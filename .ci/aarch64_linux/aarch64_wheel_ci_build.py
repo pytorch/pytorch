@@ -92,6 +92,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libnccl.so.2",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
+        "/usr/local/cuda/lib64/libnvshmem_host.so.3",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",
@@ -209,8 +210,6 @@ if __name__ == "__main__":
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
         build_vars += "MAX_JOBS=5 "
-        # nvshmem is broken for aarch64 see https://github.com/pytorch/pytorch/issues/160425
-        build_vars += "USE_NVSHMEM=OFF "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")

@@ -319,24 +319,26 @@ class OutputGraphGuardsState:
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
     global_state_guard: torch._C._dynamo.guards.GlobalStateGuard
-    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
+    _guards: torch._guards.GuardsSet
+    _aotautograd_guards: list[torch._guards.GuardEnvExpr]
+
+    # Whether or not the guards should be checked for correctness
 
     export: bool = False
+    skip_guards_check: bool = False
     export_constraints: bool = False
-
-    _guards: Optional[torch._guards.GuardsSet] = None
-    _aotautograd_guards: Optional[list[torch._guards.GuardEnvExpr]] = None
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     @property
     def shape_env(self) -> ShapeEnv:
         raise AssertionError(f"shape_env shouldn't be accessed from {type(self)}")
 
     @property
-    def guards(self) -> Optional[torch._guards.GuardsSet]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self._guards
 
     @property
-    def aotautograd_guards(self) -> Optional[list[torch._guards.GuardEnvExpr]]:
+    def aotautograd_guards(self) -> list[torch._guards.GuardEnvExpr]:
         return self._aotautograd_guards
 
 
@@ -412,6 +414,9 @@ class OutputGraph(OutputGraphGuardsState):
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
             or torch._C._dynamo.guards.GlobalStateGuard(),
+            # These are set by @property instead, just initialize them as blank
+            _guards=torch._guards.GuardsSet(),
+            _aotautograd_guards=[],
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -583,6 +588,9 @@ class OutputGraph(OutputGraphGuardsState):
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
 
+        # mangled alias -> module fqn name
+        self.import_sources: dict[str, str] = {}
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -686,6 +694,7 @@ class OutputGraph(OutputGraphGuardsState):
         return [pack_subgraph_name, unpack_subgraph_name]
 
     def dump_guards_state(self) -> OutputGraphGuardsState:
+        # Dump a serializable version of self without extras
         return OutputGraphGuardsState(
             local_scope=self.local_scope,
             global_scope=self.global_scope,
@@ -701,6 +710,7 @@ class OutputGraph(OutputGraphGuardsState):
             export_constraints=self.export_constraints,
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
+            skip_guards_check=self.skip_guards_check,
         )
 
     def synthetic_graph_input(
@@ -1577,6 +1587,32 @@ class OutputGraph(OutputGraphGuardsState):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def bypass_package(self, reason: str = "", **kwargs: Any) -> None:
+        """
+        Do not save this output graph to the CompilePackage
+        """
+        if not self.package:
+            return
+        if torch._dynamo.config.strict_precompile:
+            raise torch._dynamo.exc.PackageError(
+                "Detected a package bypass: %s", reason
+            )
+        log.warning("Detected a package bypass: %s", reason)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "precompile_cache_bypass",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {
+                # precede with underscore so it always appear first in JSON in tlparse
+                "_reason": reason,
+                **kwargs,
+            },
+        )
+        self.package.bypass_current_entry()
+        self.package = None
+
     def get_graph_sizes_structured(self) -> dict[str, list[Union[int, str]]]:
         ret: dict[str, list[Union[int, str]]] = {}
         for node in self.graph.nodes:
@@ -1733,12 +1769,26 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
-            gm._backend_id = name
+            if next(gm.parameters(), None) is not None:
+                # If dynamo produces a graph with parameters, skip package stuff
+                # Bypass output graph
+                self.bypass_package(
+                    "Graph contains named parameters: either inline_inbuilt_nn_modules=False or there are static addresses.",
+                    inline_builtin_nn_modules=torch._dynamo.config.inline_inbuilt_nn_modules,
+                    gm=gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+
+            if self.package is not None:
+                gm._backend_id = name
+
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
+            gm.meta["backend_id"] = name
 
             graph_code_log.debug(
                 "%s",
@@ -2254,6 +2304,22 @@ class OutputGraph(OutputGraphGuardsState):
             return node.meta["grapharg"].example
         assert node.op == "get_attr"
         return self.nn_modules[node.target]  # type: ignore[index]
+
+
+class DynamoTracerOutput:
+    error_on_graph_break: bool
+    is_tracing_resume_prologue: bool
+    output_graph: Optional[OutputGraph]
+
+    def __init__(
+        self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
+    ) -> None:
+        self.error_on_graph_break = tracer.error_on_graph_break
+        self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
+        if error:
+            self.output_graph = None
+        else:
+            self.output_graph = tracer.output
 
 
 err_epilogue = (

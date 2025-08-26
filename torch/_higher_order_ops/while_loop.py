@@ -9,6 +9,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     reenter_make_fx,
     validate_subgraph_args_types,
@@ -47,6 +48,83 @@ class WhileLoopOp(HigherOrderOperator):
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+    def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        all_inputs = carried_inputs + additional_inputs
+
+        cond_gm: torch.fx.GraphModule = (
+            cond_fn
+            if isinstance(cond_fn, torch.fx.GraphModule)
+            else materialize_as_graph(cond_fn, all_inputs)
+        )
+        body_gm: torch.fx.GraphModule = (
+            body_fn
+            if isinstance(body_fn, torch.fx.GraphModule)
+            else materialize_as_graph(body_fn, all_inputs)
+        )
+
+        def _find_example_value(n, real_inp):
+            if "val" in n.meta:
+                return n.meta["val"]
+            elif "example_value" in n.meta:
+                return n.meta["example_value"]
+            else:
+                assert not isinstance(real_inp, torch.Tensor)
+                return real_inp
+
+        example_inputs = [
+            _find_example_value(n, real_inp)
+            for n, real_inp in zip(
+                body_gm.graph.find_nodes(op="placeholder"),
+                carried_inputs + additional_inputs,
+            )
+        ]
+
+        (
+            _,
+            _,
+            _,
+            body_mutated_inputs,
+            body_outputs,
+        ) = check_input_alias_and_mutation_return_outputs(body_gm, example_inputs)
+
+        (
+            _,
+            _,
+            _,
+            cond_mutated_inputs,
+            _,
+        ) = check_input_alias_and_mutation_return_outputs(cond_gm, example_inputs)
+
+        mutated_inputs = set(body_mutated_inputs) | set(cond_mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("cond_fn", cond_gm)
+        schema_gen.add_arg("body_fn", body_gm)
+
+        for idx, arg in enumerate(carried_inputs):
+            schema_gen.add_arg(
+                f"carried_input{idx}", arg, is_mutated=idx in mutated_inputs
+            )
+
+        for idx, arg in enumerate(additional_inputs):
+            additional_idx = len(carried_inputs) + idx
+            schema_gen.add_arg(
+                f"additional_input{idx}",
+                arg,
+                is_mutated=additional_idx in mutated_inputs,
+            )
+
+        for out in body_outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(
+            cond_fn, body_fn, carried_inputs, additional_inputs
+        )
+        return schema_gen.gen_schema()
 
 
 while_loop_op = WhileLoopOp()
