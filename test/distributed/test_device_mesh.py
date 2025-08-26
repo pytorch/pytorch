@@ -925,13 +925,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_2d["tp"]._layouts_to_groups, unflatten_mesh["tp"]._layouts_to_groups
         )
 
-        # # Not supporting flatten a unflattened mesh.
-        # with self.assertRaises(NotImplementedError):
-        #     mesh_2d["dp_shard", "dp_replicate"]._flatten()
+        # TODO: Need to more clarity and discussions on the behavior of flatten + unflatten
+        mesh_2d["dp_shard", "dp_replicate"]._flatten()
 
-        # # Not supporting unflatten into a different shape for the same dim name.
-        # with self.assertRaises(RuntimeError):
-        #     mesh_2d._unflatten(0, (2, 2), ("dp", "cp"))
+        # Not supporting unflatten into a different shape for the same dim name.
+        with self.assertRaises(ValueError):
+            mesh_2d._unflatten(0, (2, 2), ("dp", "cp"))
 
         # Test unflatten from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
         global_mesh = init_device_mesh(

@@ -498,7 +498,6 @@ else:
                     )
                 root_mesh._names_to_layouts[name] = layout
                 self._names_to_layouts[name] = layout
-                self._layouts_to_groups[layout] = root_mesh._layouts_to_groups[layout]
 
             # If the layout has already been mapped to a process group backend, we ignore the
             # backend_override and group, and return early. We also throw a warning for that.
