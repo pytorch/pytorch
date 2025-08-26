@@ -487,9 +487,13 @@ Tensor& _weight_fp8pack_mm_out_xpu(
   TensorArg scales_arg{scales, "scales", 3};
 
   checkAllSameGPU("_weight_fp8_mm_out", {out_arg, A_arg, B_arg, scales_arg});
-  
-  // A should be {b, m, k} or {m, k}
-  TORCH_CHECK(A.dim() == 2 || A.dim() == 3, "A must be 2D or 3D matrix but got ", A.dim());
+
+  // A should be [b, m, k] or [m, k]
+  TORCH_CHECK(
+      A.dim() == 2 || A.dim() == 3,
+      "A must be 2D or
+      3D matrix but got ",
+      A.dim());
   TORCH_CHECK(B.dim() == 2, "B must be a 2D matrix but got ", B.dim());
   int64_t k_dim = (A.dim() == 2) ? 1 : 2;
   TORCH_CHECK(
@@ -506,9 +510,9 @@ Tensor& _weight_fp8pack_mm_out_xpu(
         "If provided scales, it must be a scalar or 2D tensor, but got ",
         scales.dim());
     TORCH_CHECK(
-      (scales.numel() == 1 || scales.numel() == B.size(1)),
-      "scales must be scalar or match B's first dimension. But got scales size: ",
-      scales.sizes());
+        (scales.numel() == 1 || scales.numel() == B.size(1)),
+        "scales must be scalar or match B's first dimension. But got scales size: ",
+        scales.sizes());
   }
 
   TORCH_CHECK(
@@ -536,8 +540,8 @@ Tensor& _weight_fp8pack_mm_out_xpu(
       __func__,
       " : expect scales to be fp32 tensor, but got ",
       scales.dtype());
-  
-  // If A is the 3D tensor with [B, M, K], reshape to [B*M, K]
+
+  // If A is the 3D tensor with [B, M, K],reshape to [B x M, K]
   at::Tensor flattened_A;
   if (A.dim() == 3) {
     flattened_A = A.reshape({A.size(0) * A.size(1), A.size(2)});
@@ -557,7 +561,7 @@ Tensor& _weight_fp8pack_mm_out_xpu(
   at::native::onednn::matmul_w8(out, flattened_A, B, scales);
 
   // [B, M, K] -> [B, M, N] for output
-  std::vector<int64_t> output_size (A.sizes().begin(), A.sizes().end()-1);
+  std::vector<int64_t> output_size(A.sizes().begin(), A.sizes().end() - 1);
   output_size.push_back(B.size(1));
 
   // Reshape output to [B, M, N]
@@ -670,3 +674,4 @@ Tensor _int_mm_xpu(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_xpu(self, mat2, result);
 }
 } // namespace at::native
+    
