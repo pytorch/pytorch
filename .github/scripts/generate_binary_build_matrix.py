@@ -107,7 +107,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse==12.6.2.49; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu13==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu13==3.3.24; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -210,7 +210,7 @@ LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     "cpu": "libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
