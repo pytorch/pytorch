@@ -3,7 +3,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/RangeUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/range_native.h>
 #include <cmath>
 #include <limits>
 
@@ -50,7 +54,7 @@ struct RangeCachedGraph : public mps::MPSCachedGraph {
 
 Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, true>;
+    using accscalar_t = at::acc_type_device<scalar_t, kMPS>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -62,14 +66,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>());
     }
 
-    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) && std::isfinite(static_cast<double>(xend)),
-                "unsupported range: ",
-                xstart,
-                " -> ",
-                xend);
-    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-                "upper bound and larger bound inconsistent with step sign");
+    arange_check_bounds(start, end, step);
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
@@ -96,14 +93,14 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       return;
     }
 
-    bool is_contiguous = result.is_contiguous();
-    Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+    bool needs_gather = !mps::needsGather(result);
+    Tensor r = !needs_gather ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
     auto stream = getCurrentMPSStream();
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
-      string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
+      std::string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + std::to_string(size);
       auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
         cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
@@ -118,12 +115,10 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
-    if (!is_contiguous) {
+    if (!needs_gather) {
       result.copy_(r);
     }
   });
@@ -133,7 +128,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
 
 Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, true>;
+    using accscalar_t = at::acc_type_device<scalar_t, kMPS>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -146,14 +141,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       size_d = static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>() + 1;
     }
 
-    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) && std::isfinite(static_cast<double>(xend)),
-                "unsupported range: ",
-                xstart,
-                " -> ",
-                xend);
-    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-                "upper bound and larger bound inconsistent with step sign");
+    arange_check_bounds(start, end, step);
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
@@ -165,14 +153,14 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     if (numel != size) {
       result.resize_({size});
     }
-    bool is_contiguous = result.is_contiguous();
-    Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+    bool needs_gather = !mps::needsGather(result);
+    Tensor r = !needs_gather ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
     auto stream = getCurrentMPSStream();
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
-      string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
+      std::string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + std::to_string(size);
       auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
         cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
@@ -187,12 +175,10 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
-    if (!is_contiguous) {
+    if (!needs_gather) {
       result.copy_(r);
     }
   });
@@ -213,7 +199,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   } else if (steps == 1) {
     result.fill_(start);
   } else {
-    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    Tensor r = !mps::needsGather(result) ? result : result.contiguous();
 
     // Do the MPSGraph computation
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -222,8 +208,8 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     bool start_less_end = (start.to<double>() <= end.to<double>());
 
     @autoreleasepool {
-      string key =
-          "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps) + to_string(start_less_end);
+      std::string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + std::to_string(steps) +
+          std::to_string(start_less_end);
       auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
 
       if (!cachedGraph) {
@@ -256,9 +242,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!result.is_contiguous()) {

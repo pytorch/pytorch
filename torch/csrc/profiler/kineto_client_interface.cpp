@@ -1,7 +1,11 @@
 #ifdef USE_KINETO
+#include <ATen/Context.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
-#include <cstdlib>
+#include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>
+#include <torch/csrc/profiler/kineto_client_interface.h>
+#include <chrono>
+#include <thread>
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
@@ -11,8 +15,8 @@
 #endif
 
 namespace torch {
-namespace profiler {
-namespace impl {
+
+namespace profiler::impl {
 
 namespace {
 
@@ -20,7 +24,9 @@ using namespace torch::autograd::profiler;
 
 class LibKinetoClient : public libkineto::ClientInterface {
  public:
-  void init() override {}
+  void init() override {
+    ::torch::mtia::initMemoryProfiler();
+  }
 
   void prepare(
       bool report_input_shapes = false,
@@ -55,6 +61,20 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
+  void start_memory_profile() override {
+    LOG(INFO) << "Starting on-demand memory profile";
+    startMemoryProfile();
+  }
+
+  void stop_memory_profile() override {
+    LOG(INFO) << "Stopping on-demand memory profile";
+    stopMemoryProfile();
+  }
+
+  void export_memory_profile(const std::string& path) override {
+    exportMemoryProfile(path);
+  }
+
  private:
   // Temporarily disable shape collection until
   // we re-roll out the feature for on-demand cases
@@ -67,8 +87,18 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 } // namespace
 
-} // namespace impl
-} // namespace profiler
+} // namespace profiler::impl
+
+void global_kineto_init() {
+#if ENABLE_GLOBAL_OBSERVER
+  if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
+    libkineto_init(
+        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+        /*logOnError=*/true);
+    libkineto::api().suppressLogMessages();
+  }
+#endif
+}
 
 #if ENABLE_GLOBAL_OBSERVER
 namespace {
@@ -76,12 +106,6 @@ namespace {
 struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
     static profiler::impl::LibKinetoClient client;
-
-    if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
-      libkineto_init(/*cpuOnly=*/false, /*logOnError=*/true);
-      libkineto::api().suppressLogMessages();
-    }
-
     libkineto::api().registerClient(&client);
   }
 } register_libkineto_client;

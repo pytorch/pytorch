@@ -1,5 +1,5 @@
-#include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/overloaded.h>
@@ -10,16 +10,18 @@
 
 namespace at {
 
+extern const std::string kParamCommsCallName = "record_param_comms";
+
 namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_cb_id {1};
+  static std::atomic<uint64_t> unique_cb_id{1};
   return CallbackHandle(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
-  static std::atomic<uint64_t> unique_rf_id {1};
+  static std::atomic<uint64_t> unique_rf_id{1};
   return RecordFunctionHandle(unique_rf_id++);
 }
 
@@ -28,7 +30,7 @@ std::atomic<int64_t> defaultNodeId(-1);
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
-std::atomic<uint64_t> next_thread_id_ {0};
+std::atomic<uint64_t> next_thread_id_{0};
 thread_local uint64_t current_thread_id_ = 0;
 
 static constexpr size_t NumRecordScopes =
@@ -41,12 +43,12 @@ RecordFunctionCallbacks::iterator findCallback(
   return std::find_if(entries.begin(), entries.end(), match_handle);
 }
 
-c10::optional<RecordFunctionCallback> extractCallback(
+std::optional<RecordFunctionCallback> extractCallback(
     RecordFunctionCallbacks& entries,
     CallbackHandle handle) {
   auto it = findCallback(entries, handle);
   if (it == entries.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto out = it->callback_;
   entries.erase(it);
@@ -130,7 +132,7 @@ class CacheEntry {
   // The caller is expected to check `GlobalCallbackManager::get().version()'
   // and call CacheEntry::update() if necessary.
   StepCallbacks getActiveCallbacks();
-  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
+  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
 
   // Full rebuild. (E.g. during registration)
   void update(const std::vector<RecordFunctionCallback>& callbacks);
@@ -172,7 +174,8 @@ class LocalCallbackManager {
  public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
-  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(const RecordScope scope);
+  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(
+      const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -215,7 +218,8 @@ size_t GlobalCallbackManager::version() const {
   return version_.load(std::memory_order_relaxed);
 }
 
-std::pair<size_t, RecordFunctionCallbacks> GlobalCallbackManager::getSnapshot() const {
+std::pair<size_t, RecordFunctionCallbacks> GlobalCallbackManager::getSnapshot()
+    const {
   std::lock_guard<std::mutex> guard(update_mutex_);
   return {version_.load(std::memory_order_seq_cst), global_callbacks_};
 }
@@ -224,7 +228,7 @@ CallbackHandle GlobalCallbackManager::addCallback(RecordFunctionCallback cb) {
   std::lock_guard<std::mutex> guard(update_mutex_);
   ++version_;
   auto handle = next_unique_callback_handle();
-  global_callbacks_.emplace_back(std::move(cb), handle);
+  global_callbacks_.emplace_back(cb, handle);
   return handle;
 }
 
@@ -308,10 +312,10 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
   return active_callbacks_;
 }
 
-c10::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
+std::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
   getActiveCallbacksImpl();
   if (C10_LIKELY(active_callbacks_.empty())) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return active_callbacks_;
 }
@@ -331,7 +335,8 @@ void CacheEntry::rebuildActiveCallbacks() {
 
     } else if (i.tries_left_ == 0) {
       // Callback is sampled and we have reached a sampling event. Push and
-      // set `sampling_countdown_` to one so we trigger a rebuild after one call.
+      // set `sampling_countdown_` to one so we trigger a rebuild after one
+      // call.
       active_callbacks_.callbacks_.push_back(
           {i.callback_.start(), i.callback_.end()});
       sampling_countdown_ = 1;
@@ -395,10 +400,11 @@ StepCallbacks LocalCallbackManager::getActiveCallbacks(
   return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacks();
 }
 
-c10::optional<StepCallbacks> LocalCallbackManager::getActiveCallbacksUnlessEmpty(
-    const RecordScope scope) {
+std::optional<StepCallbacks> LocalCallbackManager::
+    getActiveCallbacksUnlessEmpty(const RecordScope scope) {
   rebuildActiveCallbacksIfNeeded();
-  return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacksUnlessEmpty();
+  return active_callbacks_[static_cast<size_t>(scope)]
+      .getActiveCallbacksUnlessEmpty();
 }
 
 void LocalCallbackManager::setTLS(const RecordFunctionTLS& tls) {
@@ -414,7 +420,7 @@ CallbackHandle LocalCallbackManager::addCallback(
     RecordFunctionCallback callback) {
   auto handle = next_unique_callback_handle();
   auto& callbacks = registered_callbacks_.sorted_tls_callbacks_;
-  callbacks.emplace_back(std::move(callback), handle);
+  callbacks.emplace_back(callback, handle);
   rebuild_callback_scopes(
       GlobalCallbackManager::get().getSnapshot(), callbacks.back().callback_);
   return handle;
@@ -448,7 +454,8 @@ void LocalCallbackManager::clearCallbacks() {
   rebuild_all(GlobalCallbackManager::get().getSnapshot());
 }
 
-void LocalCallbackManager::rebuild_all(const GlobalCallbackManager::snapshot_t& global_snapshot) {
+void LocalCallbackManager::rebuild_all(
+    const GlobalCallbackManager::snapshot_t& global_snapshot) {
   global_version_ = global_snapshot.first;
   for (auto i : c10::irange(NumRecordScopes)) {
     rebuild_scope(global_snapshot, static_cast<RecordScope>(i));
@@ -547,14 +554,14 @@ void RecordFunction::end() {
   if (called_start_callbacks_) {
     for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
       tryRunCallback</*is_start=*/false>(
-        step_callbacks_.callbacks_[i], *this, ctx_[i]);
+          step_callbacks_.callbacks_[i], *this, ctx_[i]);
     }
     step_callbacks_.callbacks_.clear();
   }
 }
 
 const char* RecordFunction::name() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [](const std::string& name) { return name.c_str(); },
           [](const schema_ref_t schema) {
@@ -564,7 +571,7 @@ const char* RecordFunction::name() const {
 }
 
 size_t RecordFunction::num_inputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return inputs_.size(); },
           [](const schema_ref_t schema) {
@@ -574,7 +581,7 @@ size_t RecordFunction::num_inputs() const {
 }
 
 size_t RecordFunction::num_outputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return outputs_.size(); },
           [](const schema_ref_t schema) {
@@ -583,26 +590,36 @@ size_t RecordFunction::num_outputs() const {
       fn_);
 }
 
-c10::optional<OperatorName> RecordFunction::operator_name() const {
-  return c10::visit(
+std::optional<OperatorName> RecordFunction::operator_name() const {
+  return std::visit(
       c10::overloaded(
-          [&](const std::string&) -> c10::optional<OperatorName> {
-            return c10::nullopt;
+          [&](const std::string&) -> std::optional<OperatorName> {
+            return std::nullopt;
           },
-          [](const schema_ref_t schema) -> c10::optional<OperatorName> {
+          [](const schema_ref_t schema) -> std::optional<OperatorName> {
             return schema.get().operator_name();
           }),
       fn_);
 }
 
-c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
-  return c10::visit(
+std::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
+  return std::visit(
       c10::overloaded(
-          [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
-            return c10::nullopt;
+          [&](const std::string&) -> std::optional<c10::FunctionSchema> {
+            return std::nullopt;
           },
-          [](const schema_ref_t schema) -> c10::optional<c10::FunctionSchema> {
+          [](const schema_ref_t schema) -> std::optional<c10::FunctionSchema> {
             return schema.get();
+          }),
+      fn_);
+}
+
+const char* RecordFunction::overload_name() const {
+  return std::visit(
+      c10::overloaded(
+          [&](const std::string&) -> const char* { return ""; },
+          [](const schema_ref_t schema) -> const char* {
+            return schema.get().overload_name().c_str();
           }),
       fn_);
 }
@@ -611,7 +628,7 @@ StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
 
-c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
+std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacksUnlessEmpty(scope);
 }
 
@@ -643,14 +660,12 @@ bool hasThreadLocalCallbacks() {
   return anyEnabled(get_record_function_tls_().sorted_tls_callbacks_);
 }
 
-CallbackHandle addThreadLocalCallback(
-    RecordFunctionCallback cb) {
-  return LocalCallbackManager::get().addCallback(std::move(cb));
+CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
+  return LocalCallbackManager::get().addCallback(cb);
 }
 
-CallbackHandle addGlobalCallback(
-    RecordFunctionCallback cb) {
-  return GlobalCallbackManager::get().addCallback(std::move(cb));
+CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
+  return GlobalCallbackManager::get().addCallback(cb);
 }
 
 void removeCallback(CallbackHandle handle) {
@@ -709,36 +724,20 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-void RecordFunction::before(const char* name, int64_t sequence_nr) {
-  fn_ = name;
+void RecordFunction::before(RecordFunction::FunctionDescriptor fn, int64_t sequence_nr) {
+  std::visit([this](auto&& fn) {
+    if constexpr (std::is_same_v<std::decay_t<decltype(fn)>, std::string_view>) {
+      is_nccl_meta_ = (fn == kParamCommsCallName);
+      fn_ = std::string(fn);
+    } else {
+      is_nccl_meta_ = (fn.get().name() == kParamCommsCallName);
+      fn_ = fn;
+    }
+  }, fn);
   sequence_nr_ = sequence_nr;
 
 #ifndef NDEBUG
-    inputs_valid_ = true;
-#endif
-  runStartCallbacks();
-  invalidateInputs();
-}
-
-void RecordFunction::before(std::string name, int64_t sequence_nr) {
-  fn_ = std::move(name);
-  sequence_nr_ = sequence_nr;
-
-#ifndef NDEBUG
-    inputs_valid_ = true;
-#endif
-  runStartCallbacks();
-  invalidateInputs();
-}
-
-void RecordFunction::before(
-    RecordFunction::schema_ref_t schema,
-    int64_t sequence_nr) {
-  sequence_nr_ = sequence_nr;
-  fn_ = schema;
-
-#ifndef NDEBUG
-    inputs_valid_ = true;
+  inputs_valid_ = true;
 #endif
   runStartCallbacks();
   invalidateInputs();

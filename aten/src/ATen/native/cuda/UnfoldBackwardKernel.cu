@@ -157,6 +157,6 @@ void unfold_backward_cuda_kernel(
 
 }
 
-REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cuda_kernel);
+REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cuda_kernel)
 
 } // namespace at::native

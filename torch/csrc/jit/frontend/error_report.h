@@ -1,10 +1,9 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
+#include <mutex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Call {
   std::string fn_name;
@@ -14,11 +13,43 @@ struct Call {
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  explicit ErrorReport(SourceRange r);
+  explicit ErrorReport(const SourceRange& r);
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
 
   const char* what() const noexcept override;
+
+  class TORCH_API Calls {
+   private:
+    std::vector<Call> calls_;
+    mutable std::mutex mutex_;
+
+   public:
+    void push_back(Call call) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      calls_.push_back(std::move(call));
+    }
+
+    void pop_back() {
+      std::lock_guard<std::mutex> lock(mutex_);
+      calls_.pop_back();
+    }
+
+    bool empty() const {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return calls_.empty();
+    }
+
+    void update_pending_range(const SourceRange& range) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      calls_.back().caller_range = range;
+    }
+
+    std::vector<Call> get_stack() const {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return calls_;
+    }
+  };
 
   struct TORCH_API CallStack {
     // These functions are used to report why a function was being compiled
@@ -30,6 +61,9 @@ struct TORCH_API ErrorReport : public std::exception {
     // Change the range that is relevant for the current function (i.e. after
     // each successful expression compilation, change it to the next expression)
     static void update_pending_range(const SourceRange& range);
+
+   private:
+    std::shared_ptr<Calls> source_callstack_;
   };
 
   static std::string current_call_stack();
@@ -50,5 +84,4 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

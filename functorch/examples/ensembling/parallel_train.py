@@ -1,9 +1,11 @@
 import argparse
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.func import functional_call, grad_and_value, vmap, stack_module_state
+from torch.func import functional_call, grad_and_value, stack_module_state, vmap
+
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
 # tutorial on Model Ensembling with JAX by Will Whitney.
@@ -33,15 +35,21 @@ DEVICE = args.device
 # Step 1: Make some spirals
 
 
-def make_spirals(n_samples, noise_std=0., rotations=1.):
+def make_spirals(n_samples, noise_std=0.0, rotations=1.0):
     ts = torch.linspace(0, 1, n_samples, device=DEVICE)
-    rs = ts ** 0.5
+    rs = ts**0.5
     thetas = rs * rotations * 2 * math.pi
     signs = torch.randint(0, 2, (n_samples,), device=DEVICE) * 2 - 1
     labels = (signs > 0).to(torch.long).to(DEVICE)
 
-    xs = rs * signs * torch.cos(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
-    ys = rs * signs * torch.sin(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
+    xs = (
+        rs * signs * torch.cos(thetas)
+        + torch.randn(n_samples, device=DEVICE) * noise_std
+    )
+    ys = (
+        rs * signs * torch.sin(thetas)
+        + torch.randn(n_samples, device=DEVICE) * noise_std
+    )
     points = torch.stack([xs, ys], dim=1)
     return points, labels
 
@@ -69,6 +77,7 @@ class MLPClassifier(nn.Module):
 
 loss_fn = nn.NLLLoss()
 model = MLPClassifier().to(DEVICE)
+
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
@@ -109,6 +118,7 @@ def init_fn(num_models):
     params, _ = stack_module_state(models)
     return params
 
+
 # Step 6: Now, can we try multiple models at the same time?
 # The answer is: yes! `loss` is a 2-tuple, and we can see that the value keeps
 # on decreasing
@@ -128,7 +138,7 @@ step6()
 # Step 7: Now, the flaw with step 6 is that we were training on the same exact
 # data. This can lead to all of the models in the ensemble overfitting in the
 # same way. The solution that http://willwhitney.com/parallel-training-jax.html
-# applies is to randomly subset the data in a way that the models do not recieve
+# applies is to randomly subset the data in a way that the models do not receive
 # exactly the same data in each training step!
 # Because the goal of this doc is to show that we can use eager-mode vmap to
 # achieve similar things as JAX, the rest of this is left as an exercise to the reader.

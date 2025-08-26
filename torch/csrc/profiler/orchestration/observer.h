@@ -5,9 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -16,9 +14,19 @@ enum class C10_API_ENUM ActivityType {
   CPU = 0,
   XPU, // XPU kernels, runtime
   CUDA, // CUDA kernels, runtime
+  HPU, // HPU kernels, runtime
   MTIA, // MTIA kernels, runtime
+  PrivateUse1, // PrivateUse1 kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
+
+inline std::string actToString(ActivityType t) {
+  const std::array<
+      std::string,
+      static_cast<size_t>(ActivityType::NUM_KINETO_ACTIVITIES)>
+      ActivityTypeNames = {"CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  return ActivityTypeNames[static_cast<int>(t)];
+}
 
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
@@ -26,6 +34,7 @@ enum class C10_API_ENUM ProfilerState {
   CUDA, // CPU + CUDA events
   NVTX, // only emit NVTX markers
   ITT, // only emit ITT markers
+  PRIVATEUSE1, // only emit PRIVATEUSE1 markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
@@ -38,7 +47,8 @@ enum class C10_API_ENUM ActiveProfilerType {
   LEGACY,
   KINETO,
   NVTX,
-  ITT
+  ITT,
+  PRIVATEUSE1
 };
 
 struct TORCH_API ExperimentalConfig {
@@ -47,8 +57,14 @@ struct TORCH_API ExperimentalConfig {
       bool profiler_measure_per_kernel = false,
       bool verbose = false,
       std::vector<std::string> performance_events = {},
+      bool enable_cuda_sync_events = false,
+      bool adjust_profiler_step = false,
+      bool disable_external_correlation = false,
+      bool profile_all_threads = false,
+      bool capture_overload_names = false,
+      bool record_python_gc_info = false,
+      std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
-  ~ExperimentalConfig() = default;
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
@@ -60,6 +76,46 @@ struct TORCH_API ExperimentalConfig {
    */
   std::vector<std::string> performance_events;
   /*
+   * For CUDA profiling mode, enable adding CUDA synchronization events
+   * that expose CUDA device, stream and event synchronization activities.
+   * This feature is new and currently disabled by default.
+   */
+  bool enable_cuda_sync_events;
+  /*
+   * Controls whether or not timestamp adjustment for ProfilerStep and parent
+   * Python events occurs after profiling. This occurs at an O(n) cost and
+   * affects only the start of profiler step events.
+   */
+  bool adjust_profiler_step;
+  /*
+   * Controls whether or not external correlation is disabled. This is used to
+   * lower the amount of events received by CUPTI as correlation events are
+   * paired with runtime/gpu events for each kind of correlation
+   */
+  bool disable_external_correlation;
+
+  /* controls whether profiler records cpu events on threads
+   * that are not spawned from the main thread on which the
+   * profiler was enabled, similar to on_demand mode */
+  bool profile_all_threads;
+
+  /* controls whether overload names are queried from an ATen
+   * function schema and stored in the profile  */
+  bool capture_overload_names;
+
+  /*
+   * Controls whether or not python gc info is recorded. This is used to
+   * determine if gc collect is slowing down your profile.
+   */
+  bool record_python_gc_info;
+
+  /*
+   * A custom_profiler_config option is introduced to allow custom backends
+   * to apply custom configurations as needed.
+   */
+  std::string custom_profiler_config;
+
+  /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
    * of their parent CPU events.
@@ -67,24 +123,25 @@ struct TORCH_API ExperimentalConfig {
    * their child events) and delaying CPU event start times (to
    * prevent overlaps), so this should not be used unless Vulkan events are
    * being profiled and it is ok to use this modified timestamp/duration
-   * information instead of the the original information.
+   * information instead of the original information.
    */
   bool adjust_timestamps;
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
       bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig());
-  ~ProfilerConfig() = default;
+      ExperimentalConfig experimental_config = ExperimentalConfig(),
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;
+  bool pushGlobalCallbacks() const;
 
   ProfilerState state;
   ExperimentalConfig experimental_config;
@@ -93,6 +150,7 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+  std::string trace_id;
 
   // For serialization
   at::IValue toIValue() const;
@@ -103,7 +161,11 @@ struct TORCH_API ProfilerConfig {
 // -- Profiler base class -----------------------------------------------------
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
-  explicit ProfilerStateBase(const ProfilerConfig& config);
+  explicit ProfilerStateBase(ProfilerConfig config);
+  ProfilerStateBase(const ProfilerStateBase&) = delete;
+  ProfilerStateBase(ProfilerStateBase&&) = delete;
+  ProfilerStateBase& operator=(const ProfilerStateBase&) = delete;
+  ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);
@@ -147,6 +209,4 @@ TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

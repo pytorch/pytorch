@@ -1,5 +1,4 @@
-r"""Utility classes & functions for data loading. Code in this folder is mostly
-used by ../dataloder.py.
+r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloder.py.
 
 A lot of multiprocessing is used in data loading, which only supports running
 functions defined in global environment (py2 can't serialize static methods).
@@ -7,8 +6,8 @@ Therefore, for code tidiness we put these functions into different files in this
 folder.
 """
 
-import sys
 import atexit
+import sys
 
 # old private location of the ExceptionWrapper that some users rely on:
 from torch._utils import ExceptionWrapper
@@ -37,16 +36,18 @@ https://github.com/python/cpython/blob/d4d60134b29290049e28df54f23493de4f1824b6/
 
 try:
     import numpy
+
     HAS_NUMPY = True
 except ModuleNotFoundError:
     HAS_NUMPY = False
 
 
-def _set_python_exit_flag():
+def _set_python_exit_flag() -> None:
     global python_exit_status
     python_exit_status = True
+
 
 atexit.register(_set_python_exit_flag)
 
 
-from . import worker, signal_handling, pin_memory, collate, fetch
+from . import collate, fetch, pin_memory, signal_handling, worker

@@ -15,15 +15,13 @@ static std::vector<VarHandle> squeezeIndices(
   return indices_squeezed;
 }
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<size_t> axes;
   bool keepdim = false;
@@ -32,7 +30,7 @@ Tensor computeSum(
 
   size_t rank = sizes.size();
   if (inputs.size() > 2) {
-    if (auto emptyAxes = c10::get_if<BufList>(&inputs[1])) {
+    if (auto emptyAxes = std::get_if<BufList>(&inputs[1])) {
       // If dim-array is an empty list, it will appear as BufList instead of
       // IntList, and hence we need a special handling for it.
       // In that case, we need to sum over all axes.
@@ -40,15 +38,15 @@ Tensor computeSum(
       axes.resize(rank);
       std::iota(axes.begin(), axes.end(), 0);
     } else if (rank > 0) {
-      auto nodeAxes = c10::get<IntList>(inputs[1]);
+      auto const& nodeAxes = std::get<IntList>(inputs[1]);
       // Canonicalize axes: wrap around, sort and make unique.
       for (auto axis : nodeAxes) {
-        axes.push_back(at::maybe_wrap_dim(axis, rank));
+        axes.push_back(at::maybe_wrap_dim(axis, static_cast<int64_t>(rank)));
       }
       std::sort(axes.begin(), axes.end());
       axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
     }
-    keepdim = c10::get<bool>(inputs[2]);
+    keepdim = std::get<bool>(inputs[2]);
   } else {
     axes.resize(rank);
     std::iota(axes.begin(), axes.end(), 0);
@@ -91,7 +89,8 @@ Tensor computeSum(
         }
         for (auto axis : axes) {
           indices_exprs.insert(
-              indices_exprs.begin() + axis, indices_squeezed[i]);
+              indices_exprs.begin() + static_cast<std::ptrdiff_t>(axis),
+              indices_squeezed[i]);
           ++i;
         }
         auto indexed = tensorOrConstant(inputs[0], indices_exprs);
@@ -108,7 +107,7 @@ Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
@@ -116,13 +115,13 @@ Tensor computeMean(
   }
   bool keepdim = false;
   BufHandle ResultBuf("mean", outputShape, dtype);
-  BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
+  auto const& InputBuf = std::get<BufHandle>(inputs[0]);
   std::vector<ExprHandle> extra_args;
   if (inputs.size() > 2) {
-    keepdim = c10::get<bool>(inputs[2]);
+    keepdim = std::get<bool>(inputs[2]);
   }
 
-  if (auto mean_dims = c10::get_if<IntList>(&inputs[1])) {
+  if (auto mean_dims = std::get_if<IntList>(&inputs[1])) {
     extra_args = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
@@ -140,17 +139,16 @@ Tensor computeMax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("max", outputShape, dtype);
-  BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
-  std::vector<ExprHandle> max_dims_expr;
-  auto max_dim = c10::get<int64_t>(inputs[1]);
-  auto keep_dim = c10::get<bool>(inputs[2]);
+  auto const& InputBuf = std::get<BufHandle>(inputs[0]);
+  auto max_dim = std::get<int64_t>(inputs[1]);
+  auto keep_dim = std::get<bool>(inputs[2]);
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
@@ -164,24 +162,21 @@ Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto out_size_param = c10::get<IntList>(inputs[1]);
+  auto const& out_size_param = std::get<IntList>(inputs[1]);
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
           ResultBuf,
           "nnc_aten_adaptive_avg_pool2d",
-          {c10::get<BufHandle>(inputs[0])},
+          {std::get<BufHandle>(inputs[0])},
           c10::fmap<ExprHandle>(out_size_param)));
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

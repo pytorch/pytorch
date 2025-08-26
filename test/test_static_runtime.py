@@ -1,35 +1,14 @@
 # Owner(s): ["module: unknown"]
+# ruff: noqa: F841
 
 import unittest
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
-from typing import List
-
-class StaticModule:
-    def __init__(self, scripted):
-        # this is an nn.Module
-        if hasattr(scripted, "_c"):
-            self.static_module = torch._C._jit_to_static_module(scripted._c)
-        else:
-            self.static_module = torch._C._jit_to_static_module(scripted.graph)
-
-    def __call__(self, *args, **kwargs):
-        return self.static_module(*args, **kwargs)
-
-    def benchmark(self, args, kwargs, warmup_runs, main_runs):
-        self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
-
-    def runAsync(self, args, kwargs):
-        return self.static_module.runAsync(args, kwargs)
-
-    def benchmark_individual_ops(self, args, kwargs, warmup_runs, main_runs):
-        return self.static_module.benchmark_individual_ops(
-            args, kwargs, warmup_runs, main_runs
-        )
+from torch.testing._internal.static_module import StaticModule
 
 
 def linear_shim(
@@ -128,7 +107,7 @@ def fork_wait_graph2(input1, input2):
    :param iters: number of future/wait pairs to be created
 """
 def fork_wait_graph3(input, iters: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(iters):
         futures.append(torch.jit.fork(torch.neg, input))
     results = []
@@ -143,7 +122,7 @@ def fork_wait_graph3(input, iters: int):
    :param num_child_forks: number of child forks per parent fork
 """
 def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(num_forks):
         futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
     results = []
@@ -170,14 +149,14 @@ def loop_graph(a, b, iters: int):
 def output_graph(a, b, c, iters: int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d: Dict[int, torch.Tensor] = {}
+    d: dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d
 
 
 class SubModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 11
         self.b = 2
@@ -187,7 +166,7 @@ class SubModule(nn.Module):
 
 
 class SubModule2(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 12
         self.b = 2
@@ -198,7 +177,7 @@ class SubModule2(nn.Module):
 
 
 class TestModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.sub1 = SubModule()
         self.sub2 = SubModule2()
@@ -297,6 +276,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph on
     multiple nested fork/wait operations
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4(self):
         input = torch.ones(3, 3)
         num_forks = 10
@@ -311,6 +291,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph with multiple
     nested fork/wait operations on runAsync API returning future
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4_async(self):
         input = torch.ones(3, 3)
         num_forks = 10
@@ -349,7 +330,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     """
@@ -379,7 +360,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     def test_multihead_attention_layer(self):

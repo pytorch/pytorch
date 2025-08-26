@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <iterator>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -77,7 +76,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   // This set maps each Value* to its assigned storage group.
   c10::FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
-  // are available for re-use.
+  // are available for reuse.
   std::vector<size_t> free_storage_groups;
 
   auto makeNewStorageGroup = [&](const Value* value) {
@@ -402,7 +401,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
-  DCHECK(storages_.size() > 0);
+  DCHECK(!storages_.empty());
   size_t offset = 0;
   auto* start = allocateBuffer(managed_bytes_);
 
@@ -513,5 +512,4 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

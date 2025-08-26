@@ -1,3 +1,18 @@
+"""Common utilities for testing Dynamo's minifier functionality.
+
+This module provides the base infrastructure for running minification tests in Dynamo.
+It includes:
+- MinifierTestResult: A dataclass for storing and processing minifier test results
+- MinifierTestBase: A base test class with utilities for:
+  - Running tests in isolated environments
+  - Managing temporary directories and configurations
+  - Executing minifier launcher scripts
+  - Running and validating reproduction scripts
+  - Supporting both compile-time and runtime error testing
+
+The minifier helps reduce failing Dynamo compilations to minimal reproductions.
+"""
+
 import dataclasses
 import io
 import logging
@@ -8,11 +23,14 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from collections.abc import Sequence
+from typing import Any, Optional, Union
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
 
@@ -21,18 +39,30 @@ class MinifierTestResult:
     minifier_code: str
     repro_code: str
 
-    def _get_module(self, t):
-        r = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t).group(
-            0
-        )
+    def _get_module(self, t: str) -> str:
+        match = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t)
+        assert match is not None, "failed to find module"
+        r = match.group(0)
         r = re.sub(r"\s+$", "\n", r, flags=re.MULTILINE)
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
 
-    def minifier_module(self):
+    def get_exported_program_path(self) -> Optional[str]:
+        # Extract the exported program file path from AOTI minifier's repro.py
+        # Regular expression pattern to match the file path
+        pattern = r'torch\.export\.load\(\s*["\'](.*?)["\']\s*\)'
+        # Search for the pattern in the text
+        match = re.search(pattern, self.repro_code)
+        # Extract and print the file path if a match is found
+        if match:
+            file_path = match.group(1)
+            return file_path
+        return None
+
+    def minifier_module(self) -> str:
         return self._get_module(self.minifier_code)
 
-    def repro_module(self):
+    def repro_module(self) -> str:
         return self._get_module(self.repro_code)
 
 
@@ -40,14 +70,16 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     DEBUG_DIR = tempfile.mkdtemp()
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._exit_stack.enter_context(
+        if not os.path.exists(cls.DEBUG_DIR):
+            cls.DEBUG_DIR = tempfile.mkdtemp()
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
         )
         # These configurations make new process startup slower.  Disable them
         # for the minification tests to speed them up.
-        cls._exit_stack.enter_context(
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._inductor.config.patch(
                 {
                     # https://github.com/pytorch/pytorch/issues/100376
@@ -61,14 +93,14 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         )
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         if os.getenv("PYTORCH_KEEP_TMPDIR", "0") != "1":
             shutil.rmtree(cls.DEBUG_DIR)
         else:
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
-        cls._exit_stack.close()
+        cls._exit_stack.close()  # type: ignore[attr-defined]
 
-    def _gen_codegen_fn_patch_code(self, device, bug_type):
+    def _gen_codegen_fn_patch_code(self, device: str, bug_type: str) -> str:
         assert bug_type in ("compile_error", "runtime_error", "accuracy")
         return f"""\
 {torch._dynamo.config.codegen_config()}
@@ -76,7 +108,11 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
 torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_TESTING_ONLY = {bug_type!r}
 """
 
-    def _maybe_subprocess_run(self, args, *, isolate, cwd=None):
+    def _maybe_subprocess_run(
+        self, args: Sequence[Any], *, isolate: bool, cwd: Optional[str] = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        from torch._inductor.cpp_builder import normalize_path_separator
+
         if not isolate:
             assert len(args) >= 2, args
             assert args[0] == "python3", args
@@ -86,8 +122,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 args = ["-c"]
             else:
                 assert len(args) >= 2, args
-                with open(args[1], "r") as f:
-                    code = f.read()
+                with open(args[1]) as f:
+                    # Need normalize path of the code.
+                    code = normalize_path_separator(f.read())
                 args = args[1:]
 
             # WARNING: This is not a perfect simulation of running
@@ -97,16 +134,17 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config._config.copy()
-            inductor_config = torch._inductor.config._config.copy()
+            dynamo_config = torch._dynamo.config.get_config_copy()
+            inductor_config = torch._inductor.config.get_config_copy()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
                 log = logging.getLogger("torch._dynamo")
                 log.addHandler(log_handler)
                 try:
-                    prev_cwd = os.getcwd()
+                    prev_cwd = _as_posix_path(os.getcwd())
                     if cwd is not None:
+                        cwd = _as_posix_path(cwd)
                         os.chdir(cwd)
                     with patch("sys.argv", args), report_compile_source_on_error():
                         exec(code, {"__name__": "__main__", "__compile_source__": code})
@@ -117,13 +155,13 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 finally:
                     log.removeHandler(log_handler)
                     if cwd is not None:
-                        os.chdir(prev_cwd)
+                        os.chdir(prev_cwd)  # type: ignore[possibly-undefined]
                     # Make sure we don't leave buggy compiled frames lying
                     # around
                     torch._dynamo.reset()
             finally:
-                object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
-                object.__setattr__(torch._inductor.config, "_config", inductor_config)
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
@@ -133,12 +171,16 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 stderr.getvalue().encode("utf-8"),
             )
         else:
-            return subprocess.run(args, capture_output=True, cwd=cwd)
+            if cwd is not None:
+                cwd = _as_posix_path(cwd)
+            return subprocess.run(args, capture_output=True, cwd=cwd, check=False)
 
     # Run `code` in a separate python process.
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
-    def _run_test_code(self, code, *, isolate):
+    def _run_test_code(
+        self, code: str, *, isolate: bool
+    ) -> tuple[subprocess.CompletedProcess[bytes], Union[str, Any]]:
         proc = self._maybe_subprocess_run(
             ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
         )
@@ -153,15 +195,24 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
+    def _run_minifier_launcher(
+        self,
+        repro_dir: str,
+        isolate: bool,
+        *,
+        minifier_args: Sequence[Any] = (),
+        repro_after: Optional[str] = None,
+    ) -> tuple[subprocess.CompletedProcess[bytes], str]:
         self.assertIsNotNone(repro_dir)
-        launch_file = os.path.join(repro_dir, "minifier_launcher.py")
-        with open(launch_file, "r") as f:
+        launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
+        with open(launch_file) as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
         args = ["python3", launch_file, "minify", *minifier_args]
-        if not isolate:
+        if not isolate and repro_after != "aot_inductor":
+            # AOTI minifier doesn't have --no-isolate flag.
+            # Everything in AOTI minifier is in no-isolate mode.
             args.append("--no-isolate")
         launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
         print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
@@ -172,10 +223,12 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`
-    def _run_repro(self, repro_dir, *, isolate=True):
+    def _run_repro(
+        self, repro_dir: str, *, isolate: bool = True
+    ) -> tuple[subprocess.CompletedProcess[bytes], str]:
         self.assertIsNotNone(repro_dir)
-        repro_file = os.path.join(repro_dir, "repro.py")
-        with open(repro_file, "r") as f:
+        repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
+        with open(repro_file) as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
 
@@ -190,15 +243,26 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `run_code` is the code to run for the test case.
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
-    def _gen_test_code(self, run_code, repro_after, repro_level):
+    def _gen_test_code(self, run_code: str, repro_after: str, repro_level: int) -> str:
+        repro_after_line = ""
+        if repro_after == "aot_inductor":
+            repro_after_line = (
+                "torch._inductor.config.aot_inductor.dump_aoti_minifier = True"
+            )
+        elif repro_after:
+            repro_after_line = f"""\
+torch._dynamo.config.repro_after = "{repro_after}"
+        """
         return f"""\
 import torch
 import torch._dynamo
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
-torch._dynamo.config.repro_after = "{repro_after}"
+import torch._inductor
+{_as_posix_path(torch._dynamo.config.codegen_config())}
+{_as_posix_path(torch._inductor.config.codegen_config())}
+{repro_after_line}
 torch._dynamo.config.repro_level = {repro_level}
-torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
+torch._inductor.config.aot_inductor.repro_level = {repro_level}
+torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}
 """
 
@@ -212,8 +276,14 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # isolate=True only if the bug you're testing would otherwise
     # crash the process
     def _run_full_test(
-        self, run_code, repro_after, expected_error, *, isolate, minifier_args=()
-    ):
+        self,
+        run_code: str,
+        repro_after: str,
+        expected_error: Optional[str],
+        *,
+        isolate: bool,
+        minifier_args: Sequence[Any] = (),
+    ) -> Optional[MinifierTestResult]:
         if isolate:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
@@ -227,14 +297,17 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             # Just check that there was no error
             self.assertEqual(test_proc.returncode, 0)
             self.assertIsNone(repro_dir)
-            return
+            return None
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
-        minifier_proc, minifier_code = self._run_minifier_launcher(
-            repro_dir, isolate=isolate, minifier_args=minifier_args
+        _minifier_proc, minifier_code = self._run_minifier_launcher(
+            repro_dir,
+            isolate=isolate,
+            minifier_args=minifier_args,
+            repro_after=repro_after,
         )
         print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)

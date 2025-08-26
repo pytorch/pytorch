@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .base_structured_sparsifier import BaseStructuredSparsifier
 
 
@@ -6,7 +7,7 @@ class SaliencyPruner(BaseStructuredSparsifier):
     Prune rows based on the saliency (L1 norm) of each row.
 
     This pruner works on N-Dimensional weight tensors.
-    For each row, we will calculate the saliency, whic is the sum the L1 norm of all weights in that row.
+    For each row, we will calculate the saliency, which is the sum the L1 norm of all weights in that row.
     We expect that the resulting saliency vector has the same shape as our mask.
     We then pick elements to remove until we reach the target sparsity_level.
     """
@@ -18,7 +19,9 @@ class SaliencyPruner(BaseStructuredSparsifier):
 
         # use negative weights so we can use topk (we prune out the smallest)
         if weights.dim() <= 1:
-            raise Exception("Structured pruning can only be applied to a 2+dim weight tensor!")
+            raise Exception(  # noqa: TRY002
+                "Structured pruning can only be applied to a 2+dim weight tensor!"
+            )
         saliency = -weights.norm(dim=tuple(range(1, weights.dim())), p=1)
         assert saliency.shape == mask.shape
 

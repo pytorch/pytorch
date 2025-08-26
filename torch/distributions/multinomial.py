@@ -1,12 +1,16 @@
+# mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import inf
+from torch import inf, Tensor
+from torch.distributions import Categorical, constraints
 from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
-from torch.distributions import Categorical
-from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Multinomial']
+
+__all__ = ["Multinomial"]
+
 
 class Multinomial(Distribution):
     r"""
@@ -45,21 +49,27 @@ class Multinomial(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real_vector}
+
+    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     total_count: int
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.probs * self.total_count
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.total_count * self.probs * (1 - self.probs)
 
-    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        total_count: int = 1,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if not isinstance(total_count, int):
-            raise NotImplementedError('inhomogeneous total_count is not supported')
+            raise NotImplementedError("inhomogeneous total_count is not supported")
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
         self._binomial = Binomial(total_count=total_count, probs=self.probs)
@@ -72,7 +82,9 @@ class Multinomial(Distribution):
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count
         new._categorical = self._categorical.expand(batch_shape)
-        super(Multinomial, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super(Multinomial, new).__init__(
+            batch_shape, self.event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
@@ -84,20 +96,22 @@ class Multinomial(Distribution):
         return constraints.multinomial(self.total_count)
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
-        samples = self._categorical.sample(torch.Size((self.total_count,)) + sample_shape)
+        samples = self._categorical.sample(
+            torch.Size((self.total_count,)) + sample_shape
+        )
         # samples.shape is (total_count, sample_shape, batch_shape), need to change it to
         # (sample_shape, batch_shape, total_count)
         shifted_idx = list(range(samples.dim()))

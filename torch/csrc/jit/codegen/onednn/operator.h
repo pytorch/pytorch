@@ -4,10 +4,7 @@
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 class Operator {
  public:
@@ -94,13 +91,13 @@ class Operator {
   }
 
   template <typename Attr>
-  Operator& setAttr(std::string name, Attr&& attr) {
+  Operator& setAttr(dnnl::graph::op::attr name, Attr&& attr) {
     o.set_attr(name, std::forward<Attr>(attr));
     return *this;
   }
 
   template <typename F>
-  Operator& setAttr(std::string name, const F& fn, size_t offset) {
+  Operator& setAttr(dnnl::graph::op::attr name, const F& fn, size_t offset) {
     return setAttr(name, fn(n, offset));
   }
 
@@ -146,7 +143,4 @@ class Operator {
   dnnl::graph::op::kind k;
 };
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

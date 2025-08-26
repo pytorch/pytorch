@@ -2,19 +2,20 @@
 #
 # This writes one file: variable_factories.h
 
+from __future__ import annotations
+
 import re
-from typing import List, Optional
 
 import torchgen.api.python as python
 from torchgen.api import cpp
-
 from torchgen.api.types import CppSignatureGroup
 from torchgen.context import with_native_function
 from torchgen.gen import parse_native_yaml
 from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
 from torchgen.utils import FileManager, mapMaybe
 
-OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
+
+OPTIONAL_TYPE_PATTERN = re.compile(r"std::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 
 
@@ -22,7 +23,7 @@ TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 # TODO: maybe update the cpp argument API to take optional namespace argument?
 def fully_qualified_type(argument_type: str) -> str:
     def maybe_optional_type(type: str, is_opt: bool) -> str:
-        return f"c10::optional<{type}>" if is_opt else type
+        return f"std::optional<{type}>" if is_opt else type
 
     opt_match = OPTIONAL_TYPE_PATTERN.match(argument_type)
     is_opt = opt_match is not None
@@ -69,7 +70,7 @@ def is_factory_function(f: NativeFunction) -> bool:
 
 
 @with_native_function
-def process_function(f: NativeFunction) -> Optional[str]:
+def process_function(f: NativeFunction) -> str | None:
     name = cpp.name(f.func)
     has_tensor_options = python.has_tensor_options(f)
     is_factory = has_tensor_options or name.endswith("_like")
@@ -83,8 +84,8 @@ def process_function(f: NativeFunction) -> Optional[str]:
         sigs.append(cpp_sigs.symint_signature)
     r = ""
     for sig in sigs:
-        formals: List[str] = []
-        exprs: List[str] = []
+        formals: list[str] = []
+        exprs: list[str] = []
         requires_grad = "false"
         for arg in sig.arguments():
             qualified_type = fully_qualified_type(arg.type)
@@ -99,7 +100,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
                 # which would fail otherwise). We handle requires_grad explicitly here
                 # instead of passing it through to the kernel.
                 exprs.append(
-                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                    f"at::TensorOptions({arg.name}).requires_grad(::std::nullopt)"
                 )
                 # Manually set the requires_grad bit on the result tensor.
                 requires_grad = f"{arg.name}.requires_grad()"
@@ -107,9 +108,9 @@ def process_function(f: NativeFunction) -> Optional[str]:
                 exprs.append(arg.name)
 
         r += f"""\
-inline at::Tensor {sig.name()}({', '.join(formals)}) {{
+inline at::Tensor {sig.name()}({", ".join(formals)}) {{
   at::AutoDispatchBelowADInplaceOrView guard;
-  return autograd::make_variable(at::{sig.name()}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
+  return autograd::make_variable(at::{sig.name()}({", ".join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """
     return r

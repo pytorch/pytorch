@@ -41,7 +41,7 @@ def main() -> None:
 
     for func_name in sorted(torch.masked._ops.__all__):
         func = getattr(torch.masked._ops, func_name)
-        func_doc = torch.masked._generate_docstring(func)
+        func_doc = torch.masked._generate_docstring(func)  # type: ignore[no-untyped-call, attr-defined]
         _new_content.append(f'{func_name}_docstring = """{func_doc}"""\n')
 
     new_content = "\n".join(_new_content)

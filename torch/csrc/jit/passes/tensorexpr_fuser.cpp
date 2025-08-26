@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -23,23 +24,21 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
-// NOLINTNEXTLINE
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
-    "disable aten::cat in TE fusion groups");
+    "disable aten::cat in TE fusion groups")
 
 C10_DEFINE_bool(
     torch_jit_enable_dynamic_shape_fusion,
     false,
-    "enable TE fusion using dynamic shapes");
+    "enable TE fusion using dynamic shapes")
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static bool texpr_reductions_enabled = false;
 
@@ -85,9 +84,8 @@ static const OperatorSet& supported_non_eltwise_set() {
       "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
-  // clang-format on
   return supported_non_eltwise_set;
-};
+}
 
 bool isSupported(Node* node) {
   // For Block codegen we allow limited ops.
@@ -105,7 +103,6 @@ bool isSupported(Node* node) {
       "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
   };
-  // clang-format on
 
   if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
@@ -159,11 +156,11 @@ void setTensorExprFuserEnabled(bool val) {
 }
 
 bool tensorExprFuserEnabled() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
-  if (!enable_c_str) {
+  static const auto enable_opt = c10::utils::get_env("PYTORCH_TENSOREXPR");
+  if (!enable_opt.has_value()) {
     return texpr_fuser_enabled_;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
@@ -399,7 +396,7 @@ void insertTypeGuard(
 
 namespace {
 bool has_unsupported_pin_memory(const Node* node) {
-  // cant support non-constant pin_memory or pin_memory = True
+  // can't support non-constant pin_memory or pin_memory = True
   if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
     int index = *maybe_index;
     auto inp = node->input(index);
@@ -550,7 +547,7 @@ class TensorExprFuser {
   }
 
   void run() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    aliasDb_ = std::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
@@ -561,8 +558,7 @@ class TensorExprFuser {
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
     if (fuse_to_dynamic_shapes_) {
-      VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled"
-              << std::endl;
+      VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled" << '\n';
       generalizeFusionGroups(graph_->block());
       GRAPH_DUMP("After generalizing fusion groups: ", graph_);
     } else {
@@ -625,9 +621,7 @@ class TensorExprFuser {
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     GRAPH_DEBUG(msg, *n);
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
@@ -668,9 +662,8 @@ class TensorExprFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        auto [tmp_it, changed] = scanNode(*it);
+        it = tmp_it;
         any_changed |= changed;
       }
     }
@@ -781,9 +774,9 @@ class TensorExprFuser {
     }
   }
 
-  c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
+  std::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     std::vector<Node*> nodes_to_merge = {to_merge};
@@ -800,7 +793,7 @@ class TensorExprFuser {
       GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
       if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
         GRAPH_UPDATE("Failed to move because of AliasDB checks!");
-        return c10::nullopt;
+        return std::nullopt;
       }
       move_point = n;
     }
@@ -858,11 +851,6 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
-#ifndef C10_MOBILE
-      if (fuser::cuda::isEnabled()) {
-        return false;
-      }
-#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
@@ -915,7 +903,6 @@ class TensorExprFuser {
     static const OperatorSet pow{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
-    // clang-format on
 
     // Check types of input values.
     for (const Value* v : node->inputs()) {
@@ -1294,7 +1281,7 @@ class TensorExprFuser {
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
       if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
-                << std::endl;
+                << '\n';
         SubgraphUtils::unmergeSubgraph(fusion_group);
       }
     }
@@ -1307,10 +1294,10 @@ class TensorExprFuser {
   // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
   // aten::clamp, aten::mul and aten::add.
   void parseTENotFuseOption() {
-    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    const auto option = c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_FUSE");
     std::stringstream in_ss;
-    if (option) {
-      in_ss << option;
+    if (option.has_value()) {
+      in_ss << option.value();
     }
 
     std::string line;
@@ -1450,12 +1437,11 @@ static Operation createTensorExprOp(const Node* node) {
   };
 }
 
-RegisterOperators TensorExprOps({
+static RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
         createTensorExprOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

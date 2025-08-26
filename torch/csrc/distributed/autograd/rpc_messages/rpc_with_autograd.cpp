@@ -1,13 +1,10 @@
-#include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using rpc::Message;
 using rpc::MessageType;
@@ -109,7 +106,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       static_cast<MessageType>(tupleElements[0].toInt());
   AutogradMetadata autogradMetadata(
       tupleElements[1].toInt(), tupleElements[2].toInt());
-  worker_id_t workerId = tupleElements[3].toInt();
+  worker_id_t workerId = static_cast<worker_id_t>(tupleElements[3].toInt());
   auto c10DeviceMap =
       tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
@@ -175,6 +172,4 @@ const rpc::DeviceMap& RpcWithAutograd::deviceMap() {
   return deviceMap_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -8,6 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/addmv_native.h>
+#include <ATen/ops/dot_native.h>
 #include <ATen/ops/mm.h>
 #endif
 
@@ -42,7 +43,7 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
               other.numel(),
               " elements respectively");
   TORCH_CHECK(self.device() == other.device(),
-              "expected all tensors to be on the same device. Found: ",
+              "Expected all tensors to be on the same device. Found: ",
               self.device(),
               ", ",
               other.device());
@@ -50,19 +51,17 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 } // namespace mps
 
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS: dot op doesn't support int64 input")
-
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
 
   dot_check(self, other);
 
-  auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "dot_mps" + getTensorsStringKey({self, other});
+    std::string key = "dot_mps" + getTensorsStringKey({self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -78,6 +77,12 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
       } else {
         castSelf = selfTensor;
         castOther = otherTensor;
+      }
+      if (self.is_conj()) {
+        castSelf = [mpsGraph conjugateWithTensor:selfTensor name:nil];
+      }
+      if (other.is_conj()) {
+        castOther = [mpsGraph conjugateWithTensor:otherTensor name:nil];
       }
 
       MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
@@ -101,26 +106,19 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
     Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
 }
 
-Tensor& addmv_out_mps_impl(const Tensor& self,
-                           const Tensor& mat,
-                           const Tensor& vec,
-                           const Scalar& beta_,
-                           const Scalar& alpha_,
-                           Tensor& result) {
+static Tensor& addmv_out_mps_impl(const Tensor& self,
+                                  const Tensor& mat,
+                                  const Tensor& vec,
+                                  const Scalar& beta_,
+                                  const Scalar& alpha_,
+                                  Tensor& result) {
   using namespace mps;
 
   TORCH_CHECK(mat.is_mps());
@@ -142,8 +140,8 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {
-    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" + to_string(beta_.toDouble()) +
-        ":" + to_string(alpha_.toDouble());
+    std::string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
+        std::to_string(beta_.toDouble()) + ":" + std::to_string(alpha_.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -187,10 +185,7 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;

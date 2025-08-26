@@ -56,6 +56,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../c10/util/Optional.h \
                          ../../../c10/cuda/CUDAGuard.h \
                          ../../../c10/cuda/CUDAStream.h \
+                         ../../../c10/xpu/XPUStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
                          ../../../torch/csrc/autograd/autograd.h \
@@ -66,6 +67,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/jit/runtime/custom_operator.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/csrc/stable/library.h \
                          ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!

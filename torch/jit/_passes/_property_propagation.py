@@ -5,14 +5,14 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-from typing import Any, List
+from typing import Any
 
 import torch
 from torch import TensorType
 from torch._C import Graph
 
 
-def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
+def apply_input_props_using_example(graph: Graph, example_input: list[Any]) -> None:
     """
     Applies properties for each tensor in the graph inputs
     using the example supplied.
@@ -28,14 +28,19 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
 
     if not len(graph_inputs) == len(example_input):
         raise RuntimeError(
-            "Number of inputs in graph does not match number of inputs in the example")
+            "Number of inputs in graph does not match number of inputs in the example"
+        )
 
     for i, (graph_i, example_i) in enumerate(zip(graph_inputs, example_input)):
         if example_i is None:
             continue  # Skip the type check
 
-        if isinstance(example_i, torch.Tensor) != isinstance(graph_i.type(), TensorType):
-            raise RuntimeError(f"Input {i} does not match type of example", graph_i, example_i)
+        if isinstance(example_i, torch.Tensor) != isinstance(
+            graph_i.type(), TensorType
+        ):
+            raise RuntimeError(
+                f"Input {i} does not match type of example", graph_i, example_i
+            )
 
         if isinstance(example_i, torch.Tensor):
             graph_i.setType(TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]

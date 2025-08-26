@@ -7,8 +7,7 @@ namespace F = torch::nn::functional;
 
 using namespace torch::indexing;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 ASMoutput::ASMoutput(Tensor output_, double loss_)
     : output(std::move(output_)), loss(loss_) {}
@@ -19,11 +18,13 @@ AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(
       shortlist_size(0),
       n_clusters(0),
       head_size(0) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  AdaptiveLogSoftmaxWithLossImpl::reset();
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::reset() {
+  TORCH_CHECK(
+      !options.cutoffs().empty(),
+      "cutoffs should be a sequence of length larger than 0");
   TORCH_CHECK(
       std::is_sorted(options.cutoffs().begin(), options.cutoffs().end()) &&
           *std::min_element(
@@ -35,12 +36,13 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
                   .size() == options.cutoffs().size(),
       "cutoffs should be a sequence of unique, positive integers sorted in an increasing order, ",
       "where each value is between 1 and n_classes-1");
+  TORCH_CHECK(options.div_value() != 0, "div_value should not be equal to 0");
 
   cutoffs = options.cutoffs();
   cutoffs.push_back(options.n_classes());
 
   shortlist_size = cutoffs[0];
-  n_clusters = cutoffs.size() - 1;
+  n_clusters = static_cast<int64_t>(cutoffs.size() - 1);
   head_size = shortlist_size + n_clusters;
 
   head = this->register_module(
@@ -50,8 +52,9 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   tail = this->register_module("tail", ModuleList());
 
   for (const auto i : c10::irange(n_clusters)) {
-    int64_t hsz = options.in_features() /
-        static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
+    int64_t hsz = static_cast<int64_t>(std::floor(
+        static_cast<double>(options.in_features()) /
+        std::pow(options.div_value(), (i + 1))));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
     Sequential projection(
@@ -126,7 +129,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(
 
       const Tensor cluster_output =
           tail[i - 1]->as<Sequential>()->forward(input_subset);
-      int64_t cluster_index = shortlist_size + i - 1;
+      int64_t cluster_index = shortlist_size + static_cast<int64_t>(i) - 1;
 
       gather_inds.index_fill_(0, row_indices, cluster_index);
 
@@ -216,5 +219,4 @@ void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

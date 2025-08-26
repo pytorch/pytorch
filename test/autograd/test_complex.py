@@ -1,8 +1,7 @@
 # Owner(s): ["module: autograd"]
 
 import torch
-
-from torch.testing._internal.common_utils import TestCase, run_tests, gradcheck
+from torch.testing._internal.common_utils import gradcheck, run_tests, TestCase
 
 
 class TestAutogradComplex(TestCase):
@@ -71,7 +70,9 @@ class TestAutogradComplex(TestCase):
         # modified inplace
         res = x1.unbind(0)
 
-        with self.assertRaisesRegex(RuntimeError, "output of a function that returns multiple views"):
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
             res[0] += torch.rand(2, requires_grad=True)
 
         x.requires_grad_(True)
@@ -80,7 +81,9 @@ class TestAutogradComplex(TestCase):
         # modified inplace
         res = x1.unbind(0)
 
-        with self.assertRaisesRegex(RuntimeError, "output of a function that returns multiple views"):
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
             res[0] += torch.rand(2, requires_grad=True)
 
     def as_identity(self):
@@ -95,11 +98,11 @@ class TestAutogradComplex(TestCase):
         gradcheck(func, [z])
         func(z).backward()
 
-        z1 = z.clone().detach().requires_grad_(True)
+        z1 = z.detach().clone().requires_grad_(True)
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
 
         self.assertEqual(z.grad, z1.grad)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

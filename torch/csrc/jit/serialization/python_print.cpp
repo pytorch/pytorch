@@ -130,6 +130,10 @@ struct PythonPrintImpl {
         stack->push_back(n->sourceRange());
       }
     }
+    WithSourceRange(const WithSourceRange&) = delete;
+    WithSourceRange(WithSourceRange&&) = delete;
+    WithSourceRange& operator=(const WithSourceRange&) = delete;
+    WithSourceRange& operator=(WithSourceRange&&) = delete;
 
     ~WithSourceRange() {
       stack->pop_back();
@@ -208,7 +212,7 @@ struct PythonPrintImpl {
   //     and would appear in the same order when the expression tree is
   //     reparsed.
   // The last case can be checked
-  // because when we emit a expresion tree in the parser,
+  // because when we emit a expression tree in the parser,
   // we do a left-to-right postorder traversal of the expression tree (emit
   // children, then emit op). The reverse of this is a right-to-left preorder
   // traversal of the tree. By doing a right-to-left preorder traversal of the
@@ -218,12 +222,12 @@ struct PythonPrintImpl {
   // expression.
 
   // The inductive step is that the right-most input should be produced by the
-  // node immediatly before the current node if it is in tree order.
+  // node immediately before the current node if it is in tree order.
 
   bool canInline(Value* v) {
     Node* n = v->node();
     // there must be only 1 values, otherwise we need an assignment to handle
-    // the multiple outout values
+    // the multiple output values
     if (n->outputs().size() != 1)
       return false;
     // if it is used more than once, then we need a variable
@@ -361,8 +365,9 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = candidate + c10::to_string(next_id[name]++);
+      auto suffix = (next_id[name]++);
+      name.resize(candidate.size());
+      name.append(std::to_string(suffix));
     }
     used.insert(name);
     return name;
@@ -436,8 +441,7 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (const auto i : c10::irange(level)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(level)) {
       body_ << "  ";
     }
     return body_;
@@ -455,7 +459,7 @@ struct PythonPrintImpl {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Python printer expected 2 lists of same size");
+      TORCH_CHECK(false, "Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
@@ -579,10 +583,11 @@ struct PythonPrintImpl {
 
     auto loop_type = stmt.loopType();
     if (loop_type == LoopView::ModifiedLoop) {
-      throw ErrorReport(stmt.node()->sourceRange())
+      throw(
+          ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
-          << "that combined while and for loops. File a bug";
+          << "that combined while and for loops. File a bug");
     }
 
     bool emit_as_for_loop = loop_type == LoopView::For;
@@ -646,7 +651,7 @@ struct PythonPrintImpl {
   // [reordering of inlines]
   // We inline anything that is semantically legal to inline, but sometimes
   // we find that these lines get too long. In that case we break the lines
-  /// and it  is important that we un-inline all the inputs preceeding the long
+  /// and it is important that we un-inline all the inputs preceding the long
   /// input:
   //   r = foo(x.add_(b), some_long + expression)
   //  wrong!
@@ -670,20 +675,22 @@ struct PythonPrintImpl {
 
   void scanLongInlines(
       Node* user,
-      int64_t offset,
+      size_t offset,
       std::vector<Value*>& to_split_reversed) {
     auto it = visited_split_inline_uses_.find(user);
     bool present = it != visited_split_inline_uses_.end();
-    for (int64_t i = offset; i >= (present ? it->second + 1 : 0); --i) {
+    for (int64_t i = static_cast<int64_t>(offset);
+         i >= (present ? it->second + 1 : 0);
+         --i) {
       Value* prev_arg = user->input(i);
       if (isNonConstantInline(prev_arg)) {
         to_split_reversed.push_back(prev_arg);
       }
     }
-    visited_split_inline_uses_[user] = offset;
+    visited_split_inline_uses_[user] = static_cast<int64_t>(offset);
     if (!present && output_inline_.count(user)) {
       Use u = user->output()->uses().at(0);
-      scanLongInlines(u.user, int64_t(u.offset) - 1, to_split_reversed);
+      scanLongInlines(u.user, u.offset - 1, to_split_reversed);
       // -1 because the actual use is still being
       // emitted so it cannot be split
     }
@@ -778,9 +785,10 @@ struct PythonPrintImpl {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw ErrorReport(node->sourceRange())
+          throw(
+              ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this";
+              << "Normal use of ScriptMethods should enforce this");
         }
         if (!node->inputs().empty()) {
           indent();
@@ -868,8 +876,9 @@ struct PythonPrintImpl {
       } break;
       case prim::Closure: {
         if (enforce_importable_) {
-          throw ErrorReport(node->sourceRange())
-              << "closures are not exportable";
+          throw(
+              ErrorReport(node->sourceRange())
+              << "closures are not exportable");
         }
         assignValuesToTheirUniqueNames(node->outputs());
         auto name = useOf(node->output())->str();
@@ -994,11 +1003,12 @@ struct PythonPrintImpl {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
-          throw ErrorReport(node->sourceRange())
+          throw(
+              ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget to add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__";
+              << "If this is a nn.ModuleList, add it to __constants__");
         }
         std::stringstream scalars_stream;
         stmt << "^" << value->name();
@@ -1293,8 +1303,7 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (const auto i : c10::irange(N)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(N)) {
       repeated.push_back(value);
     }
     return repeated;
@@ -1401,7 +1410,7 @@ struct PythonPrintImpl {
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
-    // If any of the methods are not Graph funtions, this indicates that
+    // If any of the methods are not Graph functions, this indicates that
     // this class is a custom-bound C++ class. Skip serialization
     // of this class, we will depend on the ClassType being defined
     // in the target process.
@@ -1581,7 +1590,7 @@ struct PythonPrintImpl {
     } else if (auto enumType = type->cast<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
 
-      std::string value_wrapper = "";
+      std::string value_wrapper;
       if (enumType->getValueType() == StringType::get()) {
         value_wrapper = "\"";
       }
@@ -1677,9 +1686,7 @@ uint64_t PythonPrint::minVersion() const {
   return pImpl->min_version_;
 }
 
-PythonPrint::~PythonPrint() = default;
-
-static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
+static std::vector<IValue> traverseIValueAndGetObjects(const IValue& ivalue) {
   std::vector<IValue> result;
   std::vector<IValue> stack;
   stack.emplace_back(ivalue);
@@ -1716,7 +1723,7 @@ static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   return result;
 }
 
-static c10::optional<std::string> printType(
+static std::optional<std::string> printType(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
@@ -1727,7 +1734,7 @@ static c10::optional<std::string> printType(
   if (namedType && namedType->name()) {
     return type_name_uniquer.getUniqueName(namedType).qualifiedName();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void jitModuleToPythonCodeAndConstants(

@@ -1,11 +1,13 @@
-from functools import wraps
-import weakref
+# mypy: allow-untyped-defs
 import abc
 import warnings
+import weakref
+from functools import wraps
 
-from ..data_sparsifier import BaseDataSparsifier
+from torch.ao.pruning._experimental.data_sparsifier import BaseDataSparsifier
 
-__all__ = ['BaseDataScheduler']
+
+__all__ = ["BaseDataScheduler"]
 
 
 class BaseDataScheduler:
@@ -27,11 +29,15 @@ class BaseDataScheduler:
 
     The *get_hyperparam()* function needs to be implemented by the user.
     """
-    def __init__(self, data_sparsifier, schedule_param: str, last_epoch=-1, verbose=False):
+
+    def __init__(
+        self, data_sparsifier, schedule_param: str, last_epoch=-1, verbose=False
+    ):
         # Attach sparsifier
         if not isinstance(data_sparsifier, BaseDataSparsifier):
-            raise TypeError('{} is not an instance of torch.ao.pruning.BaseDataSparsifier'.format(
-                type(data_sparsifier).__name__))
+            raise TypeError(
+                f"{type(data_sparsifier).__name__} is not an instance of torch.ao.pruning.BaseDataSparsifier"
+            )
         self.data_sparsifier = data_sparsifier
         self.schedule_param = schedule_param
 
@@ -47,7 +53,7 @@ class BaseDataScheduler:
         # We would like to ensure that `scheduler.step()` is called after
         # `sparsifier.step()`
         def with_counter(method):
-            if getattr(method, '_with_counter', False):
+            if getattr(method, "_with_counter", False):
                 # `sparsifier.step()` has already been replaced, return.
                 return method
 
@@ -92,7 +98,9 @@ class BaseDataScheduler:
             >>> def get_schedule_param(self):
             ...     new_param = {}
             ...     for name in self.sparsifier.data_groups.keys():
-            ...         new_param[name] = self.sparsifier.data_groups[name][self.schedule_param] * 0.5
+            ...         new_param[name] = (
+            ...             self.sparsifier.data_groups[name][self.schedule_param] * 0.5
+            ...         )
             ...     return new_param
 
         When the step() function is called, the value in self.sparsifier.data_groups[name][self.schedule_param]
@@ -101,11 +109,11 @@ class BaseDataScheduler:
         raise NotImplementedError
 
     def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
-        format_string += '\n'
-        format_string += 'Data Sparsifier {0}\n'.format(self.data_sparsifier)
-        format_string += '    {0}: {1}\n'.format(self.schedule_param, self.base_param)
-        format_string += ')'
+        format_string = self.__class__.__name__ + " ("
+        format_string += "\n"
+        format_string += f"Data Sparsifier {self.data_sparsifier}\n"
+        format_string += f"    {self.schedule_param}: {self.base_param}\n"
+        format_string += ")"
         return format_string
 
     def state_dict(self):
@@ -119,7 +127,11 @@ class BaseDataScheduler:
             Make sure to store the state of the sparsifier before storing the
             state of the scheduler
         """
-        return {key: value for key, value in self.__dict__.items() if key != 'data_sparsifier'}
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key != "data_sparsifier"
+        }
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -141,19 +153,24 @@ class BaseDataScheduler:
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
             if not hasattr(self.data_sparsifier.step, "_with_counter"):
-                warnings.warn("Seems like `data_sparsifier.step()` has been overridden after sparsity scheduler "
-                              "initialization. Please, make sure to call `data_sparsifier.step()` before "
-                              "`scheduler.step()`.", UserWarning)
+                warnings.warn(
+                    "Seems like `data_sparsifier.step()` has been overridden after sparsity scheduler "
+                    "initialization. Please, make sure to call `data_sparsifier.step()` before "
+                    "`scheduler.step()`.",
+                    UserWarning,
+                )
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
             elif self.data_sparsifier._step_count < 1:  # type: ignore[attr-defined]
-                warnings.warn("Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
-                              "You have to make sure you run the data_sparsifier.step() BEFORE any "
-                              "calls to the scheduler.step().", UserWarning)
+                warnings.warn(
+                    "Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
+                    "You have to make sure you run the data_sparsifier.step() BEFORE any "
+                    "calls to the scheduler.step().",
+                    UserWarning,
+                )
         self._step_count += 1
 
         class _enable_get_sp_call:
-
             def __init__(self, o):
                 self.o = o
 

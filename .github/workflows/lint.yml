@@ -1,4 +1,5 @@
 name: Lint
+# Workflow that runs lint checks and also unittests for tools, and scripts.
 
 on:
   pull_request:
@@ -9,101 +10,122 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      - ciflow/pull/*
   workflow_dispatch:
 
+permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
-  docker-image:
-    name: docker-image
+  get-label-type:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
-    timeout-minutes: 30
-    outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
-        with:
-          docker-image-name: 'pytorch-linux-focal-linter'
-          # TODO: This flag is needed to make the Docker image available on ECR
-          # to avoid "Requested image not found" error for linter workflow. The
-          # longer term fix would be to refactor linter so that building the new
-          # image and running lint are done in the same runner like _linux-build
-          skip_push: false
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
-
-  lintrunner:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
-      runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+
+  get-changed-files:
+    if: github.repository_owner == 'pytorch'
+    name: Get changed files
+    uses: ./.github/workflows/_get-changed-files.yml
+
+  lintrunner-clang:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to clangtidy / clangformat
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.h') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cc') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cu') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cuh') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.mm') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.metal')
+      )
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
-        CACHE_DIRECTORY="/tmp/.lintbin"
-        # Try to recover the cached binaries
-        if [[ -d "${CACHE_DIRECTORY}" ]]; then
-          # It's ok to fail this as lintrunner init would download these binaries
-          # again if they do not exist
-          cp -r "${CACHE_DIRECTORY}" . || true
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = "*" ]; then
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        else
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
         fi
+        export CLANG=1
+        .github/scripts/lintrunner.sh
 
-        # This has already been cached in the docker image
-        lintrunner init 2> /dev/null
+  # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
+  #       fails to find types when it should
+  lintrunner-mypy:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to mypy
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.py') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.pyi')
+      )
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running mypy"
+        ADDITIONAL_LINTRUNNER_ARGS="--take MYPY,MYPYSTRICT --all-files" .github/scripts/lintrunner.sh
 
-        # Do build steps necessary for linters
-        python3 -m tools.linter.clang_tidy.generate_build_files
-        python3 -m tools.generate_torch_version --is_debug=false
-        python3 -m tools.pyi.gen_pyi \
-          --native-functions-path aten/src/ATen/native/native_functions.yaml \
-          --tags-path aten/src/ATen/native/tags.yaml \
-          --deprecated-functions-path "tools/autograd/deprecated.yaml"
-
-        RC=0
-        # Run lintrunner on all files
-        if ! lintrunner --force-color --all-files --tee-json=lint.json 2> /dev/null; then
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
-          RC=1
+  lintrunner-noclang:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: [get-label-type, get-changed-files]
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running all other linters"
+        if [ "$CHANGED_FILES" = '*' ]; then
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT --all-files" .github/scripts/lintrunner.sh
+        else
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT ${CHANGED_FILES}" .github/scripts/lintrunner.sh
         fi
-
-        # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
-        jq --raw-output \
-          '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
-          lint.json || true
-
-        exit $RC
 
   quick-checks:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Ensure no non-breaking spaces
         # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
         # does not support the '\u000a' syntax (which is relevant for local linters)
@@ -129,7 +151,8 @@ jobs:
 
   pr-sanity-checks:
     name: pr-sanity-checks
-    runs-on: [self-hosted, linux.large]
+    needs: get-label-type
+    runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}linux.large"]
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
@@ -147,17 +170,16 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: -1
+      submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
 
@@ -182,17 +204,15 @@ jobs:
         exit $RC
 
   toc:
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Regenerate ToCs and check that they didn't change
         set -eu
 
@@ -220,54 +240,59 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
-      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
-
         # Test tools
-        python3 -m unittest discover -vs tools/test -p 'test_*.py'
-        python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+        PYTHONPATH=$(pwd) pytest tools/stats
+        PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
+        PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_run_test:
-    name: Test `run_test.py` is usable without boto3/rockset
+    name: Test `run_test.py` is usable without boto3
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.8
-        uses: actions/setup-python@v4
+      - name: Setup Python 3.9
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           cache: pip
       - name: Install dependencies
         run: |
-          pip install pytest-rerunfailures==11.1.* pytest-shard==0.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
+          python3 -m pip install --upgrade pip
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.3.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |
-          # Run test_weak, which is very fast
-          python3 test/run_test.py --include test_weak --verbose
+          # Run test_vulkan, which is a fast noop on Linux
+          python3 test/run_test.py --include test_vulkan --verbose
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        test_type: [with_torch, without_torch, older_python_version]
+        include:
+          - test_type: with_torch
+            runner: linux.24_04.4x
+          - test_type: without_torch
+            runner: linux.24_04.4x
+          - test_type: older_python_version
+            runner: linux.24_04.4x
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
@@ -276,36 +301,54 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.5
+      - name: Get min python version
+        id: get-min-python-version
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v4
+        run: |
+          set -eou pipefail
+          # Generate PyTorch version to use
+          echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
+      - name: Setup Old Python version
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.5'
+          python-version: 3.8
           architecture: x64
           check-latest: false
           cache: pip
           cache-dependency-path: |
+            **/requirements-build.txt
             **/requirements.txt
-      - name: Setup Python 3.8
+      - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.8'
+          python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
           check-latest: false
           cache: pip
           cache-dependency-path: |
+            **/requirements-build.txt
             **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
           pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
-          pip install 'torch==1.*'
+          pip install 'torch==2.*'
       - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
+
+  link-check:
+    name: Link checks
+    needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
+    with:
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

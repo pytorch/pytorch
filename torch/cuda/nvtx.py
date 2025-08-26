@@ -1,12 +1,19 @@
+# mypy: allow-untyped-defs
+r"""This package adds support for NVIDIA Tools Extension (NVTX) used in profiling."""
+
 from contextlib import contextmanager
+
 
 try:
     from torch._C import _nvtx
 except ImportError:
+
     class _NVTXStub:
         @staticmethod
         def _fail(*args, **kwargs):
-            raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
+            raise RuntimeError(
+                "NVTX functions not installed. Are you sure you have a CUDA build?"
+            )
 
         rangePushA = _fail
         rangePop = _fail
@@ -19,8 +26,7 @@ __all__ = ["range_push", "range_pop", "range_start", "range_end", "mark", "range
 
 def range_push(msg):
     """
-    Pushes a range onto a stack of nested range span.  Returns zero-based
-    depth of the range that is started.
+    Push a range onto a stack of nested range span.  Returns zero-based depth of the range that is started.
 
     Args:
         msg (str): ASCII message to associate with range
@@ -29,10 +35,7 @@ def range_push(msg):
 
 
 def range_pop():
-    """
-    Pops a range off of a stack of nested range spans.  Returns the
-    zero-based depth of the range that is ended.
-    """
+    """Pop a range off of a stack of nested range spans.  Returns the  zero-based depth of the range that is ended."""
     return _nvtx.rangePop()
 
 
@@ -61,6 +64,38 @@ def range_end(range_id) -> None:
         range_id (int): an unique handle for the start range.
     """
     _nvtx.rangeEnd(range_id)
+
+
+def _device_range_start(msg: str, stream: int = 0) -> object:
+    """
+    Marks the start of a range with string message.
+    It returns an opaque heap-allocated handle for this range
+    to pass to the corresponding call to device_range_end().
+
+    A key difference between this and range_start is that the
+    range_start marks the range right away, while _device_range_start
+    marks the start of the range as soon as all the tasks on the
+    CUDA stream are completed.
+
+    Returns: An opaque heap-allocated handle that should be passed to _device_range_end().
+
+    Args:
+        msg (str): ASCII message to associate with the range.
+        stream (int): CUDA stream id.
+    """
+    return _nvtx.deviceRangeStart(msg, stream)
+
+
+def _device_range_end(range_handle: object, stream: int = 0) -> None:
+    """
+    Mark the end of a range for a given range_handle as soon as all the tasks
+    on the CUDA stream are completed.
+
+    Args:
+        range_handle: an unique handle for the start range.
+        stream (int): CUDA stream id.
+    """
+    _nvtx.deviceRangeEnd(range_handle, stream)
 
 
 def mark(msg):

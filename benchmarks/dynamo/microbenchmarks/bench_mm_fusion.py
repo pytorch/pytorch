@@ -1,10 +1,12 @@
-# flake8: noqa
-import torch
+# flake8: noqa: B902
 
+from prettytable import PrettyTable
+
+import torch
 import torch._dynamo
 import torch._inductor.config
-import triton
-from prettytable import PrettyTable
+from torch._inductor.runtime.benchmarking import benchmarker
+
 
 # torch._inductor.config.debug = True
 torch._inductor.config.triton.dense_indexing = True
@@ -15,7 +17,7 @@ torch.manual_seed(0)
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-class Func(object):
+class Func:
     # mm
     @torch._dynamo.optimize("inductor")
     def mm(a, b, bias):
@@ -42,7 +44,10 @@ class Func(object):
         return torch.relu(y)
 
 
-def bench(shape, layer_id, p, fusion_types=[""]):
+def bench(shape, layer_id, p, fusion_types=None):
+    torch._logging.set_logs(inductor_metrics=True)
+    if fusion_types is None:
+        fusion_types = [""]
     dtype = torch.float16
     M, K = shape[0]
     _, N = shape[1]
@@ -57,7 +62,7 @@ def bench(shape, layer_id, p, fusion_types=[""]):
     row = [layer_id]
     for fusion_type in fusion_types:
         if fusion_type == "":
-            fn_mm = getattr(Func, "mm")
+            fn_mm = Func.mm
         else:
             fn_mm = getattr(Func, f"mm_{fusion_type}")
 
@@ -72,18 +77,19 @@ def bench(shape, layer_id, p, fusion_types=[""]):
             return fn_mm(*args)
 
         torch._inductor.config.triton.mm = "aten"
-        torch_mm_ms, _, _ = triton.testing.do_bench(fn)
+        torch_mm_ms, _, _ = benchmarker.benchmark_gpu(fn)
         torch._inductor.config.triton.mm = "triton"
         # reset to force code gen new python code
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        triton_mm_ms, _, _ = triton.testing.do_bench(fn)
-        assert (
-            torch._inductor.metrics.generated_kernel_count == 1
-        ), "codegen #kernel != 1"
+        triton_mm_ms, _, _ = benchmarker.benchmark_gpu(fn)
+        assert torch._inductor.metrics.generated_kernel_count == 1, (
+            "codegen #kernel != 1"
+        )
         row.extend([tflops(torch_mm_ms), tflops(triton_mm_ms)])
 
     p.add_row(row)
+    torch._logging.set_logs()
 
 
 fusion_types = ["", "add", "relu", "add_relu"]

@@ -2,6 +2,8 @@
 Generic linter that greps for a pattern and optionally suggests replacements.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -10,14 +12,10 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, List, NamedTuple, Optional
+from typing import NamedTuple
 
 
 IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -28,15 +26,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def as_posix(name: str) -> str:
@@ -44,8 +42,8 @@ def as_posix(name: str) -> str:
 
 
 def run_command(
-    args: List[str],
-) -> "subprocess.CompletedProcess[bytes]":
+    args: list[str],
+) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -65,7 +63,7 @@ def lint_file(
     linter_name: str,
     error_name: str,
     error_description: str,
-) -> Optional[LintMessage]:
+) -> LintMessage | None:
     # matching_line looks like:
     #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
     split = matching_line.split(":")
@@ -108,7 +106,7 @@ def lint_file(
     original = None
     replacement = None
     if replace_pattern:
-        with open(filename, "r") as f:
+        with open(filename) as f:
             original = f.read()
 
         try:
@@ -221,10 +219,24 @@ def main() -> None:
     if args.match_first_only:
         files_with_matches = ["--files-with-matches"]
 
+    lines = []
     try:
-        proc = run_command(
-            ["grep", "-nEHI", *files_with_matches, args.pattern, *args.filenames]
-        )
+        # Split the grep command into multiple batches to avoid hitting the
+        # command line length limit of ~1M on my machine
+        arg_length = sum(len(x) for x in args.filenames)
+        batches = arg_length // 750000 + 1
+        batch_size = len(args.filenames) // batches
+        for i in range(0, len(args.filenames), batch_size):
+            proc = run_command(
+                [
+                    "grep",
+                    "-nEHI",
+                    *files_with_matches,
+                    args.pattern,
+                    *args.filenames[i : i + batch_size],
+                ]
+            )
+            lines.extend(proc.stdout.decode().splitlines())
     except Exception as err:
         err_msg = LintMessage(
             path=None,
@@ -252,9 +264,8 @@ def main() -> None:
             ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
-    lines = proc.stdout.decode().splitlines()
     for line in lines:
         lint_message = lint_file(
             line,

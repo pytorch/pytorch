@@ -18,10 +18,10 @@ class BatchNormPackedContext final : virtual public VulkanPackedContext,
 
  public:
   BatchNormPackedContext(
-      const c10::optional<Tensor>& weight_opt,
-      const c10::optional<Tensor>& bias_opt,
-      const c10::optional<Tensor>& running_mean_opt,
-      const c10::optional<Tensor>& running_var_opt,
+      const std::optional<Tensor>& weight_opt,
+      const std::optional<Tensor>& bias_opt,
+      const std::optional<Tensor>& running_mean_opt,
+      const std::optional<Tensor>& running_var_opt,
       double eps);
 
   /*
@@ -40,17 +40,17 @@ class BatchNormPackedContext final : virtual public VulkanPackedContext,
   static BatchNormPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
-    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+    TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
     return unpacked_;
   }
 };
 
 c10::intrusive_ptr<BatchNormPackedContext> create_batchnorm_context(
-    c10::optional<Tensor>&& weight_opt,
-    c10::optional<Tensor>&& bias_opt,
-    c10::optional<Tensor>&& running_mean_opt,
-    c10::optional<Tensor>&& running_var_opt,
+    std::optional<Tensor>&& weight_opt,
+    std::optional<Tensor>&& bias_opt,
+    std::optional<Tensor>&& running_mean_opt,
+    std::optional<Tensor>&& running_var_opt,
     bool training,
     double /* momentum */,
     double eps,

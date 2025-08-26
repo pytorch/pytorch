@@ -8,7 +8,7 @@
 namespace c10 {
 namespace {
 
-TEST(bit_cast_test, basic) {
+TEST(bitCastTest, basic) {
   ASSERT_THAT(bit_cast<std::int8_t>('a'), testing::Eq(97));
 }
 

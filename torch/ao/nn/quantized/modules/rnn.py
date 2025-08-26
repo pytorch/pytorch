@@ -1,8 +1,12 @@
+from typing import Any
+
 import torch
+
 
 __all__ = [
     "LSTM",
 ]
+
 
 class LSTM(torch.ao.nn.quantizable.LSTM):
     r"""A quantized long short-term memory (LSTM).
@@ -29,23 +33,27 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
         >>> tq.prepare(model, prepare_custom_module_class=custom_module_config)
         >>> tq.convert(model, convert_custom_module_class=custom_module_config)
     """
+
     _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
-    def _get_name(self):
-        return 'QuantizedLSTM'
+    def _get_name(self) -> str:
+        return "QuantizedLSTM"
 
     @classmethod
-    def from_float(cls, *args, **kwargs):
+    def from_float(cls, *args: Any, **kwargs: Any) -> None:
         # The whole flow is float -> observed -> quantized
         # This class does observed -> quantized only
-        raise NotImplementedError("It looks like you are trying to convert a "
-                                  "non-observed LSTM module. Please, see "
-                                  "the examples on quantizable LSTMs.")
+        raise NotImplementedError(
+            "It looks like you are trying to convert a "
+            "non-observed LSTM module. Please, see "
+            "the examples on quantizable LSTMs."
+        )
 
     @classmethod
-    def from_observed(cls, other):
-        assert type(other) == cls._FLOAT_MODULE
-        converted = torch.ao.quantization.convert(other, inplace=False,
-                                                  remove_qconfig=True)
+    def from_observed(cls: type["LSTM"], other: torch.ao.nn.quantizable.LSTM) -> "LSTM":
+        assert isinstance(other, cls._FLOAT_MODULE)  # type: ignore[has-type]
+        converted = torch.ao.quantization.convert(
+            other, inplace=False, remove_qconfig=True
+        )
         converted.__class__ = cls
         return converted

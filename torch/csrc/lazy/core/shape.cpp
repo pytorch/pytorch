@@ -1,19 +1,21 @@
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
+#include <utility>
+
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
-    "Enables calculation of if dims are symbolic");
+    "Enables calculation of if dims are symbolic")
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 Shape::Shape(
     at::ScalarType scalar_type,
     c10::ArrayRef<int64_t> sizes,
-    c10::optional<std::vector<bool>> is_symbolic)
+    std::optional<std::vector<bool>> is_symbolic)
     : scalar_type_(scalar_type),
       sizes_(sizes.begin(), sizes.end()),
       is_symbolic_(std::move(is_symbolic)) {}
@@ -49,14 +51,14 @@ hash_t Shape::hash(bool bakeInSizes) const {
 }
 
 Shape Shape::with_symbolic_dims(
-    c10::optional<std::vector<bool>> symbolic_dims) const {
+    std::optional<std::vector<bool>> symbolic_dims) const {
   Shape copy = *this;
-  copy.is_symbolic_ = symbolic_dims;
+  copy.is_symbolic_ = std::move(symbolic_dims);
   return copy;
 }
 
 bool symbolicShapeEnabled() {
-  static bool enabled = std::getenv("LTC_ENABLE_SYMBOLIC_SHAPES") != nullptr;
+  static bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
@@ -75,10 +77,10 @@ static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       sizes.size() == is_symbolic->size(),
       "Dims of two values are not consistent");
-  std::vector<c10::optional<int64_t>> symbolic_dims;
+  std::vector<std::optional<int64_t>> symbolic_dims;
   for (size_t i = 0; i < sizes.size(); i++) {
     if (is_symbolic->at(i)) {
-      symbolic_dims.emplace_back(c10::nullopt);
+      symbolic_dims.emplace_back(std::nullopt);
     } else {
       symbolic_dims.emplace_back(sizes.at(i));
     }
@@ -114,7 +116,7 @@ void applySymbolicShapesOnLT(
   auto res_symbolic = jit::calculateSymbolicShapesOnOp(&schema, converted_args);
   if (!res_symbolic) {
     for (auto& result_shape : result_shapes) {
-      result_shape = result_shape.with_symbolic_dims(c10::nullopt);
+      result_shape = result_shape.with_symbolic_dims(std::nullopt);
     }
   } else {
     TORCH_INTERNAL_ASSERT(
@@ -123,11 +125,11 @@ void applySymbolicShapesOnLT(
     for (size_t i = 0; i < res_symbolic->size(); i++) {
       auto sym_dims = res_symbolic->at(i).symbolicDims();
       if (sym_dims.has_value()) {
-        result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);
+        result_shapes[i] =
+            result_shapes[i].with_symbolic_dims(std::move(sym_dims));
       }
     }
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

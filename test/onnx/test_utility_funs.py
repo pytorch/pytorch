@@ -8,12 +8,9 @@ import warnings
 from typing import Callable
 
 import onnx
+
 import parameterized
 import pytorch_test_common
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
@@ -21,12 +18,15 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
-from verify import verify
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
@@ -169,9 +169,14 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
 @parameterized.parameterized_class(
     [
         {"opset_version": opset}
-        for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
+        for opset in range(
+            _constants.ONNX_BASE_OPSET,
+            _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
+        )
     ],
-    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
 )
 class TestUtilityFuns(_BaseTestCase):
     opset_version = None
@@ -253,6 +258,7 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertNotEqual(node.kind(), "onnx::Cast")
         self.assertEqual(len(list(graph.nodes())), 2)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
             def forward(self, x):
@@ -270,6 +276,7 @@ class TestUtilityFuns(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
             def forward(self, x):
@@ -392,7 +399,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_constant_fold_unsqueeze_multi_axies(self):
         class PReluModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.prelu = torch.nn.PReLU()
 
@@ -485,7 +492,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mygru = torch.nn.GRU(7, 3, 1, bidirectional=False)
 
@@ -516,7 +523,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.B = torch.nn.Parameter(torch.ones(5, 3))
 
@@ -540,7 +547,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 b = self.weight.reshape(1, -1, 1, 1)
@@ -563,7 +570,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 div = self.weight.div(torch.tensor([1, 2, 3, 4, 5]))
@@ -586,7 +593,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 mul = self.weight.mul(torch.tensor([1, 2, 3, 4, 5]))
@@ -609,7 +616,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 add = self.weight + torch.tensor([1, 2, 3, 4, 5])
@@ -640,7 +647,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 sub = self.weight - torch.tensor([1, 2, 3, 4, 5])
@@ -671,7 +678,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 sqrt = torch.sqrt(self.weight)
@@ -689,9 +696,9 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_constant_fold_shape(self):
         class ShapeModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
@@ -840,7 +847,7 @@ class TestUtilityFuns(_BaseTestCase):
                     return x * x
 
         class Outer(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inner = torch.jit.script(Inner())
 
@@ -1091,9 +1098,48 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
+    # This test cases checks the issue where an object does not have an attribute.
+    # When enabling `export_modules_as_functions = True`, the exporter could return an
+    # AttributeError. With this test case, we check that the export passes successfully
+    # without any AttributeError exceptions.
+    # See https://github.com/pytorch/pytorch/pull/109759 for an example. The exception that
+    # this test tries to avoid is `AttributeError: 'Embedding' object has no attribute 'freeze'`.
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_subset_of_predefined_attributes(self):
+        class M(torch.nn.Module):
+            num_layers: int
+
+            def __init__(self, num_layers):
+                super().__init__()
+                self.embed_layer = torch.nn.Embedding.from_pretrained(
+                    torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+                )
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=1e-4) for _ in range(num_layers)]
+                )
+
+            def forward(self, x):
+                e = self.embed_layer(torch.LongTensor([1]))
+                for ln in self.lns:
+                    x = ln(x)
+                return x, e
+
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        model = M(3)
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            export_modules_as_functions=True,
+            opset_version=self.opset_version,
+            verbose=True,  # Allows the test case to print `Skipping module attribute 'freeze'`
+        )
+
     def test_node_scope(self):
         class N(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -1315,6 +1361,8 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_custom_opsets_gelu(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::gelu", 9)
 
@@ -1339,6 +1387,8 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "aten::gelu", 9)
 
@@ -1518,7 +1568,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2 = torch.nn.ConvTranspose2d(
                     16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1)
@@ -1545,7 +1595,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_scripting_param(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 16, kernel_size=1, stride=2, padding=3, bias=True
@@ -1579,28 +1629,9 @@ class TestUtilityFuns(_BaseTestCase):
                 "Graph parameter names does not match model parameters.",
             )
 
-    @skipIfNoCaffe2
-    def test_modifying_params(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # Move import to local as caffe2 backend requires additional build flag,
-        # and is only used in this test case.
-        import caffe2.python.onnx.backend as backend
-
-        verify(MyModel(), x, backend, do_constant_folding=False)
-
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 2, kernel_size=1, stride=2, padding=3, bias=True
@@ -1626,7 +1657,7 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_fuse_resnet18(self):
-        model = torchvision.models.resnet18(pretrained=False)
+        model = torchvision.models.resnet18(weights=None)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         graph, _, __ = self._model_to_graph(
             model,
@@ -1672,7 +1703,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_onnx_value_name(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.in_weight = torch.nn.Parameter(torch.Tensor(3, 3))
                 self.in_bias = torch.nn.Parameter(torch.Tensor(3))
@@ -1705,7 +1736,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def test_onnx_node_naming(self):
         class MainModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self._module_1 = torch.nn.Linear(10, 10)
                 self._module_2 = torch.nn.Linear(10, 10)
@@ -1744,7 +1775,7 @@ class TestUtilityFuns(_BaseTestCase):
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = torch.nn.Linear(3, 3)
                 self.layer2 = torch.nn.Linear(3, 3)
@@ -1812,7 +1843,7 @@ class TestUtilityFuns(_BaseTestCase):
     @skipIfNoCuda
     def test_deduplicate_initializers_diff_devices(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w_cpu = torch.nn.Parameter(
                     torch.ones(3, device=torch.device("cpu"))
@@ -1842,7 +1873,7 @@ class TestUtilityFuns(_BaseTestCase):
                 out2 = self.fc1(input1)
                 return out1, out1, out2, out1, out2
 
-        N, D_in, H, D_out = 64, 784, 500, 10
+        N, D_in, D_out = 64, 784, 10
         pt_model = DuplicatedOutputNet(D_in, D_out)
 
         f = io.BytesIO()
@@ -1885,7 +1916,7 @@ class TestUtilityFuns(_BaseTestCase):
         # upsample scale is a constant, not a model parameter,
         # therefore should be ignored by shared weight deduplication.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample_1 = torch.nn.Upsample(scale_factor=2)
                 self.upsample_2 = torch.nn.Upsample(scale_factor=2)

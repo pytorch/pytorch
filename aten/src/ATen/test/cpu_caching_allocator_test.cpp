@@ -5,6 +5,9 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+// At the moment caching allocator is only exposed to mobile cpu allocator.
+#ifdef C10_MOBILE
+
 TEST(CPUCachingAllocatorTest, check_alloc_free) {
   c10::CPUCachingAllocator caching_allocator;
   c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
@@ -23,8 +26,7 @@ TEST(CPUCachingAllocatorTest, check_alloc_outside_free_inside) {
   {
     c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
         &caching_allocator);
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    float* data_ptr = a.data_ptr<float>();
+    [[maybe_unused]] float* data_ptr = a.data_ptr<float>();
     a.reset();
     a = at::rand({23, 23});
   }
@@ -42,10 +44,9 @@ TEST(CPUCachingAllocatorTest, check_alloc_inside_free_outside) {
 }
 
 int main(int argc, char* argv[]) {
-// At the moment caching allocator is only exposed to mobile cpu allocator.
-#ifdef C10_MOBILE
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();
-#endif /* C10_Mobile */
 }
+
+#endif /* C10_Mobile */

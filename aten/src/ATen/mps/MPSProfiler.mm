@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSProfiler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <fmt/format.h>
 
 // these need to be literal strings when passed to os_signpost*()
@@ -28,6 +29,23 @@ const std::string BaseInfo::toString(double gpuTime, double schedulingTime) cons
   return fmt::format("{}{}",
                      gpuTime > 0.0 ? fmt::format(", gpu={:.3f} ms", gpuTime) : "",
                      schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
+}
+
+std::string BaseInfo::buildTensorString(const Tensor& tensor, bool includeBufferId) {
+  if (tensor.defined()) {
+    std::stringstream tensorStr;
+    auto deviceType = tensor.device().type();
+    tensorStr << c10::DeviceTypeName(deviceType);
+    // see comments for INCLUDE_BUFFER_ID
+    if (includeBufferId && deviceType == at::kMPS) {
+      id<MTLBuffer> buffer = __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+      tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ":" << buffer.retainCount << ")";
+    }
+    tensorStr << ":" << tensor.scalar_type() << tensor.sizes();
+    return tensorStr.str();
+  } else {
+    return "undefined";
+  }
 }
 
 const std::string OperationInfo::toString(double gpuTime, double schedulingTime) const {
@@ -74,11 +92,11 @@ std::string CopyInfo::buildTensorString(const void* buffer, const OptionalTensor
 
 MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullptr) {
   // see enum LogOptions for the description.
-  static const char* log_options_str = getenv(kEVLogProfileInfoStr);
-  m_log_options = log_options_str ? strtol(log_options_str, nullptr, 0) : 0;
+  static const auto log_options_str = c10::utils::get_env(kEVLogProfileInfoStr);
+  m_log_options = log_options_str ? strtol(log_options_str->c_str(), nullptr, 0) : 0;
   // see enums profilerOptions and SignpostTypes for the description.
-  static const char* trace_signpost_str = getenv(kEVTraceSignpostsStr);
-  uint32_t trace_signposts = trace_signpost_str ? strtol(trace_signpost_str, nullptr, 0) : 0;
+  static const auto trace_signpost_str = c10::utils::get_env(kEVTraceSignpostsStr);
+  uint32_t trace_signposts = trace_signpost_str ? strtol(trace_signpost_str->c_str(), nullptr, 0) : 0;
 
   TORCH_CHECK(m_log_options <= LogOptions::LOG_COUNT,
               "invalid log options ",
@@ -189,13 +207,13 @@ void MPSProfiler::initialize() {
       currentSigint.sa_flags = SA_RESTART;
       sigfillset(&currentSigint.sa_mask);
       if (sigaction(SIGINT, &currentSigint, &previousSigint) == -1) {
-        AT_ERROR("Cannot install SIGINT handler for MPSProfiler.");
+        TORCH_CHECK(false, "Cannot install SIGINT handler for MPSProfiler.");
       }
     }
   }
 }
 
-void MPSProfiler::StartTrace(const string& mode, bool waitUntilCompleted) {
+void MPSProfiler::StartTrace(const std::string& mode, bool waitUntilCompleted) {
   TORCH_CHECK(m_profile_options == ProfileOptions::OPTIONS_NONE, "Tracing Signposts is already enabled ");
 
   std::stringstream ss(mode);
@@ -207,7 +225,7 @@ void MPSProfiler::StartTrace(const string& mode, bool waitUntilCompleted) {
       } else if (token == "event") {
         m_profile_options |= ProfileOptions::ALL_SIGNPOST_EVENTS;
       } else {
-        AT_ERROR("Invalid Signpost trace mode: ", token);
+        TORCH_CHECK(false, "Invalid Signpost trace mode: ", token);
       }
     }
   }
@@ -504,7 +522,7 @@ void MPSProfiler::logOperationsProfilingStats(std::FILE* f) const {
                opInfo->runCount,
                fmt::format("{:.3f}", opInfo->totalSchedulingTime / double(opInfo->runCount)),
                fmt::format("{:.3f}", opInfo->totalGpuTime / double(opInfo->runCount)),
-               fmt::format("{:.3f}", opInfo->totalGpuTime),
+               fmt::format("{:.3f}", opInfo->totalGpuTime.load()),
                opInfo->strKey);
   }
 }
@@ -556,7 +574,7 @@ void MPSProfiler::logCPUFallbackProfilingStats(std::FILE* f) const {
                cpuFbInfo->profileId,
                cpuFbInfo->runCount,
                fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime / double(cpuFbInfo->runCount)),
-               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime),
+               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime.load()),
                getIMPSAllocator()->formatSize(cpuFbInfo->totalCopyOverhead),
                cpuFbInfo->opName);
   }
@@ -607,8 +625,8 @@ void MPSProfiler::logCopyProfilingStats(std::FILE* f) const {
           copyStat.kindStr,
           copyStat.totalCount,
           getIMPSAllocator()->formatSize(copyStat.length),
-          fmt::format("{:.3f}", copyStat.totalSchedulingTime),
-          fmt::format("{:.3f}", copyStat.totalGpuTime),
+          fmt::format("{:.3f}", copyStat.totalSchedulingTime.load()),
+          fmt::format("{:.3f}", copyStat.totalGpuTime.load()),
           copyStat.scalarsCount,
           fmt::format("{:.2f} %",
                       copyStat.totalGpuTime > 0.0
@@ -654,7 +672,7 @@ bool MPSProfiler::isProfileInfoLoggingEnabled(BaseInfo::Type infoType, bool isEx
       isInfoLoggingEnabled = (m_log_options & LogOptions::CPU_FALLBACK_INFO);
       break;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
   if (!isInfoLoggingEnabled) {
     return false;
@@ -685,7 +703,7 @@ void MPSProfiler::emitSignpostEvent(SignpostTypes signpost_type,
       os_signpost_event_emit(m_os_log_events, signpost_id, kEvtSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -709,7 +727,7 @@ void MPSProfiler::beginSignpostInterval(SignpostTypes signpost_type,
       os_signpost_interval_begin(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -728,7 +746,7 @@ void MPSProfiler::endSignpostInterval(SignpostTypes signpost_type, os_signpost_i
       os_signpost_interval_end(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -750,7 +768,7 @@ MPSProfiler::SignpostTypes MPSProfiler::getSignpostType(BaseInfo::Type infoType)
     case BaseInfo::Type::CPU_FALLBACK:
       return SignpostTypes::CPU_FALLBACK;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
 }
 
@@ -762,8 +780,43 @@ void MPSProfiler::handleIntSignal(int signal) {
 }
 
 // used to capture sigint signal to log profiling stats
-struct sigaction MPSProfiler::currentSigint {};
-struct sigaction MPSProfiler::previousSigint {};
+struct sigaction MPSProfiler::currentSigint{};
+struct sigaction MPSProfiler::previousSigint{};
+
+bool MPSProfiler::isCapturing() const {
+  return [captureManager isCapturing];
+}
+
+bool MPSProfiler::isCaptureEnabled() const {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  static bool isEnabled = [this]() {
+    return [captureManager supportsDestination:MTLCaptureDestinationGPUTraceDocument];
+  }();
+  return isEnabled;
+}
+
+void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  NSError* err = nil;
+  NSString* fname = [NSString stringWithFormat:@"%04d-%s.gputrace", captureCount++, name.c_str()];
+  MTLCaptureDescriptor* captureDescriptor = [MTLCaptureDescriptor new];
+  captureDescriptor.captureObject = stream ? (id)stream->commandQueue() : (id)MPSDevice::getInstance()->device();
+  captureDescriptor.destination = MTLCaptureDestinationGPUTraceDocument;
+  captureDescriptor.outputURL = [NSURL fileURLWithPath:fname];
+  auto rc = [captureManager startCaptureWithDescriptor:captureDescriptor error:&err];
+  TORCH_CHECK(rc, "Failed to start capture of ", [fname UTF8String], " error ", [[err description] UTF8String]);
+}
+
+void MPSProfiler::stopCapture(MPSStream* stream) {
+  if (stream) {
+    stream->synchronize(SyncType::COMMIT);
+  }
+  [captureManager stopCapture];
+}
 
 } // namespace Profiler
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,17 +9,22 @@
 
 import functools
 import logging
-import time
-from typing import List, Tuple
+from typing import Any, Callable, TypeVar
+from typing_extensions import ParamSpec
 
-from torch.distributed.logging_handlers import _log_handlers
+import torch
 import torch.distributed as dist
+from torch.distributed.logging_handlers import _log_handlers
+from torch.monitor import _WaitCounter
 
-__all__: List[str] = []
+
+__all__: list[str] = []
+
+_DEFAULT_DESTINATION = "default"
 
 
-def _get_or_create_logger() -> logging.Logger:
-    logging_handler, log_handler_name = _get_logging_handler()
+def _get_or_create_logger(destination: str = _DEFAULT_DESTINATION) -> logging.Logger:
+    logging_handler, log_handler_name = _get_logging_handler(destination)
     logger = logging.getLogger(f"c10d-{log_handler_name}")
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter(
@@ -30,9 +36,11 @@ def _get_or_create_logger() -> logging.Logger:
     return logger
 
 
-def _get_logging_handler(destination: str = "default") -> Tuple[logging.Handler, str]:
+def _get_logging_handler(
+    destination: str = _DEFAULT_DESTINATION,
+) -> tuple[logging.Handler, str]:
     log_handler = _log_handlers[destination]
-    log_handler_name = type(log_handler).__name__
+    log_handler_name = f"{type(log_handler).__name__}-{destination}"
     return (log_handler, log_handler_name)
 
 
@@ -40,58 +48,51 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def _exception_logger(func):
+def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
+    if dist.is_initialized():
+        group = kwargs.get("group") or kwargs.get("process_group")
+        msg_dict = {
+            "func_name": f"{func_name}",
+            "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
+            "backend": f"{dist.get_backend(group)}",
+            "world_size": f"{dist.get_world_size()}",
+            "group_size": f"{dist.get_world_size(group)}",
+            "global_rank": f"{dist.get_rank()}",
+            "local_rank": f"{dist.get_rank(group)}",
+        }
+        if msg_dict["backend"] == "nccl":
+            nccl_version = torch.cuda.nccl.version()
+            msg_dict["nccl_version"] = ".".join(str(v) for v in nccl_version)
+    else:
+        msg_dict = {
+            "func_name": f"{func_name}",
+        }
+    return msg_dict
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
+def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         try:
             return func(*args, **kwargs)
         except Exception as error:
-            if dist.is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "backend": f"{dist.get_backend(kwargs.get('group'))}",
-                    "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{dist.get_rank()}",
-                    "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_logger.debug(error_msg_dict)
+            msg_dict = _get_msg_dict(func.__name__, *args, **kwargs)
+            msg_dict["error"] = f"{error}"
+            _c10d_logger.debug(msg_dict)
             raise
+
     return wrapper
 
 
-def _time_logger(func):
+def _time_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        t1 = time.time_ns()
-        func_return = func(*args, **kwargs)
-        t2 = time.time_ns()
-
-        if dist.is_initialized():
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "args": f"{args}, {kwargs}",
-                "backend": f"{dist.get_backend(kwargs.get('group'))}",
-                "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
-                "global_rank": f"{dist.get_rank()}",
-                "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
-                "time_spent": f"{t2-t1}ns",
-            }
-        else:
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "args": f"{args}, {kwargs}",
-                "time_spent": f"{t2-t1}",
-            }
-        _c10d_logger.debug(msg_dict)
-
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        with _WaitCounter(f"pytorch.wait_counter.c10d.{func.__name__}").guard():
+            func_return = func(*args, **kwargs)
         return func_return
 
     return wrapper

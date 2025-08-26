@@ -1,11 +1,10 @@
-"""
-This module contains utility method for mobile model optimization and lint.
-"""
+# mypy: allow-untyped-defs
+"""This module contains utility method for mobile model optimization and lint."""
 
 import torch
 from enum import Enum
 from torch._C import _MobileOptimizerType as MobileOptimizerType
-from typing import Optional, Set, List, AnyStr
+from typing import Optional, AnyStr
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -15,10 +14,12 @@ class LintCode(Enum):
 
 def optimize_for_mobile(
         script_module: torch.jit.ScriptModule,
-        optimization_blocklist: Optional[Set[MobileOptimizerType]] = None,
-        preserved_methods: Optional[List[AnyStr]] = None,
+        optimization_blocklist: Optional[set[MobileOptimizerType]] = None,
+        preserved_methods: Optional[list[AnyStr]] = None,
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
+    Optimize a torch script module for mobile deployment.
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
@@ -31,7 +32,7 @@ def optimize_for_mobile(
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     if optimization_blocklist is None:
         optimization_blocklist = set()
@@ -42,20 +43,16 @@ def optimize_for_mobile(
     # Convert potential byte arrays into strings (if there is any) to pass type checking
     # Here we use a new name as assigning it back to preserved_methods will invoke
     # mypy errors (i.e. List[AnyStr] = List[str])
-    preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
+    preserved_methods_str: list[str] = [str(method) for method in preserved_methods]
 
     bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
     if all(hasattr(script_module, method) for method in bundled_inputs_attributes):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
-    non_exist_methods = []
-    for method in preserved_methods_str:
-        if not hasattr(script_module, method):
-            non_exist_methods.append(method)
+    non_exist_methods = [method for method in preserved_methods_str if not hasattr(script_module, method)]
     if non_exist_methods:
         raise AttributeError(
-            'The following methods to preserve do not exist in script_module: {}'
-            .format(', '.join(non_exist_methods)))
+            f"The following methods to preserve do not exist in script_module: {', '.join(non_exist_methods)}")
 
     backend = backend.lower()
     if backend == 'cpu':
@@ -78,15 +75,17 @@ def optimize_for_mobile(
 
 def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
+    Generate a list of lints for a given torch script module.
+
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
+        script_module: An instance of torch script module with type of ScriptModule.
 
     Returns:
         lint_map: A list of dictionary that contains modules lints
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     lint_list = []
 
@@ -96,24 +95,26 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
-            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": "Param {} requires grad, "
+            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": f"Param {name} requires grad, "
                              "please set torch.no_grad() to reduce memory usage and improve computation speed during "
-                              "inference phase.".format(name)})
+                              "inference phase."})
 
     op_names = torch.jit.export_opnames(script_module)
     for op_name in op_names:
         if "dropout" in op_name:
-            lint_list.append({"name": LintCode.DROPOUT.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.DROPOUT.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module.and call torch.utils.mobile_optimizer.optimize_for_mobile to drop dropout "
-                              "operator.".format(op_name)})
+                              "operator."})
         if "batch_norm" in op_name:
-            lint_list.append({"name": LintCode.BATCHNORM.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.BATCHNORM.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module and call torch.utils.mobile_optimizer.optimize_for_mobile to drop batch_norm "
-                              "operator.".format(op_name)})
+                              "operator."})
 
     return lint_list
 
-def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModule, preserved_methods: List[str]) -> List[str]:
+def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModule, preserved_methods: list[str]) -> list[str]:
 
     bundled_inputs_attributes = []
     # Has bundled inputs for forward

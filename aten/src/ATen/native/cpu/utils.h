@@ -1,15 +1,32 @@
 #pragma once
 
 #include <ATen/Parallel.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/llvmMathExtras.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_POP()
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
+
+template <typename T>
+inline void _store(T* dst, at::vec::Vectorized<T> src) {
+  src.store(dst);
+}
+
+inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  res.store(dst, at::vec::Vectorized<float>::size());
+}
+
+inline void _store(at::Half* dst, at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_half(src, src);
+  res.store(dst, at::vec::Vectorized<float>::size());
+}
 
 inline namespace CPU_CAPABILITY {
 
@@ -38,7 +55,7 @@ inline bool data_index_step(T& x, const T& X, Args&&... args) {
   return false;
 }
 
-// Helper struct for bfloat16 vectorization
+// Helper struct for bfloat16/float16 vectorization
 // Useful when you need float as immediate dtype or accumulate dtype
 using namespace vec;
 struct Vec2 {
@@ -46,25 +63,48 @@ struct Vec2 {
   Vec2(Vectorized<float> v0, Vectorized<float> v1) : val0(v0), val1(v1) {}
   Vec2(float v) : val0(v), val1(v) {}
   static Vec2 loadu(const BFloat16* ptr) {
-    Vectorized<float> v0, v1;
-    std::tie(v0, v1) = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
+    auto [v0, v1] = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
     return {v0, v1};
+  }
+  static Vec2 loadu(const Half* ptr) {
+    auto [v0, v1] = convert_half_float(Vectorized<Half>::loadu(ptr));
+    return {v0, v1};
+  }
+  static Vec2 loadu(const float* ptr) {
+    return {Vectorized<float>::loadu(ptr), Vectorized<float>::loadu(ptr + Vectorized<float>::size())};
   }
   void store(BFloat16* ptr) const {
     Vectorized<BFloat16> val = convert_float_bfloat16(val0, val1);
     val.store(ptr);
   }
+  void store(Half* ptr) const {
+    Vectorized<Half> val = convert_float_half(val0, val1);
+    val.store(ptr);
+  }
+  void store(float* ptr) const {
+    val0.store(ptr);
+    val1.store(ptr + Vectorized<float>::size());
+  }
 };
 inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.val0 + b.val0, a.val1 + b.val1}; }
 inline Vec2 operator*(const Vec2& a, const Vec2& b) { return {a.val0 * b.val0, a.val1 * b.val1}; }
+inline Vec2 operator-(const Vec2& a, const Vec2& b) { return {a.val0 - b.val0, a.val1 - b.val1}; }
+inline Vec2 operator/(const Vec2& a, const Vec2& b) { return {a.val0 / b.val0, a.val1 / b.val1}; }
+inline Vec2 maximum(const Vec2& a, const Vec2& b) { return {vec::maximum(a.val0, b.val0), vec::maximum(a.val1, b.val1)}; }
+inline Vec2 minimum(const Vec2& a, const Vec2& b) { return {vec::minimum(a.val0, b.val0), vec::minimum(a.val1, b.val1)}; }
 
 template <typename scalar_t> struct VectorizedType { using type = Vectorized<scalar_t>; };
 template <> struct VectorizedType<BFloat16> { using type = Vec2; };
+template <> struct VectorizedType<Half> { using type = Vec2; };
 template <typename scalar_t> using VecType = typename VectorizedType<scalar_t>::type;
 
 // Helper for mixed data type parameter Vec::load
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr) {
+  return convert_half_float(Vectorized<Half>::loadu(ptr));
 }
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
@@ -74,6 +114,10 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr, int64_t count) {
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr, count));
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr, int64_t count) {
+  return convert_half_float(Vectorized<Half>::loadu(ptr, count));
 }
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr, int64_t count) {
@@ -106,7 +150,7 @@ template <typename T>
 inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
   for (int64_t j = 0; j < N; j++) {
     for (int64_t i = 0; i < M; i++) {
-      dst[j * ld_dst + i] = src[i * ld_src + j];
+      dst[j * ld_dst + i] = c10::load(&(src[i * ld_src + j]));
     }
   }
 }
@@ -116,6 +160,18 @@ template <>
 inline void transpose<float>(int64_t M, int64_t N, const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   fbgemm::transpose_simd<float>(M, N, src, ld_src, dst, ld_dst);
+}
+
+template <>
+inline void transpose<uint16_t>(int64_t M, int64_t N, const uint16_t* src, int64_t ld_src, uint16_t* dst, int64_t ld_dst) {
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  fbgemm::transpose_simd<uint16_t>(M, N, src, ld_src, dst, ld_dst);
+}
+
+template <>
+inline void transpose<uint8_t>(int64_t M, int64_t N, const uint8_t* src, int64_t ld_src, uint8_t* dst, int64_t ld_dst) {
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  fbgemm::transpose_simd<uint8_t>(M, N, src, ld_src, dst, ld_dst);
 }
 #endif
 
@@ -161,5 +217,4 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace native
-} // namespace at
+} // namespace at::native

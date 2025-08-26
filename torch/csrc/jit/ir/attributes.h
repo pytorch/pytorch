@@ -8,8 +8,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Symbol;
 
@@ -87,7 +86,6 @@ template <typename T, AttributeKind Kind>
 struct VectorAttributeValue : public AttributeValue {
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VectorAttributeValue(Symbol name, ConstructorType value_)
       : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
@@ -145,7 +143,6 @@ struct TORCH_API GraphAttr : public AttributeValue {
 struct TORCH_API GraphsAttr : public AttributeValue {
   using ConstructorType = std::vector<std::shared_ptr<Graph>>;
   using ValueType = std::vector<std::shared_ptr<Graph>>;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphsAttr(Symbol name, ConstructorType value_)
       : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
@@ -180,5 +177,4 @@ struct IRAttributeError : public std::exception {
  private:
   std::string msg;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

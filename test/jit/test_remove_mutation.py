@@ -2,20 +2,18 @@
 
 import os
 import sys
+from typing import List
 
 import torch
 from torch.testing import FileCheck
-from typing import List
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
+from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.jit_utils import freeze_rng_state, JitTestCase
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
 class TestRemoveMutation(JitTestCase):
     def test_aten_inplace(self):
@@ -26,7 +24,7 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(test_not_new_alias)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check("aten::add_").run(graph)
         self.assertEqual(fn(torch.ones([2, 2])), test_not_new_alias(torch.ones([2, 2])))
 
@@ -38,7 +36,7 @@ class TestRemoveMutation(JitTestCase):
         # there is no functional equivalent of x[0] = ...
         fn = torch.jit.script(test_no_lowering)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check("aten::copy_").run(graph)
         self.assertEqual(fn(), test_no_lowering())
 
@@ -50,7 +48,7 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(test_move_before_not_valid)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check("aten::add_").run(graph)
         self.assertEqual(fn(), test_move_before_not_valid())
 
@@ -63,7 +61,7 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(test_successful)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check_not("aten::add_").run(graph)
         self.assertEqual(test_successful(), fn())
 
@@ -77,7 +75,7 @@ class TestRemoveMutation(JitTestCase):
         fn = torch.jit.script(test_intermediary_use)
         graph = fn.graph
         FileCheck().check_count("aten::add_", 2).run(graph)
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         # Unable to remove the second add_ because of the y = x + 4 use
         # In the future we could duplicating the value of x as a temporary and replacing
         # its intermediary use (so long as aliasing is safe)
@@ -96,7 +94,7 @@ class TestRemoveMutation(JitTestCase):
         out_eager = foo(torch.tensor(5), True)
         foo_script = torch.jit.script(foo)
         FileCheck().check("aten::add_").run(foo_script.graph)
-        self.run_pass('remove_mutation', foo_script.graph)
+        self.run_pass("remove_mutation", foo_script.graph)
         FileCheck().check_not("aten::add_").run(foo_script.graph)
 
         self.assertEqual(out_eager, foo_script(torch.tensor(5), True))
@@ -113,8 +111,8 @@ class TestRemoveMutation(JitTestCase):
             y = x.add_(2)
             return y, li
 
-        self.run_pass('inline', foo.graph)
-        self.run_pass('remove_mutation', foo.graph)
+        self.run_pass("inline", foo.graph)
+        self.run_pass("remove_mutation", foo.graph)
         FileCheck().check("aten::add_").run(foo.graph)
 
         @torch.jit.script
@@ -126,8 +124,8 @@ class TestRemoveMutation(JitTestCase):
             z = x.add_(2)
             return z
 
-        self.run_pass('inline', foo.graph)
-        self.run_pass('remove_mutation', foo.graph)
+        self.run_pass("inline", foo.graph)
+        self.run_pass("remove_mutation", foo.graph)
         FileCheck().check("aten::add_").run(foo.graph)
 
     def test_special_mapped_op(self):
@@ -140,7 +138,7 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(test_successful)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check_not("aten::zero_").check_not("aten::fill_").run(graph)
         self.assertEqual(test_successful(), fn())
 
@@ -154,15 +152,20 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(test_successful)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
-        FileCheck().check_not('aten::fill_').run(graph)
+        self.run_pass("remove_mutation", graph)
+        FileCheck().check_not("aten::fill_").run(graph)
 
         def normal():
-            return torch.rand(2, 1, 3, 4).normal_()
+            # NOTE: For some unknown reason, the
+            # `torch._C._jit_pass_remove_mutation` call within `self.run_pass`
+            # replaces `torch.randn(..., dtype=None).normal_()` with an
+            # `aten::normal` call with dtype double, even if the default dtype
+            # is float. So we must explicitly set the dtype here
+            return torch.rand(2, 1, 3, 4, dtype=torch.float).normal_()
 
         fn = torch.jit.script(normal)
         graph = fn.graph
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         FileCheck().check_not("normal_").run(graph)
         with freeze_rng_state():
             out_eager = normal()
@@ -176,29 +179,31 @@ class TestRemoveMutation(JitTestCase):
 
         fn = torch.jit.script(successful_remove)
         graph = fn.graph
-        self.run_pass('loop_unrolling', graph)
-        self.run_pass('remove_mutation', graph)
-        self.run_pass('constant_propagation', graph)
-        FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
+        self.run_pass("loop_unrolling", graph)
+        self.run_pass("remove_mutation", graph)
+        self.run_pass("constant_propagation", graph)
+        FileCheck().check("graph").check_next("Constant").check_next("return").run(
+            graph
+        )
         self.assertEqual(successful_remove(), successful_remove())
 
         def intermediary_use():
             a = [1, 2]
-            b = len(a)
+            b = len(a)  # noqa: F841
             a.append(3)
             return a
 
         fn = torch.jit.script(intermediary_use)
         graph = fn.graph
         FileCheck().check("append").run(graph)
-        self.run_pass('remove_mutation', graph)
+        self.run_pass("remove_mutation", graph)
         # it is possible to remove the append here but don't currently have the logic for it
         FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
 
     def test_lists_insert(self):
         def successful_remove():
-            a : List[int] = []
+            a: List[int] = []
             a.insert(0, 1)
             a.insert(0, 2)
             a.insert(-10, 3)
@@ -210,7 +215,9 @@ class TestRemoveMutation(JitTestCase):
         graph = fn.graph
         torch._C._jit_pass_remove_mutation(graph)
         torch._C._jit_pass_constant_propagation(graph)
-        FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
+        FileCheck().check("graph").check_next("Constant").check_next("return").run(
+            graph
+        )
         self.assertEqual(successful_remove(), fn())
 
     def test_list_indexing_removal(self):
@@ -266,6 +273,7 @@ class TestRemoveMutation(JitTestCase):
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
+
             class OpMod(torch.nn.Module):
                 def __init__(self, op):
                     super().__init__()
@@ -280,7 +288,7 @@ class TestRemoveMutation(JitTestCase):
             torch_op = getattr(torch, op)
             mod = OpMod(torch_op)
             mod_script = torch.jit.script(mod)
-            self.run_pass('remove_mutation', mod_script.forward.graph)
+            self.run_pass("remove_mutation", mod_script.forward.graph)
             FileCheck().check_not("aten::add_").run(mod_script.forward.graph)
             self.assertEqual(mod(), mod_script())
 
@@ -294,7 +302,6 @@ class TestRemoveMutation(JitTestCase):
 
                 self.assertEqual(sums, [ten.sum() for ten in result])
 
-
         @torch.jit.script
         def test_multiple_uses():
             x = torch.tensor([1, 2, 3, 4])
@@ -302,5 +309,9 @@ class TestRemoveMutation(JitTestCase):
             y = [x, x]
             return torch.cat(y), y
 
-        self.run_pass('remove_mutation', mod_script.forward.graph)
+        self.run_pass("remove_mutation", mod_script.forward.graph)
         FileCheck().check("aten::add_").run(test_multiple_uses.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

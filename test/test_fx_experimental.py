@@ -1,14 +1,18 @@
 # Owner(s): ["module: fx"]
+# ruff: noqa: F841
 
+import functools
 import math
 import numbers
 import operator
 import pickle
 import sys
+import sympy
 import tempfile
+import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, NamedTuple, Optional, Union
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -16,6 +20,7 @@ import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.partitioner_utils import (
     Device,
@@ -47,9 +52,10 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_nn import module_tests, get_new_module_tests
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
 from torch.testing._internal.jit_utils import JitTestCase
+import torch.utils._pytree as pytree
 
 try:
     import torchvision.models
@@ -118,7 +124,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -175,7 +181,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.c = torch.rand(4)
@@ -207,7 +213,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -246,7 +252,7 @@ class TestFXExperimental(JitTestCase):
                     layers.append(torch.nn.ReLU())
                 return layers
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = self.create_mlp(4, 4, 4)
                 self.bottom_layers = torch.nn.Sequential(*layers)
@@ -300,7 +306,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -316,7 +322,7 @@ class TestFXExperimental(JitTestCase):
             """Given a fx module, generate node latency for each node
             based on the size of each node
             """
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -357,7 +363,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -371,7 +377,7 @@ class TestFXExperimental(JitTestCase):
                 return add_5
 
         def get_node_to_latency_mapping(fx_module: GraphModule):
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -419,7 +425,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.rand(4)
                 self.c = torch.rand(4)
@@ -478,7 +484,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -534,7 +540,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_not_running_state(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
                 self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
@@ -558,7 +564,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_mixed_dtype(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
                 self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
@@ -609,7 +615,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_meta_tracer(self):
         class MetaTracerTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
                 self.layernorm = torch.nn.LayerNorm(16)
@@ -732,7 +738,7 @@ terrible spacing
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 4))
                 self.linear = torch.nn.Linear(4, 5)
@@ -785,6 +791,95 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_input_names(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, a0, a1, b0, b1, c0, c1):
+                x = x + (a0 ** 2) + (a1 / 2)
+                x = x + (b0 ** 2) + (b1 / 2)
+                x = x + (c0 ** 2) + (c1 / 2)
+                return x
+
+        mod = Mod()
+        traced = torch.fx.symbolic_trace(mod)
+
+        seen = 0
+
+        def split(n):
+            nonlocal seen
+            result = seen // 4
+            seen += 1
+            return result
+
+        split = split_module(traced, mod, split, keep_original_input_name=False)
+
+        # All the submodules should take in the inputs in the same order.
+        args = [torch.tensor(2.), torch.tensor(3.), torch.tensor(4.)]
+        output0 = split.submod_0(*args)
+        output1 = split.submod_1(*args)
+        output2 = split.submod_2(*args)
+        self.assertEqual(output0, output1)
+        self.assertEqual(output1, output2)
+
+        # Each submodule should have normalized input names
+        def check_ph(gm):
+            nodes = list(gm.graph.nodes)
+            self.assertEqual(nodes[0].target, "arg_0")
+            self.assertEqual(nodes[1].target, "arg_1")
+            self.assertEqual(nodes[2].target, "arg_2")
+
+        check_ph(split.submod_0)
+        check_ph(split.submod_1)
+        check_ph(split.submod_2)
+
+    def test_split_module_dead_code(self):
+        class ModWithDeadCode(torch.nn.Module):
+            def forward(self, x):
+                output = x * 2  # we want this
+                dead_line = x + 2  # this is dead
+                return output
+
+        mod = ModWithDeadCode()
+        traced = torch.fx.symbolic_trace(mod)
+
+        # split into before (0), target (1), and after(2)
+        saw_mul = False
+
+        def split_callback(n):
+            nonlocal saw_mul
+            if n.target == operator.mul:
+                saw_mul = True
+                return 1
+
+            if not saw_mul:
+                return 0
+            if saw_mul:
+                return 2
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn((5,))
+        torch.testing.assert_close(
+            split(x), traced(x)
+        )
+
+    def test_split_module_return_node(self):
+        def foo(x):
+            x.add_(1)
+
+        gm = make_fx(foo, tracing_mode="fake")(torch.randn(3,))
+
+        def cb(_):
+            return 1
+
+        sp_gm = split_module(gm, None, cb)
+        submod_gm = sp_gm.submod_1
+        for node in submod_gm.graph.nodes:
+            if node.op == "output":
+                break
+        else:
+            raise RuntimeError("Expected the subgraph to have an output node.")
+
+
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
             def forward(self, x, **kwargs):
@@ -820,7 +915,7 @@ terrible spacing
 
     def test_split_module_default_arg(self):
         class ModelToTrace(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(512, 512)
 
@@ -839,6 +934,123 @@ terrible spacing
 
         x = torch.randn(50, 512)
         torch.testing.assert_close(split(x), traced(x))
+
+    def test_split_module_keep_original_order_and_noop_graph(self):
+        # Verify that split_module returns a similar no-op graph
+        # for `keep_original_order={True|False}`.
+        def fn(x):
+            return (x,)
+
+        g = make_fx(fn, tracing_mode="fake")(torch.randn(3, 3))
+
+        # g.graph.print_tabular()
+        # opcode       name    target    args       kwargs
+        # -----------  ------  --------  ---------  --------
+        # placeholder  x_1     x_1       ()         {}
+        # output       output  output    ((x_1,),)  {}
+
+        def _test_split_graph(split_gm):
+            # Verify that the split_gm has same structure as original
+            self.assertEqual(len(split_gm.graph.nodes), 2)
+
+            nodes = list(split_gm.graph.nodes)
+            self.assertEqual(nodes[0].op, "placeholder")
+            self.assertEqual(nodes[1].op, "output")
+
+        # `keep_original_order=False`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=False))
+
+        # `keep_original_order=True`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=True))
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "See https://github.com/pytorch/pytorch/issues/160077")
+    def test_split_module_symint_dependency_handling(self):
+        # Based on the code from - transformers/models/granitemoe/modeling_granitemoe.py
+        class GraniteMoeTopKGating(torch.nn.Module):
+            def __init__(self, input_size: int, num_experts: int, top_k: int):
+                super().__init__()
+
+                self.num_experts = num_experts
+                self.input_size = input_size
+                self.top_k = top_k
+
+                self.layer = torch.nn.Linear(input_size, num_experts, bias=False)
+
+            def forward(self, hidden_states):
+                # compute the top_k routing decision
+                logits = self.layer(hidden_states).float()  # [batch_size x seq_len, num_experts]
+                top_k_logits, top_k_indices = logits.topk(self.top_k, dim=1)  # [num_tokens, top_k]
+                top_k_gates = torch.softmax(top_k_logits, dim=1).type_as(hidden_states)  # [num_tokens, top_k]
+
+                # compute number of input given to each expert
+                zeros = torch.zeros(
+                    [top_k_gates.size(0), self.num_experts], dtype=top_k_gates.dtype, device=top_k_gates.device
+                )  # [num_tokens, num_experts]
+                gates = zeros.scatter(1, top_k_indices, 1)  # [num_tokens, num_experts]
+                expert_size = gates.long().sum(0)  # [num_experts,]
+                expert_size = expert_size.tolist()
+
+                # sort and group input tokens according to expert assignment
+                top_k_experts = top_k_indices.flatten()  # [num_tokens * top_k]
+                _, index_sorted_experts = top_k_experts.sort(0)  # [num_tokens * top_k]
+                batch_index = index_sorted_experts.div(self.top_k, rounding_mode="trunc")  # [num_tokens * top_k]
+
+                # gather the gate values for grouped input tokens
+                top_k_gates = top_k_gates.flatten()  # [num_tokens * top_k]
+                batch_gates = top_k_gates[index_sorted_experts]  # [num_tokens * top_k]
+
+                return index_sorted_experts, batch_index, batch_gates, expert_size, logits
+
+        class GraniteMoeMoE(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.input_size = 32
+                self.num_local_experts = 4
+
+                num_experts_per_tok = 2
+                self.router = GraniteMoeTopKGating(
+                    input_size=self.input_size,
+                    num_experts=self.num_local_experts,
+                    top_k=num_experts_per_tok,
+                )
+
+            def forward(self, layer_input):
+                _, batch_index, _, expert_size, _ = self.router(layer_input)
+                expert_inputs = layer_input[batch_index]
+                return expert_inputs.split(expert_size, dim=0)
+
+        moe = GraniteMoeMoE()
+        inp = torch.randn([32, 32])
+
+        expected = moe(inp)
+
+        PARTITION_ID = 0
+        PARTITION_OPS_CTR = 0
+        NODE_PARTITION_MAP = {}
+
+        # `callback` is called multiple times with same `node` in `split_module`.
+        # Cache the result such that partition id is consistent across calls.
+        def callback(node) -> int:
+            nonlocal PARTITION_ID, PARTITION_OPS_CTR, NODE_PARTITION_MAP
+            if node in NODE_PARTITION_MAP:
+                return NODE_PARTITION_MAP[node]
+
+            if PARTITION_OPS_CTR % 5 == 0:
+                PARTITION_ID += 1
+
+            PARTITION_OPS_CTR += 1
+
+            NODE_PARTITION_MAP[node] = PARTITION_ID
+            return PARTITION_ID
+
+        def backend(gm, inps):
+            split_gm = split_module(gm, root_m=None, split_callback=callback,
+                                    keep_original_order=True, keep_original_node_name=True)
+            return split_gm
+
+        actual = torch.compile(moe, backend=backend)(inp)
+        torch.testing.assert_close(actual, expected)
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -925,7 +1137,7 @@ terrible spacing
         Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
-        for test_params in module_tests + new_module_tests:
+        for test_params in module_tests + get_new_module_tests():
             if "constructor" not in test_params:
                 constructor = getattr(torch.nn, test_params["module_name"])
             else:
@@ -1037,7 +1249,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_normalize_args_perserve_type(self):
         class MyModule(torch.nn.Module):
-            def forward(self, a: List[torch.Tensor]):
+            def forward(self, a: list[torch.Tensor]):
                 return torch.add(a[0], a[1])
 
         m = MyModule()
@@ -1046,7 +1258,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "placeholder":
-                self.assertEqual(node.type, List[torch.Tensor])
+                self.assertEqual(node.type, list[torch.Tensor])
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1110,7 +1322,16 @@ class {test_classname}(torch.nn.Module):
             y: float
 
         class MyModule(torch.nn.Module):
-            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
+        class MyModule2(torch.nn.Module):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
                 inp_0 = inp[0]
                 inp_1 = inp[1]
                 inp2_0 = inp2[0]
@@ -1132,9 +1353,23 @@ class {test_classname}(torch.nn.Module):
             if node.target == operator.getitem:
                 self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
 
+        my_module = MyModule2()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -1164,7 +1399,7 @@ class {test_classname}(torch.nn.Module):
         d_hid = 4
 
         class ExampleCode(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -1192,7 +1427,7 @@ class {test_classname}(torch.nn.Module):
             return part_idx
 
         # split module in module with submodules
-        qualname_map : Dict[str, str] = {}
+        qualname_map : dict[str, str] = {}
         module_with_submodules = split_module(
             my_module_traced, my_module, split_callback, qualname_map
         )
@@ -1209,14 +1444,14 @@ class {test_classname}(torch.nn.Module):
 
     def test_to_folder(self):
         class Test(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.register_buffer("attr2", torch.randn(2))
-                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
+                self.attr2 = torch.nn.Buffer(torch.randn(2))
+                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
@@ -1243,7 +1478,7 @@ class {test_classname}(torch.nn.Module):
             self.assertEqual(module.Foo()(t), mod(t))
 
     def test_fetch(self):
-        attrs_for_lowering: Dict[str, List[str]] = {
+        attrs_for_lowering: dict[str, list[str]] = {
             "torch.nn.modules.conv.Conv2d": [
                 "weight",
                 "bias",
@@ -1264,7 +1499,7 @@ class {test_classname}(torch.nn.Module):
         }
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 2)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -1419,35 +1654,60 @@ class {test_classname}(torch.nn.Module):
             (int, type(torch.float)),
             (Union[int, float], int),
             (Union[int, float], float),
-            (List[int], int),
-            (List[int], create_type_hint([int, int])),
-            (List[int], create_type_hint((int, int))),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (list[int], int),
+            (list[int], create_type_hint([int, int])),
+            (list[int], create_type_hint((int, int))),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
             (
-                List[torch.Tensor],
+                list[torch.Tensor],
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
             (torch.Tensor, torch.nn.Parameter),
-            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
             (
-                List[torch.Tensor],
+                list[torch.Tensor],
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
             (torch.Tensor, torch.nn.Parameter),
-            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[List[torch.Tensor]], List[torch.Tensor]),
-            (Optional[List[int]], List[int]),
+            (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),
+            (Optional[list[int]], list[int]),
+        ] + [
+            # pre-PEP585 signatures
+            (typing.List[int], int),  # noqa: UP006
+            (typing.List[int], create_type_hint([int, int])),  # noqa: UP006
+            (typing.List[int], create_type_hint((int, int))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),  # noqa: UP006
+            (
+                typing.List[torch.Tensor],  # noqa: UP006
+                create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
+            ),
+            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),  # noqa: UP006
+            (
+                typing.List[torch.Tensor],  # noqa: UP006
+                create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
+            ),
+            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
         ]
+
         for sig_type, arg_type in should_be_equal:
             self.assertTrue(type_matches(sig_type, arg_type))
 
         should_fail = [
             (int, float),
             (Union[int, float], str),
-            (List[torch.Tensor], List[int]),
+            (list[torch.Tensor], typing.List[int]),  # noqa: UP006
+        ] + [
+            # pre-PEP585 signatures
+            (list[torch.Tensor], list[int]),
         ]
 
         for sig_type, arg_type in should_fail:
@@ -1458,7 +1718,7 @@ class {test_classname}(torch.nn.Module):
         import torch.nn as nn
 
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = []
                 layers2 = []
@@ -1531,7 +1791,7 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa", "_chunk_cat"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")
@@ -1590,21 +1850,40 @@ class TestNormalizeOperators(JitTestCase):
             param_names = []
             param_values = []
             fx_args = []
-            for idx, v in enumerate(arg_values):
-                if isinstance(v, torch.Tensor):
-                    param_names.append(f"arg_{idx}")
-                    param_values.append(v)
-                    fx_args.append(param_names[-1])
+
+            idx = 0
+
+            def process_arg(arg, name):
+                if isinstance(arg, torch.Tensor):
+                    param_names.append(name)
+                    param_values.append(arg)
+                    return name
                 else:
-                    fx_args.append(f"{repr(v)}")
+                    return f"{repr(arg)}"
+
+            def process_arg_with_idx(arg):
+                nonlocal idx
+                res = process_arg(arg, f"arg_{idx}")
+                idx = idx + 1
+                return res
+
+            def str_arg(arg):
+                if isinstance(arg, tuple):
+                    args = [f"{str_arg(v)}, " for v in arg]
+                    return f"({' '.join(args)})"
+                elif isinstance(arg, list):
+                    args = [f"{str_arg(v)}" for v in arg]
+                    return f"[{', '.join(args)}]"
+                else:
+                    return arg
+
+            for v in arg_values:
+                arg = pytree.tree_map(process_arg_with_idx, v)
+                fx_args.append(str_arg(arg))
 
             for k, v in kwarg_values.items():
-                if isinstance(v, torch.Tensor):
-                    param_names.append(k)
-                    param_values.append(v)
-                    fx_args.append(f"{k} = {k}")
-                else:
-                    fx_args.append(f"{k} = {repr(v)}")
+                arg = pytree.tree_map(functools.partial(process_arg, name=k), v)
+                fx_args.append(f"{k} = {str_arg(arg)}")
 
             code = f"""
 class TestModule(torch.nn.Module):
@@ -1658,7 +1937,7 @@ class TestModule(torch.nn.Module):
                 "include_last_offset",
             },
         )
-        self.assertEqual(norm_args_and_kwargs.args, tuple())
+        self.assertEqual(norm_args_and_kwargs.args, ())
 
     def test_normalize_args_op_overload(self):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
@@ -1667,6 +1946,182 @@ class TestModule(torch.nn.Module):
             args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
+
+
+if TEST_Z3:
+    import z3
+
+    import torch._dynamo.config
+
+    from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
+    from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
+
+    class TestTranslationValidation(TestCase):
+        def _prepare_for_translation_validation(self):
+            validator = TranslationValidator()
+
+            # SymPy symbols.
+            s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
+
+            # Z3 symbols.
+            [validator.add_var(s, int) for s in (s0, s1, s2)]
+            z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
+
+            return (s0, s1, s2), (z0, z1, z2), validator
+
+        def test_sympy_to_z3(self):
+
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            test_cases = [
+                # Integer constants.
+                (sympy.S.Zero, z3.IntVal(0)),
+                (sympy.S.One, z3.IntVal(1)),
+                (sympy.S.NegativeOne, z3.IntVal(-1)),
+                (sympy.Integer(2), z3.IntVal(2)),
+                (
+                    s0,
+                    z0,
+                ),
+                # Arithmetic operations.
+                *[
+                    (op(s0, s1), op(z0, z1))
+                    for op in (
+                        operator.add,
+                        operator.mul,
+                        operator.pow,
+                    )
+                ],
+                # Logical operations.
+                *[
+                    (sympy_op(s0, s1), z3_op(z0, z1))
+                    for sympy_op, z3_op in (
+                        (sympy.Eq, operator.eq),
+                        (sympy.Ne, operator.ne),
+                        (sympy.Lt, operator.lt),
+                        (sympy.Le, operator.le),
+                        (sympy.Gt, operator.gt),
+                        (sympy.Ge, operator.ge),
+                    )
+                ],
+                # Bitwise operations.
+                (BitwiseFn_bitwise_and(s0, s1), z3.BV2Int(z3.Int2BV(z0, 64) & z3.Int2BV(z1, 64))),
+                # Other operations.
+                (
+                    s0 - s1,
+                    z0 + z3.IntVal(-1) * z1,
+                ),
+                (
+                    s0 / s1,
+                    z3.ToReal(z0) * (z1**-1),
+                ),
+                (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+                (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+                (
+                    Mod(s2, (s0 / s1)),
+                    z2
+                    - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                    * (z3.ToReal(z0) * z1**-1),
+                ),
+                (
+                    Mod(s2, s0**3),
+                    z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+                ),
+            ]
+
+            toZ3 = SympyToZ3(validator)
+            for sympy_expr, z3_expr in test_cases:
+                result = toZ3.run(sympy_expr)
+                self.assertTrue(
+                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+                )
+
+        def test_sat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            validator.add_target_expr(s1 > s0**2)
+
+            validator.validate()
+
+        def test_sat_bitwise(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z3.BV2Int(z3.Int2BV(z0, 64) & z3.Int2BV(z1, 64)) == 5)
+            validator.add_source_expr(z0 == 0b110101)
+
+            validator.validate()
+
+        def test_unsat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is NOT a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            # This expression is less restrictive than its counterpart.
+            validator.add_target_expr(s1 > s0 + 2)
+
+            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
+                validator.validate()
+
+        def test_z3str(self):
+            a = z3.Int("a")
+            b = z3.Int("b")
+            special = z3.Real("this.size()[2]")
+
+            test_cases = [
+                (z3.IntVal(42), "42"),
+                # Variable.
+                (a, "a"),
+                # Name with special characters.
+                (special, "this.size()[2]"),
+                # Renamed function fpplications.
+                (a != b, "(!= a b)"),
+                (a ** b, "(pow a b)"),
+                # Chain of associative operations.
+                *[
+                    (op(op(a, 5), b), f"({opstr} 5 a b)")
+                    for op, opstr in [
+                        (operator.add, "+"),
+                        (operator.mul, "*")
+                    ]
+                ],
+                # Revert 'Not' conversions.
+                (a != b, "(!= a b)"),
+                (a < b, "(> b a)"),
+                (a > b, "(> a b)"),
+                # Ignore 'ToInt' and 'ToReal' functions.
+                (z3.ToInt(special) + a, "(+ this.size()[2] a)"),
+                (z3.ToReal(a + b), "(+ a b)"),
+                # Convert to floor division: 'idiv'.
+                (z3.ToInt(z3.ToReal(a) / z3.ToReal(b)), "(idiv a b)"),
+            ]
+
+            for expr, expected in test_cases:
+                self.assertEqual(z3str(expr), expected)
+
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import collections
 import logging
 
 import torch
-
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
@@ -12,6 +14,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from ..virtualized import V
+
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -24,7 +27,8 @@ def replace_random_passes(gm: torch.fx.GraphModule):
         return 0
 
     count = patterns.apply(gm)
-    count += fuse_seed_creation_pass(gm.graph)
+    with GraphTransformObserver(gm, "fuse_seed_creation_pass"):
+        count += fuse_seed_creation_pass(gm.graph)
 
     return count
 
@@ -85,10 +89,22 @@ def get_device(device):
 
 
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.default), pass_dict=patterns)
+@register_graph_pattern(CallFunctionVarArgs(aten.rand.generator), pass_dict=patterns)
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
+@register_graph_pattern(CallFunctionVarArgs(aten.randn.generator), pass_dict=patterns)
 def replace_random(
-    match: Match, size, *, dtype=None, device=None, layout=None, pin_memory=None
+    match: Match,
+    size,
+    *,
+    generator=None,
+    dtype=None,
+    device=None,
+    layout=None,
+    pin_memory=None,
 ):
+    if generator is not None:
+        return
+
     def replacement(size):
         result = inductor_prims.random(
             size, inductor_prims.seed(device), mode, **default_kwargs(device)
@@ -98,9 +114,11 @@ def replace_random(
         return result
 
     mode = {
-        aten.rand.default: "rand",
-        aten.randn.default: "randn",
-    }[match.output_node().target]
+        aten.rand: "rand",
+        aten.randn: "randn",
+    }[
+        match.output_node().target.overloadpacket  # type: ignore[union-attr]
+    ]  # type: ignore[union-attr]
     device = get_device(device)
     match.replace_by_example(replacement, [size])
 
@@ -117,9 +135,9 @@ def replace_randint(
     layout=None,
     pin_memory=None,
 ):
-    def replacement(size):
+    def replacement(low, high, size):
         result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
         return result.to(dtype)
 
     device = get_device(device)
-    match.replace_by_example(replacement, [size])
+    match.replace_by_example(replacement, [low, high, size])

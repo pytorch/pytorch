@@ -3,15 +3,15 @@
 
 #include <unistd.h>
 
-#include <iostream>
 #include <thread>
 
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <utility>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 
-void testGetSet(std::string prefix = "") {
+void testGetSet(const std::string& prefix = "") {
   // Basic set/get
   {
     auto hashStore = c10::make_intrusive<c10d::HashStore>();
@@ -39,7 +39,7 @@ void testGetSet(std::string prefix = "") {
     EXPECT_FALSE(delFailure);
     auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
     store.setTimeout(timeout);
-    EXPECT_THROW(store.get("key0"), std::runtime_error);
+    EXPECT_THROW(store.get("key0"), c10::DistStoreError);
   }
 
   // get() waits up to timeout_.
@@ -60,16 +60,16 @@ void stressTestStore(std::string prefix = "") {
   std::vector<std::thread> threads;
   c10d::test::Semaphore sem1, sem2;
   auto hashStore = c10::make_intrusive<c10d::HashStore>();
-  c10d::PrefixStore store(prefix, hashStore);
+  c10d::PrefixStore store(std::move(prefix), hashStore);
 
-  for (C10_UNUSED const auto i : c10::irange(numThreads)) {
-    threads.emplace_back(std::thread([&] {
+  for ([[maybe_unused]] const auto i : c10::irange(numThreads)) {
+    threads.emplace_back([&] {
       sem1.post();
       sem2.wait();
-      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
+      for ([[maybe_unused]] const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
-    }));
+    });
   }
 
   sem1.wait(numThreads);

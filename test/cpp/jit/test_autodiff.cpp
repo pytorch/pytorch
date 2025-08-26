@@ -121,14 +121,10 @@ TEST(AutodiffTest, ADFormulas) {
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
       {"view",
        unary_pointwise_2d,
-       [](const VL& v) -> VL {
-         return {v[0].view({3, 2})};
-       }},
+       [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
       {"expand",
        {{2, 1}},
-       [](const VL& v) -> VL {
-         return {v[0].expand({2, 3})};
-       }},
+       [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
@@ -169,8 +165,7 @@ TEST(AutodiffTest, ADFormulas) {
     // Get outputs from the interpreter
     auto tensors_in = fmap(vars_in, cast);
     auto tensor_grads_in = fmap(var_grads_in, cast);
-    tensor_list tensors_out, tensor_grads_out;
-    std::tie(tensors_out, tensor_grads_out) =
+    auto [tensors_out, tensor_grads_out] =
         runGradient(grad_spec, tensors_in, tensor_grads_in);
 
     // Compare results

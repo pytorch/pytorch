@@ -1,95 +1,27 @@
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
-
-ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
-    : start_times_(measurePairs()) {}
-
-ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair
-ApproximateClockToUnixTimeConverter::measurePair() {
-  // Take a measurement on either side to avoid an ordering bias.
-  auto fast_0 = getApproximateTime();
-  auto wall = std::chrono::system_clock::now();
-  auto fast_1 = getApproximateTime();
-
-  TORCH_INTERNAL_ASSERT(fast_1 >= fast_0, "getCount is non-monotonic.");
-  auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(
-      wall.time_since_epoch());
-
-  // `x + (y - x) / 2` is a more numerically stable average than `(x + y) / 2`.
-  return {t.count(), fast_0 + (fast_1 - fast_0) / 2};
-}
-
-ApproximateClockToUnixTimeConverter::time_pairs
-ApproximateClockToUnixTimeConverter::measurePairs() {
-  static constexpr auto n_warmup = 5;
-  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
-    getApproximateTime();
-    steady_clock_t::now();
-  }
-
-  time_pairs out;
-  for (const auto i : c10::irange(out.size())) {
-    out[i] = measurePair();
-  }
-  return out;
-}
-
-std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
-    makeConverter() {
-  auto end_times = measurePairs();
-
-  // Compute the real time that passes for each tick of the approximate clock.
-  std::array<long double, replicates> scale_factors{};
-  for (const auto i : c10::irange(replicates)) {
-    auto delta_ns = end_times[i].t_ - start_times_[i].t_;
-    auto delta_approx = end_times[i].approx_t_ - start_times_[i].approx_t_;
-    scale_factors[i] = (double)delta_ns / (double)delta_approx;
-  }
-  std::sort(scale_factors.begin(), scale_factors.end());
-  long double scale_factor = scale_factors[replicates / 2 + 1];
-
-  // We shift all times by `t0` for better numerics. Double precision only has
-  // 16 decimal digits of accuracy, so if we blindly multiply times by
-  // `scale_factor` we may suffer from precision loss. The choice of `t0` is
-  // mostly arbitrary; we just need a factor that is the correct order of
-  // magnitude to bring the intermediate values closer to zero. We are not,
-  // however, guaranteed that `t0_approx` is *exactly* the getApproximateTime
-  // equivilent of `t0`; it is only an estimate that we have to fine tune.
-  auto t0 = start_times_[0].t_;
-  auto t0_approx = start_times_[0].approx_t_;
-  std::array<double, replicates> t0_correction{};
-  for (const auto i : c10::irange(replicates)) {
-    auto dt = start_times_[i].t_ - t0;
-    auto dt_approx =
-        (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
-    t0_correction[i] = dt - (time_t)dt_approx;
-  }
-  t0 += t0_correction[t0_correction.size() / 2 + 1];
-
-  return [=](approx_time_t t_approx) {
-    // See above for why this is more stable than `A * t_approx + B`.
-    return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
-  };
-}
+namespace torch::profiler::impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -98,10 +30,15 @@ bool softAssertRaises() {
 }
 
 void logSoftAssert(
+    // @lint-ignore CLANGTIDY
     const char* func,
+    // @lint-ignore CLANGTIDY
     const char* file,
+    // @lint-ignore CLANGTIDY
     uint32_t line,
+    // @lint-ignore CLANGTIDY
     const char* cond,
+    // @lint-ignore CLANGTIDY
     const char* args) {
 #ifdef USE_KINETO
   std::string error;
@@ -118,10 +55,15 @@ void logSoftAssert(
 }
 
 void logSoftAssert(
+    // @lint-ignore CLANGTIDY
     const char* func,
+    // @lint-ignore CLANGTIDY
     const char* file,
+    // @lint-ignore CLANGTIDY
     uint32_t line,
+    // @lint-ignore CLANGTIDY
     const char* cond,
+    // @lint-ignore CLANGTIDY
     const std::string& args) {
 #ifdef USE_KINETO
   std::string error;
@@ -191,6 +133,7 @@ std::vector<FileLineFunc> prepareCallstack(
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
         entries.emplace_back(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             FileLineFunc{*(src->filename()), line, entry.filename});
       }
     }
@@ -229,8 +172,7 @@ std::string stacksToStr(
 }
 
 static std::vector<std::vector<int64_t>> flattenList(
-    c10::List<c10::IValue> list,
-    std::string fn_name) {
+    const c10::List<c10::IValue>& list) {
   std::vector<std::vector<int64_t>> tensor_dims;
   for (const c10::IValue& input : list) {
     if (input.isTensor()) {
@@ -259,7 +201,7 @@ std::vector<std::vector<int64_t>> inputSizes(
     } else if (input.isList()) {
       std::vector<std::vector<int64_t>> tmp_sizes;
       if (flatten_list_enabled) {
-        tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
+        tmp_sizes = flattenList(input.toList());
       }
       // Extend the current sizes array by the array returned from input sizes
       if (!tmp_sizes.empty()) {
@@ -280,14 +222,51 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
     if (t_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}[", str);
-    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
-      if (s_idx > 0) {
-        str = fmt::format("{}, ", str);
-      }
-      str = fmt::format("{}{}", str, shapes[t_idx][s_idx]);
+    str = fmt::format("{}{}", str, shapeToStr(shapes[t_idx]));
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string variantShapesToStr(const std::vector<shape>& shapes) {
+  std::string str("[");
+  for (const auto t_idx : c10::irange(shapes.size())) {
+    if (t_idx > 0) {
+      str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}]", str);
+    if (std::holds_alternative<std::vector<int64_t>>(shapes[t_idx])) {
+      const auto& shape = std::get<std::vector<int64_t>>(shapes[t_idx]);
+      str = fmt::format("{}{}", str, shapeToStr(shape));
+    } else if (std::holds_alternative<std::vector<std::vector<int64_t>>>(
+                   shapes[t_idx])) {
+      const auto& tensor_shape =
+          std::get<std::vector<std::vector<int64_t>>>(shapes[t_idx]);
+      if (tensor_shape.size() > TENSOR_LIST_DISPLAY_LENGTH_LIMIT) {
+        // skip if the tensor list is too long
+        str = fmt::format("{}[]", str);
+        continue;
+      }
+      str = fmt::format("{}[", str);
+      for (const auto s_idx : c10::irange(tensor_shape.size())) {
+        if (s_idx > 0) {
+          str = fmt::format("{}, ", str);
+        }
+        str = fmt::format("{}{}", str, shapeToStr(tensor_shape[s_idx]));
+      }
+      str = fmt::format("{}]", str);
+    }
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string shapeToStr(const std::vector<int64_t>& shape) {
+  std::string str("[");
+  for (const auto s_idx : c10::irange(shape.size())) {
+    if (s_idx > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    str = fmt::format("{}{}", str, shape[s_idx]);
   }
   str = fmt::format("{}]", str);
   return str;
@@ -319,10 +298,39 @@ std::string strListToStr(const std::vector<std::string>& types) {
         types.begin(),
         types.end(),
         std::ostream_iterator<std::string>(oss, ", "),
-        [](std::string s) -> std::string { return "\"" + s + "\""; });
+        [](const std::string& s) -> std::string { return "\"" + s + "\""; });
     auto rc = oss.str();
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
+  }
+}
+std::string ivalueToStr(const c10::IValue& val, bool isString) {
+  std::stringstream ss;
+  if (val.isNone()) {
+    return "\"None\"";
+  } else {
+    ss.str("");
+    if (isString) {
+      ss << "\"";
+    }
+    ss << val;
+    if (isString) {
+      ss << "\"";
+    }
+    std::string mystr = ss.str();
+
+    // For boolean the values that ivalue gives is "True" and "False" but
+    // json only takes "true" and "false" so we convert the string to lower case
+    if (val.isBool()) {
+      for (char& c : mystr) {
+        c = static_cast<char>(std::tolower(c));
+      }
+    }
+
+    // A double quote can cause issues with the chrome tracing so force
+    // all inputs to not contain more than the 2 we add in this function
+    auto count = std::count(mystr.begin(), mystr.end(), '"');
+    return count > 2 ? "\"None\"" : mystr;
   }
 }
 
@@ -363,6 +371,205 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 }
 
 // ----------------------------------------------------------------------------
+// -- NCCL Metadata -----------------------------------------------------------
+// ----------------------------------------------------------------------------
+
+static constexpr int32_t kTruncatLength = 30;
+
+template <typename ListLikeType>
+static inline std::string format_list(
+    ListLikeType list,
+    bool truncate,
+    bool with_escaped_quotes = true) {
+  if (truncate && list.size() > kTruncatLength) {
+    if (with_escaped_quotes == true) {
+      auto x = fmt::format(
+          "\"[{}, ..., {}]\"",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
+      return x;
+    } else {
+      auto x = fmt::format(
+          "[{}, ..., {}]",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
+      return x;
+    }
+  }
+  if (with_escaped_quotes == true) {
+    auto x = fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+    return x;
+  } else {
+    auto x = fmt::format("[{}]", fmt::join(list.begin(), list.end(), ", "));
+    return x;
+  }
+}
+
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
+    const c10::IValue& val) {
+  if (val.isTensor()) {
+    // Store hints about where the input starts in memory.
+    // Useful for debugging memory access patterns.
+    const auto& tensor = val.toTensor();
+    const int result = getTensorStartHint(tensor);
+    return {false, result};
+  } else if (val.isTuple()) {
+    const auto& val_tuple = val.toTupleRef().elements();
+    size_t tuple_size = val_tuple.size();
+    std::vector<int> responses;
+    responses.reserve(tuple_size);
+    for (const auto j : c10::irange(tuple_size)) {
+      auto [is_list, res] = findStartAddrForTensors(val_tuple[j]);
+      if (is_list) {
+        const auto& vec_res = std::get<std::vector<int>>(res);
+        responses.insert(responses.end(), vec_res.begin(), vec_res.end());
+      } else {
+        responses.push_back(std::get<int>(res));
+      }
+    }
+    return {true, responses};
+  } else if (val.isList()) {
+    const auto& val_list = val.toList();
+    size_t list_size = val_list.size();
+    std::vector<int> responses;
+    responses.reserve(list_size);
+    for (const auto j : c10::irange(list_size)) {
+      auto [is_list, res] = findStartAddrForTensors(val_list[j]);
+      if (is_list) {
+        auto const& vec_res = std::get<std::vector<int>>(res);
+        responses.insert(responses.end(), vec_res.begin(), vec_res.end());
+      } else {
+        responses.push_back(std::get<int>(res));
+      }
+    }
+    return {true, responses};
+  } else {
+    // push back an invalid value for indices representing non-tensor inputs
+    return {false, -1};
+  }
+}
+
+std::unordered_map<std::string, std::string> saveNcclMeta(
+    // @lint-ignore CLANGTIDY
+    const at::RecordFunction& fn,
+    // @lint-ignore CLANGTIDY
+    const SaveNcclMetaConfig& config) {
+  std::unordered_map<std::string, std::string> map;
+#ifdef USE_DISTRIBUTED
+  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
+
+  if (config.introspectMetadata) {
+    if (debugInfo == nullptr) {
+      LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
+                   << fn.name();
+      return map;
+    }
+    auto& collective_name = debugInfo->getCollectiveName();
+    map.emplace(kCommsName, fmt::format("\"{}\"", collective_name));
+    map.emplace(
+        kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
+    map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
+    map.emplace(
+        kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
+
+    auto& inSplitSizes = debugInfo->getInputSplitSizes();
+    map.emplace(kInSplit, format_list(inSplitSizes, config.truncate));
+
+    auto& outSplitSizes = debugInfo->getOutputSplitSizes();
+    map.emplace(kOutSplit, format_list(outSplitSizes, config.truncate));
+
+    auto globalRankStart = debugInfo->getGlobalRankStart();
+    if (globalRankStart >= 0) {
+      map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
+    }
+    auto globalRankStride = debugInfo->getGlobalRankStride();
+    if (globalRankStride > 0) {
+      map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
+    }
+    map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
+    auto& group_name = debugInfo->getProcessGroupName();
+    if (!group_name.empty()) {
+      map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
+    }
+    auto& group_desc = debugInfo->getProcessGroupDesc();
+    if (!group_desc.empty()) {
+      map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
+    }
+    auto& groupRanks = debugInfo->getGroupRanks();
+    map.emplace(kGroupRanks, format_list(groupRanks, config.truncate));
+
+    auto rank = debugInfo->getRank();
+    map.emplace(kRank, std::to_string(rank));
+    int nRanks = static_cast<int>(groupRanks.size());
+    if (collective_name == "send") {
+      if (rank >= 0 && rank < nRanks) {
+        map.emplace(kP2pDst, std::to_string(groupRanks[rank]));
+      }
+    } else if (collective_name == "recv") {
+      if (rank >= 0 && rank < nRanks) {
+        map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
+      }
+    }
+  }
+
+  if (get_record_tensor_addrs_enabled()) {
+    std::vector<std::string> addressList;
+    if (config.introspectInputs) {
+      auto num_inputs = fn.num_inputs();
+      const auto inputs = fn.inputs();
+      if (checkFunctionInputsForLogging(fn)) {
+        // need to account for Stack mode where the inputs are at the end.
+        size_t input_start = inputs.size() - num_inputs;
+        for (const auto i : c10::irange(input_start, inputs.size())) {
+          const c10::IValue& val = inputs[i];
+          auto [is_list, result] = findStartAddrForTensors(val);
+          if (is_list) {
+            auto const& list_result = std::get<std::vector<int>>(result);
+            addressList.push_back(
+                format_list(list_result, config.truncate, false));
+          } else {
+            auto scalar_result = std::get<int>(result);
+            addressList.push_back(std::to_string(scalar_result));
+          }
+          // today we record a lot of metadata in record_param_comms that shows
+          // up as inputs. here we only need the addresses of the first inputs,
+          // which are the real tensor inputs to the collective call. So let's
+          // break out of the loop here.
+          break;
+        }
+        map.emplace(kInTensorsStart, format_list(addressList, false));
+        addressList.clear();
+      }
+    }
+    if (config.introspectOutputs) {
+      const auto& outputs = fn.outputs();
+      auto num_outputs = fn.num_outputs();
+      if (checkFunctionOutputsForLogging(fn)) {
+        // need to account for Stack mode where the outputs are at the end.
+        size_t output_start = outputs.size() - num_outputs;
+        for (const auto i : c10::irange(output_start, outputs.size())) {
+          const c10::IValue& val = outputs[i];
+          auto [is_list, result] = findStartAddrForTensors(val);
+          if (is_list) {
+            auto const& list_result = std::get<std::vector<int>>(result);
+            addressList.push_back(
+                format_list(list_result, config.truncate, false));
+          } else {
+            auto scalar_result = std::get<int>(result);
+            addressList.push_back(std::to_string(scalar_result));
+          }
+        }
+        map.emplace(kOutTensorsStart, format_list(addressList, false));
+        addressList.clear();
+      }
+    }
+  }
+#endif // USE_DISTRIBUTED
+  return map;
+}
+
+// ----------------------------------------------------------------------------
 // -- FLOPS -------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 static constexpr auto kConv2dStride = 3;
@@ -389,7 +596,7 @@ static constexpr auto kMatSize = "mat_size";
 static constexpr auto kMat1Size = "mat1_size";
 static constexpr auto kMat2Size = "mat2_size";
 
-static bool validateInput(
+static std::vector<c10::IntArrayRef> getInputSizes(
     const std::string& op_name,
     size_t min_size,
     c10::ArrayRef<const c10::IValue> inputs,
@@ -400,17 +607,26 @@ static bool validateInput(
        << op_name << ", min size: " << min_size
        << ", actual size: " << inputs.size();
     TORCH_WARN(ss.str());
-    return false;
+    return {};
   }
+  std::vector<c10::IntArrayRef> inputSizes = {};
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
       ss << "Failed to save extra arguments for flops computation of op "
          << op_name << ", input[" << index << "] must be a tensor.";
       TORCH_WARN(ss.str());
-      return false;
+      return {};
     }
+    at::Tensor t = inputs[index].toTensor();
+    if (t.is_nested()) {
+      ss << "Failed to save extra arguments for flops computation of op "
+         << op_name << " with input[" << index << "] as nested tensor.";
+      TORCH_WARN(ss.str());
+      return {};
+    }
+    inputSizes.emplace_back(t.sizes());
   }
-  return true;
+  return inputSizes;
 }
 
 std::unordered_map<std::string, c10::IValue> saveExtraArgs(
@@ -426,77 +642,64 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
   }
 
   if (fname == kConv2dOp) {
-    bool check = validateInput(fname, kConv2dGroups + 1, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes =
+        getInputSizes(fname, kConv2dGroups + 1, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor input = inputs[0].toTensor();
-    at::Tensor weight = inputs[1].toTensor();
-    if (weight.sizes().size() != 4) {
+    if (inputSizes[1].size() != 4) {
       TORCH_WARN(
           "Failed to compute flops for op aten::conv2d because it requires a 4D kernel tensor.");
       return map;
     }
-    map[kInputSize] = at::IValue(input.sizes());
-    map[kWeightSize] = at::IValue(weight.sizes());
+    map[kInputSize] = at::IValue(inputSizes[0]);
+    map[kWeightSize] = at::IValue(inputSizes[1]);
     map[kStride] = inputs[kConv2dStride];
     map[kPadding] = inputs[kConv2dPadding];
     map[kDilation] = inputs[kConv2dDilation];
     map[kGroups] = inputs[kConv2dGroups];
   } else if (fname == kMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kAddMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
-
     // Exact FLOP count depends on scaling factors alpha and beta but
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   } else if (fname == kMulOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kAddOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kBMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kBAddBMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
 
@@ -504,10 +707,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   }
 
   return map;
@@ -573,12 +774,10 @@ uint64_t computeFlops(
     }
     // format of the input is defined in
     // torch.ao.nn.quantized.functional.conv2d()
-    uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
-    uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;
-    std::tie(minibatch, in_channels, input_h, input_w) = std::make_tuple(
+    auto [minibatch, in_channels, input_h, input_w] = std::make_tuple(
         input_sizes[0], input_sizes[1], input_sizes[2], input_sizes[3]);
-    std::tie(out_channels, std::ignore, kernel_h, kernel_w) = std::make_tuple(
+    auto [out_channels, _, kernel_h, kernel_w] = std::make_tuple(
         kernel_sizes[0], kernel_sizes[1], kernel_sizes[2], kernel_sizes[3]);
     uint64_t output_h =
         (input_h + 2 * padding[0] - dilation[0] * (kernel_h - 1) - 1) /
@@ -721,6 +920,43 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+// A function that takes an IValue
+// and returns a conventional string representation of the IValue
+// Currently it returns int representation of the last 20 bits of the address
+// value
+int getTensorStartHint(const at::Tensor& t) {
+  const auto tensor_impl = t.unsafeGetTensorImpl();
+  uintptr_t storage_addr = 0;
+  storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
+  int last_bits = static_cast<int>(storage_addr & 0xFFFFF);
+  return last_bits;
+}
+
+bool checkFunctionOutputsForLogging(const at::RecordFunction& fn) {
+  const auto& outputs = fn.outputs();
+  auto num_outputs = fn.num_outputs();
+  VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
+  // We have two cases: for unboxed kernel, we have num_outputs ==
+  // outputs.size() for boxed kernel using stack, there could be more elements
+  // on the stack from previous ops.
+  // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
+  if (num_outputs > outputs.size()) {
+    return false;
+  }
+  return true;
+}
+
+bool checkFunctionInputsForLogging(const at::RecordFunction& fn) {
+  auto num_inputs = fn.num_inputs();
+  const auto inputs = fn.inputs();
+  VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
+  // We have two cases: for unboxed kernel, we have num_inputs ==
+  // inputs.size() for boxed kernel using stack, there could be more elements
+  // on the stack from previous ops.
+  // TORCH_INTERNAL_ASSERT(num_inputs <= inputs.size());
+  if (num_inputs > inputs.size()) {
+    return false;
+  }
+  return true;
+}
+} // namespace torch::profiler::impl

@@ -12,8 +12,6 @@
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/onnx/diagnostics/diagnostics.h>
-
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
@@ -22,16 +20,15 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
-inline bool PyNone_Check(PyObject* o) {
+static inline bool PyNone_Check(PyObject* o) {
   return o == Py_None;
 }
 
 std::pair<TypePtr, bool> MergeInferredType(
-    TypePtr existing_type,
-    TypePtr inferred_type) {
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type) {
   auto new_list_type = inferred_type->cast<ListType>();
   auto use_inferred_type = false;
   if (new_list_type) {
@@ -75,12 +72,9 @@ std::pair<TypePtr, bool> MergeInferredType(
 
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
-    TypePtr existing_type,
-    TypePtr inferred_type) {
-  TypePtr mergedType;
-  bool inferred;
-  std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type) {
+  auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
@@ -88,23 +82,25 @@ void MergeInferredTypeAndSetMap(
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
-namespace diagnostics = ::torch::onnx::diagnostics;
 
+// SymbolDimMap is a Torch-to-ONNX shape look-up. This is built so it can be
+// returned by the export function. During the export however, when we come
+// across new ONNX shapes, the reverse look-up is needed. To avoid incurring
+// a linear-time look-up, we maintain DimSymbolMap in parallel.
 c10::ShapeSymbol ONNXDimToShapeSymbol(
     const onnx::TensorShapeProto_Dimension& dim,
-    SymbolDimMap& symbol_dim_map) {
+    SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map) {
   if (dim.has_dim_value()) {
     return c10::ShapeSymbol::fromStaticSize(dim.dim_value());
   }
-  c10::optional<c10::ShapeSymbol> sym = c10::nullopt;
+  std::optional<c10::ShapeSymbol> sym = std::nullopt;
   if (dim.has_dim_param()) {
     // If this param is already known, assign the same Symbol.
     GRAPH_UPDATE("Got dim_param:", dim.dim_param());
-    for (const auto& pair : symbol_dim_map) {
-      if (pair.second == dim.dim_param()) {
-        sym = pair.first;
-        break;
-      }
+    auto maybe_symbol = dim_symbol_map.find(dim.dim_param());
+    if (maybe_symbol != dim_symbol_map.end()) {
+      sym = maybe_symbol->second;
     }
   }
   if (!sym) {
@@ -112,14 +108,16 @@ c10::ShapeSymbol ONNXDimToShapeSymbol(
     // If dim.dim_param() is empty, no need to keep track
     // because there won't be duplicates.
     symbol_dim_map[sym.value()] = dim.dim_param();
+    dim_symbol_map[dim.dim_param()] = sym.value();
   }
   return sym.value();
 }
 
 TensorTypePtr TorchTensorTypeFromONNX(
     const onnx::TypeProto_Tensor& onnx_tensor_type,
-    SymbolDimMap& symbol_dim_map) {
-  c10::optional<at::ScalarType> scalar_type;
+    SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map) {
+  std::optional<at::ScalarType> scalar_type;
   if (onnx_tensor_type.has_elem_type()) {
     scalar_type = ONNXTypeToATenType(onnx_tensor_type.elem_type());
   }
@@ -135,8 +133,8 @@ TensorTypePtr TorchTensorTypeFromONNX(
     const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (const auto i : c10::irange(onnx_shape.dim_size())) {
-      sizes.emplace_back(
-          ONNXDimToShapeSymbol(onnx_shape.dim(i), symbol_dim_map));
+      sizes.emplace_back(ONNXDimToShapeSymbol(
+          onnx_shape.dim(i), symbol_dim_map, dim_symbol_map));
     }
     v_type = TensorType::create(scalar_type, at::kCPU, sizes.size(), {});
     v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
@@ -153,14 +151,14 @@ TensorTypePtr TorchTensorTypeFromONNX(
 
 ListTypePtr TorchListTypeFromONNX(
     const onnx::TypeProto_Sequence& onnx_sequence_type,
-    SymbolDimMap& symbol_dim_map) {
-  c10::optional<at::ScalarType> scalar_type;
+    SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map) {
   if (onnx_sequence_type.has_elem_type()) {
     const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
       const auto& onnx_tensor_type = onnx_seq_elem_type.tensor_type();
-      const auto v_tensor_type =
-          TorchTensorTypeFromONNX(onnx_tensor_type, symbol_dim_map);
+      const auto v_tensor_type = TorchTensorTypeFromONNX(
+          onnx_tensor_type, symbol_dim_map, dim_symbol_map);
       auto v_type = ListType::create(v_tensor_type);
       return v_type;
     }
@@ -171,21 +169,22 @@ ListTypePtr TorchListTypeFromONNX(
 void UpdateTorchValueByOnnxValueInfo(
     Value* v,
     const onnx::ValueInfoProto& p_info,
-    SymbolDimMap& symbol_dim_map) {
+    SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map) {
   if (!p_info.has_type()) {
     return;
   }
 
   const auto& p_type = p_info.type();
   if (p_type.has_tensor_type()) {
-    const auto torch_tensor_type =
-        TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_dim_map);
+    const auto torch_tensor_type = TorchTensorTypeFromONNX(
+        p_type.tensor_type(), symbol_dim_map, dim_symbol_map);
     if (torch_tensor_type) {
       MergeInferredTypeAndSetMap(v, v->type(), torch_tensor_type);
     }
   } else if (p_type.has_sequence_type()) {
-    const auto torch_list_type =
-        TorchListTypeFromONNX(p_type.sequence_type(), symbol_dim_map);
+    const auto torch_list_type = TorchListTypeFromONNX(
+        p_type.sequence_type(), symbol_dim_map, dim_symbol_map);
     if (torch_list_type) {
       MergeInferredTypeAndSetMap(v, v->type(), torch_list_type);
     }
@@ -253,7 +252,7 @@ bool CustomSettype(Node* node) {
 
 Value* CloneValueFromListConstruct(
     Value* v,
-    std::shared_ptr<Graph> n_graph,
+    const std::shared_ptr<Graph>& n_graph,
     int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
@@ -264,7 +263,7 @@ Value* CloneValueFromListConstruct(
   // is preserved. If the elemtype is Int, insert a onnx::Concat node into
   // the graph.
   TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
-  c10::optional<at::ScalarType> scalar_type = c10::nullopt;
+  std::optional<at::ScalarType> scalar_type = std::nullopt;
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
     if (isValidToTransformToONNXConcatNode(v->node())) {
@@ -283,7 +282,7 @@ Value* CloneValueFromListConstruct(
   auto input = n_graph->addInput();
   if (scalar_type) {
     auto v_type = TensorType::create(
-        scalar_type.value(),
+        scalar_type,
         at::kCPU,
         c10::SymbolicShape(),
         c10::VaryingShape<c10::Stride>{},
@@ -299,10 +298,8 @@ Node* CloneNodeToGraph(
     std::shared_ptr<Graph> n_graph,
     const ParamMap& params_dict,
     int opset_version) {
-  auto vals_to_params_map =
-      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
   auto clone_node = n_graph->createClone(
-      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+      n, [&n_graph, &params_dict, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::prim::Constant:
@@ -331,10 +328,11 @@ Node* CloneNodeToGraph(
             // Try to lookup input value and insert it into the graph.
             // If the input value is unknown, set it to graph input in the new
             // graph, and copy over metadata, such as datatype and shape.
-            ::c10::optional<at::Tensor> val = ::c10::nullopt;
-            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
-              val = vals_to_params_map.find(v)->second.second.toTensor();
-            } else if (ConstantValueMap::HasValue(v->debugName())) {
+            ::std::optional<at::Tensor> val = ::std::nullopt;
+            auto v0 = params_dict.find(v->debugName());
+            if (v0 != params_dict.end()) {
+              val = v0->second.toTensor();
+            } else {
               val = ConstantValueMap::GetValue(v->debugName());
             }
 
@@ -353,7 +351,7 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool HasValidType(TypePtr type, std::string name) {
+bool HasValidType(const TypePtr& type, const std::string& name) {
   if (auto t_type = type->cast<TensorType>()) {
     if (!t_type->scalarType().has_value()) {
       GRAPH_UPDATE("Input ", name, " is missing tensor datatype.");
@@ -369,7 +367,7 @@ bool HasValidType(TypePtr type, std::string name) {
   return true;
 }
 
-bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
+bool IsGraphValidForInference(const std::shared_ptr<Graph>& graph) {
   // Verify if every input has type (either Tensor, Sequence or Optional) and
   // scalar type. This is a requirement for ONNX graph inputs.
   for (auto in : graph->inputs()) {
@@ -379,48 +377,51 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
 }
 
 void ConvertGraphToONNXProto(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::shared_ptr<onnx::ModelProto>& model_proto,
     SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map,
     int opset_version) {
-  RawDataExportMap export_map;
-  bool val_use_external_data_format;
-  SymbolDimMap new_symbol_dim_map;
-  NodeNameMap node_names;
-  std::tie(
-      model_proto,
-      export_map,
-      new_symbol_dim_map,
-      val_use_external_data_format,
-      node_names) =
-      export_onnx(
-          graph,
-          {},
-          opset_version,
-          {},
-          false,
-          onnx_torch::OperatorExportTypes::ONNX,
-          true,
-          true,
-          {},
-          true,
-          false,
-          std::string());
+  auto
+      [model_proto_tmp,
+       export_map,
+       new_symbol_dim_map,
+       val_use_external_data_format,
+       node_names] =
+          export_onnx(
+              graph,
+              {},
+              opset_version,
+              {},
+              false,
+              onnx_torch::OperatorExportTypes::ONNX,
+              true,
+              true,
+              {},
+              true,
+              false,
+              std::string());
+  model_proto = std::move(model_proto_tmp);
   symbol_dim_map.insert(new_symbol_dim_map.begin(), new_symbol_dim_map.end());
+  for (const auto& pair : new_symbol_dim_map) {
+    dim_symbol_map[pair.second] = pair.first;
+  }
   for (int i = 0; i < model_proto->graph().output_size(); ++i) {
     model_proto->mutable_graph()->mutable_output(i)->clear_type();
   }
 }
 
-c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
+std::optional<at::Tensor> ComputeConstantFolding(
+    const Node* n,
+    int opset_version) {
   if (n->inputs().empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::vector<at::Tensor> inputTensorValues;
   for (auto i : c10::irange(n->inputs().size())) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       auto tensor_value =
           ConstantValueMap::GetValue(n->input(i)->debugName()).value();
@@ -428,7 +429,7 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     }
   }
   if (inputTensorValues.size() < n->inputs().size()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   try {
     return onnx_constant_fold::runTorchBackendForOnnx(
@@ -437,12 +438,12 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     auto ex_str = std::string(ex.what());
     ex_str = ex_str.substr(0, ex_str.find('\n'));
     TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
 // Similar to the function above, but for symbolic shapes.
-c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
+std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     Node* n,
     const c10::SymbolicShape& input_shape,
     const c10::SymbolicShape& shape,
@@ -464,7 +465,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  int minus_one_pos = -1;
+  int64_t minus_one_pos = -1;
   for (auto i : c10::irange(shape_vector.size())) {
     if (shape_vector[i].value() == -1) {
       minus_one_pos = i;
@@ -494,7 +495,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
           std::numeric_limits<uint64_t>::max() / input_shape.static_size()) {
         TORCH_WARN(
             "ComputeShapeFromReshape(), shape_ratio overflows, skip shape inference.");
-        return c10::nullopt;
+        return std::nullopt;
       } else {
         shape_ratio *= static_cast<uint64_t>(input_shape.static_size());
       }
@@ -517,7 +518,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     } else {
       auto value = target_shape.value();
       if (sym_map.find(value) == sym_map.end()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       sym_map[value]--;
       if (sym_map[value] == 0) {
@@ -529,7 +530,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   // sym_map is used to match shape symbols between the input and shape.
   // If there is a mismatch, the output shape cannot be estimated.
   if (!sym_map.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -554,12 +555,12 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   return final_shape_0;
 }
 
-c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
+std::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
   for (const auto& it : reshape) {
     if (it < 0) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::vector<::c10::ShapeSymbol> final_shape;
@@ -593,7 +594,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
   return shape;
 }
 
-c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
+std::optional<::c10::SymbolicShape> ComputeShapeFromTile(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
   TORCH_INTERNAL_ASSERT(
@@ -601,7 +602,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
       "ONNX Tile input shapes do not match.");
   for (const auto& it : reshape) {
     if (it < 0) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::vector<::c10::ShapeSymbol> final_shape;
@@ -621,7 +622,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
 void UpdateRank(Value* value, size_t rank) {
   ConstantValueMap::SetRank(value->debugName(), rank);
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
-    c10::optional<size_t> rank_opt = rank;
+    std::optional<size_t> rank_opt = rank;
     auto shape = ::c10::SymbolicShape(rank_opt);
     value->setType(value_type->withSymbolicShapes(shape));
   }
@@ -667,7 +668,7 @@ void UpdateShapeConstantValueMap(
   }
 }
 
-c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
+std::optional<std::vector<int64_t>> GetValueFromListConstructNode(
     Node* lc_node) {
   std::vector<int64_t> shape_size;
   for (const auto& input : lc_node->inputs()) {
@@ -681,8 +682,8 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
     }
   }
   return lc_node->inputs().size() == shape_size.size()
-      ? c10::optional<std::vector<int64_t>>(shape_size)
-      : c10::nullopt;
+      ? std::optional<std::vector<int64_t>>(shape_size)
+      : std::nullopt;
 }
 
 void SetShapeValueFromListConstructNode(Node* lc_node) {
@@ -774,7 +775,7 @@ void ProcessBroadcastNode(Node* n) {
 }
 
 void ProcessShapeForConcatNode(Node* n) {
-  int axis = n->i(attr::axis);
+  auto axis = n->i(attr::axis);
   if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
     auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
     size_t axis_adjust = 0;
@@ -920,11 +921,15 @@ void ProcessReduceNode(Node* n) {
     size_t rank_0 = input_shape_value_0.value().size();
     std::vector<::c10::ShapeSymbol> final_shape;
     std::vector<int64_t> axes_vector(rank_0);
-    if (!n->hasAttributeS("axes")) {
-      std::iota(axes_vector.begin(), axes_vector.end(), 0);
-    } else {
+    if (n->hasAttributeS("axes")) {
       axes_vector = n->is(attr::axes);
+    } else if (n->inputs().size() > 1) {
+      axes_vector =
+          ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
+    } else {
+      std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
+
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
@@ -1032,9 +1037,7 @@ c10::SymbolicShape ComputeShapeForSlice(
   final_shape = input_shape;
   for (const auto idx : c10::irange(axes_vector.size())) {
     auto axis = axes_vector[idx];
-    if (axis < 0) {
-      axis += input_shape.size();
-    }
+    TORCH_INTERNAL_ASSERT(axis >= 0);
     if (!input_shape[axis].is_static()) {
       final_shape[axis] = c10::ShapeSymbol::newSymbol();
       continue;
@@ -1070,20 +1073,18 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  auto valid = true;
+  bool valid = ConstantValueMap::HasShape(n->input(0)->debugName());
+
   // For opset version <= 9, starts, ends, axes, steps are attributes,
   // so their values are always valid.
   if (opset_version >= 10) {
-    valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
-        ConstantValueMap::HasValue(n->input(2)->debugName());
-    for (const auto input_idx : c10::irange(3U, 5U)) {
-      if (n->inputs().size() > input_idx) {
-        valid = valid &&
-            ConstantValueMap::HasValue(n->input(input_idx)->debugName());
-      }
+    // We can only infer shapes if 'axes' is known.
+    if (n->inputs().size() > 3) {
+      valid = valid && ConstantValueMap::HasValue(n->input(3)->debugName());
     }
   }
-  if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
+
+  if (!valid) {
     if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
       auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
       UpdateRank(n->output(), rank);
@@ -1097,27 +1098,49 @@ void ProcessSliceNode(Node* n, int opset_version) {
 
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
+      std::vector<int64_t> step_vector;
+
       std::vector<int64_t> axes_vector(input0_shape_value.size(), 0);
       for (const auto i : c10::irange(input0_shape_value.size())) {
         axes_vector[i] = i;
       }
-      std::vector<int64_t> step_vector;
+      if (opset_version >= 10 && n->inputs().size() > 3) {
+        axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
+            n->input(3)->debugName());
+      } else if (opset_version < 10 && n->hasAttributeS("axes")) {
+        axes_vector = n->is(attr::axes);
+      }
+      for (auto& axis : axes_vector) {
+        if (axis < 0) {
+          axis += input0_shape_value.size();
+        }
+      }
 
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
-        if (n->hasAttributeS("axes")) {
-          axes_vector = n->is(attr::axes);
-        }
       } else {
+        // If starts, ends, or step are unknown,
+        // then mark all dimensions in 'axes' as unknown.
+        std::vector<uint64_t> indices = {1U, 2U, 4U};
+        bool start_end_step_known =
+            std::all_of(indices.begin(), indices.end(), [&n](auto i) {
+              return (i >= n->inputs().size()) ||
+                  ConstantValueMap::HasValue(n->input(i)->debugName());
+            });
+        if (!start_end_step_known) {
+          auto final_shape = input0_shape_value;
+          for (const auto axis : axes_vector) {
+            final_shape[axis] = c10::ShapeSymbol::newSymbol();
+          }
+          UpdateShape(n->output(), final_shape);
+          return;
+        }
+
         start_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(1)->debugName());
         end_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(2)->debugName());
-        if (n->inputs().size() > 3) {
-          axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-              n->input(3)->debugName());
-        }
         if (n->inputs().size() > 4) {
           step_vector = ConstantValueMap::GetValueInto1DInt64Vector(
               n->input(4)->debugName());
@@ -1223,7 +1246,7 @@ void ProcessUnsqueezeNode(Node* n) {
 void ComputeConstant(Node* n, int opset_version) {
   if (n->kind() == ::c10::onnx::Constant) {
     if (n->kindOf(attr::value) == AttributeKind::t) {
-      at::Tensor const_val = n->t(attr::value);
+      const at::Tensor& const_val = n->t(attr::value);
       at::Tensor const_val_copy =
           at::empty(const_val.sizes(), const_val.options());
       const_val_copy.copy_(const_val);
@@ -1360,7 +1383,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             // When value of `shape` is statically known,
             // output shape can be computed.
@@ -1453,7 +1476,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           int64_t total_size = 1;
           auto is_full_static = true;
           for (const auto i : c10::irange(input0_shape_value.size())) {
@@ -1489,7 +1512,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
@@ -1531,26 +1554,19 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
-bool AllGraphInputsStatic(const Graph* g) {
-  for (auto n : g->inputs()) {
-    if (TensorTypePtr input_type = n->type()->cast<TensorType>()) {
-      if (input_type->dim()) {
-        auto shape = input_type->symbolic_sizes();
-        if (!ConstantValueMap::HasShape(n->debugName())) {
-          UpdateShapeConstantValueMap(n, shape);
-        }
-      }
-    }
+// Check if all graph inputs are static and allow a cached value to return.
+// Since this traverses all inputs of the graph (including weights), it can be
+// costly for large graphs. Since this is called for each node in an export,
+// and the inputs remain unchanged, we can cut down export time by caching.
+bool AllGraphInputsStaticWithCaching(const Graph* g) {
+  auto maybe_is_static = ConstantValueMap::GetAllGraphInputsStatic();
+  if (maybe_is_static.has_value()) {
+    return maybe_is_static.value();
+  } else {
+    bool ret = AllGraphInputsStatic(g);
+    ConstantValueMap::SetAllGraphInputsStatic(ret);
+    return ret;
   }
-  for (auto n : g->inputs()) {
-    // Some inputs can be non-Tensor type, e.g.,
-    // __torch__.torch.classes.quantized.LinearPackedParamsBase
-    // so we only need check Tensor type here.
-    if (n->type()->cast<TensorType>() && !n->isCompleteTensor()) {
-      return false;
-    }
-  }
-  return true;
 }
 
 void ProcessConstantValueMap(Node* n, int opset_version) {
@@ -1564,7 +1580,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // shapes
   UpdateReliable(n);
 
-  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
+  auto static_input_shape = AllGraphInputsStaticWithCaching(n->owningGraph());
   for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1634,7 +1650,8 @@ void SpecialPostProcess(Node* n) {
       auto seq_node = n->input(0)->node();
       auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
+      auto update_sequence_empty_dtype = [](Node* n,
+                                            const TensorTypePtr& t_type) {
         TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
         TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
         auto scalar_type = t_type->scalarType().value();
@@ -1644,10 +1661,10 @@ void SpecialPostProcess(Node* n) {
       };
 
       auto find_sequence_empty = [](Value* input,
-                                    TensorTypePtr t_type) -> Node* {
+                                    const TensorTypePtr& t_type) -> Node* {
         auto find_sequence_empty_impl =
             [](Value* input,
-               TensorTypePtr t_type,
+               const TensorTypePtr& t_type,
                auto& find_sequence_empty_ref) -> Node* {
           auto input_node = input->node();
           TORCH_INTERNAL_ASSERT(input_node);
@@ -1786,7 +1803,8 @@ void UpdateOutputTypeByONNXProto(
     Node* n,
     Node* clone_node,
     const onnx::ModelProto& model_proto,
-    SymbolDimMap& symbol_dim_map) {
+    SymbolDimMap& symbol_dim_map,
+    DimSymbolMap& dim_symbol_map) {
   const auto& graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
@@ -1795,7 +1813,7 @@ void UpdateOutputTypeByONNXProto(
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
             UpdateTorchValueByOnnxValueInfo(
-                n->output(i), v_info, symbol_dim_map);
+                n->output(i), v_info, symbol_dim_map, dim_symbol_map);
           }
         }
       };
@@ -1897,6 +1915,28 @@ void ONNXShapeTypeInference(
 static std::unordered_map<std::string, std::unordered_set<int64_t>>
     non_required_shape_inference_idx_map = {{"onnx::LSTM", {4}}};
 
+bool AllGraphInputsStatic(const Graph* g) {
+  for (auto n : g->inputs()) {
+    if (TensorTypePtr input_type = n->type()->cast<TensorType>()) {
+      if (input_type->dim()) {
+        auto shape = input_type->symbolic_sizes();
+        if (!ConstantValueMap::HasShape(n->debugName())) {
+          UpdateShapeConstantValueMap(n, shape);
+        }
+      }
+    }
+  }
+  for (auto n : g->inputs()) {
+    // Some inputs can be non-Tensor type, e.g.,
+    // __torch__.torch.classes.quantized.LinearPackedParamsBase
+    // so we only need check Tensor type here.
+    if (n->type()->cast<TensorType>() && !n->isCompleteTensor()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
   auto reliable = true;
   auto complete = true;
@@ -1951,18 +1991,11 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
-    // TODO(84661): This warning comes before setType in symbolic_fn.
-    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),
         " type is missing, so it may result in wrong shape inference for the exported graph. ",
         "Please consider adding it in symbolic function.");
-    // Experimental, nothing sent to stdout nor stderr.
-    diagnostics::Diagnose(
-        diagnostics::Rule::kNodeMissingOnnxShapeInference,
-        diagnostics::Level::kWarning,
-        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {
@@ -1993,11 +2026,17 @@ void UpdateReliable(Node* n) {
   }
 }
 
-void SetGraphInputTypeReliable(const Graph* g) {
-  for (auto graph_input : g->inputs()) {
-    if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
-      ConstantValueMap::SetTypeReliable(graph_input->debugName(), true);
+// Traverse the graph inputs and compute reliability (e.g., are shapes static).
+// Since the inputs do not change during export, we save computation time by
+// marking it as computed and subsequently skipping.
+static void SetGraphInputTypeReliable(const Graph* g) {
+  if (!ConstantValueMap::GetAllGraphInputsReliableComputed()) {
+    for (auto graph_input : g->inputs()) {
+      if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
+        ConstantValueMap::SetTypeReliable(graph_input->debugName(), true);
+      }
     }
+    ConstantValueMap::SetAllGraphInputsReliableComputed(true);
   }
 }
 
@@ -2010,6 +2049,7 @@ void ONNXShapeTypeInference(
   auto& original_shape_data = ConstantValueMap::GetInferredShapeData();
   ShapeDataMap inferred_shape_data;
   auto& symbol_dim_map = ConstantValueMap::GetSymbolDimMap();
+  auto& dim_symbol_map = ConstantValueMap::GetDimSymbolMap();
 
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
@@ -2039,11 +2079,16 @@ void ONNXShapeTypeInference(
           clone_node->output(i)->debugName();
     }
     // Make inferred_shape_data use name from temporal ONNX graph
-    // instead of original PyTorch graph
-    for (const auto& gs_data : original_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_input.end()) {
-        inferred_shape_data[onnx_output_name->second] = gs_data.second;
+    // instead of original PyTorch graph. Only copy what we need,
+    // which are the inputs of n.
+    for (auto input : n->inputs()) {
+      const auto maybe_shape = original_shape_data.find(input->debugName());
+      if (maybe_shape != original_shape_data.end()) {
+        const auto onnx_output_name =
+            torch_to_onnx_input.find(input->debugName());
+        if (onnx_output_name != torch_to_onnx_input.end()) {
+          inferred_shape_data[onnx_output_name->second] = maybe_shape->second;
+        }
       }
     }
     // Use scalar_type_analysis without low precision cast
@@ -2059,7 +2104,7 @@ void ONNXShapeTypeInference(
       //       e.g: ListConstruct, ListUnpack, etc.
       std::shared_ptr<onnx::ModelProto> model_proto;
       ConvertGraphToONNXProto(
-          n_graph, model_proto, symbol_dim_map, opset_version);
+          n_graph, model_proto, symbol_dim_map, dim_symbol_map, opset_version);
       GRAPH_DEBUG(
           "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
 
@@ -2071,9 +2116,9 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
             onnx::ShapeInferenceOptions options{
-                /*check_type=*/false,
-                /*error_mode=*/false,
-                /*enable_data_propagation=*/true};
+                /*check_type_val=*/false,
+                /*strict_mode_val=*/0,
+                /*data_prop_val=*/true};
             onnx::shape_inference::InferShapes(
                 *model_proto, schema_registry, options, &inferred_shape_data);
             break;
@@ -2084,7 +2129,7 @@ void ONNXShapeTypeInference(
           }
         }
         UpdateOutputTypeByONNXProto(
-            n, clone_node, *model_proto, symbol_dim_map);
+            n, clone_node, *model_proto, symbol_dim_map, dim_symbol_map);
       } catch (std::runtime_error& ex) {
         // TODO: include this as warning once we have a more consolidated
         // warning system.
@@ -2093,10 +2138,8 @@ void ONNXShapeTypeInference(
             ex.what(),
             " on graph: ",
             n_graph->toString());
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char shape_err[] = "ShapeInferenceError";
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char type_err[] = "TypeInferenceError";
+        constexpr const char* shape_err = "ShapeInferenceError";
+        constexpr const char* type_err = "TypeInferenceError";
         if ((strstr(ex.what(), shape_err) == nullptr) &&
             (strstr(ex.what(), type_err) == nullptr)) {
           throw;
@@ -2126,8 +2169,8 @@ void ONNXShapeTypeInference(
       int rank = inferred_shape.dim_size();
       std::vector<::c10::ShapeSymbol> final_shape(rank);
       for (int i = 0; i < rank; ++i) {
-        final_shape[i] =
-            ONNXDimToShapeSymbol(inferred_shape.dim(i), symbol_dim_map);
+        final_shape[i] = ONNXDimToShapeSymbol(
+            inferred_shape.dim(i), symbol_dim_map, dim_symbol_map);
       }
       c10::SymbolicShape shape_value(final_shape);
       // Store data propagation result into shapeValueMap
@@ -2214,7 +2257,7 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-bool HasSequenceTypeOutput(Node* node) {
+static bool HasSequenceTypeOutput(const Node* node) {
   if (node->kind() == ::c10::onnx::SplitToSequence ||
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
@@ -2225,7 +2268,7 @@ bool HasSequenceTypeOutput(Node* node) {
   return false;
 }
 
-void ONNXUpdateTypeFromTensor(
+static void ONNXUpdateTypeFromTensor(
     Value* graph_output,
     const at::Tensor& output,
     bool onnx_shape_inference) {
@@ -2241,7 +2284,7 @@ void ONNXUpdateTypeFromTensor(
 // into flattened graph outputs. `outputs_index` is passed in to point to the
 // current index in flattened graph outputs. The updated `outputs_index` is
 // returned at the end of the function.
-size_t ONNXAssignOutputShape(
+static size_t ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     size_t outputs_index,
     PyObject* output_obj,
@@ -2326,8 +2369,8 @@ size_t ONNXAssignOutputShape(
     // Support for dict data type is limited to fixed size dictionaries in
     // ONNX.
     // Dictionary values are unrolled and keys are not preserved.
-    auto unrolled_dict =
-        py::reinterpret_borrow<py::list>(PyDict_Items(output_obj));
+    auto* items = PyDict_Items(output_obj);
+    auto unrolled_dict = py::reinterpret_borrow<py::list>(items);
     TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
     for (const auto i : c10::irange(unrolled_dict.size())) {
       outputs_index = ONNXAssignOutputShape(
@@ -2338,6 +2381,7 @@ size_t ONNXAssignOutputShape(
           is_script,
           opset_version);
     }
+    Py_DECREF(items);
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
   } else if (PyNone_Check(output_obj)) {
@@ -2457,5 +2501,4 @@ void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,15 +1,13 @@
-#include <ATen/native/mkldnn/ConvPrepack.h>
 #include <ATen/native/mkldnn/OpContext.h>
 
 #if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/ConvPrepack.h>
 
-namespace at {
-namespace native {
-namespace mkldnn {
+namespace at::native::mkldnn {
 
 c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
     at::Tensor&& weight,
-    c10::optional<at::Tensor>&& bias,
+    std::optional<at::Tensor>&& bias,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
@@ -37,11 +35,9 @@ Tensor MkldnnConvOpContext::run(const Tensor& input) {
 }
 
 void MkldnnConvOpContext::run(const Tensor& input, void* output) {
-  return mkldnn::internal::convolution::run(op_context_, input, output);
+  mkldnn::internal::convolution::run(op_context_, input, output);
 }
 
-} // namespace mkldnn
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

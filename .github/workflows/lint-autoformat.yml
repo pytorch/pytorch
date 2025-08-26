@@ -1,0 +1,42 @@
+name: Apply lint suggestions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  lintrunner-autoformat:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: lf.linux.2xlarge
+    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.labels.*.name, 'autoformat') }}
+    steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Run lintrunner (nonretryable)
+        continue-on-error: true
+        run: |
+          set -ex
+          python3 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
+          export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
+          bash .github/scripts/lintrunner.sh
+      - name: Check for changes
+        id: git-check
+        continue-on-error: true
+        run: |
+          git diff --exit-code || echo "changes=true" >> "$GITHUB_OUTPUT"
+      - name: Suggest changes
+        if: steps.git-check.outputs.changes == 'true'
+        continue-on-error: true
+        uses: parkerbxyz/suggest-changes@a2ec1653b0c4cc8287d682f0066dba4a173cc7f3 # v1.0.8
+        with:
+          comment: "Please commit the suggested changes from pytorch's linter."
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

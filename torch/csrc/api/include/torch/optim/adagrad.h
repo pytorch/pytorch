@@ -9,15 +9,12 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API AdagradOptions
     : public OptimizerCloneableOptions<AdagradOptions> {
@@ -34,7 +31,6 @@ struct TORCH_API AdagradOptions
   TORCH_API friend bool operator==(
       const AdagradOptions& lhs,
       const AdagradOptions& rhs);
-  ~AdagradOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -50,17 +46,14 @@ struct TORCH_API AdagradParamState
   TORCH_API friend bool operator==(
       const AdagradParamState& lhs,
       const AdagradParamState& rhs);
-  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
  public:
   explicit Adagrad(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       AdagradOptions defaults = {})
-      : Optimizer(
-            std::move(param_groups),
-            std::make_unique<AdagradOptions>(defaults)) {
+      : Optimizer(param_groups, std::make_unique<AdagradOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(
         defaults.lr_decay() >= 0,
@@ -84,14 +77,14 @@ class TORCH_API Adagrad : public Optimizer {
             p.data(),
             defaults.initial_accumulator_value(),
             at::MemoryFormat::Preserve));
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-            std::move(state);
+        state_[p.unsafeGetTensorImpl()] = std::move(state);
       }
     }
   }
 
   explicit Adagrad(std::vector<Tensor> params, AdagradOptions defaults = {})
-      : Adagrad({OptimizerParamGroup(std::move(params))}, defaults) {}
+      : Adagrad({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {
+  }
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -103,5 +96,4 @@ class TORCH_API Adagrad : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adagrad);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

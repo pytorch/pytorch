@@ -3,12 +3,13 @@
 import json
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any
 from unittest import main, mock, TestCase
 
 import yaml
 from filter_test_configs import (
     filter,
+    filter_selected_test_configs,
     get_labels,
     mark_unstable_jobs,
     parse_reenabled_issues,
@@ -17,7 +18,6 @@ from filter_test_configs import (
     remove_disabled_jobs,
     set_periodic_modes,
     SUPPORTED_PERIODICAL_MODES,
-    VALID_TEST_CONFIG_LABELS,
 )
 
 
@@ -249,13 +249,13 @@ class TestConfigFilter(TestCase):
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}]}',
-                "description": "No match, keep the same test matrix",
+                "expected": '{"include": []}',
+                "description": "Request test-config/cfg but the test matrix doesn't have it",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "plain-cfg"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "plain-cfg"}]}',
-                "description": "No match because there is no prefix or suffix, keep the same test matrix",
+                "expected": '{"include": []}',
+                "description": "A valid test config label needs to start with test-config/",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", shard: 1}]}',
@@ -270,9 +270,8 @@ class TestConfigFilter(TestCase):
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
-    def test_filter_with_valid_label(self) -> None:
+    def test_filter_with_test_config_label(self) -> None:
         mocked_labels = {f"{PREFIX}cfg", "ciflow/trunk"}
-        VALID_TEST_CONFIG_LABELS.add(f"{PREFIX}cfg")
 
         testcases = [
             {
@@ -293,8 +292,53 @@ class TestConfigFilter(TestCase):
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
+    def test_filter_selected_test_configs(self) -> None:
+        testcases = [
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "",
+                "expected": '{"include": [{"config": "default"}]}',
+                "description": "No selected test configs",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo",
+                "expected": '{"include": []}',
+                "description": "A different test config is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo, bar",
+                "expected": '{"include": []}',
+                "description": "A different set of test configs is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo, bar,default",
+                "expected": '{"include": [{"config": "default"}]}',
+                "description": "One of the test config is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}, {config: "bar"}]}',
+                "selected_test_configs": "foo, bar,Default",
+                "expected": '{"include": [{"config": "default"}, {"config": "bar"}]}',
+                "description": "Several test configs are selected",
+            },
+        ]
+
+        for case in testcases:
+            selected_test_configs = {
+                v.strip().lower()
+                for v in case["selected_test_configs"].split(",")
+                if v.strip()
+            }
+            filtered_test_matrix = filter_selected_test_configs(
+                yaml.safe_load(case["test_matrix"]), selected_test_configs
+            )
+            self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
     def test_set_periodic_modes(self) -> None:
-        testcases: List[Dict[str, str]] = [
+        testcases: list[dict[str, str]] = [
             {
                 "job_name": "a CI job",
                 "test_matrix": "{include: []}",
@@ -303,26 +347,26 @@ class TestConfigFilter(TestCase):
             {
                 "job_name": "a-ci-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config",
+                "description": "Replicate each periodic mode in a different config",
             },
             {
                 "job_name": "a-ci-cuda11.8-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config for a CUDA job",
+                "description": "Replicate each periodic mode in a different config for a CUDA job",
             },
             {
                 "job_name": "a-ci-rocm-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Replicate each periodic mode in a different config for a ROCm job",
+                "description": "Replicate each periodic mode in a different config for a ROCm job",
             },
             {
                 "job_name": "",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Empty job name",
+                "description": "Empty job name",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
-                "descripion": "Missing job name",
+                "description": "Missing job name",
             },
         ]
 
@@ -577,59 +621,131 @@ class TestConfigFilter(TestCase):
             test_matrix = yaml.safe_load(case["test_matrix"])
 
             filtered_test_matrix = mark_unstable_jobs(workflow, job_name, test_matrix)
-            self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+            self.assertEqual(json.loads(case["expected"]), filtered_test_matrix)
 
     @mock.patch("subprocess.check_output")
     def test_perform_misc_tasks(self, mocked_subprocess: Any) -> None:
+        def _gen_expected_string(
+            keep_going: bool = False,
+            ci_verbose_test_logs: bool = False,
+            ci_test_showlocals: bool = False,
+            ci_no_test_timeout: bool = False,
+            ci_no_td: bool = False,
+            ci_td_distributed: bool = False,
+            is_unstable: bool = False,
+            reenabled_issues: str = "",
+        ) -> str:
+            return (
+                f"keep-going={keep_going}\n"
+                f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
+                f"ci-test-showlocals={ci_test_showlocals}\n"
+                f"ci-no-test-timeout={ci_no_test_timeout}\n"
+                f"ci-no-td={ci_no_td}\n"
+                f"ci-td-distributed={ci_td_distributed}\n"
+                f"is-unstable={is_unstable}\n"
+                f"reenabled-issues={reenabled_issues}\n"
+            )
+
         mocked_subprocess.return_value = b""
-        testcases: List[Dict[str, Any]] = [
+        testcases: list[dict[str, Any]] = [
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(),
                 "description": "No keep-going, no is-unstable",
             },
             {
                 "labels": {"keep-going"},
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
-                "expected": "keep-going=True\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(keep_going=True),
                 "description": "Has keep-going, no is-unstable",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[keep-going]",
+                "expected": _gen_expected_string(keep_going=True),
+                "description": "Keep-going in PR body",
+            },
+            {
+                "labels": {"ci-verbose-test-logs"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-no-test-timeout]",
+                "expected": _gen_expected_string(
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
+                ),
+                "description": "No pipe logs label and no test timeout in PR body",
+            },
+            {
+                "labels": {"ci-test-showlocals"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "expected": _gen_expected_string(ci_test_showlocals=True),
+                "description": "Has ci-test-showlocals",
+            },
+            {
+                "labels": {},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-test-showlocals]",
+                "expected": _gen_expected_string(ci_test_showlocals=True),
+                "description": "ci-test-showlocals in body",
+            },
+            {
+                "labels": {"ci-no-test-timeout"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-verbose-test-logs]",
+                "expected": _gen_expected_string(
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
+                ),
+                "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
+            },
+            {
+                "labels": {"ci-no-td"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "",
+                "expected": _gen_expected_string(ci_no_td=True),
+                "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
+            },
+            {
+                "labels": {},
+                "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": None,
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(),
                 "description": "No job name",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "Unstable job",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "Unstable job",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "1", unstable: "unstable"}, {config: "2", unstable: "unstable"}]}',
                 "job_name": "macos-12-py3-arm64 / build",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "All configs are unstable",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "1", unstable: "unstable"}, {config: "2"}]}',
                 "job_name": "macos-12-py3-arm64 / build",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(is_unstable=False),
                 "description": "Only mark some configs as unstable",
             },
             {
@@ -637,7 +753,7 @@ class TestConfigFilter(TestCase):
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
                 "pr_body": "resolves #123 fixes #234",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=123,234\n",
+                "expected": _gen_expected_string(reenabled_issues="123,234"),
                 "description": "Reenable some issues",
             },
         ]
@@ -691,10 +807,13 @@ class TestConfigFilter(TestCase):
         # test bad things
         pr_body = (
             "fixes189 fixeshttps://github.com/pytorch/pytorch/issues/75123 "
-            "closedhttps://githubcom/pytorch/pytorch/issues/75123"
+            "closedhttps://githubcom/pytorch/pytorch/issues/75123"  # @lint-ignore
             "fix 234, fixes # 45, fixing #123, close 234, closes#45, closing #123 resolve 234, "
             "resolves  #45, resolving #123"
         )
+        self.assertEqual(parse_reenabled_issues(pr_body), [])
+
+        pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
 
 

@@ -10,8 +10,7 @@
 
 #include <torch/csrc/monitor/events.h>
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 constexpr int NUM_AGGREGATIONS = 7;
 
@@ -37,12 +36,11 @@ enum class C10_API_ENUM Aggregation {
   MIN = 6,
 };
 
-struct TORCH_API AggregationHash {
-  template <typename T>
-  std::size_t operator()(T t) const {
-    return static_cast<std::size_t>(t);
-  }
-};
+struct TORCH_API AggregationHash{template <typename T> std::size_t operator()(
+    T t) const {return static_cast<std::size_t>(t);
+} // namespace torch::monitor
+}
+;
 
 // aggregationName returns the human readable name corresponding to the
 // aggregation.
@@ -123,6 +121,10 @@ class Stat {
         maxSamples_(maxSamples) {
     detail::registerStat(this);
   }
+  Stat(const Stat&) = delete;
+  Stat(Stat&&) = delete;
+  Stat& operator=(const Stat&) = delete;
+  Stat& operator=(Stat&&) = delete;
 
   virtual ~Stat() {
     {
@@ -275,5 +277,4 @@ class Stat {
   const std::chrono::milliseconds windowSize_;
   const int64_t maxSamples_;
 };
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor

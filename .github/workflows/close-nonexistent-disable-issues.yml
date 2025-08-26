@@ -1,0 +1,30 @@
+name: Close nonexistent disable issues
+
+on:
+  schedule:
+    - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
+
+jobs:
+  close-nonexistent-disable-issues:
+    environment: rockset-read-only
+    permissions:
+      issues: write
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Run close_nonexistent_disable_issues.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLICKHOUSE_ENDPOINT: ${{ secrets.CLICKHOUSE_ENDPOINT }}
+          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_READONLY_USERNAME }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
+        run: |
+          pip3 install requests==2.32.2
+          pip3 install clickhouse-connect==0.8.14
+          python3 .github/scripts/close_nonexistent_disable_issues.py

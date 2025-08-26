@@ -5,6 +5,7 @@
 
 using namespace c10::guts;
 
+// NOLINTBEGIN(modernize*, cppcoreguidelines-special-member-functions)
 namespace {
 
 namespace test_function_traits {
@@ -67,8 +68,7 @@ static_assert(
 } // namespace test_function_traits
 
 struct MovableOnly {
-  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */
-  }
+  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */ }
   MovableOnly(const MovableOnly&) = delete;
   MovableOnly(MovableOnly&&) = default;
   MovableOnly& operator=(const MovableOnly&) = delete;
@@ -87,20 +87,20 @@ using is_my_movable_only_class =
     std::is_same<MovableOnly, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 struct CopyCounting {
-  int move_count;
-  int copy_count;
+  int move_count{0};
+  int copy_count{0};
 
-  CopyCounting() : move_count(0), copy_count(0) {}
+  CopyCounting() {}
   CopyCounting(const CopyCounting& rhs)
       : move_count(rhs.move_count), copy_count(rhs.copy_count + 1) {}
-  CopyCounting(CopyCounting&& rhs)
+  CopyCounting(CopyCounting&& rhs) noexcept
       : move_count(rhs.move_count + 1), copy_count(rhs.copy_count) {}
   CopyCounting& operator=(const CopyCounting& rhs) {
     move_count = rhs.move_count;
     copy_count = rhs.copy_count + 1;
     return *this;
   }
-  CopyCounting& operator=(CopyCounting&& rhs) {
+  CopyCounting& operator=(CopyCounting&& rhs) noexcept {
     move_count = rhs.move_count + 1;
     copy_count = rhs.copy_count;
     return *this;
@@ -174,7 +174,7 @@ namespace test_tuple_map {
 TEST(MetaprogrammingTest, TupleMap_simple) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int32_t a) -> int16_t { return a + 1; });
+      [](int32_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -187,7 +187,7 @@ TEST(MetaprogrammingTest, TupleMap_simple) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int64_t a) -> int16_t { return a + 1; });
+      [](int64_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -200,7 +200,7 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](const int32_t& a) -> int16_t { return a + 1; });
+      [](const int32_t& a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -229,6 +229,7 @@ TEST(MetaprogrammingTest, TupleMap_mapsToDifferentTypes) {
 
 TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
   struct Mapper {
+    // NOLINTNEXTLINE(*move*)
     std::string operator()(std::string&& a) const {
       return "moved";
     }
@@ -300,3 +301,4 @@ TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
 } // namespace test_tuple_map
 
 } // namespace
+// NOLINTEND(modernize*, cppcoreguidelines-special-member-functions)

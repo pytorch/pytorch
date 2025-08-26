@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -ex -o pipefail
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -10,10 +10,6 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
-fi
 
 echo "Python version:"
 python --version
@@ -27,13 +23,21 @@ cmake --version
 echo "Environment variables:"
 env
 
+# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
+# there are some issues if it is always wrapped, so we need to add it to PATH
+# during CI builds.
+# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
+export PATH="/opt/cache/lib:$PATH"
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
+  export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
   echo "NVCC version:"
   nvcc --version
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
     # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
@@ -42,26 +46,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
-  echo "Caffe2 build is ON"
-  export BUILD_CAFFE2=ON
-fi
-
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-# Enable LLVM dependency for TensorExpr testing
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export USE_LLVM=/opt/rocm/llvm
-  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
-else
-  export USE_LLVM=/opt/llvm
-  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
-fi
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
@@ -73,7 +61,56 @@ if ! which conda; then
     export USE_MKLDNN=0
   fi
 else
-  export CMAKE_PREFIX_PATH=/opt/conda
+  # CMAKE_PREFIX_PATH precedences
+  # 1. $CONDA_PREFIX, if defined. This follows the pytorch official build instructions.
+  # 2. /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}, if ANACONDA_PYTHON_VERSION defined.
+  #    This is for CI, which defines ANACONDA_PYTHON_VERSION but not CONDA_PREFIX.
+  # 3. $(conda info --base). The fallback value of pytorch official build
+  #    instructions actually refers to this.
+  #    Commonly this is /opt/conda/
+  if [[ -v CONDA_PREFIX ]]; then
+    export CMAKE_PREFIX_PATH=${CONDA_PREFIX}
+  elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
+    export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
+  else
+    # already checked by `! which conda`
+    CMAKE_PREFIX_PATH="$(conda info --base)"
+    export CMAKE_PREFIX_PATH
+  fi
+
+  # Workaround required for MKL library linkage
+  # https://github.com/pytorch/pytorch/issues/119557
+  if [[ "$ANACONDA_PYTHON_VERSION" = "3.12" || "$ANACONDA_PYTHON_VERSION" = "3.13" ]]; then
+    export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
+    export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/ComputeLibrary
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
+
+  export CMAKE_CROSSCOMPILING=TRUE
+  export CMAKE_SYSTEM_NAME=Linux
+  export CMAKE_SYSTEM_PROCESSOR=riscv64
+
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -101,26 +138,8 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
 fi
 
 # Use special scripts for Android builds
-if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
-  export ANDROID_NDK=/opt/ndk
-  build_args=()
-  if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
-    build_args+=("-DANDROID_ABI=armeabi-v7a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
-    build_args+=("-DANDROID_ABI=arm64-v8a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_32* ]]; then
-    build_args+=("-DANDROID_ABI=x86")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
-    build_args+=("-DANDROID_ABI=x86_64")
-  fi
-  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-    build_args+=("-DUSE_VULKAN=ON")
-  fi
-  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
-  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
-fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
@@ -145,10 +164,25 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_amd.py
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # Enable XCCL build
+  export USE_XCCL=1
+  export USE_MPI=0
+  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
+  export USE_KINETO=0
+  export TORCH_XPU_ARCH_LIST=pvc
+fi
+
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]; } && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
@@ -159,18 +193,32 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
+# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
+# memory to build and will OOM
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
+  J=2  # default to 2 jobs
+  case "$RUNNER" in
+    linux.12xlarge.memory|linux.24xlarge.memory)
+      J=24
+      ;;
+  esac
+  echo "Building FlashAttention with job limit $J"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
-  export LDSHARED="clang --shared"
-  export USE_CUDA=0
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export USE_CUDA=1
+  fi
   export USE_ASAN=1
-  export USE_MKLDNN=0
+  export REL_WITH_DEB_INFO=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
-  unset USE_LLVM
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
@@ -181,19 +229,37 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
     export USE_PRECOMPILED_HEADERS=1
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
-  export USE_GLOO_WITH_OPENSSL=ON
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
+# Do not change workspace permissions for ROCm and s390x CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e
+  set -e -o pipefail
 
   get_bazel
-  install_sccache_nvcc_for_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -214,18 +280,53 @@ else
   ( ! get_exit_code python setup.py clean bad_argument )
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      python -mpip install numpy==2.0.2
+
+      WERROR=1 python setup.py clean
+
       WERROR=1 python setup.py bdist_wheel
     else
+      python setup.py clean
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
       python setup.py bdist_wheel
     fi
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+      install_torchvision
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+      install_torchaudio
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+      install_torchrec_and_fbgemm
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+      install_torchao
+    fi
+
+    if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+      echo "Checking that xpu is compiled"
+      pushd dist/
+      if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
+        echo "XPU support is compiled in."
+      else
+        echo "XPU support is NOT compiled in."
+        exit 1
+      fi
+      popd
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -261,10 +362,11 @@ else
     CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -274,10 +376,10 @@ else
     JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -289,7 +391,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -319,5 +421,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-print_sccache_stats
+# don't do this for bazel or s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+  print_sccache_stats
+fi

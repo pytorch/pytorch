@@ -42,7 +42,7 @@ TensorBase TensorBase::to(
     at::TensorOptions options,
     bool non_blocking,
     bool copy,
-    c10::optional<at::MemoryFormat> memory_format) const {
+    std::optional<at::MemoryFormat> memory_format) const {
   Tensor self(*this);
   return at::_ops::to_dtype_layout::call(
       self, optTypeMetaToScalarType(options.dtype_opt()),
@@ -51,9 +51,8 @@ TensorBase TensorBase::to(
 }
 
 void TensorBase::enforce_invariants() {
-  if (impl_.get() == nullptr) {
-    throw std::runtime_error("TensorImpl with nullptr is not supported");
-  }
+  TORCH_CHECK(
+      impl_.get() != nullptr, "TensorImpl with nullptr is not supported");
   // Following line throws if the method is not a POD data type or is not
   // supported by ATen
   scalar_type();
@@ -72,9 +71,9 @@ void TensorBase::enforce_invariants() {
 
 void TensorBase::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << toString() << " " << sizes() << "]" << '\n';
   } else {
-    std::cerr << "[UndefinedTensor]" << std::endl;
+    std::cerr << "[UndefinedTensor]" << '\n';
   }
 }
 
@@ -89,6 +88,8 @@ std::string TensorBase::toString() const {
       dispatchkey_str = c10::get_privateuse1_backend();
     } else if (dispatchkey == c10::DispatchKey::AutocastPrivateUse1) {
       dispatchkey_str = "Autocast" + c10::get_privateuse1_backend();
+    } else if (dispatchkey == c10::DispatchKey::QuantizedPrivateUse1) {
+      dispatchkey_str = "Quantized" + c10::get_privateuse1_backend();
     } else {
       dispatchkey_str = at::toString(dispatchkey);
     }
@@ -134,8 +135,8 @@ bool TensorBase::retains_grad() const {
 }
 
 void Tensor::_backward(TensorList inputs,
-        const c10::optional<Tensor>& gradient,
-        c10::optional<bool> keep_graph,
+        const std::optional<Tensor>& gradient,
+        std::optional<bool> keep_graph,
         bool create_graph) const {
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }

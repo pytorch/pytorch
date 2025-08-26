@@ -176,171 +176,168 @@ can use this pattern:
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
 
-.. _serializing-python-modules:
 
-Serializing torch.nn.Modules and loading them in C++
-----------------------------------------------------
+.. _serialized-file-format:
 
-See also: `Tutorial: Loading a TorchScript Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_
+Serialized file format for ``torch.save``
+-----------------------------------------
 
-ScriptModules can be serialized as a TorchScript program and loaded
-using :func:`torch.jit.load`.
-This serialization encodes all the modules’ methods, submodules, parameters,
-and attributes, and it allows the serialized program to be loaded in C++
-(i.e. without Python).
+Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
+archive unless the user sets ``_use_new_zipfile_serialization=False``.
 
-The distinction between :func:`torch.jit.save` and :func:`torch.save` may not
-be immediately clear. :func:`torch.save` saves Python objects with pickle.
-This is especially useful for prototyping, researching, and training.
-:func:`torch.jit.save`, on the other hand, serializes ScriptModules to a format
-that can be loaded in Python or C++. This is useful when saving and loading C++
-modules or for running modules trained in Python with C++, a common practice
-when deploying PyTorch models.
+In this archive, the files are ordered as such
 
-To script, serialize and load a module in Python:
+.. code-block:: text
 
-::
+    checkpoint.pth
+    ├── data.pkl
+    ├── byteorder  # added in PyTorch 2.1.0
+    ├── data/
+    │   ├── 0
+    │   ├── 1
+    │   ├── 2
+    │   └── …
+    └── version
 
-    >>> scripted_module = torch.jit.script(MyModule())
-    >>> torch.jit.save(scripted_module, 'mymodule.pt')
-    >>> torch.jit.load('mymodule.pt')
-    RecursiveScriptModule( original_name=MyModule
-                          (l0): RecursiveScriptModule(original_name=Linear)
-                          (l1): RecursiveScriptModule(original_name=Linear) )
+The entries are as follows:
+  * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
+    excluding ``torch.Storage`` objects that it contains
+  * ``byteorder`` contains a string with the ``sys.byteorder`` when saving (“little” or “big”)
+  * ``data/`` contains all the storages in the object, where each storage is a separate file
+  * ``version`` contains a version number at save time that can be used at load time
+
+When saving, PyTorch will ensure that the local file header of each file is padded
+to an offset that is a multiple of 64 bytes, ensuring that the offset of each file
+is 64-byte aligned.
+
+.. note::
+    Tensors on certain devices such as XLA are serialized as pickled numpy arrays. As
+    such, their storages are not serialized. In these cases ``data/`` might not exist
+    in the checkpoint.
+
+.. _layout-control:
+
+Layout Control
+--------------
+
+The ``mmap`` argument in :func:`torch.load` allows for lazy loading of tensor storages.
+
+In addition, there are some advanced features that allow for more fine-grained
+control and manipulation of a ``torch.save`` checkpoint.
+
+The :class:`torch.serialization.skip_data` context manager enables
+  * Saving a checkpoint with ``torch.save`` that includes empty space for data bytes
+    to be written later.
+  * Loading a checkpoint with ``torch.load`` and filling in the data bytes of tensors later.
+
+To inspect tensor metadata in a ``torch.save`` checkpoint without allocating memory for storage
+data, use ``torch.load`` within the ``FakeTensorMode`` context manager. On top of skipping loading
+storage data similar to ``skip_data`` above, it additionally tags storages with their offset within
+the checkpoint, enabling direct checkpoint manipulation.
+
+.. code-block:: python
+
+  import torch.nn as nn
+  from torch._subclasses.fake_tensor import FakeTensorMode
+
+  m = nn.Linear(10, 10)
+  torch.save(m.state_dict(), "checkpoint.pt")
+
+  with FakeTensorMode() as mode:
+      fake_sd = torch.load("checkpoint.pt")
+
+  for k, v in fake_sd.items():
+      print(f"key={k}, dtype={v.dtype}, shape={v.shape}, stride={v.stride()}, storage_offset={v.storage_offset()}")
+      # offset of the storage in the checkpoint
+      print(f"key={k}, checkpoint_offset={v.untyped_storage()._checkpoint_offset}")
+
+For more information, `this tutorial <https://docs.pytorch.org/tutorials/prototype/gpu_direct_storage.html>`_
+offers a comprehensive example of using these features to manipulate a checkpoint.
 
 
-Traced modules can also be saved with :func:`torch.jit.save`, with the caveat
-that only the traced code path is serialized. The following example demonstrates
-this:
+.. _weights-only:
 
-::
+``torch.load`` with ``weights_only=True``
+-----------------------------------------
 
-    # A module with control flow
-    >>> class ControlFlowModule(torch.nn.Module):
-          def __init__(self):
-            super().__init__()
-            self.l0 = torch.nn.Linear(4, 2)
-            self.l1 = torch.nn.Linear(2, 1)
+Starting in version 2.6, ``torch.load`` will use ``weights_only=True`` if the ``pickle_module``
+argument is not passed.
 
-          def forward(self, input):
-            if input.dim() > 1:
-                return torch.tensor(0)
+As discussed in the documentation for :func:`torch.load`, ``weights_only=True`` restricts
+the unpickler used in ``torch.load`` to only executing functions/building classes required for
+``state_dicts`` of plain ``torch.Tensors`` as well as some other primitive types. Further,
+unlike the default ``Unpickler`` provided by the ``pickle`` module, the ``weights_only`` Unpickler
+is not allowed to dynamically import anything during unpickling.
 
-            out0 = self.l0(input)
-            out0_relu = torch.nn.functional.relu(out0)
-            return self.l1(out0_relu)
+As mentioned above, saving a module's ``state_dict`` is a best practice when using ``torch.save``. If loading an old
+checkpoint that contains an ``nn.Module``, we recommend ``weights_only=False``. When loading a checkpoint that contains
+tensor subclasses, there will likely be functions/classes that need to be allowlisted, see below for further details.
 
-    >>> traced_module = torch.jit.trace(ControlFlowModule(), torch.randn(4))
-    >>> torch.jit.save(traced_module, 'controlflowmodule_traced.pt')
-    >>> loaded = torch.jit.load('controlflowmodule_traced.pt')
-    >>> loaded(torch.randn(2, 4)))
-    tensor([[-0.1571], [-0.3793]], grad_fn=<AddBackward0>)
+If the ``weights_only`` Unpickler encounters a function or class that is not allowlisted
+by default within the pickle file, you should see an actionable error like such
 
-    >>> scripted_module = torch.jit.script(ControlFlowModule(), torch.randn(4))
-    >>> torch.jit.save(scripted_module, 'controlflowmodule_scripted.pt')
-    >>> loaded = torch.jit.load('controlflowmodule_scripted.pt')
-    >> loaded(torch.randn(2, 4))
-    tensor(0)
+.. code::
 
-The above module has an if statement that is not triggered by the traced inputs,
-and so is not part of the traced module and not serialized with it.
-The scripted module, however, contains the if statement and is serialized with it.
-See the `TorchScript documentation <https://pytorch.org/docs/stable/jit.html>`_
-for more on scripting and tracing.
+    _pickle.UnpicklingError: Weights only load failed. This file can still be loaded,
+    to do so you have two options, do those steps only if you trust the source of the checkpoint.
+        1. Re-running `torch.load` with `weights_only` set to `False` will likely succeed,
+            but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
+        2. Alternatively, to load with `weights_only=True` please check the recommended
+           steps in the following error message.
+           WeightsUnpickler error: Unsupported global: GLOBAL {__module__}.{__name__} was not an allowed global by
+           default. Please use `torch.serialization.add_safe_globals([{__name__}])` or the
+           `torch.serialization.safe_globals([{__name__}])` context manager to allowlist this global
+           if you trust this class/function.
 
-Finally, to load the module in C++:
+Please follow the steps in the error message and allowlist the functions or classes only if you trust them.
 
-::
+To get all GLOBALs (functions/classes) in the checkpoint that are not yet allowlisted you can use
+:func:`torch.serialization.get_unsafe_globals_in_checkpoint` which will return a list of strings of the form
+``{__module__}.{__name__}``. If you trust these functions/classes, you can import them and allowlist them per
+the error message either via :func:`torch.serialization.add_safe_globals` or the context manager
+:class:`torch.serialization.safe_globals`.
 
-    >>> torch::jit::script::Module module;
-    >>> module = torch::jit::load('controlflowmodule_scripted.pt');
+To access the list of user-allowlisted functions/classes you can use :func:`torch.serialization.get_safe_globals` and
+to clear the current list see :func:`torch.serialization.clear_safe_globals`.
 
-See the `PyTorch C++ API documentation <https://pytorch.org/cppdocs/>`_
-for details about how to use PyTorch modules in C++.
+Troubleshooting ``weights_only``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. _saving-loading-across-versions:
+Getting unsafe globals
+""""""""""""""""""""""
 
-Saving and loading ScriptModules across PyTorch versions
------------------------------------------------------------
+A caveat is that :func:`torch.serialization.get_unsafe_globals_in_checkpoint` analyzes the checkpoint statically,
+some types might be built dynamically during the unpickling process and hence will not be reported by
+:func:`torch.serialization.get_unsafe_globals_in_checkpoint`. One such example is ``dtypes`` in numpy. In
+``numpy < 1.25`` after allowlisting all the functions/classes reported by
+:func:`torch.serialization.get_unsafe_globals_in_checkpoint` you might see an error like
 
-The PyTorch Team recommends saving and loading modules with the same version of
-PyTorch. Older versions of PyTorch may not support newer modules, and newer
-versions may have removed or modified older behavior. These changes are
-explicitly described in
-PyTorch’s `release notes <https://github.com/pytorch/pytorch/releases>`_,
-and modules relying on functionality that has changed may need to be updated
-to continue working properly. In limited cases, detailed below, PyTorch will
-preserve the historic behavior of serialized ScriptModules so they do not require
-an update.
+.. code::
 
-torch.div performing integer division
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    WeightsUnpickler error: Can only build Tensor, Parameter, OrderedDict or types allowlisted via `add_safe_globals`,
+    but got <class 'numpy.dtype[float32]'>
 
-In PyTorch 1.5 and earlier :func:`torch.div` would perform floor division when
-given two integer inputs:
+This can be allowlisted via ``{add_}safe_globals([type(np.dtype(np.float32))])``.
 
-::
+In ``numpy >=1.25`` you would see
 
-    # PyTorch 1.5 (and earlier)
-    >>> a = torch.tensor(5)
-    >>> b = torch.tensor(3)
-    >>> a / b
-    tensor(1)
+.. code::
 
-In PyTorch 1.7, however, :func:`torch.div` will always perform a true division
-of its inputs, just like division in Python 3:
+    WeightsUnpickler error: Can only build Tensor, Parameter, OrderedDict or types allowlisted via `add_safe_globals`,
+    but got <class 'numpy.dtypes.Float32DType'>
 
-::
+This can be allowlisted via ``{add_}safe_globals([np.dtypes.Float32DType])``.
 
-    # PyTorch 1.7
-    >>> a = torch.tensor(5)
-    >>> b = torch.tensor(3)
-    >>> a / b
-    tensor(1.6667)
+Environment Variables
+"""""""""""""""""""""
 
-The behavior of :func:`torch.div` is preserved in serialized ScriptModules.
-That is, ScriptModules serialized with versions of PyTorch before 1.6 will continue
-to see :func:`torch.div` perform floor division when given two integer inputs
-even when loaded with newer versions of PyTorch. ScriptModules using :func:`torch.div`
-and serialized on PyTorch 1.6 and later cannot be loaded in earlier versions of
-PyTorch, however, since those earlier versions do not understand the new behavior.
+There are two environment variables that will influence the behavior of ``torch.load``. These can be helpful
+if one does not have access to the ``torch.load`` callsites.
 
-torch.full always inferring a float dtype
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+* ``TORCH_FORCE_WEIGHTS_ONLY_LOAD=1`` will override all ``torch.load`` callsites to use ``weights_only=True``.
+* ``TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1`` will make ``torch.load`` callsites use ``weights_only=False`` **only**
+  if ``weights_only`` was not passed as an argument.
 
-In PyTorch 1.5 and earlier :func:`torch.full` always returned a float tensor,
-regardless of the fill value it’s given:
-
-::
-
-    # PyTorch 1.5 and earlier
-    >>> torch.full((3,), 1)  # Note the integer fill value...
-    tensor([1., 1., 1.])     # ...but float tensor!
-
-In PyTorch 1.7, however, :func:`torch.full` will infer the returned tensor’s
-dtype from the fill value:
-
-::
-
-    # PyTorch 1.7
-    >>> torch.full((3,), 1)
-    tensor([1, 1, 1])
-
-    >>> torch.full((3,), True)
-    tensor([True, True, True])
-
-    >>> torch.full((3,), 1.)
-    tensor([1., 1., 1.])
-
-    >>> torch.full((3,), 1 + 1j)
-    tensor([1.+1.j, 1.+1.j, 1.+1.j])
-
-The behavior of :func:`torch.full` is preserved in serialized ScriptModules. That is,
-ScriptModules serialized with versions of PyTorch before 1.6 will continue to see
-torch.full return float tensors by default, even when given bool or
-integer fill values. ScriptModules using :func:`torch.full` and serialized on PyTorch 1.6
-and later cannot be loaded in earlier versions of PyTorch, however, since those
-earlier versions do not understand the new behavior.
 
 .. _utility functions:
 
@@ -352,3 +349,47 @@ The following utility functions are related to serialization:
 .. currentmodule:: torch.serialization
 
 .. autofunction:: register_package
+.. autofunction:: get_crc32_options
+.. autofunction:: set_crc32_options
+.. autofunction:: get_default_load_endianness
+.. autofunction:: set_default_load_endianness
+.. autofunction:: get_default_mmap_options
+.. autofunction:: set_default_mmap_options
+.. autofunction:: add_safe_globals
+.. autofunction:: clear_safe_globals
+.. autofunction:: get_safe_globals
+.. autofunction:: get_unsafe_globals_in_checkpoint
+.. autoclass:: safe_globals
+.. autoclass:: skip_data
+
+.. _serialization config:
+
+Config
+------
+.. py:module:: torch.utils.serialization
+.. py:module:: torch.utils.serialization.config
+
+``torch.utils.serialization.config`` provides a global config that can control the behavior of
+``torch.save`` and ``torch.load``.
+
+
+``torch.utils.serialization.config.save`` contains options that control the behavior of ``torch.save``.
+
+  * ``compute_crc32``: whether to compute and write the zip file checksum (Default : ``True``).
+    See :func:`~torch.serialization.set_crc32_options`.
+  * ``use_pinned_memory_for_d2h``: for storages that are on an accelerator when passed to ``torch.save``, whether to
+    move storage to pinned memory or pageable memory on CPU within ``torch.save``. (Default: ``False`` (i.e. pageable))
+  * ``storage_alignment``: alignment of storages in the checkpoint during ``torch.save`` in bytes. (Default ``64``)
+
+``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
+
+  * ``mmap``: See the documentation for ``mmap`` argument in :func:`torch.load`.
+    This config will set the behavior of ``mmap`` for ``torch.load`` if it is not
+    already explicitly passed to the ``torch.load`` call (Default : ``False``).
+  * ``endianness``: See :func:`~torch.serialization.set_default_load_endianness`.
+    (Default : ``torch.serialization.LoadEndianness.NATIVE``)
+  * ``mmap_flags``: See :class:`~torch.serialization.set_default_mmap_options`.
+    (Default : ``MAP_PRIVATE``)
+  * ``calculate_storage_offsets``: If this config is set to ``True``, offsets for storages will be
+    calculated rather than read via random reads when using ``torch.load(mmap=True)``. This minimizes
+    random reads, which can be helpful when the file is being loaded over a network. (Default : ``False``)

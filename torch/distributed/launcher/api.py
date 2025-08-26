@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,19 +9,28 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
+import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
+from torch._utils_internal import get_default_numa_options
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
-from torch.distributed.elastic.multiprocessing import SignalException, Std
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs,
+    LogsSpecs,
+    SignalException,
+)
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.multiprocessing.spawn import should_use_parallel_start
+from torch.numa.binding import NumaOptions
 
-__all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
+
+__all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
 
 logger = get_logger(__name__)
 
@@ -54,16 +64,15 @@ class LaunchConfig:
                         as a period of monitoring workers.
         start_method: The method is used by the elastic agent to start the
                     workers (spawn, fork, forkserver).
-        log_dir: base log directory where log files are written. If not set,
-                one is created in a tmp dir but NOT removed on exit.
-        redirects: configuration to redirect stdout/stderr to log files.
-                Pass a single ``Std`` enum to redirect all workers,
-                or a mapping keyed by local_rank to selectively redirect.
-        tee: configuration to "tee" stdout/stderr to console + log file.
         metrics_cfg: configuration to initialize metrics.
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
-    ..note:
+        local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
@@ -72,20 +81,21 @@ class LaunchConfig:
     min_nodes: int
     max_nodes: int
     nproc_per_node: int
+    logs_specs: Optional[LogsSpecs] = None
     run_id: str = ""
     role: str = "default_role"
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
-    rdzv_configs: Dict[str, Any] = field(default_factory=dict)
+    rdzv_configs: dict[str, Any] = field(default_factory=dict)
     rdzv_timeout: int = -1
     max_restarts: int = 3
-    monitor_interval: float = 30
+    monitor_interval: float = 0.1
     start_method: str = "spawn"
-    log_dir: Optional[str] = None
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE
-    tee: Union[Std, Dict[int, Std]] = Std.NONE
-    metrics_cfg: Dict[str, str] = field(default_factory=dict)
+    log_line_prefix_template: Optional[str] = None
+    metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -93,6 +103,24 @@ class LaunchConfig:
             self.rdzv_configs["timeout"] = self.rdzv_timeout
         elif "timeout" not in self.rdzv_configs:
             self.rdzv_configs["timeout"] = default_timeout
+
+        # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
+        if self.logs_specs is None:
+            self.logs_specs = DefaultLogsSpecs()
+
+        if (
+            self.numa_options is None
+            # The way we apply NUMA bindings currently depends
+            # on the processes being started sequentially.
+            # Technically, this filter does not matter for str entrypoints,
+            # but we ignore that nuance for now.
+            and not should_use_parallel_start(self.start_method)
+            and torch.cuda.is_available()
+            # We assume local_rank n uses cuda device n.
+            and torch.cuda.device_count() == self.nproc_per_node
+        ):
+            self.numa_options = get_default_numa_options()
+            logger.info("Using default numa options = %r", self.numa_options)
 
 
 class elastic_launch:
@@ -135,7 +163,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: List[Any]
+    entrypoint: Union[Callable, str, None], args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -158,7 +186,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint
@@ -178,8 +206,8 @@ def _get_addr_and_port(
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
-    args: List[Any],
-) -> Dict[int, Any]:
+    args: list[Any],
+) -> dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
         logger.warning("config has no run_id, generated a random run_id: %s", run_id)
@@ -189,18 +217,20 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint       : %(entrypoint)s\n"
-        "  min_nodes        : %(min_nodes)s\n"
-        "  max_nodes        : %(max_nodes)s\n"
-        "  nproc_per_node   : %(nproc_per_node)s\n"
-        "  run_id           : %(run_id)s\n"
-        "  rdzv_backend     : %(rdzv_backend)s\n"
-        "  rdzv_endpoint    : %(rdzv_endpoint)s\n"
-        "  rdzv_configs     : %(rdzv_configs)s\n"
-        "  max_restarts     : %(max_restarts)s\n"
-        "  monitor_interval : %(monitor_interval)s\n"
-        "  log_dir          : %(log_dir)s\n"
-        "  metrics_cfg      : %(metrics_cfg)s\n",
+        "  entrypoint         : %(entrypoint)s\n"
+        "  min_nodes          : %(min_nodes)s\n"
+        "  max_nodes          : %(max_nodes)s\n"
+        "  nproc_per_node     : %(nproc_per_node)s\n"
+        "  run_id             : %(run_id)s\n"
+        "  rdzv_backend       : %(rdzv_backend)s\n"
+        "  rdzv_endpoint      : %(rdzv_endpoint)s\n"
+        "  rdzv_configs       : %(rdzv_configs)s\n"
+        "  max_restarts       : %(max_restarts)s\n"
+        "  monitor_interval   : %(monitor_interval)s\n"
+        "  log_dir            : %(log_dir)s\n"
+        "  metrics_cfg        : %(metrics_cfg)s\n"
+        "  event_log_handler  : %(event_log_handler)s\n"
+        "  numa_options       : %(numa_options)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -212,9 +242,11 @@ def launch_agent(
             "rdzv_configs": config.rdzv_configs,
             "max_restarts": config.max_restarts,
             "monitor_interval": config.monitor_interval,
-            "log_dir": config.log_dir,
-            "metrics_cfg": config.metrics_cfg
-        }
+            "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
+            "metrics_cfg": config.metrics_cfg,
+            "event_log_handler": config.event_log_handler,
+            "numa_options": config.numa_options,
+        },
     )
 
     rdzv_parameters = RendezvousParameters(
@@ -237,15 +269,18 @@ def launch_agent(
         rdzv_handler=rdzv_registry.get_rendezvous_handler(rdzv_parameters),
         max_restarts=config.max_restarts,
         monitor_interval=config.monitor_interval,
-        redirects=config.redirects,
-        tee=config.tee,
         master_addr=master_addr,
         master_port=master_port,
         local_addr=config.local_addr,
+        event_log_handler=config.event_log_handler,
+        numa_options=config.numa_options,
     )
 
     agent = LocalElasticAgent(
-        spec=spec, start_method=config.start_method, log_dir=config.log_dir
+        spec=spec,
+        logs_specs=config.logs_specs,  # type: ignore[arg-type]
+        start_method=config.start_method,
+        log_line_prefix_template=config.log_line_prefix_template,
     )
 
     shutdown_rdzv = True
@@ -254,7 +289,7 @@ def launch_agent(
 
         result = agent.run()
         # records that agent.run() has succeeded NOT that workers have succeeded
-        events.record(agent.get_event_succeeded())
+        events.record(agent.get_event_succeeded(), config.event_log_handler)
 
         if result.is_failed():
             # ChildFailedError is treated specially by @record
@@ -274,10 +309,10 @@ def launch_agent(
         # since this closes the rendezvous on this rdzv_id permanently and
         # prevents any additional scaling events
         shutdown_rdzv = False
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     except Exception:
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     finally:
         if shutdown_rdzv:

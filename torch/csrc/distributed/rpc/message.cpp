@@ -1,9 +1,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 Message::Message() = default;
 
@@ -52,11 +50,13 @@ MessageType Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageTypeFlags::REQUEST_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::REQUEST_TYPE) &
+      static_cast<int>(type_);
 }
 
 bool Message::isResponse() const {
-  return MessageTypeFlags::RESPONSE_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::RESPONSE_TYPE) &
+      static_cast<int>(type_);
 }
 
 int64_t Message::id() const {
@@ -113,6 +113,4 @@ static const auto message = torch::class_<Message>("rpc", "_Message");
 
 } // namespace
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

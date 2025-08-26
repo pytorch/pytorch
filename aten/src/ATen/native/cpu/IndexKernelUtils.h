@@ -2,11 +2,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-namespace {
-static bool is_constant_index(int ntensor, const int64_t* strides) {
+inline bool is_constant_index(int ntensor, const int64_t* strides) {
   AT_ASSERT(ntensor >= 3);
   for (const auto arg : c10::irange(2, ntensor)) {
     if (strides[arg] != 0) {
@@ -50,14 +48,13 @@ struct Indexer {
     return offset;
   }
 };
-} // anonymous namespace
 
 template <typename scalar_t, typename func_t>
 void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride,
                       const func_t& f, bool serial_execution=false)
 {
   int ntensor = iter.ntensors();
-  // When launch the index parallel version, set a relative samll grain size less than the INTERNAL::GRAIN_SIZE
+  // When launch the index parallel version, set a relative small grain size less than the INTERNAL::GRAIN_SIZE
   // to make the whole available thread numbers get more balanced work load and a better cache location.
   // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
   const int index_parallel_grain_size = 3000;
@@ -85,4 +82,4 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
   }
 }
 } // at
-} // native
+// native

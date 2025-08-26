@@ -1,27 +1,31 @@
+# mypy: allow-untyped-defs
 import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
-from functorch.experimental import control_flow
-from functorch.experimental import _map
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
+from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+from torch.fx.experimental.symbolic_shapes import (
+    compute_unbacked_bindings,
+    PropagateUnbackedSymInts,
+)
 from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["ExportPassBase"]
+__all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
 
 
 Argument = Any
@@ -30,11 +34,22 @@ Fn = Callable[..., Any]
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
+_TORCH_SYM_OPS: set[Callable] = {
+    torch.sym_int,
+    torch.sym_float,
+    torch.sym_ite,
+    torch.sym_max,
+    torch.sym_min,
+    torch.sym_not,
+    torch.sym_sqrt,
+}
+
+
 class ExportPassBaseError(RuntimeError):
     pass
 
 
-class ExportPassBase(PassBase):
+class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -42,24 +57,22 @@ class ExportPassBase(PassBase):
 
     @staticmethod
     def _create_dummy_node_metadata():
-        return NodeMetadata({"stack_trace": traceback.format_exc(-1)})
-
+        return NodeMetadata({"stack_trace": "".join(traceback.format_stack(limit=1))})
 
     class ExportTracer(PythonKeyTracer):
-        """
-        Tracer used to create nodes during the retracing part of the ExportPassBase
-        """
-        def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
+        def __init__(
+            self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen
+        ) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
             self.graph = torch.fx.Graph()
             self.graph.set_codegen(codegen)
-            self.tensor_attrs: Dict[str, torch.Tensor] = {}  # type: ignore[assignment]
+            self.tensor_attrs: dict[str, torch.Tensor] = {}  # type: ignore[assignment]
             self.fake_tensor_mode: Optional[FakeTensorMode] = None
-            self.submodules: Dict[torch.nn.Module, str] = {}
+            self.submodules: dict[torch.nn.Module, str] = {}
 
-        def trace(self) -> None:
+        def trace(self) -> None:  # type: ignore[override]
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
         def create_arg(self, a: Argument) -> torch.fx.Node:
@@ -83,12 +96,24 @@ class ExportPassBase(PassBase):
             return node
 
         def set_metadata(
-            self, node: torch.fx.Node, value: Argument,
+            self,
+            node: torch.fx.Node,
+            value: Argument,
         ) -> None:
             # propagate the fake tensor or sym nodes
             def make_val(
                 x: Argument,
-            ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
+            ) -> Union[
+                FakeTensor,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+                int,
+                float,
+                bool,
+                str,
+                None,
+            ]:
                 if isinstance(x, FakeTensor):
                     return x
                 elif isinstance(x, torch.Tensor):
@@ -98,7 +123,14 @@ class ExportPassBase(PassBase):
 
                     try:
                         assert self.fake_tensor_mode is not None
-                        fake_tensor = self.fake_tensor_mode.from_tensor(x)
+                        # TODO we should allocate static shapes
+                        # for param/buffer values
+                        if isinstance(x, torch.nn.Parameter):
+                            fake_tensor = self.fake_tensor_mode.from_tensor(
+                                x, static_shapes=True
+                            )
+                        else:
+                            fake_tensor = self.fake_tensor_mode.from_tensor(x)
                     except UnsupportedFakeTensorException:
                         # TODO: This is just a workaround to get over the
                         # x.as_subclass error
@@ -108,7 +140,18 @@ class ExportPassBase(PassBase):
                         )
                         fake_tensor = None
                     return fake_tensor
-                elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
+                elif isinstance(
+                    x,
+                    (
+                        torch.SymInt,
+                        torch.SymFloat,
+                        torch.SymBool,
+                        int,
+                        float,
+                        bool,
+                        str,
+                    ),
+                ):
                     return x
                 else:
                     return None
@@ -137,19 +180,18 @@ class ExportPassBase(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        """
-        Interpreter to callback on any ExportPassBase functions
-        """
-        def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
+        def __init__(
+            self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule
+        ) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
 
         def placeholder(
             self,
-            target: str,
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            target: str,  # type: ignore[override]
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> ProxyValue:
             arg = super().placeholder(target, args, kwargs)
             return self.callback.placeholder(target, arg, NodeMetadata(self.node.meta))
@@ -157,56 +199,80 @@ class ExportPassBase(PassBase):
         def output(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> ProxyValue:
-            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data
+            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data  # type: ignore[return-value]
 
         def call_function(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
 
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) == "_operator":
+            elif getattr(target, "__module__", None) in {
+                "_operator",
+                "builtins",
+                "math",
+            }:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
-            elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            elif target in _TORCH_SYM_OPS:
+                assert callable(target)
+                return self.callback.call_sym(target, args, meta)
+            elif isinstance(
+                target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+            ):
                 return self.callback.call_operator(
                     target,
                     args,
                     kwargs,
                     meta,
                 )
-            elif target == control_flow.cond:
+            elif target == torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == _map.map_impl:
-                f, num_args, *rest = args  # type: ignore[assignment]
-                return self.callback.call_map(f, num_args, list(rest), meta)
+            elif target == torch.ops.higher_order.map_impl:
+                f, mapped_args, operands = args  # type: ignore[assignment]
+                return self.callback.call_map(f, mapped_args, operands, meta)
+            # For other unregistered HigherOrderOps, just interpret them blindly
+            elif isinstance(target, torch._ops.HigherOrderOperator):
+                return self.callback._fx(
+                    "call_function",
+                    target,
+                    args,
+                    kwargs,
+                    meta,
+                )
             else:
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
-        def get_attr(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+        def get_attr(  # type: ignore[override]
+            self,
+            target: str,
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
         def call_module(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> None:
             raise ExportPassBaseError("call_module is not supported.")
 
-        def call_method(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+        def call_method(  # type: ignore[override]
+            self,
+            target: str,
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -215,17 +281,11 @@ class ExportPassBase(PassBase):
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 
-    def __init_subclass__(cls, **kwargs):
-        if hasattr(cls, "ExportInterpreter"):
-            ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
-        if hasattr(cls, "ExportTracer"):
-            ExportPassBase.ExportTracer = cls.ExportTracer  # type: ignore[misc]
-
     def __init__(self) -> None:
-        self.interpreter = torch.fx.Interpreter(
+        self.interpreter = PropagateUnbackedSymInts(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
-        self.tracer = ExportPassBase.ExportTracer(self, CodeGen())
+        self.tracer = self.ExportTracer(self, CodeGen())
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
@@ -234,8 +294,8 @@ class ExportPassBase(PassBase):
         self,
         kind: str,
         target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         args_data, kwargs_data = pytree.tree_map_only(
@@ -245,12 +305,22 @@ class ExportPassBase(PassBase):
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
-        res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy)
+
+        name = None
+        if isinstance(target, torch._ops.OpOverload):
+            name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
+
+        res_proxy = self.tracer.create_proxy(
+            kind, target, args_proxy, kwargs_proxy, name=name
+        )
         res_proxy.node.meta.update(meta.data)
+        if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
+            if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
+                res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
-    def inputs(self, graph_module: torch.fx.GraphModule) -> List[Argument]:
+    def inputs(self, graph_module: torch.fx.GraphModule) -> list[Argument]:
         # TODO(angelayi): Update this with what we decide to do for metadata in
         # the exported graph module
         if (args := graph_module.meta.get("args", None)) is not None:
@@ -258,7 +328,10 @@ class ExportPassBase(PassBase):
 
         def extract_input(node: torch.fx.Node) -> Optional[FakeTensor]:
             if "val" in node.meta:
-                return node.meta["val"]
+                fake = node.meta["val"]
+                if hasattr(fake, "constant") and fake.constant is not None:
+                    return fake.constant
+                return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
                 assert self.fake_tensor_mode is not None
                 return FakeTensor(
@@ -296,8 +369,8 @@ class ExportPassBase(PassBase):
     def call_operator(
         self,
         op,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         return self._fx("call_function", op, args, kwargs, meta)
@@ -305,7 +378,7 @@ class ExportPassBase(PassBase):
     def call_sym(
         self,
         target: Fn,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         meta: NodeMetadata,
     ) -> ProxyValue:
         return self._fx("call_function", target, args, {}, meta)
@@ -315,7 +388,7 @@ class ExportPassBase(PassBase):
         pred: ProxyValue,
         true_fn: torch.fx.GraphModule,
         false_fn: torch.fx.GraphModule,
-        inputs: List[Argument],
+        inputs: list[Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         true_branch = self.call_submodule(true_fn, tuple(inputs))
@@ -324,8 +397,8 @@ class ExportPassBase(PassBase):
         assert false_branch is not None
         return self._fx(
             "call_function",
-            control_flow.cond,
-            (pred, true_branch.graph_module, false_branch.graph_module, inputs),
+            torch.ops.higher_order.cond,
+            (pred, true_branch.graph_module, false_branch.graph_module, list(inputs)),
             {},
             meta,
         )
@@ -333,16 +406,17 @@ class ExportPassBase(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        num_args: int,
-        args: List[ProxyValue],
+        mapped_args: list[ProxyValue],
+        operands: list[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        f_branch = self.call_submodule(f, (args[:num_args][0], *args[num_args:]))
+        xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
+        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in operands]))
         assert f_branch is not None
         return self._fx(
             "call_function",
-            _map.map_impl,
-            (f_branch.graph_module, num_args, *args),
+            torch.ops.higher_order.map_impl,
+            (f_branch.graph_module, mapped_args, operands),
             {},
             meta,
         )
@@ -352,19 +426,23 @@ class ExportPassBase(PassBase):
     ) -> ProxyValue:
         return self._fx("call_function", operator.getitem, (value, key), {}, meta)
 
-    def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
+    def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
         return self._fx("output", "output", (results,), {}, meta)
 
     def call_submodule(
-        self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
+        self, graph_module: fx.GraphModule, inputs: tuple[Argument, ...]
     ) -> PassResult:
-        prev_tracer, self.tracer = self.tracer, ExportPassBase.ExportTracer(
-            self, graph_module.graph._codegen
+        prev_tracer, self.tracer = (
+            self.tracer,
+            self.ExportTracer(self, graph_module.graph._codegen),
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
-        interpreter = ExportPassBase.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
-            torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        interpreter = self.ExportInterpreter(self, graph_module)
+        prev_interpreter, self.interpreter = (
+            self.interpreter,
+            torch.fx.Interpreter(  # type: ignore[assignment]
+                torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+            ),
         )
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)
         with fx_traceback.preserve_node_meta():
@@ -390,15 +468,16 @@ class ExportPassBase(PassBase):
         fake_tensor_mode = None
         for i in inputs:
             if isinstance(i, FakeTensor):
-                assert (
-                    fake_tensor_mode is None or fake_tensor_mode is i.fake_mode
-                ), "Multiple fake tensor mode detected."
+                assert fake_tensor_mode is None or fake_tensor_mode is i.fake_mode, (
+                    "Multiple fake tensor mode detected."
+                )
                 fake_tensor_mode = i.fake_mode
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
             dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:
+            fake_tensor_mode.allow_non_fake_inputs = True
             self.tracer.fake_tensor_mode = fake_tensor_mode
             dispatcher_mode = enable_python_dispatcher()  # type: ignore[assignment]
         self.fake_tensor_mode = self.tracer.fake_tensor_mode

@@ -1,29 +1,37 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Script used only in CD pipeline
 
-set -ex
+set -eou pipefail
 
-# "install" hipMAGMA into /opt/rocm/magma by copying after build
-git clone https://bitbucket.org/icl/magma.git
-pushd magma
-# Fixes memory leaks of magma found while executing linalg UTs
-git checkout 28592a7170e4b3707ed92644bf4a689ed600c27f
-cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
-echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
-echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
-echo 'DEVCCFLAGS += --gpu-max-threads-per-block=256' >> make.inc
-export PATH="${PATH}:/opt/rocm/bin"
-if [[ -n "$PYTORCH_ROCM_ARCH" ]]; then
-  amdgpu_targets=`echo $PYTORCH_ROCM_ARCH | sed 's/;/ /g'`
-else
-  amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
-fi
-for arch in $amdgpu_targets; do
-  echo "DEVCCFLAGS += --offload-arch=$arch" >> make.inc
-done
-# hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
-sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
-make -f make.gen.hipMAGMA -j $(nproc)
-LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION
-make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION
-popd
-mv magma /opt/rocm
+function do_install() {
+    rocm_version=$1
+    if [[ ${rocm_version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # chop off any patch version
+        rocm_version="${rocm_version%.*}"
+    fi
+
+    rocm_version_nodot=${rocm_version//./}
+
+    # Version 2.7.2 + ROCm related updates
+    MAGMA_VERSION=a1625ff4d9bc362906bd01f805dbbe12612953f6
+    magma_archive="magma-rocm${rocm_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
+
+    rocm_dir="/opt/rocm"
+    (
+        set -x
+        tmp_dir=$(mktemp -d)
+        pushd ${tmp_dir}
+        curl -OLs https://ossci-linux.s3.us-east-1.amazonaws.com/${magma_archive}
+        if tar -xvf "${magma_archive}"
+        then
+            mkdir -p "${rocm_dir}/magma"
+            mv include "${rocm_dir}/magma/include"
+            mv lib "${rocm_dir}/magma/lib"
+        else
+            echo "${magma_archive} not found, skipping magma install"
+        fi
+        popd
+    )
+}
+
+do_install $1

@@ -1,28 +1,38 @@
+from __future__ import annotations
+
 import argparse
 import csv
+import hashlib
+import json
 import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any
 
-from tools.stats.upload_stats_lib import download_s3_artifacts, unzip, upload_to_rockset
+from tools.stats.upload_stats_lib import (
+    download_s3_artifacts,
+    unzip,
+    upload_to_dynamodb,
+)
 
 
 ARTIFACTS = [
     "test-reports",
 ]
 ARTIFACT_REGEX = re.compile(
-    r"test-reports-test-(?P<name>\w+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
+    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.-]+)_(?P<job>\d+).zip"
 )
 
 
-def upload_dynamo_perf_stats_to_rockset(
+def get_perf_stats(
     repo: str,
     workflow_run_id: int,
     workflow_run_attempt: int,
     head_branch: str,
-) -> List[Dict[str, Any]]:
+    match_filename: str,
+) -> list[dict[str, Any]]:
+    match_filename_regex = re.compile(match_filename)
     perf_stats = []
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
@@ -49,17 +59,14 @@ def upload_dynamo_perf_stats_to_rockset(
 
                 for csv_file in Path(".").glob("**/*.csv"):
                     filename = os.path.splitext(os.path.basename(csv_file))[0]
+                    if not re.match(match_filename_regex, filename):
+                        continue
                     print(f"Processing {filename} from {path}")
 
                     with open(csv_file) as csvfile:
                         reader = csv.DictReader(csvfile, delimiter=",")
 
                         for row in reader:
-                            # If the row doesn't have a dev and a name column, it's not
-                            # a torch dynamo perf stats csv file
-                            if "dev" not in row or "name" not in row:
-                                break
-
                             row.update(
                                 {
                                     "workflow_id": workflow_run_id,  # type: ignore[dict-item]
@@ -79,9 +86,24 @@ def upload_dynamo_perf_stats_to_rockset(
     return perf_stats
 
 
+def generate_partition_key(repo: str, doc: dict[str, Any]) -> str:
+    """
+    Generate an unique partition key for the document on DynamoDB
+    """
+    workflow_id = doc["workflow_id"]
+    job_id = doc["job_id"]
+    test_name = doc["test_name"]
+    filename = doc["filename"]
+
+    hash_content = hashlib.md5(
+        json.dumps(doc).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
+    return f"{repo}/{workflow_id}/{job_id}/{test_name}/{filename}/{hash_content}"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upload dynamo perf stats from S3 to Rockset"
+        description="Upload dynamo perf stats from S3 to DynamoDB"
     )
     parser.add_argument(
         "--workflow-run-id",
@@ -105,14 +127,31 @@ if __name__ == "__main__":
         "--head-branch",
         type=str,
         required=True,
-        help="Head branch of the workflow",
+        help="head branch of the workflow",
+    )
+    parser.add_argument(
+        "--dynamodb-table",
+        type=str,
+        required=True,
+        help="the name of the DynamoDB table to store the stats",
+    )
+    parser.add_argument(
+        "--match-filename",
+        type=str,
+        default="",
+        help="the regex to filter the list of CSV files containing the records to upload",
     )
     args = parser.parse_args()
-    perf_stats = upload_dynamo_perf_stats_to_rockset(
-        args.repo, args.workflow_run_id, args.workflow_run_attempt, args.head_branch
+    perf_stats = get_perf_stats(
+        args.repo,
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        args.head_branch,
+        args.match_filename,
     )
-    upload_to_rockset(
-        collection="torch_dynamo_perf_stats",
+    upload_to_dynamodb(
+        dynamodb_table=args.dynamodb_table,
+        repo=args.repo,
         docs=perf_stats,
-        workspace="inductor",
+        generate_partition_key=generate_partition_key,
     )

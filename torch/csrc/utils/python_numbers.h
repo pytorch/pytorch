@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/python_headers.h>
@@ -11,6 +12,10 @@
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
+
+inline PyObject* THPUtils_packDeviceIndex(c10::DeviceIndex value) {
+  return PyLong_FromLong(value);
+}
 
 inline PyObject* THPUtils_packInt32(int32_t value) {
   return PyLong_FromLong(value);
@@ -52,32 +57,26 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int32_t THPUtils_unpackInt(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
-  }
-  if (value > std::numeric_limits<int32_t>::max() ||
-      value < std::numeric_limits<int32_t>::min()) {
-    throw std::runtime_error("Overflow when unpacking long");
-  }
+  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
+  TORCH_CHECK_VALUE(
+      value <= std::numeric_limits<int32_t>::max() &&
+          value >= std::numeric_limits<int32_t>::min(),
+      "Overflow when unpacking long");
   return (int32_t)value;
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
-  }
+  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
   return (int64_t)value;
 }
 
@@ -86,9 +85,9 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  if (value > std::numeric_limits<uint32_t>::max()) {
-    throw std::runtime_error("Overflow when unpacking unsigned long");
-  }
+  TORCH_CHECK_VALUE(
+      value <= std::numeric_limits<uint32_t>::max(),
+      "Overflow when unpacking long long");
   return (uint32_t)value;
 }
 
@@ -164,6 +163,16 @@ inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject* obj) {
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
+#ifdef USE_NUMPY
+  // Handle NumPy boolean scalars (np.bool_)
+  if (torch::utils::is_numpy_bool(obj)) {
+    int truth = PyObject_IsTrue(obj);
+    if (truth == -1) {
+      throw python_error();
+    }
+    return truth != 0;
+  }
+#endif
   if (PyFloat_Check(obj)) {
     return (bool)PyFloat_AS_DOUBLE(obj);
   }
@@ -174,13 +183,47 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
     return !(real_val == 0 && imag_val == 0);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  // No need to check overflow, because when overflow occured, it should
+  // No need to check overflow, because when overflow occurred, it should
   // return true in order to keep the same behavior of numpy.
   return (bool)value;
+}
+
+inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
+  int overflow = 0;
+  long value = PyLong_AsLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking DeviceIndex");
+  }
+  if (value > std::numeric_limits<c10::DeviceIndex>::max() ||
+      value < std::numeric_limits<c10::DeviceIndex>::min()) {
+    throw std::runtime_error("Overflow when unpacking DeviceIndex");
+  }
+  return (c10::DeviceIndex)value;
+}
+
+template <typename T>
+inline T THPUtils_unpackInteger(PyObject* obj) {
+  int overflow = -1;
+  const auto value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (!overflow) {
+    return static_cast<int64_t>(value);
+  }
+  // try unsigned
+  const auto uvalue = PyLong_AsUnsignedLongLong(obj);
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
+    throw python_error();
+  }
+  return static_cast<uint64_t>(uvalue);
 }

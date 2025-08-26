@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 /*
  * TILE_SIZE = (1, 1, 1)
@@ -75,7 +75,7 @@ void main() {
   // During prepacking, the weight tensor was rearranged in order to optimize
   // for data access linearity in this shader. Therefore we need to adjust the
   // canonical coordinates to the corresponding index in the rearranged weight
-  // tensor. the x coordinate is multipled by 4 since each group of 4 channels
+  // tensor. the x coordinate is multiplied by 4 since each group of 4 channels
   // is folded into the X axis. The y coordinate is offset based on the z
   // coordinate because the 2D planes were stacked atop each other vertically.
   kstart.x *= 4;
@@ -106,7 +106,7 @@ void main() {
         //   | x |              | A0 | A1 | A2 | A3 |
         //   +---+              +----+----+----+----+
         //
-        // In the uKernel graphic, cells sharing the the same letter are from
+        // In the uKernel graphic, cells sharing the same letter are from
         // the same batch/output channel index, and the number denotes a unique
         // channel index. To calculate the output texel, the following
         // calculation is performed:

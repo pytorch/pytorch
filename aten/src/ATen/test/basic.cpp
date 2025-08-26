@@ -62,8 +62,7 @@ void TestSort(DeprecatedTypeProperties& type) {
 void TestRandperm(DeprecatedTypeProperties& type) {
   if (type.backend() != Backend::CUDA) {
     Tensor b = randperm(15, type);
-    Tensor rv, ri;
-    std::tie(rv, ri) = sort(b, 0);
+    auto [rv, ri] = sort(b, 0);
     bool isLE = (rv[0].item<float>() <= rv[1].item<float>());
     ASSERT_TRUE(isLE);
   }
@@ -90,8 +89,7 @@ void TestAdd(DeprecatedTypeProperties& type) {
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor a = zeros({1024, 1024}, type);
-  for (const auto i : c10::irange(1, 1000)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(1, 1000)) {
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -109,8 +107,7 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(1000)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(1000)) {
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -127,8 +124,7 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(1000)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(1000)) {
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -170,8 +166,10 @@ void TestSqueeze(DeprecatedTypeProperties& type) {
   ASSERT_EQ_RESOLVED(b.dim(), 1);
   a = rand({1}, type);
   b = squeeze(a);
-  // TODO 0-dim squeeze
   ASSERT_TRUE(a[0].equal(b));
+  Tensor c = at::scalar_tensor(1, type.options());
+  Tensor d = squeeze(c);
+  ASSERT_TRUE(c.equal(d));
 }
 
 void TestCopy(DeprecatedTypeProperties& type) {
@@ -518,4 +516,22 @@ TEST(BasicTest, BasicStdTestCPU) {
   t2.join();
   t3.join();
   t4.join();
+}
+
+TEST(BasicTest, TestForBlobResizeCPU) {
+  // Checks that for_blob can correctly create tensors with non-empty offset and resize them
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+  auto t = at::for_blob(storage.data(), {3,}).storage_offset(3).options(c10::TensorOptions(kInt)).make_tensor();
+  auto te = *at::expand_size(t, {3, 3});
+  ASSERT_EQ(te[1][1].item<int32_t>(), 5);
+}
+
+TEST(BasicTest, TestForBlobStridesResizeCPU) {
+  // Checks that for_blob can correctly create tensors with non-empty offset and resize them
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+  auto t = at::for_blob(storage.data(), {3,}).strides({1,}).storage_offset(3).options(c10::TensorOptions(kInt)).make_tensor();
+  auto te = *at::expand_size(t, {3, 3});
+  ASSERT_EQ(te[1][1].item<int32_t>(), 5);
 }

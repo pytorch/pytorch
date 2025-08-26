@@ -9,7 +9,7 @@ namespace c10 {
 // const reference (const T&); taking T by non-const reference
 // will result in an error like:
 //
-//    error: no type named 'type' in 'class std::result_of<foobar::__lambda(T)>'
+//    error: no type named 'type' in 'class std::invoke_result<foobar::__lambda, T>'
 //
 // No explicit template parameters are required.
 

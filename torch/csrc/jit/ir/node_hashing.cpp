@@ -16,7 +16,7 @@ namespace torch::jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // type_equal doesn't distinguish between mkldnn/pytorch cpu tensors,
   // and we dont want to coalesce mkldnn tensors bc they do layout
   // transformations based on usage
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
@@ -141,6 +141,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   }
   if (a1.isObject()) {
     return &a1.toObjectRef() == &a2.toObjectRef();
+  }
+  if (a1.isGenerator()) {
+    return a1.toGenerator() == a2.toGenerator();
   }
   TORCH_INTERNAL_ASSERT(false);
 }

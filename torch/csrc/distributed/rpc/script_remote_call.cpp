@@ -1,12 +1,9 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
-#include <c10/util/C++17.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
@@ -77,9 +74,8 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
   auto values = value.toTupleRef().elements().vec();
+  TORCH_CHECK(!values.empty(), "Malformed message: empty values unpickled");
   return fromIValues(values);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

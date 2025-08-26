@@ -2,7 +2,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 import boto3  # type: ignore[import]
 
@@ -44,7 +44,7 @@ def load_json_file(file_path: Path) -> Any:
     """
     Returns the deserialized json object
     """
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         return json.load(f)
 
 
@@ -77,7 +77,7 @@ def upload_file_to_s3(file_name: Path, bucket: str, key: str) -> None:
 
 def download_s3_objects_with_prefix(
     bucket_name: str, prefix: str, download_folder: Path
-) -> List[Path]:
+) -> list[Path]:
     s3 = boto3.resource("s3")
     bucket = s3.Bucket(bucket_name)
 

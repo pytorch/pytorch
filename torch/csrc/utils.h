@@ -1,7 +1,7 @@
-#ifndef THP_UTILS_H
-#define THP_UTILS_H
+#pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -10,10 +10,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifdef USE_CUDA
-#include <c10/cuda/CUDAStream.h>
-#endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP, Real, Utils_, NAME)
 
@@ -105,11 +101,10 @@
 #define THPBoolUtils_newReal(value) THPUtils_newReal_BOOL(value)
 #define THPBoolUtils_checkAccreal(object) THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackAccreal(object) \
-  (int64_t) THPUtils_unpackReal_BOOL(object)
+  (int64_t)THPUtils_unpackReal_BOOL(object)
 #define THPBoolUtils_newAccreal(value) THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackReal(object) \
-  (int64_t) THPUtils_unpackReal_INT(object)
+#define THPLongUtils_unpackReal(object) (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
@@ -152,13 +147,6 @@
 */
 #define DEFERRED_ADDRESS(ADDR) nullptr
 
-#define THPUtils_assert(cond, ...) \
-  THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
-#define THPUtils_assertRet(value, cond, ...) \
-  if (THP_EXPECT(!(cond), 0)) {              \
-    THPUtils_setError(__VA_ARGS__);          \
-    return value;                            \
-  }
 TORCH_PYTHON_API void THPUtils_setError(const char* format, ...);
 TORCH_PYTHON_API void THPUtils_invalidArguments(
     PyObject* given_args,
@@ -172,7 +160,7 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject* arg);
 
 TORCH_PYTHON_API void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
-    PyMethodDef* methods);
+    const PyMethodDef* methods);
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result);
 
@@ -190,18 +178,14 @@ template <typename _real, typename = void>
 struct mod_traits {};
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_floating_point<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_floating_point_v<_real>>> {
   static _real mod(_real a, _real b) {
     return fmod(a, b);
   }
 };
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_integral<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_integral_v<_real>>> {
   static _real mod(_real a, _real b) {
     return a % b;
   }
@@ -214,14 +198,6 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char* func);
 
-// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
-#ifdef USE_CUDA
-std::vector<c10::optional<at::cuda::CUDAStream>>
-THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
-#endif
-
-void storage_fill(at::Storage self, uint8_t value);
-void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
-uint8_t storage_get(at::Storage self, ptrdiff_t idx);
-
-#endif
+void storage_fill(const at::Storage& self, uint8_t value);
+void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(const at::Storage& self, ptrdiff_t idx);

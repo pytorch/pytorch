@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from typing import Optional, Union
 
@@ -5,7 +6,6 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
-
 from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import (
@@ -116,7 +116,7 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def log_ndtr(a: TensorLikeType) -> TensorLikeType:
-    # Note: M_SQRT1_2 is the value of 1 / √2
+    # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     t = a * M_SQRT1_2
     return torch.where(
@@ -137,7 +137,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
+    self = torch.where(self < lo, lo, torch.where(self > hi, hi, self))
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
@@ -185,7 +185,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def ndtr(a: TensorLikeType) -> TensorLikeType:
-    # Note: M_SQRT1_2 is the value of 1 / √2
+    # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     a_sqrt_2 = a * M_SQRT1_2
     return (1 + torch.erf(a_sqrt_2)) * 0.5

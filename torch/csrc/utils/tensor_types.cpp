@@ -8,23 +8,22 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/tensor/python_tensor.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
 
 using namespace at;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
-static const char* parse_privateuseone_backend() {
+static const char* parse_privateuseone_backend(bool is_sparse = false) {
   static std::string backend_name = "torch." + get_privateuse1_backend();
-  return backend_name.c_str();
+  static std::string sparse_backend_name = backend_name + ".sparse";
+  return is_sparse == false ? backend_name.c_str()
+                            : sparse_backend_name.c_str();
 }
 
-static const char* backend_to_string(const at::Backend& backend) {
+const char* backend_to_string(const at::Backend& backend) {
   switch (backend) {
     case at::Backend::CPU:
       return "torch";
@@ -40,6 +39,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.cuda.sparse";
     case at::Backend::SparseXPU:
       return "torch.xpu.sparse";
+    case at::Backend::SparseMPS:
+      return "torch.mps.sparse";
     case at::Backend::QuantizedCPU:
       return "torch.quantized";
     case at::Backend::HPU:
@@ -50,6 +51,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.mtia";
     case at::Backend::PrivateUse1:
       return parse_privateuseone_backend();
+    case at::Backend::SparsePrivateUse1:
+      return parse_privateuseone_backend(true);
     case at::Backend::Lazy:
       return "torch.lazy";
     case at::Backend::XLA:
@@ -57,7 +60,7 @@ static const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::Meta:
       return "torch.meta";
     default:
-      AT_ERROR("Unimplemented backend ", backend);
+      TORCH_CHECK(false, "Unimplemented backend ", backend);
   }
 }
 
@@ -78,13 +81,14 @@ std::string type_to_string(const at::DeprecatedTypeProperties& type) {
 at::TensorOptions options_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
   static std::string xpu_prefix("torch.xpu.");
-  static c10::once_flag cpu_once;
-  static c10::once_flag cuda_once;
-  static c10::once_flag xpu_once;
+  static std::string privateUser_prefix(
+      std::string(parse_privateuseone_backend()) + ".");
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> xpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
       cuda_map;
+  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
+      privateUser1_map;
 
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map =
       nullptr;
@@ -99,35 +103,48 @@ at::TensorOptions options_from_string(const std::string& str) {
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin())
           .first == cuda_prefix.end()) {
     // torch.cuda. is prefix of str
-    c10::call_once(cuda_once, []() {
+    static bool cuda_once [[maybe_unused]] = []() {
       for (auto type : autograd::VariableType::allCUDATypes()) {
         cuda_map.emplace(type_to_string(*type), type);
       }
-    });
+      return true;
+    }();
     map = &cuda_map;
   } else if (
       std::mismatch(xpu_prefix.begin(), xpu_prefix.end(), str.begin()).first ==
       xpu_prefix.end()) {
     // torch.xpu. is prefix of str
-    c10::call_once(xpu_once, []() {
+    static bool xpu_once [[maybe_unused]] = []() {
       for (auto type : autograd::VariableType::allXPUTypes()) {
         xpu_map.emplace(type_to_string(*type), type);
       }
-    });
+      return true;
+    }();
     map = &xpu_map;
+  } else if (
+      std::mismatch(
+          privateUser_prefix.begin(), privateUser_prefix.end(), str.begin())
+          .first == privateUser_prefix.end()) {
+    // torch.foo. foo is privateUser1 name
+    static bool privateUser1_once [[maybe_unused]] = []() {
+      for (auto type : autograd::VariableType::allPrivateUser1Types()) {
+        privateUser1_map.emplace(type_to_string(*type), type);
+      }
+      return true;
+    }();
+    map = &privateUser1_map;
   } else {
-    c10::call_once(cpu_once, []() {
+    static bool cpu_once [[maybe_unused]] = []() {
       for (auto type : autograd::VariableType::allCPUTypes()) {
         cpu_map.emplace(type_to_string(*type), type);
       }
-    });
+      return true;
+    }();
     map = &cpu_map;
   }
 
   auto it = map->find(str);
-  if (it == map->end()) {
-    throw ValueError("invalid type: '%s'", str.c_str());
-  }
+  TORCH_CHECK_VALUE(it != map->end(), "invalid type: '", str, "'");
   return it->second->options();
 }
 
@@ -137,9 +154,9 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   // NOTE: Do not add more types here. This list controls the creation
   // of legacy tensor types e.g. torch.cuda.FloatTensor which are
   // maintained for backwards-compatibility only.
-  std::vector<Backend> backends = {
+  auto backends = {
       Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA};
-  std::vector<ScalarType> scalar_types = {
+  auto scalar_types = {
       ScalarType::Byte,
       ScalarType::Char,
       ScalarType::Double,
@@ -165,5 +182,4 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   return ret;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

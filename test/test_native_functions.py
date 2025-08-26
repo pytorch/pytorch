@@ -1,6 +1,6 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Optional, List
+from typing import Optional
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 
@@ -8,12 +8,12 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorc
 
 
 class FloatListWrapperModule(torch.nn.Module):
-    def forward(self, values, incr: Optional[List[float]]):
+    def forward(self, values, incr: Optional[list[float]]):
         return torch._C._nn._test_optional_floatlist(values, incr)
 
 
 class IntListWrapperModule(torch.nn.Module):
-    def forward(self, values, incr: Optional[List[int]]):
+    def forward(self, values, incr: Optional[list[int]]):
         return torch._C._nn._test_optional_intlist(values, incr)
 
 
@@ -96,7 +96,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == [5.1, 4.1]:
                 return traced_list(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_floatlist_with_module(fake_module)
 
@@ -150,7 +150,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == [5, 4]:
                 return traced_list(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_intlist_with_module(fake_module)
 
@@ -217,7 +217,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == 10:
                 return traced_int(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_filled_intlist_with_module(fake_module)
 

@@ -3,20 +3,23 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <c10/util/variant.h>
+#include <optional>
 
 #include <array>
-#include <atomic>
 #include <functional>
 #include <memory>
+#include <string_view>
+#include <variant>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
 }
 
 namespace at {
+
+// Function name to record NCCL metadata
+extern TORCH_API const std::string kParamCommsCallName;
 
 // Kind of record function scope;
 enum class C10_API_ENUM RecordScope : uint8_t {
@@ -94,7 +97,7 @@ struct ObserverContext {
   virtual ~ObserverContext() = default;
 
  protected:
-  ObserverContext() {}
+  ObserverContext() = default;
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
@@ -241,7 +244,7 @@ constexpr CallbackHandle INVALID_CALLBACK_HANDLE{0};
 // thread-local function callbacks. Moreover, it prevents saving to
 // ThreadLocalState because std::atomic is non-copyable.
 struct RecordFunctionCallbacksEntry {
-  RecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+  RecordFunctionCallbacksEntry(RecordFunctionCallback cb, CallbackHandle h)
       : callback_(cb), handle_(h) {}
 
   RecordFunctionCallback callback_;
@@ -285,9 +288,11 @@ struct TORCH_API RecordFunction {
   explicit RecordFunction(RecordScope scope = RecordScope::FUNCTION);
   explicit RecordFunction(StepCallbacks&& step_callbacks);
 
-  template <typename F>
+  using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
+  using FunctionDescriptor = std::variant<std::string_view, schema_ref_t>;
+
   void before(
-      F fn,
+      FunctionDescriptor fn,
       c10::ArrayRef<const c10::IValue> args,
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
@@ -297,15 +302,49 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  template <typename F>
   void before(
-      F fn,
+      FunctionDescriptor fn,
+      c10::ArrayRef<const c10::IValue> args,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(fn, args, current_sequence_nr);
+  }
+
+  void before(
+      FunctionDescriptor fn,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(fn, current_sequence_nr);
+  }
+
+  void before(
+      FunctionDescriptor fn,
       const std::vector<IValue>* args,
       int64_t current_sequence_nr = -1) {
     before(
-        std::move(fn),
+        fn,
         c10::ArrayRef<const c10::IValue>(args->data(), args->size()),
         current_sequence_nr);
+  }
+
+  void before(
+      FunctionDescriptor fn,
+      const std::vector<IValue>* args,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(std::move(fn), args, current_sequence_nr);
   }
 
   // Destructor calls end callbacks
@@ -313,8 +352,11 @@ struct TORCH_API RecordFunction {
 
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
+  RecordFunction(RecordFunction&&) = delete;
+  RecordFunction& operator=(RecordFunction&&) = delete;
 
   const char* name() const;
+  const char* overload_name() const;
 
   int64_t seqNr() const {
     return sequence_nr_;
@@ -326,6 +368,15 @@ struct TORCH_API RecordFunction {
         inputs_valid_, "Called inputs() outside RecordFunction start callback");
 #endif
     return inputs_;
+  }
+
+  std::unordered_map<std::string, IValue> kwinputs() const {
+#ifndef NDEBUG
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        inputs_valid_,
+        "Called kwinputs() outside RecordFunction start callback");
+#endif
+    return kwinputs_;
   }
 
   const std::vector<c10::IValue>& outputs() const {
@@ -374,10 +425,7 @@ struct TORCH_API RecordFunction {
 
   // before functions initialize RecordFunction members and call
   // start callbacks
-  using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
-  void before(const char* name, int64_t sequence_nr = -1);
-  void before(std::string name, int64_t sequence_nr = -1);
-  void before(schema_ref_t schema, int64_t sequence_nr = -1);
+  void before(FunctionDescriptor schema, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -392,8 +440,14 @@ struct TORCH_API RecordFunction {
   // profiling.
   void _setAsync();
 
-  // Returns whether this RecordFunction corresponds to an async event orn ot.
+  // Returns whether this RecordFunction corresponds to an async event or not.
   bool isAsync() const;
+
+  // Returns whether this RecordFunction corresponds to NCCL metadata collection
+  // or not.
+  bool isNcclMeta() const {
+    return is_nccl_meta_;
+  }
 
   // Internal-only, used to denote out variant used for Static Runtime execution
   void _setStaticRuntimeOutVariant();
@@ -403,10 +457,10 @@ struct TORCH_API RecordFunction {
     return handle_;
   }
 
-  c10::optional<OperatorName> operator_name() const;
+  std::optional<OperatorName> operator_name() const;
 
   // This method returns a copy of the FunctionSchema and can be expensive.
-  c10::optional<FunctionSchema> operator_schema() const;
+  std::optional<FunctionSchema> operator_schema() const;
 
   void setHandle(RecordFunctionHandle handle) {
     handle_ = handle;
@@ -456,13 +510,14 @@ struct TORCH_API RecordFunction {
   // Stores various ObserverContext objects with event metadata for callbacks.
   ObserverContextList ctx_;
 
-  c10::variant<std::string, schema_ref_t> fn_;
+  std::variant<std::string, schema_ref_t> fn_;
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
+  std::unordered_map<std::string, IValue> kwinputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
@@ -483,18 +538,21 @@ struct TORCH_API RecordFunction {
   // Whether this RecordFunction is used for an out variant run with
   // Static Runtime
   bool is_static_runtime_out_variant_{false};
+
+  // Whether this RecordFunction is used for NCCL metadata collection
+  bool is_nccl_meta_{false};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
-TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
     RecordScope scope);
 
 namespace detail {
-template <typename Inputs, typename F, typename... Args>
+template <typename Inputs, typename... Args>
 void record_function_with_scope(
     RecordFunction& guard,
-    F fn,
+    RecordFunction::FunctionDescriptor fn,
     const Inputs& inputs,
     Args&&... args) {
   if (guard.needsInputs()) {
@@ -507,10 +565,10 @@ void record_function_with_scope(
   }
 }
 
-template <typename Inputs, typename F, typename... Args>
+template <typename Inputs, typename... Args>
 void record_function_with_scope_and_debug_handle(
     RecordFunction& guard,
-    F fn,
+    RecordFunction::FunctionDescriptor fn,
     int64_t debug_handle,
     const Inputs& inputs,
     Args&&... args) {
@@ -525,30 +583,26 @@ void record_function_with_scope_and_debug_handle(
   }
 }
 
-template <typename F, typename... Args>
+template <typename... Args>
 void record_function_with_scope(
     RecordFunction& guard,
-    F fn,
+    RecordFunction::FunctionDescriptor fn,
     c10::ArrayRef<const c10::IValue> inputs,
     Args&&... args) {
-  return record_function_with_scope<
-      c10::ArrayRef<const c10::IValue>,
-      F,
-      Args...>(guard, std::move(fn), inputs, std::forward<Args>(args)...);
+  return record_function_with_scope<c10::ArrayRef<const c10::IValue>, Args...>(
+      guard, fn, inputs, std::forward<Args>(args)...);
 }
 
-template <typename F, typename... Args>
+template <typename... Args>
 void record_function_with_scope_and_debug_handle(
     RecordFunction& guard,
-    F fn,
+    RecordFunction::FunctionDescriptor fn,
     int64_t debug_handle,
     c10::ArrayRef<const c10::IValue> inputs,
     Args&&... args) {
   return record_function_with_scope_and_debug_handle<
       c10::ArrayRef<const c10::IValue>,
-      F,
-      Args...>(
-      guard, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
+      Args...>(guard, fn, debug_handle, inputs, std::forward<Args>(args)...);
 }
 
 } // namespace detail
@@ -595,6 +649,13 @@ void record_function_with_scope_and_debug_handle(
 #define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::USER_SCOPE, fn, inputs)
 
+#define RECORD_USER_SCOPE_WITH_KWARGS_ONLY(fn, kwargs) \
+  RECORD_FUNCTION_WITH_SCOPE(                          \
+      at::RecordScope::USER_SCOPE,                     \
+      fn,                                              \
+      c10::ArrayRef<const c10::IValue>{},              \
+      kwargs)
+
 // Helper macro to pass in debug handle that is used to
 // post process events
 #define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(             \
@@ -605,7 +666,7 @@ void record_function_with_scope_and_debug_handle(
         guard, fn, debug_handle, inputs, ##__VA_ARGS__);       \
   }
 
-// Helper macros to record LITE INTERPETER scope events with debug handles
+// Helper macros to record LITE INTERPRETER scope events with debug handles
 #define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS( \
     fn, debug_handle, inputs)                           \
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \
@@ -698,6 +759,10 @@ class TORCH_API RecordFunctionGuard {
     enableRecordFunction(is_enabled);
   }
 
+  RecordFunctionGuard(RecordFunctionGuard&& other) = delete;
+  RecordFunctionGuard(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(RecordFunctionGuard&&) = delete;
   virtual ~RecordFunctionGuard() {
     enableRecordFunction(prev_value_);
   }

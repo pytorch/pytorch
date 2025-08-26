@@ -1,21 +1,25 @@
+# mypy: allow-untyped-defs
+from typing import Any, Callable, cast, Optional, Union
+
 import torch
-
-__all__ = ["bench_all", "benchmark_compile"]
-
 import torch._dynamo
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch.utils.benchmark import Timer
 
-from typing import Optional, List, Callable, Union, Any, cast
+
+__all__ = ["bench_all", "benchmark_compile"]
+
 
 _warned_tensor_cores = False
 _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
     from tabulate import tabulate
+
     HAS_TABULATE = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_TABULATE = False
+    tabulate = None  # type: ignore[assignment]
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
@@ -37,8 +41,8 @@ if HAS_TABULATE:
         model: Union[torch.nn.Module, Callable],
         sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
-        optimizer: torch.optim.Optimizer = None,
-        loss_fn: Callable = None,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        loss_fn: Optional[Callable] = None,
     ):
         # Define the statement and setup for the benchmark
         if optimizer and loss_fn:
@@ -73,8 +77,8 @@ if HAS_TABULATE:
         num_iters: int = 5,
         backend: Optional[str] = None,
         mode: Optional[str] = "default",
-        optimizer: torch.optim.Optimizer = None,
-        loss_fn : Union[torch.nn.Module, Callable] = None,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
         """
         Use this utility to benchmark torch.compile
@@ -117,13 +121,13 @@ if HAS_TABULATE:
         sample_input: Union[torch.Tensor, Any],
         num_iters : int = 5,
         optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn : Union[torch.nn.Module, Callable] = None,
+        loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
         """
         This is a simple utility that can be used to benchmark torch.compile
         In particular it ensures that your GPU is setup to use tensor cores if it supports its
         It also tries out all the main backends and prints a table of results so you can easily compare them all
-        Many of the backendds have their own optional dependencies so please pip install them seperately
+        Many of the backendds have their own optional dependencies so please pip install them separately
 
         You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
@@ -149,7 +153,7 @@ if HAS_TABULATE:
         for backend in torch._dynamo.list_backends():
 
             if backend == "inductor":
-                mode_options = cast(List[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
+                mode_options = cast(list[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
                 for mode in mode_options:
                     if mode == "default":
                         continue

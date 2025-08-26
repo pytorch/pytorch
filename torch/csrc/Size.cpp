@@ -12,7 +12,6 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/pybind.h>
 
 struct THPSize {
   PyTupleObject tuple;
@@ -38,7 +37,7 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
   return self.release();
 }
 
-PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
+PyObject* THPSize_NewFromSizes(int64_t dim, const int64_t* sizes) {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
   if (!self)
     throw python_error();
@@ -49,23 +48,17 @@ PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
 PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
   auto sym_sizes = self_.sym_sizes();
 
-  auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(
+      &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
     throw python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
-    if (auto m = si.maybe_as_int()) {
-      if (torch::jit::tracer::isTracing()) {
-        PyObject* py_size_tensor =
-            THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
-        if (!py_size_tensor)
-          throw python_error();
-        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
-      } else {
-        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*m));
-      }
-    } else {
+    if (si.is_symbolic()) {
+      // First check for actual symbolic values.
+      // Reason: so that we don't replace it by its integer replacement
+      // implicitly.
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
@@ -73,6 +66,19 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       if (!py_symint)
         throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    } else {
+      // Otherwise, we know that it is an actual integer value.
+      auto m = si.maybe_as_int();
+      if (torch::jit::tracer::isTracing()) {
+        PyObject* py_size_tensor = THPVariable_Wrap(
+            torch::jit::tracer::getSizeOf(self_, static_cast<int64_t>(i)));
+        if (!py_size_tensor)
+          throw python_error();
+        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
+      } else {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(m.value()));
+      }
     }
   }
   return ret.release();
@@ -143,8 +149,6 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
-extern PyTypeObject THPSizeType;
-
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
@@ -157,17 +161,55 @@ static PyObject* wrap_tuple_fn(Args... args) {
   return result.release();
 }
 
+static PyObject* THPSize_concat(PyObject* left, PyObject* right) {
+  // wrap tuple's sq_concat with a customized error message
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyTuple_Check(right),
+      "can only concatenate tuple (not ",
+      Py_TYPE(right)->tp_name,
+      ") to torch.Size");
+  static binaryfunc tuple_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+  static binaryfunc size_concat =
+      wrap_tuple_fn<decltype(&tuple_concat), &tuple_concat>;
+  return size_concat(left, right);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPSize_add(PyObject* left, PyObject* right) {
+  /* NOTE: The python interpreter tries, in order:
+   *   1. right.nb_add(left, right)  (only if right is a subclass of left)
+   *   2. left.nb_add(left, right)
+   *   3. right.nb_add(left, right)
+   *   4. left.sq_concat(right)
+   * Hence, to support tuple + size -> size, we need to implement nb_add.
+   */
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(left) || !PyTuple_Check(right)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+  return THPSize_concat(left, right);
+  END_HANDLE_TH_ERRORS
+}
+
+// Needed to ensure tuple + size returns a size instead of a tuple
+static PyNumberMethods THPSize_as_number = {
+    &THPSize_add, // nb_add
+    nullptr, // nb_subtract
+    nullptr, // nb_multiply
+    // ... rest nullptr
+};
+
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
-auto sq_concat = PyTuple_Type.tp_as_sequence -> sq_concat;
-auto sq_repeat = PyTuple_Type.tp_as_sequence -> sq_repeat;
+auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
 binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 } // namespace
 
 static PySequenceMethods THPSize_as_sequence = {
     nullptr, /* sq_length */
-    wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
+    &THPSize_concat, /* sq_concat */
     wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
     nullptr, /* sq_item */
     nullptr, /* sq_slice */
@@ -228,7 +270,8 @@ static PyMethodDef THPSize_methods[] = {
     {nullptr}};
 
 PyTypeObject THPSizeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Size", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Size", /* tp_name */
     sizeof(THPSize), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -237,7 +280,7 @@ PyTypeObject THPSizeType = {
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
     (reprfunc)THPSize_repr, /* tp_repr */
-    nullptr, /* tp_as_number */
+    &THPSize_as_number, /* tp_as_number */
     &THPSize_as_sequence, /* tp_as_sequence */
     &THPSize_as_mapping, /* tp_as_mapping */
     nullptr, /* tp_hash  */

@@ -56,6 +56,11 @@ class TestSubclass(TestCase):
         self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
+        class UninitializedParam(nn.Parameter):
+            pass
+
+        self.assertNotIsInstance(param, UninitializedParam)
+
     @skipIfTorchDynamo()
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
@@ -81,7 +86,8 @@ class TestSubclass(TestCase):
                 x = nn.Parameter(x)
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([tensor_cls]):
+                x_loaded = torch.load(f)
 
             self.assertEqual(x, x_loaded)
             self.assertIsNot(x, x_loaded)
@@ -125,7 +131,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p1 = nn.Parameter(create_fn())
 
@@ -142,7 +148,7 @@ class TestSubclass(TestCase):
                     nn.init.normal_(self.p1)
                     for p in self.p_list:
                         nn.init.uniform_(p)
-                    for _, p in self.p_dict.items():
+                    for p in self.p_dict.values():
                         nn.init.uniform_(p)
 
             def forward(self, x):
@@ -150,7 +156,7 @@ class TestSubclass(TestCase):
                 for p in self.p_list:
                     out = p + out
 
-                for _, v in self.p_dict.items():
+                for v in self.p_dict.values():
                     out = v + out
 
                 return out
@@ -174,7 +180,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(create_fn())
 
@@ -201,7 +207,7 @@ class TestSubclass(TestCase):
             self.fail('dummy fail for base tensor until the test passes for subclasses')
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = nn.UninitializedParameter()
 
@@ -216,7 +222,7 @@ class TestSubclass(TestCase):
 
         m = MyLazyModule()
         self.assertTrue(m.has_uninitialized_params())
-        output = m(self._create_tensor(tensor_cls))
+        m(self._create_tensor(tensor_cls))
         self.assertFalse(m.has_uninitialized_params())
         self.assertIsInstance(m.param, tensor_cls)
 
@@ -228,14 +234,12 @@ class TestSubclass(TestCase):
             def __new__(
                 cls, t: torch.Tensor
             ):
-                r = super(NonRewrappingTensor, cls)._make_wrapper_subclass(
+                r = super()._make_wrapper_subclass(
                     cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
                 return r
 
             def __init__(self, t) -> None:
                 self.tensor: torch.Tensor = t
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -252,7 +256,27 @@ class TestSubclass(TestCase):
                 return r
 
         with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
-            param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
+            nn.Parameter(NonRewrappingTensor(torch.randn(3)))
+
+    def test_tensor_subclass_storage_data_accesses_throw(self):
+        from torch.testing._internal.logging_tensor import LoggingTensor
+        x = torch.ones(2)
+        x_log = LoggingTensor(x)
+        # Accessing storage on a tensor subclass is valid
+        storage = x_log.untyped_storage()
+        # This includes accessing metadata on the storage
+        # But storage methods that access data will throw
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.resize_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.copy_(storage)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.fill_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage._write_file("file")
+
 
 instantiate_parametrized_tests(TestSubclass)
 

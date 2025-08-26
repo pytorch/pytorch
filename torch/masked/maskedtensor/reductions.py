@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
@@ -6,6 +7,7 @@ import torch
 
 from .core import is_masked_tensor
 from .creation import as_masked_tensor, masked_tensor
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -46,7 +48,7 @@ def _torch_reduce_all(fn):
     def reduce_all(self):
         masked_fn = _get_masked_fn(fn)
         data = self.get_data()
-        mask = self.get_mask().values() if self.is_sparse() else self.get_mask()
+        mask = self.get_mask().values() if self.is_sparse else self.get_mask()
         # When reduction is "all", then torch.argmin/torch.argmax needs to return the index of the
         # element corresponding to the min/max, but this operation isn't supported correctly for sparse layouts.
         # Therefore, this implementation calculates it using the strides.
@@ -67,7 +69,7 @@ def _torch_reduce_all(fn):
             result_data = torch.sum(idx * stride)
 
         # we simply pass in the values for sparse COO/CSR tensors
-        elif self.is_sparse():
+        elif self.is_sparse:
             result_data = masked_fn(masked_tensor(data.values(), mask))
 
         else:
@@ -80,7 +82,7 @@ def _torch_reduce_all(fn):
 
 def _torch_reduce_dim(fn):
     def reduce_dim(self, dim, keepdim=False, dtype=None):
-        if self.is_sparse():
+        if self.is_sparse:
             msg = (
                 f"The sparse version of {fn} is not implemented in reductions.\n"
                 "If you would like this operator to be supported, please file an issue for a feature request at "
@@ -158,6 +160,7 @@ TENSOR_REDUCE_MAP = {
 NATIVE_REDUCE_FNS = list(NATIVE_REDUCE_MAP.keys())
 TORCH_REDUCE_FNS = list(TORCH_REDUCE_MAP.keys())
 TENSOR_REDUCE_FNS = list(TENSOR_REDUCE_MAP.keys())
+
 
 def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP

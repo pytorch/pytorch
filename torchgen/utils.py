@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import functools
 import hashlib
@@ -5,28 +7,22 @@ import os
 import re
 import sys
 import textwrap
-from argparse import Namespace
 from dataclasses import fields, is_dataclass
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    Iterable,
-    Iterator,
-    List,
-    Literal,
-    NoReturn,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from pathlib import Path
+from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never, deprecated, Self
 
 from torchgen.code_template import CodeTemplate
+
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+    from collections.abc import Iterable, Iterator, Sequence
+
+
+TORCHGEN_ROOT = Path(__file__).absolute().parent
+REPO_ROOT = TORCHGEN_ROOT.parent
 
 
 # Many of these functions share logic for defining both the definition
@@ -56,7 +52,7 @@ IDENT_REGEX = r"(^|\W){}($|\W)"
 
 
 # TODO: Use a real parser here; this will get bamboozled
-def split_name_params(schema: str) -> Tuple[str, List[str]]:
+def split_name_params(schema: str) -> tuple[str, list[str]]:
     m = re.match(r"(\w+)(\.\w+)?\((.*)\)", schema)
     if m is None:
         raise RuntimeError(f"Unsupported function schema: {schema}")
@@ -72,7 +68,7 @@ S = TypeVar("S")
 
 
 # Map over function that may return None; omit Nones from output sequence
-def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
+def mapMaybe(func: Callable[[T], S | None], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
         r = func(x)
         if r is not None:
@@ -101,21 +97,23 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         raise
 
 
-# A little trick from https://github.com/python/mypy/issues/6366
-# for getting mypy to do exhaustiveness checking
-# TODO: put this somewhere else, maybe
-def assert_never(x: NoReturn) -> NoReturn:
-    raise AssertionError("Unhandled type: {}".format(type(x).__name__))
+if TYPE_CHECKING:
+    # A little trick from https://github.com/python/mypy/issues/6366
+    # for getting mypy to do exhaustiveness checking
+    # TODO: put this somewhere else, maybe
+    @deprecated("Use typing_extensions.assert_never instead")
+    def assert_never(x: NoReturn) -> NoReturn:  # type: ignore[misc] # noqa: F811
+        raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 
 
 # String hash that's stable across different executions, unlike builtin hash
 def string_stable_hash(s: str) -> int:
-    sha1 = hashlib.sha1(s.encode("latin1")).digest()
+    sha1 = hashlib.sha1(s.encode("latin1"), usedforsecurity=False).digest()
     return int.from_bytes(sha1, byteorder="little")
 
 
@@ -123,85 +121,151 @@ def string_stable_hash(s: str) -> int:
 # of what files have been written (so you can write out a list of output
 # files)
 class FileManager:
-    install_dir: str
-    template_dir: str
-    dry_run: bool
-    filenames: Set[str]
-
-    def __init__(self, install_dir: str, template_dir: str, dry_run: bool) -> None:
-        self.install_dir = install_dir
-        self.template_dir = template_dir
-        self.filenames = set()
+    def __init__(
+        self,
+        install_dir: str | Path,
+        template_dir: str | Path,
+        dry_run: bool,
+    ) -> None:
+        self.install_dir = Path(install_dir)
+        self.template_dir = Path(template_dir)
+        self.files: set[Path] = set()
         self.dry_run = dry_run
 
-    def _write_if_changed(self, filename: str, contents: str) -> None:
-        old_contents: Optional[str]
+    @property
+    def filenames(self) -> frozenset[str]:
+        return frozenset({file.as_posix() for file in self.files})
+
+    def _write_if_changed(self, filename: str | Path, contents: str) -> None:
+        file = Path(filename)
+        old_contents: str | None = None
         try:
-            with open(filename, "r") as f:
-                old_contents = f.read()
-        except IOError:
-            old_contents = None
+            old_contents = file.read_text(encoding="utf-8")
+        except OSError:
+            pass
         if contents != old_contents:
             # Create output directory if it doesn't exist
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            with open(filename, "w") as f:
-                f.write(contents)
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(contents, encoding="utf-8")
 
     # Read from template file and replace pattern with callable (type could be dict or str).
     def substitute_with_template(
-        self, template_fn: str, env_callable: Callable[[], Union[str, Dict[str, Any]]]
+        self,
+        template_fn: str | Path,
+        env_callable: Callable[[], str | dict[str, Any]],
     ) -> str:
-        template_path = os.path.join(self.template_dir, template_fn)
+        assert not Path(template_fn).is_absolute(), (
+            f"template_fn must be relative: {template_fn}"
+        )
+        template_path = self.template_dir / template_fn
         env = env_callable()
         if isinstance(env, dict):
-            # TODO: Update the comment reference to the correct location
             if "generated_comment" not in env:
-                comment = "@" + "generated by torchgen/gen.py"
-                comment += " from {}".format(os.path.basename(template_path))
-                env["generated_comment"] = comment
+                generator_default = TORCHGEN_ROOT / "gen.py"
+                try:
+                    generator = Path(
+                        sys.modules["__main__"].__file__ or generator_default
+                    ).absolute()
+                except (KeyError, AttributeError):
+                    generator = generator_default.absolute()
+
+                try:
+                    generator_path = generator.relative_to(REPO_ROOT).as_posix()
+                except ValueError:
+                    generator_path = generator.name
+
+                env = {
+                    **env,  # copy the original dict instead of mutating it
+                    "generated_comment": (
+                        "@" + f"generated by {generator_path} from {template_fn}"
+                    ),
+                }
             template = _read_template(template_path)
-            return template.substitute(env)
-        elif isinstance(env, str):
+            substitute_out = template.substitute(env)
+            # Ensure an extra blank line between the class/function definition
+            # and the docstring of the previous class/function definition.
+            # NB: It is generally not recommended to have docstrings in pyi stub
+            #     files. But if there are any, we need to ensure that the file
+            #     is properly formatted.
+            return re.sub(
+                r'''
+                (""")\n+             # match triple quotes
+                (
+                    (\s*@.+\n)*     # match decorators if any
+                    \s*(class|def)  # match class/function definition
+                )
+                ''',
+                r"\g<1>\n\n\g<2>",
+                substitute_out,
+                flags=re.VERBOSE,
+            )
+        if isinstance(env, str):
             return env
-        else:
-            assert_never(env)
+        assert_never(env)
 
     def write_with_template(
         self,
-        filename: str,
-        template_fn: str,
-        env_callable: Callable[[], Union[str, Dict[str, Any]]],
+        filename: str | Path,
+        template_fn: str | Path,
+        env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
-        filename = "{}/{}".format(self.install_dir, filename)
-        assert filename not in self.filenames, "duplicate file write {filename}"
-        self.filenames.add(filename)
+        filename = Path(filename)
+        assert not filename.is_absolute(), f"filename must be relative: {filename}"
+        file = self.install_dir / filename
+        assert file not in self.files, f"duplicate file write {file}"
+        self.files.add(file)
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
                 template_fn=template_fn,
                 env_callable=env_callable,
             )
-            self._write_if_changed(filename=filename, contents=substitute_out)
+            self._write_if_changed(filename=file, contents=substitute_out)
 
     def write(
         self,
-        filename: str,
-        env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]],
+        filename: str | Path,
+        env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
         self.write_with_template(filename, filename, env_callable)
 
     def write_sharded(
         self,
-        filename: str,
+        filename: str | Path,
         items: Iterable[T],
         *,
         key_fn: Callable[[T], str],
-        env_callable: Callable[[T], Dict[str, List[str]]],
+        env_callable: Callable[[T], dict[str, list[str]]],
         num_shards: int,
-        base_env: Optional[Dict[str, Any]] = None,
-        sharded_keys: Set[str],
+        base_env: dict[str, Any] | None = None,
+        sharded_keys: set[str],
     ) -> None:
-        everything: Dict[str, Any] = {"shard_id": "Everything"}
-        shards: List[Dict[str, Any]] = [
+        self.write_sharded_with_template(
+            filename,
+            filename,
+            items,
+            key_fn=key_fn,
+            env_callable=env_callable,
+            num_shards=num_shards,
+            base_env=base_env,
+            sharded_keys=sharded_keys,
+        )
+
+    def write_sharded_with_template(
+        self,
+        filename: str | Path,
+        template_fn: str | Path,
+        items: Iterable[T],
+        *,
+        key_fn: Callable[[T], str],
+        env_callable: Callable[[T], dict[str, list[str]]],
+        num_shards: int,
+        base_env: dict[str, Any] | None = None,
+        sharded_keys: set[str],
+    ) -> None:
+        file = Path(filename)
+        assert not file.is_absolute(), f"filename must be relative: {filename}"
+        everything: dict[str, Any] = {"shard_id": "Everything"}
+        shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
         ]
         all_shards = [everything] + shards
@@ -213,14 +277,14 @@ class FileManager:
         for key in sharded_keys:
             for shard in all_shards:
                 if key in shard:
-                    assert isinstance(
-                        shard[key], list
-                    ), "sharded keys in base_env must be a list"
+                    assert isinstance(shard[key], list), (
+                        "sharded keys in base_env must be a list"
+                    )
                     shard[key] = shard[key].copy()
                 else:
                     shard[key] = []
 
-        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
+        def merge_env(into: dict[str, list[str]], from_: dict[str, list[str]]) -> None:
             for k, v in from_.items():
                 assert k in sharded_keys, f"undeclared sharded key {k}"
                 into[k] += v
@@ -237,29 +301,27 @@ class FileManager:
             merge_env(shards[sid], env)
             merge_env(everything, env)
 
-        dot_pos = filename.rfind(".")
-        if dot_pos == -1:
-            dot_pos = len(filename)
-        base_filename = filename[:dot_pos]
-        extension = filename[dot_pos:]
-
         for shard in all_shards:
             shard_id = shard["shard_id"]
             self.write_with_template(
-                f"{base_filename}{shard_id}{extension}", filename, lambda: shard
+                file.with_stem(f"{file.stem}{shard_id}"),
+                template_fn,
+                lambda: shard,
             )
 
         # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
-        self.filenames.discard(
-            f"{self.install_dir}/{base_filename}Everything{extension}"
-        )
+        self.files.discard(self.install_dir / file.with_stem(f"{file.stem}Everything"))
 
-    def write_outputs(self, variable_name: str, filename: str) -> None:
-        """Write a file containing the list of all outputs which are
-        generated by this script."""
-        content = "set({}\n    {})".format(
-            variable_name,
-            "\n    ".join('"' + name + '"' for name in sorted(self.filenames)),
+    def write_outputs(self, variable_name: str, filename: str | Path) -> None:
+        """Write a file containing the list of all outputs which are generated by this script."""
+        content = "\n".join(
+            (
+                "set(",
+                variable_name,
+                # Use POSIX paths to avoid invalid escape sequences on Windows
+                *(f'    "{file.as_posix()}"' for file in sorted(self.files)),
+                ")",
+            )
         )
         self._write_if_changed(filename, content)
 
@@ -274,12 +336,15 @@ class FileManager:
 
 # Helper function to generate file manager
 def make_file_manager(
-    options: Namespace, install_dir: Optional[str] = None
+    options: Namespace,
+    install_dir: str | Path | None = None,
 ) -> FileManager:
     template_dir = os.path.join(options.source_path, "templates")
     install_dir = install_dir if install_dir else options.install_dir
     return FileManager(
-        install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run
+        install_dir=install_dir,
+        template_dir=template_dir,
+        dry_run=options.dry_run,
     )
 
 
@@ -334,7 +399,7 @@ def _pformat(
 
 
 def _format_dict(
-    attr: Dict[Any, Any],
+    attr: dict[Any, Any],
     indent: int,
     width: int,
     curr_indent: int,
@@ -354,7 +419,7 @@ def _format_dict(
 
 
 def _format_list(
-    attr: Union[List[Any], Set[Any], Tuple[Any, ...]],
+    attr: list[Any] | set[Any] | tuple[Any, ...],
     indent: int,
     width: int,
     curr_indent: int,
@@ -369,7 +434,7 @@ def _format_list(
 
 
 def _format(
-    fields_str: List[str],
+    fields_str: list[str],
     indent: int,
     width: int,
     curr_indent: int,
@@ -401,12 +466,17 @@ class NamespaceHelper:
     } // namespace torch
     """
 
-    def __init__(self, namespace_str: str, entity_name: str = "", max_level: int = 2):
+    def __init__(
+        self,
+        namespace_str: str,
+        entity_name: str = "",
+        max_level: int = 2,
+    ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
-        assert (
-            len(cpp_namespaces) <= max_level
-        ), f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        assert len(cpp_namespaces) <= max_level, (
+            f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
+        )
         self.cpp_namespace_ = namespace_str
         self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
         self.epilogue_ = "\n".join(
@@ -417,8 +487,9 @@ class NamespaceHelper:
 
     @staticmethod
     def from_namespaced_entity(
-        namespaced_entity: str, max_level: int = 2
-    ) -> "NamespaceHelper":
+        namespaced_entity: str,
+        max_level: int = 2,
+    ) -> NamespaceHelper:
         """
         Generate helper from nested namespaces as long as class/function name. E.g.: "torch::lazy::add"
         """
@@ -451,13 +522,13 @@ class NamespaceHelper:
 
 
 class OrderedSet(Generic[T]):
-    storage: Dict[T, Literal[None]]
+    storage: dict[T, Literal[None]]
 
-    def __init__(self, iterable: Optional[Iterable[T]] = None):
+    def __init__(self, iterable: Iterable[T] | None = None) -> None:
         if iterable is None:
             self.storage = {}
         else:
-            self.storage = {k: None for k in iterable}
+            self.storage = dict.fromkeys(iterable)
 
     def __contains__(self, item: T) -> bool:
         return item in self.storage
@@ -465,28 +536,28 @@ class OrderedSet(Generic[T]):
     def __iter__(self) -> Iterator[T]:
         return iter(self.storage.keys())
 
-    def update(self, items: "OrderedSet[T]") -> None:
+    def update(self, items: OrderedSet[T]) -> None:
         self.storage.update(items.storage)
 
     def add(self, item: T) -> None:
         self.storage[item] = None
 
-    def copy(self) -> "OrderedSet[T]":
+    def copy(self) -> OrderedSet[T]:
         ret: OrderedSet[T] = OrderedSet()
         ret.storage = self.storage.copy()
         return ret
 
     @staticmethod
-    def union(*args: "OrderedSet[T]") -> "OrderedSet[T]":
+    def union(*args: OrderedSet[T]) -> OrderedSet[T]:
         ret = args[0].copy()
         for s in args[1:]:
             ret.update(s)
         return ret
 
-    def __or__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+    def __or__(self, other: OrderedSet[T]) -> OrderedSet[T]:
         return OrderedSet.union(self, other)
 
-    def __ior__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+    def __ior__(self, other: OrderedSet[T]) -> Self:
         self.update(other)
         return self
 

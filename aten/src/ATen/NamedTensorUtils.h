@@ -5,13 +5,12 @@
 
 #include <ATen/core/DimVector.h>
 #include <ATen/core/Tensor.h>
-#include <functional>
 
 namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(ITensorListRef tensors) {
+inline bool has_names(const ITensorListRef& tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const Tensor& t) {
     return t.has_names();
   });
@@ -81,7 +80,7 @@ namespace namedinference {
 
 const Tensor& propagate_names_if_present_and_nonempty(
     const Tensor& result,
-    c10::optional<DimnameList> maybe_names,
+    std::optional<DimnameList> maybe_names,
     bool validate_names = false);
 // Propagates `names` to `result` if `names` is not empty.
 // `names` can be empty; see [NOTE] Writing name inference rules
@@ -168,14 +167,14 @@ TORCH_API TensorImpl* propagate_names(
 
 TORCH_API void propagate_names(TensorImpl* result, /*const */ TensorImpl* src);
 
-TORCH_API inline void propagate_names(
+inline void propagate_names(
     const TensorBase& result,
     DimnameList names,
     bool validate_names = false) {
   propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-TORCH_API inline void propagate_names_if_nonempty(
+inline void propagate_names_if_nonempty(
     const TensorBase& result,
     DimnameList names,
     bool validate_names = false) {
@@ -183,9 +182,7 @@ TORCH_API inline void propagate_names_if_nonempty(
       result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-TORCH_API inline void propagate_names(
-    const TensorBase& result,
-    const TensorBase& src) {
+inline void propagate_names(const TensorBase& result, const TensorBase& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 

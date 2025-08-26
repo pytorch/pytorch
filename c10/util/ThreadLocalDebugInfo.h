@@ -2,8 +2,8 @@
 
 #include <c10/macros/Export.h>
 
+#include <cstdint>
 #include <memory>
-#include <string>
 
 namespace c10 {
 
@@ -74,6 +74,8 @@ class C10_API DebugInfoGuard {
 
   DebugInfoGuard(const DebugInfoGuard&) = delete;
   DebugInfoGuard(DebugInfoGuard&&) = delete;
+  DebugInfoGuard& operator=(const DebugInfoGuard&) = delete;
+  DebugInfoGuard& operator=(DebugInfoGuard&&) = delete;
 
  private:
   bool active_ = false;

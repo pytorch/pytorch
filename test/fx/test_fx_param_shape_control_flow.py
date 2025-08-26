@@ -1,10 +1,8 @@
 # Owner(s): ["module: fx"]
 
-import unittest
 import torch
 import torch.fx
-
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class MyModuleBase(torch.nn.Module):
@@ -19,7 +17,8 @@ class MyModuleBase(torch.nn.Module):
         return self.param
 
     def no_relu(self):
-        raise Exception("not implemented")
+        raise Exception("not implemented")  # noqa: TRY002
+
 
 class MyModuleParamShape(MyModuleBase):
     def __init__(self, in_channels):
@@ -72,7 +71,6 @@ class MyModuleParamNumEl(MyModuleBase):
         return self.param.numel() < 10 * 3
 
 
-
 class MyModuleParamNElement(MyModuleBase):
     def __init__(self, in_channels):
         super().__init__()
@@ -82,43 +80,49 @@ class MyModuleParamNElement(MyModuleBase):
         return self.param.nelement() < 10 * 3
 
 
-
 class TestConstParamShapeInControlFlow(TestCase):
-
     def verify_mm_relu_mods(self, mm_only_mod, relu_mod):
         """
         Verify one module only does a mm op while the other
         performs both mm and relu ops in cascade
         """
         x = torch.randn(10, 5)
-        torch.testing.assert_close(mm_only_mod(x), torch.mm(x, mm_only_mod.get_mul_matrix()))
+        torch.testing.assert_close(
+            mm_only_mod(x), torch.mm(x, mm_only_mod.get_mul_matrix())
+        )
         tracer = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph = tracer.trace(mm_only_mod)
 
         # verify the graph module calculates the same result
         graph_mod_mm = torch.fx.GraphModule(mm_only_mod, traced_graph)
-        torch.testing.assert_close(graph_mod_mm(x), torch.mm(x, mm_only_mod.get_mul_matrix()))
-
+        torch.testing.assert_close(
+            graph_mod_mm(x), torch.mm(x, mm_only_mod.get_mul_matrix())
+        )
 
         # Make a new module with different parameter shape to go down the different
         # code path
         x = torch.randn(10, 15)
-        torch.testing.assert_close(relu_mod(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix())))
+        torch.testing.assert_close(
+            relu_mod(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix()))
+        )
 
         tracer2 = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph2 = tracer2.trace(relu_mod)
 
         # verify the graph module calculates the same result
         graph_mod_relu = torch.fx.GraphModule(relu_mod, traced_graph2)
-        torch.testing.assert_close(graph_mod_relu(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix())))
-
+        torch.testing.assert_close(
+            graph_mod_relu(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix()))
+        )
 
         graph1_node_targets = [n.target for n in traced_graph.nodes]
         graph2_node_targets = [n.target for n in traced_graph2.nodes]
 
         # the second graph has an exta relu function call node
         assert torch.mm in graph1_node_targets and torch.mm in graph2_node_targets
-        assert torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
+        assert (
+            torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
+        )
 
     def test_param_shape_const(self):
         mymod = MyModuleParamShape(in_channels=5)
@@ -151,5 +155,5 @@ class TestConstParamShapeInControlFlow(TestCase):
         self.verify_mm_relu_mods(mymod, mymod2)
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

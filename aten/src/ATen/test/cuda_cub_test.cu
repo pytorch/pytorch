@@ -138,14 +138,16 @@ __managed__ int input[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 
 TEST(InclusiveScanSplit, CubTest) {
   if (!at::cuda::is_available()) return;
-  at::globalContext().lazyInitCUDA();  // This is required to use PyTorch's caching allocator.
+  at::globalContext().lazyInitDevice(
+      c10::DeviceType::CUDA); // This is required to use PyTorch's caching
+                              // allocator.
 
   int *output1;
   cudaMallocManaged(&output1, sizeof(int) * 10);
 
   cudaDeviceSynchronize();
-  at::cuda::cub::inclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, /*max_cub_size=*/2>(
-    input, output1, ::at_cuda_detail::cub::Sum(), 10);
+  at::cuda::cub::inclusive_scan<int *, int *, NO_ROCM(::cuda)::std::plus<>, /*max_cub_size=*/2>(
+    input, output1, NO_ROCM(::cuda)::std::plus<>(), 10);
   cudaDeviceSynchronize();
 
   ASSERT_EQ(output1[0], 1);
@@ -162,14 +164,16 @@ TEST(InclusiveScanSplit, CubTest) {
 
 TEST(ExclusiveScanSplit, CubTest) {
   if (!at::cuda::is_available()) return;
-  at::globalContext().lazyInitCUDA();  // This is required to use PyTorch's caching allocator.
+  at::globalContext().lazyInitDevice(
+      c10::DeviceType::CUDA); // This is required to use PyTorch's caching
+                              // allocator.
 
   int *output2;
   cudaMallocManaged(&output2, sizeof(int) * 10);
 
   cudaDeviceSynchronize();
-  at::cuda::cub::exclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, int, /*max_cub_size=*/2>(
-    input, output2, ::at_cuda_detail::cub::Sum(), 0, 10);
+  at::cuda::cub::exclusive_scan<int *, int *, NO_ROCM(::cuda)::std::plus<>, int, /*max_cub_size=*/2>(
+    input, output2, NO_ROCM(::cuda)::std::plus<>(), 0, 10);
   cudaDeviceSynchronize();
 
   ASSERT_EQ(output2[0], 0);

@@ -5,10 +5,10 @@
 #include <utility>
 
 // SHAPE CACHING CODE
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 namespace {
-using CanonicalArg = c10::variant<CanonicalizedSymbolicShape, IValue>;
+using CanonicalArg = std::variant<CanonicalizedSymbolicShape, IValue>;
 using CanonicalArgVec = std::vector<CanonicalArg>;
 using CanonicalRet = std::vector<CanonicalizedSymbolicShape>;
 using ShapeCacheKey = std::tuple<c10::OperatorName, CanonicalArgVec>;
@@ -20,14 +20,14 @@ CanonicalArgVec cannonicalizeVec(
   CanonicalArgVec canonical_args;
   canonical_args.reserve(arg_vec.size());
   for (auto& arg : arg_vec) {
-    if (const IValue* iv = c10::get_if<IValue>(&arg)) {
+    if (const IValue* iv = std::get_if<IValue>(&arg)) {
       if (deep_copy) {
         canonical_args.emplace_back(iv->deepcopy());
       } else {
         canonical_args.emplace_back(*iv);
       }
     } else {
-      auto& ss = c10::get<at::SymbolicShape>(arg);
+      auto& ss = std::get<at::SymbolicShape>(arg);
       canonical_args.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
     }
   }
@@ -57,7 +57,7 @@ struct ArgumentsHasher {
     hash_val = at::hash_combine(std::hash<size_t>{}(arg_vec.size()), hash_val);
     for (const CanonicalArg& arg : arg_vec) {
       size_t cur_arg = 0;
-      if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+      if (const IValue* ival = std::get_if<IValue>(&arg)) {
         // IValue doesn't hash List (as Python doesn't), so we will do a custom
         // list hash
         if (ival->isList()) {
@@ -70,7 +70,7 @@ struct ArgumentsHasher {
           cur_arg = IValue::hash(ival);
         }
       } else {
-        cur_arg = c10::get<CanonicalizedSymbolicShape>(arg).hash();
+        cur_arg = std::get<CanonicalizedSymbolicShape>(arg).hash();
       }
       hash_val = at::hash_combine(hash_val, cur_arg);
     }
@@ -109,7 +109,7 @@ TORCH_API void cache_shape_function(
   shapeCache.Add(std::move(cache_key), std::move(can_ret_vec));
 }
 
-TORCH_API c10::optional<std::vector<at::SymbolicShape>>
+TORCH_API std::optional<std::vector<at::SymbolicShape>>
 get_cached_shape_function(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& arg_vec) {
@@ -120,7 +120,7 @@ get_cached_shape_function(
       get_cache_key(schema, arg_vec, ss_map, /* deep_copy */ false);
   auto cached_ret_vec = shapeCache.Get(cache_key);
   if (cached_ret_vec == nullptr) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Decanonicalize the return values
   auto inverse_ss_map = std::unordered_map<int64_t, int64_t>();
@@ -148,7 +148,7 @@ void CanonicalizedSymbolicShape::init(
     std::unordered_map<int64_t, int64_t>& ss_map) {
   auto sizes = orig_shape.sizes();
   if (!sizes) {
-    values_ = c10::nullopt;
+    values_ = std::nullopt;
     return;
   }
   values_ = std::vector<int64_t>();
@@ -205,6 +205,5 @@ bool operator==(
     const CanonicalizedSymbolicShape& a,
     const CanonicalizedSymbolicShape& b) {
   return a.values_ == b.values_;
-};
-} // namespace jit
-} // namespace torch
+}
+} // namespace torch::jit

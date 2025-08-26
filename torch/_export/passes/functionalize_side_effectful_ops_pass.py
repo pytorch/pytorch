@@ -1,21 +1,26 @@
 import copy
-from typing import Dict, Optional, Tuple, List
+from typing import Optional
 
 import torch
-from torch._export.pass_base import ExportPassBase, PassResult, Argument
+from torch._export.pass_base import (
+    _ExportPassBaseDeprecatedDoNotUse,
+    Argument,
+    PassResult,
+)
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._ops import OpOverload
 
+
 aten = torch.ops.aten
 
-_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload] = {
-    aten.sym_constrain_range.default: aten._functional_sym_constrain_range,
+_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: dict[OpOverload, OpOverload] = {
+    aten.sym_constrain_range.default: aten._functional_sym_constrain_range.default,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
 
 
-class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
+class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
     """
     Functionalize ops with side effect in graph module by replacing the op with
     functional version of it. A new dependency token (`dep_token`) will be
@@ -59,8 +64,8 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     def call_operator(
         self,
         op: OpOverload,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         if op not in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS:
@@ -88,7 +93,7 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
 
         return self._dep_token
 
-    def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
+    def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
         assert self._dep_token is not None
 
-        return super().output(results=(*results, self._dep_token), meta=meta)
+        return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

@@ -1,9 +1,9 @@
 #include <c10/core/WrapDimMinimal.h>
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 template <typename T>
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar) {
   TORCH_CHECK_INDEX(
       dim_post_expr >= 0, "Rank cannot be negative but got ", dim_post_expr);
@@ -40,5 +40,4 @@ maybe_wrap_dim_slow(int64_t dim, int64_t dim_post_expr, bool wrap_scalar);
 template C10_API SymInt
 maybe_wrap_dim_slow(SymInt dim, SymInt dim_post_expr, bool wrap_scalar);
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

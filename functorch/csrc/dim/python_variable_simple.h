@@ -6,7 +6,7 @@
 
 #pragma once
 // note: pytorch's python variable simple includes pybind which conflicts with minpybind
-// so this file just reproduces the minimial API needed to extract Tensors from python objects.
+// so this file just reproduces the minimal API needed to extract Tensors from python objects.
 
 #include <torch/csrc/python_headers.h>
 #include <ATen/core/Tensor.h>
@@ -26,7 +26,7 @@ struct THPVariable {
 TORCH_PYTHON_API extern PyObject *THPVariableClass;
 TORCH_PYTHON_API extern PyObject *ParameterClass;
 
-TORCH_PYTHON_API PyObject * THPVariable_Wrap(at::TensorBase var);
+TORCH_PYTHON_API PyObject * THPVariable_Wrap(const at::TensorBase& var);
 
 inline bool THPVariable_Check(PyObject *obj)
 {

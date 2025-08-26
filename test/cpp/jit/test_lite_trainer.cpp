@@ -78,7 +78,7 @@ TEST(LiteTrainerTest, Params) {
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 
-// TODO Renable these tests after parameters are correctly loaded on mobile
+// TODO Re-enable these tests after parameters are correctly loaded on mobile
 /*
 TEST(MobileTest, NamedParameters) {
   Module m("m");
@@ -317,7 +317,7 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return size_;
   }
 

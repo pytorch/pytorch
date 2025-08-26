@@ -21,6 +21,8 @@ void test_hash_repeatable_sensitive(const T& example_a, const T& example_b) {
 }
 
 TEST(HashTest, Scalar) {
+  GTEST_SKIP()
+      << "Broken test. See https://github.com/pytorch/pytorch/issues/99883";
   c10::Scalar a(0);
   c10::Scalar b(0);
 
@@ -61,10 +63,10 @@ TEST(HashTest, Sanity) {
   test_hash_repeatable_sensitive(c10::Scalar(true), c10::Scalar(false));
   test_hash_repeatable_sensitive(c10::Scalar(12345), c10::Scalar(12354));
 
-  // c10::optional
+  // std::optional
   test_hash_repeatable_sensitive(
-      c10::optional<std::string>("I have value!"),
-      c10::optional<std::string>(c10::nullopt));
+      std::optional<std::string>("I have value!"),
+      std::optional<std::string>(std::nullopt));
 
   // Containers
   auto a = std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8});

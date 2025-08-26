@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import numpy as np
 from ._convert_np import make_np
@@ -62,7 +63,7 @@ def make_sprite(label_img, save_path):
 
 def get_embedding_info(metadata, label_img, subdir, global_step, tag):
     info = EmbeddingInfo()
-    info.tensor_name = "{}:{}".format(tag, str(global_step).zfill(5))
+    info.tensor_name = f"{tag}:{str(global_step).zfill(5)}"
     info.tensor_path = _gfile_join(subdir, "tensors.tsv")
     if metadata is not None:
         info.metadata_path = _gfile_join(subdir, "metadata.tsv")

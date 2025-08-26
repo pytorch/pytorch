@@ -93,12 +93,12 @@ ident: identity for binary combination function sf. sf(ident, x) needs to return
 x.
 
 f: function for reduction over a chunk. f needs to be of signature scalar_t
-f(int64_t partial_begin, int64_t partial_end, scalar_t identifiy)
+f(int64_t partial_begin, int64_t partial_end, scalar_t identify)
 
 sf: function to combine two partial results. sf needs to be of signature
 scalar_t sf(scalar_t x, scalar_t y)
 
-For example, you might have a tensor of 10000 entires and want to sum together
+For example, you might have a tensor of 10000 entries and want to sum together
 all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
 an intermediate result tensor with 4 elements. Then it will execute the function
 "f" you provide and pass the beginning and end index of these chunks, so
@@ -133,7 +133,7 @@ TORCH_API std::string get_parallel_info();
 TORCH_API void set_num_interop_threads(int);
 
 // Returns the number of threads used for inter-op parallelism
-TORCH_API int get_num_interop_threads();
+TORCH_API size_t get_num_interop_threads();
 
 // Launches inter-op parallel task
 TORCH_API void launch(std::function<void()> func);
@@ -142,7 +142,7 @@ void launch_no_thread_state(std::function<void()> fn);
 } // namespace internal
 
 // Launches intra-op parallel task
-TORCH_API void intraop_launch(std::function<void()> func);
+TORCH_API void intraop_launch(const std::function<void()>& func);
 
 // Returns number of intra-op threads used by default
 TORCH_API int intraop_default_num_threads();
@@ -153,8 +153,6 @@ TORCH_API int intraop_default_num_threads();
 #include <ATen/ParallelOpenMP.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE
 #include <ATen/ParallelNative.h> // IWYU pragma: keep
-#elif AT_PARALLEL_NATIVE_TBB
-#include <ATen/ParallelNativeTBB.h> // IWYU pragma: keep
 #endif
 
 #include <ATen/Parallel-inl.h> // IWYU pragma: keep

@@ -27,9 +27,7 @@
 // For extra context, see VariableHooksInterface.h, where a similar technique
 // is used
 
-namespace torch {
-namespace autograd {
-namespace impl {
+namespace torch::autograd::impl {
 
 struct TORCH_API JitDecompInterface {
   virtual ~JitDecompInterface() = default;
@@ -43,12 +41,10 @@ struct TORCH_API JitDecompInterface {
 TORCH_API void setJitDecompImpl(JitDecompInterface* impl);
 TORCH_API JitDecompInterface* getJitDecompImpl();
 
-struct TORCH_API JitDecompRegisterer {
-  explicit JitDecompRegisterer(JitDecompInterface* impl) {
-    setJitDecompImpl(impl);
-  }
-};
+struct TORCH_API JitDecompRegisterer{explicit JitDecompRegisterer(
+    JitDecompInterface * impl){setJitDecompImpl(impl);
+} // namespace torch::autograd::impl
+}
+;
 
-} // namespace impl
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::impl

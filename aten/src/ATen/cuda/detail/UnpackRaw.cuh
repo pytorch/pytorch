@@ -1,10 +1,8 @@
 // No "#pragma once" because this is a raw definition that can be copied by jit codegen.
 // Eager mode clients should not include this file directly, instead,
-// they should #include <ATen/cuda/CUDAGraphsUtils.cuh>, which has a #pragma once.
+// they should #include <ATen/cuda/PhiloxUtils.cuh>, which has a #pragma once.
 
-namespace at {
-namespace cuda {
-namespace philox {
+namespace at::cuda::philox {
 
 // In-kernel call to retrieve philox seed and offset from a PhiloxCudaState instance whether
 // that instance was created with graph capture underway or not.
@@ -27,6 +25,10 @@ unpack(at::PhiloxCudaState arg) {
   }
 }
 
-} // namespace philox
-} // namespace cuda
-} // namespace at
+// Adapted from TE
+// extract seed and offset from PhiloxCudaState
+__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr);
+
+void unpack_cudnn_wrapper(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr, cudaStream_t stream);
+
+} // namespace at::cuda::philox

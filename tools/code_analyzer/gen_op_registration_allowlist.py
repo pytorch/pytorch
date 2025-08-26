@@ -8,14 +8,15 @@ For custom build with static dispatch, the op dependency graph will be omitted,
 and it will directly output root ops as the allowlist.
 """
 
-import argparse
+from __future__ import annotations
 
+import argparse
 from collections import defaultdict
-from typing import Dict, List, Set
 
 import yaml
 
-DepGraph = Dict[str, Set[str]]
+
+DepGraph = dict[str, set[str]]
 
 
 def canonical_name(opname: str) -> str:
@@ -24,7 +25,7 @@ def canonical_name(opname: str) -> str:
 
 
 def load_op_dep_graph(fname: str) -> DepGraph:
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         result = defaultdict(set)
         for op in yaml.safe_load(stream):
             op_name = canonical_name(op["name"])
@@ -34,9 +35,9 @@ def load_op_dep_graph(fname: str) -> DepGraph:
         return dict(result)
 
 
-def load_root_ops(fname: str) -> List[str]:
+def load_root_ops(fname: str) -> list[str]:
     result = []
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         for op in yaml.safe_load(stream):
             result.append(canonical_name(op))
     return result
@@ -44,11 +45,11 @@ def load_root_ops(fname: str) -> List[str]:
 
 def gen_transitive_closure(
     dep_graph: DepGraph,
-    root_ops: List[str],
+    root_ops: list[str],
     train: bool = False,
-) -> List[str]:
+) -> list[str]:
     result = set(root_ops)
-    queue = root_ops[:]
+    queue = root_ops.copy()
 
     # The dependency graph might contain a special entry with key = `__BASE__`
     # and value = (set of `base` ops to always include in custom build).
@@ -73,7 +74,7 @@ def gen_transitive_closure(
     return sorted(result)
 
 
-def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: List[str]) -> str:
+def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: list[str]) -> str:
     return " ".join(gen_transitive_closure(dep_graph, root_ops))
 
 

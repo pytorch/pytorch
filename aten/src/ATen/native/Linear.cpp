@@ -4,8 +4,10 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
+#include <c10/core/Contiguity.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
@@ -19,6 +21,7 @@
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
+#include <ATen/ops/dot.h>
 #include <ATen/ops/einsum_native.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/matmul.h>
@@ -27,46 +30,54 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/tensordot_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <cctype>
-#include <sstream>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
   // Uninitialized value
-  static int value = -1;
-  if (value == -1) {
-    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
-    if (env_str != nullptr && strcmp(env_str, "1") == 0) {
-      value = 1;
-    } else {
-      value = 0;
-    }
-  }
-  return bool(value);
+  static auto value = c10::utils::check_env("TORCH_LINEAR_FLATTEN_3D");
+  return value.has_value() && value.value();
 }
 
-// `_flatten_3d_linear` flattens the first two dimensions of the input tensor
-// before passing it to linear operation, if the input tensor is 3D
-static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+// `_flatten_nd_linear` flattens all but the last dimension of the input tensor
+// before passing it to linear operation
+static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+    // can't use -1 in reshape because it errors when a dimension is 0
+    c10::SymInt flattened_dim = 1;
+    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
+      flattened_dim = flattened_dim * input_sizes[i];
+    }
+    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
+    const auto result = at::addmm(bias, inp_reshape, weight.t());
+    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
 }
 
-Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+
+Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
+  // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
+  // so let's try to catch this here already
+  const auto input_dim = input.dim();
+  const auto weight_dim = weight.dim();
+  TORCH_CHECK(input_dim != 0 && weight_dim != 0,
+              "both arguments to linear need to be at least 1D, but they are ",
+              input_dim, "D and ", weight_dim, "D");
+
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
-
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
@@ -75,19 +86,22 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias->defined()) {
+  if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (input.dim() == 3 && bias->defined() && !input.is_xla()) {
+  if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    if (input.is_contiguous()) {
-      return _flatten_3d_linear(input, weight, *bias);
-    } else if (parseLinearFlatten3d()) {
+    bool is_contiguous = input.is_contiguous_or_false();
+    if (is_contiguous && input_dim == 3) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
       const Tensor input_cont = input.contiguous();
-      return _flatten_3d_linear(input_cont, weight, *bias);
+      return _flatten_nd_linear(input_cont, weight, *bias);
     }
   }
   auto output = at::matmul(input, weight.t());
@@ -103,12 +117,12 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
-Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, Tensor& output) {
   TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+              : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -140,11 +154,11 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto sl = left.sym_size(i)!=1;
-    auto sr = right.sym_size(i)!=1;
+    auto sl = TORCH_GUARD_OR_TRUE(left.sym_size(i).sym_ne(1));
+    auto sr = TORCH_GUARD_OR_TRUE(right.sym_size(i).sym_ne(1));
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-        TORCH_CHECK(left.sym_size(i)==right.sym_size(i), "non-broadcast dimensions must match");
+        TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
         sum_size *= left.sym_size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
         left = left.sum(i, true);
@@ -153,7 +167,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       }
     } else if (sl && sr) { // now deal with dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
-      TORCH_CHECK(left.sym_size(i)==right.sym_size(i), "non-broadcast dimensions must match");
+      TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
       lro.push_back(i);
       lro_size *= left.sym_size(i);
     } else if (sl) { // keep track of dimensions appearing only once
@@ -234,7 +248,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // If a path is specified, we reduce in the order specified by the path, else we
 // default to going left => right. The path is a list of indices processed the same
 // way as opt-einsum: https://optimized-einsum.readthedocs.io/en/stable/path_finding.html#format-of-the-path
-Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
+Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   const auto num_ops = operands.size();
 
@@ -260,10 +274,12 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     return std::isupper(label) ? label - 'A' : label - 'a' + NUM_OF_LETTERS;
   };
 
+#ifndef STRIP_ERROR_MESSAGES
   // Convert subscript in [0, TOTAL_LABELS) to label in [A-Za-z]
   auto subscript_to_label = [=](uint8_t s) -> unsigned char {
     return s < NUM_OF_LETTERS ? s + 'A' : s + 'a' - NUM_OF_LETTERS;
   };
+#endif
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
@@ -461,10 +477,10 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
         // Iterate over each dimension covered by ellipsis
         const auto ndim = operands[i].ndimension() - (static_cast<int64_t>(op_labels[i].size()) - 1);
         for (auto j = ell_num_dim - ndim; j < ell_num_dim; ++j) {
-          if (op.sym_size(dim) != 1) {
+          if (TORCH_GUARD_OR_TRUE(op.sym_size(dim).sym_ne(1))) {
             // Update ellipsis size
-            TORCH_CHECK(
-                ell_sizes[j] == 1 || ell_sizes[j] == op.sym_size(dim),
+            TORCH_SYM_CHECK(
+                ell_sizes[j].sym_eq(1).sym_or(ell_sizes[j].sym_eq(op.sym_size(dim))),
                 "einsum(): dimension ",
                 dim,
                 " covered by ellipsis in operand ",
@@ -480,10 +496,10 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
           permutation[ell_index + j] = dim++;
         }
       } else if (permutation[label_perm_index[s]] == -1) {
-        if (op.sym_size(dim) != 1) {
+        if (TORCH_GUARD_OR_TRUE(op.sym_size(dim).sym_ne(1))) {
           // Update subscript
-          TORCH_CHECK(
-              label_size[s] == 1 || label_size[s] == op.sym_size(dim),
+          TORCH_SYM_CHECK(
+              label_size[s].sym_eq(1).sym_or(label_size[s].sym_eq(op.sym_size(dim))),
               "einsum(): subscript ",
               subscript_to_label(s),
               " has size ",
@@ -558,16 +574,22 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     SmallVector<int64_t, 5> a_dims_to_sum;
     SmallVector<int64_t, 5> b_dims_to_sum;
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
-      if (a.sym_size(dim) != 1 && b.sym_size(dim) != 1) {
+      auto sa = TORCH_GUARD_OR_TRUE(a.sym_size(dim).sym_ne(1));
+      auto sb = TORCH_GUARD_OR_TRUE(b.sym_size(dim).sym_ne(1));
+
+      if (sa && sb) {
+        // if both a and b are equal, or we can't tell that its a broadcast for sure,
+        // we assume non-broadcast.
+        TORCH_SYM_CHECK(a.sym_size(dim).sym_eq(b.sym_size(dim)), "non-broadcast dimensions must match");
         if (--dim_counts[dim] == 1) {
           sum_dims.push_back(dim);
           dim_counts[dim] = 0;
         }
       } else if (dim_counts[dim] == 1) {
-        if (a.sym_size(dim) != 1) {
+        if (sa) {
           a_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
-        } else if (b.sym_size(dim) != 1) {
+        } else if (sb) {
           b_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
         }
@@ -689,10 +711,32 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+  if (bias.defined()) {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype() &&
+            input1.dtype() == bias.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype(),
+        ", bias: ",
+        bias.dtype());
+  } else {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype());
+  }
 
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
@@ -775,11 +819,35 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permut and reshape for matrix multiplication
-  t1 = t1.permute(p1).reshape_symint({size1, csize});
-  t2 = t2.permute(p2).reshape_symint({csize, size2});
-  // multiply and reshape to target size
-  return at::mm(t1, t2).reshape_symint(rsizes);
+
+  // Full contraction (size1 == 1 and size2 == 1) is much faster when done with dot ...
+  // TODO(@nikitaved): there are other cases where dot outperforms gemms,
+  // like, for example, when the non-contracted dims are relatively small.
+  // NOTE(@nikitaved): contract with gemm when on MPS,
+  // otherwise issues with the tests xpassing/xfailing
+  // when enabling the fast-path with dot.
+  // TODO: resolve that
+  if ((t1.device().type() == at::kMPS || t2.device().type() == at::kMPS) || size1 != 1 || size2 != 1) {
+    // permute and reshape for matrix multiplication
+    t1 = t1.permute(p1).reshape_symint({size1, csize});
+    t2 = t2.permute(p2).reshape_symint({csize, size2});
+    // multiply and reshape to target size
+    return at::mm(t1, t2).reshape_symint(rsizes);
+  } else {
+    // permute to align for contraction
+    t1 = t1.permute(p1);
+    t2 = t2.permute(p2);
+
+    if (t1.is_contiguous() && t2.is_contiguous()) {
+      // If t1 and t2 are both contiguous, then flatten is a view,
+      // then dot is the method of choice
+      return at::dot(t1.flatten(), t2.flatten()).reshape_symint(rsizes);
+    } else {
+      // Otherwise mul + sum can be faster as it avoids at most 2x contiguous() calls
+      // NOTE: t1.dtype == t2.dtype -- check above
+      return (t1.squeeze() * t2.squeeze()).sum(t1.scalar_type()).reshape_symint(rsizes);
+    }
+  }
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
@@ -789,6 +857,14 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   auto output_device = result.device();
   auto input1_device = input1.device();
   auto input2_device = input2.device();
+
+  if(result.defined()) {
+    TORCH_CHECK(
+      !(result.requires_grad() && at::GradMode::is_enabled() && result.sizes() != result_tmp.sizes()),
+      "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
+      "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output."
+    );
+  }
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
     (output_device == input1_device) && (input1_device == input2_device),
@@ -806,4 +882,4 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -48,7 +48,7 @@ class CudaTimer : public Timer {
     getEvent(event).record();
   }
 
-  c10::optional<int64_t> measureDifference(Event start, Event end) override {
+  std::optional<int64_t> measureDifference(Event start, Event end) override {
     c10::DeviceGuard g(device);
     at::cuda::CUDAEvent& start_event = getEvent(start);
     at::cuda::CUDAEvent& end_event = getEvent(end);
@@ -59,7 +59,7 @@ class CudaTimer : public Timer {
     // If it is never recorded/created, skip synchronize and calculation.
     // Otherwise it will throw cuda errors.
     if (!start_event.isCreated() || !end_event.isCreated()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     // set_runtime_stats_and_log is called at the beginning of forward call,
     // when it is cheap to synchronize the cuda events of previous iteration,
@@ -74,13 +74,13 @@ class CudaTimer : public Timer {
     // calculate the valid avg_time.
     // In this case, skip calculating the avg_time and return.
     if (milliseconds < 0) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return int64_t(milliseconds * kMilliSecondToNanosSecond);
   }
 };
 
-C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer);
+C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer)
 
 } // namespace
 } // namespace c10d

@@ -1,6 +1,7 @@
 import os
 import re
-from typing import List, Optional, Pattern, Tuple
+from re import Pattern
+from typing import Optional
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -13,13 +14,13 @@ CONTACT_US = f"Questions? Feedback? Please reach out to the [PyTorch DevX Team](
 ALTERNATIVES = f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
 
 
-def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
+def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
-class TryMergeExplainer(object):
+class TryMergeExplainer:
     force: bool
-    labels: List[str]
+    labels: list[str]
     pr_num: int
     org: str
     project: str
@@ -31,7 +32,7 @@ class TryMergeExplainer(object):
     def __init__(
         self,
         force: bool,
-        labels: List[str],
+        labels: list[str],
         pr_num: int,
         org: str,
         project: str,
@@ -47,13 +48,16 @@ class TryMergeExplainer(object):
     def _get_flag_msg(
         self,
         ignore_current_checks: Optional[
-            List[Tuple[str, Optional[str], Optional[int]]]
+            list[tuple[str, Optional[str], Optional[int]]]
         ] = None,
     ) -> str:
         if self.force:
             return (
                 "Your change will be merged immediately since you used the force (-f) flag, "
-                + "**bypassing any CI checks** (ETA: 1-5 minutes)."
+                + "**bypassing any CI checks** (ETA: 1-5 minutes).  "
+                + "Please use `-f` as last resort and instead consider `-i/--ignore-current` "
+                + "to continue the merge ignoring current failures.  This will allow "
+                + "currently pending tests to finish and report signal before the merge."
             )
         elif self.ignore_current and ignore_current_checks is not None:
             msg = f"Your change will be merged while ignoring the following {len(ignore_current_checks)} checks: "
@@ -65,7 +69,7 @@ class TryMergeExplainer(object):
     def get_merge_message(
         self,
         ignore_current_checks: Optional[
-            List[Tuple[str, Optional[str], Optional[int]]]
+            list[tuple[str, Optional[str], Optional[int]]]
         ] = None,
     ) -> str:
         title = "### Merge started"
@@ -75,7 +79,7 @@ class TryMergeExplainer(object):
             (
                 "<details><summary>Advanced Debugging</summary>",
                 "Check the merge workflow status ",
-                f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
+                f'<a href="{os.getenv("GH_RUN_URL")}">here</a>',
                 "</details>",
             )
         )

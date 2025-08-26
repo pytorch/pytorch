@@ -6,8 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
@@ -129,7 +128,7 @@ using qavg_pool2d_fn = void (*)(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override);
+    std::optional<int64_t> divisor_override);
 
 using qavg_pool3d_fn = void (*)(
     const Tensor& qx,
@@ -152,7 +151,7 @@ using qavg_pool3d_fn = void (*)(
     int padH,
     int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override);
+    std::optional<int64_t> divisor_override);
 
 using qupsample_bilinear2d_fn = void (*)(
     Tensor& output,
@@ -164,8 +163,8 @@ using qupsample_bilinear2d_fn = void (*)(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w);
+    std::optional<double> scales_h,
+    std::optional<double> scales_w);
 
 using qcat_nhwc_fn = Tensor (*)(
     const MaterializedITensorListRef& qxs,
@@ -192,13 +191,13 @@ using qmean_inner_dim_fn = void (*)(
     const Tensor& /* X */,
     OptionalIntArrayRef /* opt_dim */,
     bool /* keepdim */,
-    c10::optional<ScalarType> /* opt_dtype */,
+    std::optional<ScalarType> /* opt_dtype */,
     Tensor& /* Y */);
 
 using qstd_inner_dim_fn = void (*)(
     const Tensor& /* X */,
     OptionalIntArrayRef /* dim */,
-    const c10::optional<Scalar>& /* correction */,
+    const std::optional<Scalar>& /* correction */,
     bool /* keepdim */,
     Tensor& /* Y */);
 
@@ -217,42 +216,67 @@ using qnormalize_nhwc_fn = void (*)(
 using qprelu_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                            const Tensor& /*qw*/);
 
-DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
-DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub);
-DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub);
-DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_stub);
-DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
-DECLARE_DISPATCH(qavg_pool3d_fn, qavg_pool3d_nhwc_stub);
-DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
-DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
-DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
-DECLARE_DISPATCH(qbinary_fn, qadd_stub);
-DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub);
-DECLARE_DISPATCH(qbinary_fn, qmul_stub);
-DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
-DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
-DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
-DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_min_stub);
-DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub);
-DECLARE_DISPATCH(qelu_fn, qelu_stub);
-DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
-DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
-DECLARE_DISPATCH(qdropout_fn, qdropout_stub);
-DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
-DECLARE_DISPATCH(qmaxpool_3d_fn, qmaxpool_3d_nthwc_stub);
-DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
-DECLARE_DISPATCH(qnormalize_nhwc_fn, quantized_groupnorm_nhwc_stub);
-DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
-DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
-DECLARE_DISPATCH(qgelu_fn, qgelu_stub);
-DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
-DECLARE_DISPATCH(qtanh_fn, qtanh_stub);
-DECLARE_DISPATCH(qthreshold_fn, qthreshold_stub);
-DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
-DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
-DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub);
-DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub);
-DECLARE_DISPATCH(qprelu_fn, qprelu_stub);
+using qbinary_eltwise_cpu_fn = void (*)(
+    Tensor& /*out*/,
+    const Tensor& /*qx*/,
+    double /*qx_scale*/,
+    int64_t /*qx_zero_point*/,
+    const Tensor& /*qy*/,
+    double /*qy_scale*/,
+    int64_t /*qy_zero_point*/,
+    double /*output_scale*/,
+    int64_t /*output_zero_point*/);
 
-} // namespace native
-} // namespace at
+using qbatch_norm_cpu_fn = void(*)(
+    int64_t /*N*/,
+    int64_t /*C*/,
+    int64_t /*H * W*/,
+    int64_t /*in_zero_point*/,
+    int64_t /*out_zero_point*/,
+    const Tensor& /*input*/,
+    const Tensor& /*a*/,
+    const Tensor& /*b*/,
+    Tensor& /*output*/);
+
+DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub)
+DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub)
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub)
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_stub)
+DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub)
+DECLARE_DISPATCH(qavg_pool3d_fn, qavg_pool3d_nhwc_stub)
+DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub)
+DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub)
+DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub)
+DECLARE_DISPATCH(qbinary_fn, qadd_stub)
+DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub)
+DECLARE_DISPATCH(qbinary_fn, qmul_stub)
+DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub)
+DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub)
+DECLARE_DISPATCH(qclamp_fn, qclamp_stub)
+DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_min_stub)
+DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub)
+DECLARE_DISPATCH(qelu_fn, qelu_stub)
+DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub)
+DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub)
+DECLARE_DISPATCH(qdropout_fn, qdropout_stub)
+DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub)
+DECLARE_DISPATCH(qmaxpool_3d_fn, qmaxpool_3d_nthwc_stub)
+DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub)
+DECLARE_DISPATCH(qnormalize_nhwc_fn, quantized_groupnorm_nhwc_stub)
+DECLARE_DISPATCH(qrelu_fn, qrelu_stub)
+DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub)
+DECLARE_DISPATCH(qgelu_fn, qgelu_stub)
+DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub)
+DECLARE_DISPATCH(qtanh_fn, qtanh_stub)
+DECLARE_DISPATCH(qthreshold_fn, qthreshold_stub)
+DECLARE_DISPATCH(qtopk_fn, qtopk_stub)
+DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub)
+DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub)
+DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub)
+DECLARE_DISPATCH(qprelu_fn, qprelu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qmul_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_relu_tensor_cpu_stub)
+DECLARE_DISPATCH(qbatch_norm_cpu_fn, qbatch_norm_cpu_stub)
+
+} // namespace at::native

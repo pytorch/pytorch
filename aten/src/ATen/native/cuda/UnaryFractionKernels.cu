@@ -188,12 +188,12 @@ void trunc_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
-REGISTER_DISPATCH(frac_stub, &frac_kernel_cuda);
-REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
-REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda);
-REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
-REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda);
-REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
+REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda)
+REGISTER_DISPATCH(frac_stub, &frac_kernel_cuda)
+REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda)
+REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda)
+REGISTER_DISPATCH(round_stub, &round_kernel_cuda)
+REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda)
+REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda)
 
 } // namespace at::native

@@ -2,6 +2,7 @@ import difflib
 import io
 
 import numpy as np
+
 import onnx
 import onnx.helper
 
@@ -142,7 +143,6 @@ class Errors:
         """
         # TODO: instead of immediately concatenating the context in the msg,
         # attach it as metadata and make a decision how to format it later.
-        msg_w_ctx = msg
         for c in reversed(self.context):
             msg += "\n\n  * " + "\n    ".join(c.splitlines())
         self.errors.append(msg)
@@ -154,7 +154,7 @@ class Errors:
         NB: It is an error to "fail" without having added any errors to
         the error context.
         """
-        raise self.exc_class()
+        raise self.exc_class
 
     def failWith(self, msg):
         """
@@ -377,7 +377,7 @@ def verify(
 
     with torch.onnx.select_model_mode_for_export(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(
+        torch_out = torch.onnx.utils._export(
             model,
             args,
             proto_bytes,
@@ -397,7 +397,7 @@ def verify(
 
         def run(args, remained_onnx_input_idx):
             alt_proto_bytes = io.BytesIO()
-            torch_out = torch.onnx._export(
+            torch_out = torch.onnx.utils._export(
                 model,
                 args,
                 alt_proto_bytes,
@@ -489,7 +489,7 @@ def verify(
                     errs.requireEqual(
                         proto_bytes.getvalue(), alt_proto_bytes.getvalue()
                     )
-                    raise AssertionError()
+                    raise AssertionError
 
             # TODO: test that the traced model also returns the same thing...
             run_helper(torch_out, args, remained_onnx_input_idx)
@@ -513,8 +513,9 @@ def verify(
                 "could mean that your network is numerically unstable.  Otherwise\n"
                 "it indicates a bug in PyTorch/ONNX; please file a bug report."
             )
-            with Errors(msg, rtol=rtol, atol=atol) as errs, errs.addErrCtxt(
-                result_hint
+            with (
+                Errors(msg, rtol=rtol, atol=atol) as errs,
+                errs.addErrCtxt(result_hint),
             ):
                 for i, (x, y) in enumerate(zip(torch_out, backend_out)):
                     errs.checkAlmostEqual(x.data.cpu().numpy(), y, f"In output {i}")
@@ -522,7 +523,7 @@ def verify(
         run_helper(torch_out, args, remained_onnx_input_idx)
 
         if isinstance(test_args, int):
-            for i in range(test_args):
+            for _ in range(test_args):
                 run(randomize_args(args), remained_onnx_input_idx)
         else:
             for test_arg in test_args:

@@ -1,20 +1,17 @@
 import abc
+import os
 from dataclasses import dataclass
-from typing import List, Any
+from typing import Any, Optional, Union
 
-from torch.futures import Future
-
-from .metadata import (
-    Metadata,
-    MetadataIndex,
-)
-
-from .planner import (
+from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
+from torch.distributed.checkpoint.planner import (
     LoadPlan,
+    LoadPlanner,
     SavePlan,
     SavePlanner,
-    LoadPlanner,
 )
+from torch.futures import Future
+
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -37,6 +34,7 @@ class StorageWriter(abc.ABC):
 
     A subclass should expect the following sequence of calls.
 
+    0) (all ranks) set checkpoint_id if users pass a valid checkpoint_id.
     1) (all ranks) set_up_storage_writer()
     2) (all ranks) prepare_local_plan()
     3) (coordinator) prepare_global_plan()
@@ -45,7 +43,27 @@ class StorageWriter(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        """
+        Calls to indicates a brand new checkpoint write is going to happen.
+        A checkpoint_id may be present if users set the checkpoint_id for
+        this checkpoint write. The meaning of the checkpiont_id is
+        storage-dependent. It can be a path to a folder/file or a key for
+        a key-value storage.
+
+        Args:
+            checkpoint_id (Union[str, os.PathLike, None]):
+                The ID of this checkpoint instance. The meaning of the checkpoint_id
+                depends on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is a key-value store.
+                (Default: ``None``)
+        """
+        ...
+
+    @abc.abstractmethod
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 
@@ -53,7 +71,6 @@ class StorageWriter(abc.ABC):
             is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
-        pass
 
     @abc.abstractmethod
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -69,10 +86,9 @@ class StorageWriter(abc.ABC):
         Returns:
             A transformed ``SavePlan`` after storage local planning
         """
-        pass
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         """
         Perform centralized planning of storage.
 
@@ -87,12 +103,11 @@ class StorageWriter(abc.ABC):
         Returns:
             A list of transformed ``SavePlan`` after storage global planning
         """
-        pass
 
     @abc.abstractmethod
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         """
         Write all items from ``plan`` using ``planner`` to resolve the data.
 
@@ -112,14 +127,11 @@ class StorageWriter(abc.ABC):
         Returns:
             A future that completes to a list of WriteResult
         """
-        pass
 
     @abc.abstractmethod
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         """
-        Writes the metadata and marks the current checkpoint as successful.
+        Write the metadata and marks the current checkpoint as successful.
 
         The actual format/schema used for serializing `metadata` is an
         implementation detail. The only requirement is that it's recoverable
@@ -132,7 +144,25 @@ class StorageWriter(abc.ABC):
         Returns:
             None
         """
-        pass
+
+    @classmethod
+    @abc.abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        """
+        Check if the given checkpoint_id is supported by the storage. This allow
+        us to enable automatic storage selection.
+        """
+        ...
+
+    def storage_meta(self) -> Optional[StorageMeta]:
+        """
+        Return the storage-specific metadata. This is used to store additional information
+        in a checkpoint that can be useful for providing request-level observability. StorageMeta
+        is passed to the ``SavePlanner`` during save calls. Returns None by default.
+
+        TODO: provide an example
+        """
+        return None
 
 
 class StorageReader(abc.ABC):
@@ -145,6 +175,7 @@ class StorageReader(abc.ABC):
 
     A subclass should expected the following sequence of calls by ``load_state_dict``:
 
+    0) (all ranks) set checkpoint_id if users pass a valid checkpoint_id.
     1) (all ranks) read_metadata()
     2) (all ranks) set_up_storage_reader()
     3) (all ranks) prepare_local_plan()
@@ -153,18 +184,37 @@ class StorageReader(abc.ABC):
     """
 
     @abc.abstractmethod
-    def read_metadata(self) -> Metadata:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         """
-        Reads the checkpoint metadata.
+        Calls to indicates a brand new checkpoint read is going to happen.
+        A checkpoint_id may be present if users set the checkpoint_id for
+        this checkpoint read. The meaning of the checkpiont_id is
+        storage-dependent. It can be a path to a folder/file or a key for
+        a key-value storage.
+
+        Args:
+            checkpoint_id (Union[str, os.PathLike, None]):
+                The ID of this checkpoint instance. The meaning of the checkpoint_id
+                depends on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is more like a key-value store.
+                (Default: ``None``)
+        """
+        ...
+
+    @abc.abstractmethod
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
+        """
+        Read the checkpoint metadata.
 
         Returns:
             The metadata object associated with the checkpoint being loaded.
 
         """
-        pass
 
     @abc.abstractmethod
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 
@@ -173,7 +223,6 @@ class StorageReader(abc.ABC):
             is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
-        pass
 
     @abc.abstractmethod
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
@@ -189,10 +238,9 @@ class StorageReader(abc.ABC):
         Returns:
             A transformed ``LoadPlan`` after storage local planning
         """
-        pass
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         """
         Perform centralized planning of storage loading.
 
@@ -207,12 +255,11 @@ class StorageReader(abc.ABC):
         Returns:
             A list of transformed ``LoadPlan`` after storage global planning
         """
-        pass
 
     @abc.abstractmethod
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         """
-        Reads all items from ``plan`` using ``planner`` to resolve the data.
+        Read all items from ``plan`` using ``planner`` to resolve the data.
 
         A subclass should call ``LoadPlanner::load_bytes`` to deserialize a BytesIO
         object into the right place.
@@ -230,4 +277,12 @@ class StorageReader(abc.ABC):
         Returns:
             A future that completes once all reads are finished.
         """
-        pass
+
+    @classmethod
+    @abc.abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        """
+        Check if the given checkpoint_id is supported by the storage. This allow
+        us to enable automatic storage selection.
+        """
+        ...

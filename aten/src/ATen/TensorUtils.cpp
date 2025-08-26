@@ -9,7 +9,7 @@
 
 namespace at {
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
+std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
@@ -68,7 +68,7 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
 }
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
   TORCH_CHECK(
     t->sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
@@ -76,7 +76,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
 }
 
 void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
   TORCH_CHECK(
     t->sym_sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
@@ -91,7 +91,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t s
     " (while checking arguments for ", c, ")");
 }
 
-void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, const c10::SymInt& size) {
   TORCH_CHECK(
     t->sym_size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
@@ -155,7 +155,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     }
     oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
         << " to be on GPU (while checking arguments for " << c << ")";
-    AT_ERROR(oss.str());
+    TORCH_CHECK(false, oss.str());
   }
   TORCH_CHECK(
     t1->get_device() == t2->get_device(),
@@ -200,7 +200,7 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
       }
       oss << "; but got " << t->toString()
           << " instead (while checking arguments for " << c << ")";
-      AT_ERROR(oss.str());
+      TORCH_CHECK(false, oss.str());
     }
 }
 
@@ -327,7 +327,7 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // see overloads of computeStride() below.
 //
 template <typename ResultVec, typename NewShapeVec, typename Numel>
-inline c10::optional<ResultVec> computeStride_impl(
+inline static std::optional<ResultVec> computeStride_impl(
     const NewShapeVec& oldshape,
     const NewShapeVec& oldstride,
     const NewShapeVec& newshape,
@@ -343,12 +343,13 @@ inline c10::optional<ResultVec> computeStride_impl(
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
   const Numel numel = c10::multiply_integers(oldshape);
-  if (numel == 0 && oldshape.equals(newshape)) {
+  bool zero_numel = TORCH_GUARD_OR_FALSE(sym_eq(numel, 0));
+  if (zero_numel && oldshape.equals(newshape)) {
     return toResult(oldstride);
   }
 
   ResultVec newstride(newshape.size());
-  if (numel == 0) {
+  if (zero_numel) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
@@ -366,20 +367,34 @@ inline c10::optional<ResultVec> computeStride_impl(
   // numel in current chunk
   Numel tensor_numel = 1;
   Numel view_numel = 1;
+
+ // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE below could result in returning
+ // std::nullopt which has an effect of falling back to a clone when unbacked symints are present.
+ // But it will not result in returning different or wrong results.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 &&
-         oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+        (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+     // We want to accumulate stuff in view_numel until view_numel == tensor_numel, if we do not
+     // know if that is satisfied we keep accumulating. For example if view_numel = 1 and tensor_numel = u1,
+     // we want to take that path, view_numel will become u0. Next iteration if u0==u1 we want to stop.
+     // That's why we use TORCH_GUARD_OR_TRUE below.
+
+     // we use TORCH_GUARD_OR_FALSE and not TORCH_GUARD_OR_TRUE when comparing newshape[view_d] ==1 because
+     // if we know view_numel < tensor_numel is false, we want to stop. Unless we know for sure newshape[view_d]==1
+     // in that case we would stop in the next iteration anyway. For example, if view_numel = u0 and tensor_numel = u1,
+     // and u0==u1, then want to stop unless newshape[view_d]==1. taking one more iteration will keep [view_numel = u0
+     // and tensor_numel = u1].
       while (view_d >= 0 &&
-            (view_numel < tensor_numel || newshape[view_d] == 1)) {
+            (TORCH_GUARD_OR_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (view_numel != tensor_numel) {
-        return c10::nullopt;
+      if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+        return std::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -389,12 +404,12 @@ inline c10::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return newstride;
 }
 
-c10::optional<std::vector<int64_t>> computeStride(
+std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape) {
@@ -402,7 +417,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<SymDimVector> computeStride(
+std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape) {
@@ -410,7 +425,7 @@ c10::optional<SymDimVector> computeStride(
   return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<DimVector> computeStride(
+std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape) {

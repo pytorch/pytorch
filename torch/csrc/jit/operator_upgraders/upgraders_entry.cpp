@@ -11,8 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap({
     {"logspace_0_8", R"SCRIPT(
@@ -123,7 +122,7 @@ std::shared_ptr<Graph> create_upgrader_graph(
     const std::string& upgrader_name,
     const std::string& upgrader_body) {
   auto cu = std::make_shared<CompilationUnit>();
-  cu->define(c10::nullopt, upgrader_body, nativeResolver(), nullptr);
+  cu->define(std::nullopt, upgrader_body, nativeResolver(), nullptr);
   Function& jitFunc = cu->get_function(upgrader_name);
   GraphFunction& graphFunction = toGraphFunction(jitFunc);
   return graphFunction.graph();
@@ -146,5 +145,8 @@ void populate_upgraders_graph_map() {
   }
 }
 
-} // namespace jit
-} // namespace torch
+std::unordered_map<std::string, std::string> get_upgraders_entry_map() {
+  return kUpgradersEntryMap;
+}
+
+} // namespace torch::jit

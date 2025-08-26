@@ -3,12 +3,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using IntegerRefinement = std::unordered_map<Value*, int64_t>;
 
@@ -94,7 +92,7 @@ struct IntegerValueRefiner {
         auto other_output = other_if_block->outputs().at(i);
         auto other_const_value = other_output->type()->cast<IntType>()
             ? constant_as<int64_t>(other_output)
-            : c10::nullopt;
+            : std::nullopt;
         if (!other_const_value ||
             block_output->node()->kind() == prim::Constant) {
           continue;
@@ -203,16 +201,16 @@ struct IntegerValueRefiner {
 
     active_refinements_.pop_back();
     return block_refinements;
-  };
+  }
 
-  c10::optional<int64_t> tryFindRefinement(Value* v) {
+  std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {
       auto maybe_refinement = ref->find(v);
       if (maybe_refinement != ref->end()) {
         return maybe_refinement->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::shared_ptr<Graph> graph_;
@@ -228,5 +226,4 @@ bool RefineIntegerValues(const std::shared_ptr<Graph>& graph) {
   return IntegerValueRefiner(graph).run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

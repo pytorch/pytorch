@@ -2,7 +2,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace namedinference {
+namespace at::namedinference {
 
 
 Dimname TensorName::toDimname() const {
@@ -53,8 +53,9 @@ TensorNames::TensorNames(ArrayRef<Dimname> names) {
 }
 
 TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
-  start = maybe_wrap_dim(start, names.size());
-  end = maybe_wrap_dim(end, names.size());
+  int64_t names_size = static_cast<int64_t>(names.size());
+  start = maybe_wrap_dim(start, names_size);
+  end = maybe_wrap_dim(end, names_size);
   names_.reserve(end - start);
   for (const auto idx : c10::irange(start, end)) {
     names_.emplace_back(names, idx);
@@ -83,7 +84,7 @@ TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const 
   return *this;
 }
 
-void TensorNames::append(TensorName&& name) {
+void TensorNames::append(TensorName name) {
   names_.emplace_back(name);
 }
 
@@ -126,4 +127,4 @@ std::vector<Dimname> TensorNames::toDimnameVec() const {
 }
 
 
-}} // namespace at::namedinference
+} // namespace at::namedinference

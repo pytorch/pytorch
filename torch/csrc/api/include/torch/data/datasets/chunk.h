@@ -2,17 +2,15 @@
 
 #include <c10/util/irange.h>
 #include <torch/arg.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
 #include <torch/data/samplers.h>
 #include <queue>
 #include <thread>
+#include <utility>
 
 #include <torch/serialize.h>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// Interface for chunk reader, which performs data chunking and reading of
 /// entire chunks.
@@ -52,7 +50,7 @@ template <
 class BatchDataBuffer {
  public:
   using UnwrappedBatchType = UnwrappedBatch;
-  using BatchType = torch::optional<UnwrappedBatchType>;
+  using BatchType = std::optional<UnwrappedBatchType>;
   using BatchRequestType = typename ExampleSampler::BatchRequestType;
 
   BatchDataBuffer(
@@ -76,7 +74,7 @@ class BatchDataBuffer {
     if (batch_queue_.empty()) {
       AT_ASSERT(stop_);
       // All batches have been retrieved. Return an empty batch.
-      return nullopt;
+      return std::nullopt;
     }
 
     UnwrappedBatchData batch = std::move(batch_queue_.front());
@@ -139,7 +137,6 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
-    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -214,8 +211,8 @@ class BatchDataBuffer {
     explicit UnwrappedBatchData(UnwrappedBatchType data)
         : batch_data(std::move(data)) {}
 
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    explicit UnwrappedBatchData(std::exception_ptr e) : exception(e) {}
+    explicit UnwrappedBatchData(std::exception_ptr e)
+        : exception(std::move(e)) {}
 
     /// batch data to return
     UnwrappedBatchType batch_data;
@@ -234,9 +231,10 @@ class BatchDataBuffer {
   std::condition_variable cv_read_;
   std::condition_variable cv_write_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   ExampleSampler& example_sampler_;
 
-  // configurable maximun number of elements the queue can hold at one time.
+  // configurable maximum number of elements the queue can hold at one time.
   size_t queue_capacity_;
 
   // When set to true, it wakes the writer threads from the wait and exit
@@ -288,7 +286,7 @@ struct ChunkDatasetOptions {
   /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
 
-  // The number of chunks to perfrom cross-chunk shuffling. Default to 1 meaning
+  // The number of chunks to perform cross-chunk shuffling. Default to 1 meaning
   // no cross-chunk shuffling. When it is equal to n (n > 1), n random
   // chunks will be loaded at once and example shuffling will be performed
   // across all those n chunks.
@@ -305,9 +303,10 @@ struct ChunkDatasetOptions {
 ///
 /// Unlike regular dataset, chunk dataset require two samplers to operate and
 /// keeps an internal state. `ChunkSampler` selects, which chunk to load next,
-/// while the `ExampleSampler` determins the order of Examples that are returned
-/// in each `get_batch` call. The hierarchical sampling approach used here is
-/// inspired by this paper http://martin.zinkevich.org/publications/nips2010.pdf
+/// while the `ExampleSampler` determines the order of Examples that are
+/// returned in each `get_batch` call. The hierarchical sampling approach used
+/// here is inspired by this paper
+/// http://martin.zinkevich.org/publications/nips2010.pdf
 template <
     typename ChunkReader,
     typename ChunkSampler = samplers::RandomSampler,
@@ -318,7 +317,7 @@ class ChunkDataset final
           typename ChunkReader::BatchType,
           size_t> {
  public:
-  using BatchType = torch::optional<typename ChunkReader::BatchType>;
+  using BatchType = std::optional<typename ChunkReader::BatchType>;
   using UnwrappedBatchType = typename ChunkReader::BatchType;
   using BatchRequestType = size_t;
   using ChunkSamplerType = ChunkSampler;
@@ -334,11 +333,10 @@ class ChunkDataset final
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
-        options_(std::move(options)),
+        options_(options),
         preprocessing_policy_(std::move(preprocessing_policy)),
         quit_worker_(false),
-        running_preloaders_(0),
-        load_checkpoint_(false) {}
+        running_preloaders_(0) {}
 
   ~ChunkDataset() override {
     // stop batch buffer first.
@@ -349,7 +347,7 @@ class ChunkDataset final
   }
 
   /// Default get_batch method of BatchDataset. This method returns
-  /// Example batches created from the preloaded chunks. The implemenation
+  /// Example batches created from the preloaded chunks. The implementation
   /// is dataset agnostic and does not need overriding in different chunk
   /// datasets.
   BatchType get_batch(size_t batch_size) override {
@@ -391,7 +389,7 @@ class ChunkDataset final
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
-    batch_buffer_ = torch::make_unique<
+    batch_buffer_ = std::make_unique<
         detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>(
         options_.batch_size(), example_sampler_, options_.cache_size());
 
@@ -406,8 +404,8 @@ class ChunkDataset final
   }
 
   /// size is not used for chunk dataset.
-  optional<size_t> size() const override {
-    return torch::nullopt;
+  std::optional<size_t> size() const override {
+    return std::nullopt;
   }
 
   // provide a references to chunk sampler. Used mainly in distributed data
@@ -497,6 +495,7 @@ class ChunkDataset final
   std::vector<std::thread> preload_threads_;
 
   /// The options the Dataset was configured with.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ChunkDatasetOptions options_;
 
   // function pointer wrapper to apply custom processing over chunk data. This
@@ -523,8 +522,6 @@ class ChunkDataset final
 
   // boolean value to indicate whether we need to load the checkpoint for
   // chunk_sampler_.
-  bool load_checkpoint_;
+  bool load_checkpoint_{false};
 };
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

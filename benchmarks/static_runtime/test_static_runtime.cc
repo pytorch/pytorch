@@ -649,6 +649,19 @@ TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
   testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
+  const std::string embedding_bag_default = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
+  )JIT";
+  auto weight = torch::randn({3, 11}, at::ScalarType::Float);
+  auto input = torch::tensor({0, 1, 0, 2}, at::ScalarType::Long);
+  auto offset = torch::tensor({0, 2, 4}, at::ScalarType::Int);
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default, args);
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
@@ -658,6 +671,12 @@ TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_without_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int]):
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
+  )JIT";
+
+  const std::string layer_norm_with_noncontiguous_input = R"JIT(
+    def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
+        input = torch.transpose(input, 1, 2)
+        return torch.layer_norm(input, normalized_shape, weight, bias, 1e-05, False).clone()
   )JIT";
 
   const auto a = torch::rand({1, 2, 2, 2});
@@ -671,6 +690,7 @@ TEST(StaticRuntime, LayerNorm) {
     std::vector<IValue> args1{b, normalized_shape, weight, bias};
     testStaticRuntime(layer_norm_with_weights, args);
     testStaticRuntime(layer_norm_with_weights, args, args1);
+    testStaticRuntime(layer_norm_with_noncontiguous_input, args);
 
     args = {a, normalized_shape};
     testStaticRuntime(layer_norm_without_weights, args);
@@ -1423,7 +1443,7 @@ TEST(StaticRuntime, to) {
     std::vector<IValue> args2{a, other, c, d, e};
     std::vector<IValue> args2WithDifferentOtherType{
         a, at::randn({4, 3, 1, 2}, ScalarType::Double), c, d, e};
-    std::vector<IValue> args3{a, c10::nullopt, c, d};
+    std::vector<IValue> args3{a, std::nullopt, c, d};
 
     std::vector<IValue> args0WithInt{a, ScalarType::Int, c, d, e};
     testStaticRuntime(
@@ -1458,7 +1478,7 @@ TEST(StaticRuntime, to) {
     testStaticRuntime(to_script_dtype_strided, args0, {a2, b, c, d, e});
     testStaticRuntime(to_script_prim_dtype, args1, {a2, b, c, d});
     if (!d) {
-      testStaticRuntime(to_script_prim_dtype, args3, {a2, c10::nullopt, c, d});
+      testStaticRuntime(to_script_prim_dtype, args3, {a2, std::nullopt, c, d});
     }
     testStaticRuntime(to_script_other, args2, {a2, a2_other, c, d, e});
     testStaticRuntime(to_script_alias, {a}, {a2});
@@ -1738,14 +1758,14 @@ TEST(StaticRuntime, Linear) {
   auto bias = at::randn({1, 1});
 
   std::vector<IValue> args{input, weights, bias};
-  std::vector<IValue> args_no_bias{input, weights, c10::nullopt};
+  std::vector<IValue> args_no_bias{input, weights, std::nullopt};
 
   auto input2 = at::randn({6, 3});
   auto weights2 = at::randn({6, 3});
   auto bias2 = at::randn({6, 6});
 
   std::vector<IValue> args2{input2, weights2, bias2};
-  std::vector<IValue> args2_no_bias{input2, weights2, c10::nullopt};
+  std::vector<IValue> args2_no_bias{input2, weights2, std::nullopt};
 
   testStaticRuntime(linear_script, args);
   testStaticRuntime(linear_script, args_no_bias);

@@ -26,7 +26,7 @@ __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> 
 }
 
 #if AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char angle_name[] = "angle_kernel";
+constexpr char angle_name[] = "angle_kernel";
 #endif
 
 void angle_kernel_cuda(TensorIteratorBase& iter) {
@@ -63,7 +63,7 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-CONSTEXPR_EXCEPT_WIN_CUDA char conj_name[] = "conj_kernel";
+constexpr char conj_name[] = "conj_kernel";
 void conj_kernel_cuda(TensorIteratorBase& iter) {
   auto conj_chalf = [&] {
     using scalar_t = c10::complex<at::Half>;
@@ -96,7 +96,7 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
   );
 }
 
-REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
-REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
+REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda)
+REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda)
 
 } // namespace at::native

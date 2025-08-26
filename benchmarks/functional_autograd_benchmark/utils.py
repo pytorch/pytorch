@@ -1,25 +1,26 @@
-import torch
-
 from collections import defaultdict
+from typing import Callable, Optional, Union
 
+import torch
 from torch import nn, Tensor
-from typing import List, Tuple, Dict, Union, Callable
+
 
 # Type helpers
-InputsType = Union[Tensor, Tuple[Tensor, ...]]
+InputsType = Union[Tensor, tuple[Tensor, ...]]
 # A Getter takes in a device and returns a callable and the inputs to that callable
-GetterReturnType = Tuple[Callable[..., Tensor], InputsType]
+GetterReturnType = tuple[Callable[..., Tensor], InputsType]
 GetterType = Callable[[torch.device], GetterReturnType]
 # V here refers to the v in either vjp, jvp, vhp or hvp
-VType = Union[None, Tensor, Tuple[Tensor, ...]]
+VType = Union[None, Tensor, tuple[Tensor, ...]]
 # Type used to store timing results. The first key is the model name, the second key
 # is the task name, the result is a Tuple of: speedup, mean_before, var_before, mean_after, var_after.
-TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
+TimingResultType = dict[str, dict[str, tuple[float, ...]]]
+
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
-def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
+def _del_nested_attr(obj: nn.Module, names: list[str]) -> None:
     """
     Deletes the attribute specified by the given list of names.
     For example, to delete the attribute obj.conv.weight,
@@ -30,7 +31,8 @@ def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
     else:
         _del_nested_attr(getattr(obj, names[0]), names[1:])
 
-def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
+
+def _set_nested_attr(obj: nn.Module, names: list[str], value: Tensor) -> None:
     """
     Set the attribute specified by the given list of names to value.
     For example, to set the attribute obj.conv.weight,
@@ -41,7 +43,8 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     else:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
-def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
+
+def extract_weights(mod: nn.Module) -> tuple[tuple[Tensor, ...], list[str]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -61,7 +64,8 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     params = tuple(p.detach().requires_grad_() for p in orig_params)
     return params, names
 
-def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -> None:
+
+def load_weights(mod: nn.Module, names: list[str], params: tuple[Tensor, ...]) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
     Note that the `params` are regular Tensors (that can have history) and so are left
@@ -70,15 +74,18 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
 
+
 # Utilities to read/write markdown table-like content.
-def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> str:
+def to_markdown_table(
+    res: TimingResultType, header: Optional[tuple[str, ...]] = None
+) -> str:
     if header is None:
         header = ("model", "task", "mean", "var")
     out = ""
 
     def write_line(*args):
         nonlocal out
-        out += "| {} |\n".format(" | ".join(str(a) for a in args))
+        out += f"| {' | '.join(str(a) for a in args)} |\n"
 
     # Make it a markdown table
     write_line(*header)
@@ -89,6 +96,7 @@ def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> 
 
     return out
 
+
 def from_markdown_table(data: str) -> TimingResultType:
     out = data.strip().split("\n")
     out = out[2:]  # Ignore the header lines
@@ -97,14 +105,16 @@ def from_markdown_table(data: str) -> TimingResultType:
     res = defaultdict(defaultdict)
 
     for line in out:
-        model, task, mean, var = [f.strip() for f in line.strip().split("|") if f]
+        model, task, mean, var = (f.strip() for f in line.strip().split("|") if f)
         res[model][task] = (float(mean), float(var))
 
     return res
 
+
 def check_for_functorch():
     try:
         import functorch  # noqa: F401
+
         return True
     except ImportError:
         return False

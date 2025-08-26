@@ -1,13 +1,16 @@
 # Owner(s): ["oncall: pt2"]
 
-import tempfile
-
 import torch
 from torch._prims.debug_prims import load_tensor_reader
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    TemporaryDirectoryName,
+    TestCase,
+)
 from torch.utils._content_store import (
     ContentStoreReader,
     ContentStoreWriter,
@@ -22,7 +25,7 @@ class TestContentStore(TestCase):
         y = torch.randn(6, device=device)
         z = x.view(2, 2)
         # start writing
-        with tempfile.TemporaryDirectory() as loc:
+        with TemporaryDirectoryName() as loc:
             writer = ContentStoreWriter(loc)
             writer.write_tensor("x", x)
             writer.write_tensor("y", y)
@@ -60,9 +63,16 @@ class TestContentStore(TestCase):
         # Should not raise an error
         hash_storage(torch.tensor(2, device=device).untyped_storage())
 
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_repeated_hash(self, device):
+        # Test that repeated hashing doesn't trigger a recompile in dynamo
+        # If it does, we will execute prims.xor_sum in eager which fails
+        for _ in range(4):
+            hash_storage(torch.tensor(2, device=device).untyped_storage())
+
     @skipIfRocm
     def test_load_tensor(self, device):
-        with tempfile.TemporaryDirectory() as loc:
+        with TemporaryDirectoryName() as loc:
             writer = ContentStoreWriter(loc)
             x = torch.randn(4, device=device)
 
@@ -101,12 +111,14 @@ class TestContentStore(TestCase):
                     self.assertIsInstance(x4, FakeTensor)
                     same_meta_as_x(x4)
 
-                # Check fp64 works
-                x5 = torch.ops.debugprims.load_tensor.default(
-                    "x", (4,), (1,), dtype=torch.float64, device=device
-                )
-                self.assertEqual(x5.float(), x)
-                self.assertEqual(x5.dtype, torch.float64)
+                # Check fp64 works on non-MPS platforms, since MPS doesn't currently
+                # support fp64.
+                if not device.startswith("mps"):
+                    x5 = torch.ops.debugprims.load_tensor.default(
+                        "x", (4,), (1,), dtype=torch.float64, device=device
+                    )
+                    self.assertEqual(x5.float(), x)
+                    self.assertEqual(x5.dtype, torch.float64)
 
         x6 = torch.ops.debugprims.load_tensor.default(
             "x", (4,), (1,), dtype=torch.float32, device=device
@@ -114,7 +126,9 @@ class TestContentStore(TestCase):
         same_meta_as_x(x6)
 
 
-instantiate_device_type_tests(TestContentStore, globals())
+instantiate_device_type_tests(
+    TestContentStore, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":

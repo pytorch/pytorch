@@ -3,8 +3,10 @@ This is refactored from cmake.py to avoid circular imports issue with env.py,
 which calls get_cmake_cache_variables_from_file
 """
 
+from __future__ import annotations
+
 import re
-from typing import Dict, IO, Optional, Union
+from typing import IO, Optional, Union
 
 
 CMakeValue = Optional[Union[bool, str]]
@@ -26,7 +28,7 @@ def convert_cmake_value_to_python_value(
     cmake_type = cmake_type.upper()
     up_val = cmake_value.upper()
     if cmake_type == "BOOL":
-        # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
+        # https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#genex:BOOL
         return not (
             up_val in ("FALSE", "OFF", "N", "NO", "0", "", "NOTFOUND")
             or up_val.endswith("-NOTFOUND")
@@ -42,7 +44,7 @@ def convert_cmake_value_to_python_value(
 
 def get_cmake_cache_variables_from_file(
     cmake_cache_file: IO[str],
-) -> Dict[str, CMakeValue]:
+) -> dict[str, CMakeValue]:
     r"""Gets values in CMakeCache.txt into a dictionary.
 
     Args:
@@ -71,9 +73,7 @@ def get_cmake_cache_variables_from_file(
             r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line
         )
         if matched is None:  # Illegal line
-            raise ValueError(
-                "Unexpected line {} in {}: {}".format(i, repr(cmake_cache_file), line)
-            )
+            raise ValueError(f"Unexpected line {i} in {repr(cmake_cache_file)}: {line}")
         _, variable, type_, value = matched.groups()
         if type_ is None:
             type_ = ""

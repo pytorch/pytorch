@@ -1,14 +1,27 @@
-from .parallel_apply import parallel_apply
-from .replicate import replicate
-from .data_parallel import DataParallel, data_parallel
-from .scatter_gather import gather, scatter
-from .distributed import DistributedDataParallel
+from typing_extensions import deprecated
 
-__all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
-           'DataParallel', 'DistributedDataParallel']
+from torch.nn.parallel.data_parallel import data_parallel, DataParallel
+from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.nn.parallel.parallel_apply import parallel_apply
+from torch.nn.parallel.replicate import replicate
+from torch.nn.parallel.scatter_gather import gather, scatter
 
-def DistributedDataParallelCPU(*args, **kwargs):
-    import warnings
-    warnings.warn("torch.nn.parallel.DistributedDataParallelCPU is deprecated, "
-                  "please use torch.nn.parallel.DistributedDataParallel instead.")
-    return DistributedDataParallel(*args, **kwargs)
+
+__all__ = [
+    "replicate",
+    "scatter",
+    "parallel_apply",
+    "gather",
+    "data_parallel",
+    "DataParallel",
+    "DistributedDataParallel",
+]
+
+
+@deprecated(
+    "`torch.nn.parallel.DistributedDataParallelCPU` is deprecated, "
+    "please use `torch.nn.parallel.DistributedDataParallel` instead.",
+    category=FutureWarning,
+)
+class DistributedDataParallelCPU(DistributedDataParallel):
+    pass

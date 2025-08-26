@@ -7,22 +7,24 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-from torch.ao.quantization.quantize import _convert
-from torch.ao.quantization.quantize import _observer_forward_hook
-from torch.ao.quantization.quantize import _propagate_qconfig_helper
-from torch.ao.quantization.quantize import _remove_activation_post_process
-from torch.ao.quantization.quantize import _remove_qconfig
-from torch.ao.quantization.quantize import _add_observer_
-from torch.ao.quantization.quantize import add_quant_dequant
-from torch.ao.quantization.quantize import convert
-from torch.ao.quantization.quantize import _get_observer_dict
-from torch.ao.quantization.quantize import _get_unique_devices_
-from torch.ao.quantization.quantize import _is_activation_post_process
-from torch.ao.quantization.quantize import prepare
-from torch.ao.quantization.quantize import prepare_qat
-from torch.ao.quantization.quantize import propagate_qconfig_
-from torch.ao.quantization.quantize import quantize
-from torch.ao.quantization.quantize import quantize_dynamic
-from torch.ao.quantization.quantize import quantize_qat
-from torch.ao.quantization.quantize import _register_activation_post_process_hook
-from torch.ao.quantization.quantize import swap_module
+from torch.ao.quantization.quantize import (
+    _add_observer_,
+    _convert,
+    _get_observer_dict,
+    _get_unique_devices_,
+    _is_activation_post_process,
+    _observer_forward_hook,
+    _propagate_qconfig_helper,
+    _register_activation_post_process_hook,
+    _remove_activation_post_process,
+    _remove_qconfig,
+    add_quant_dequant,
+    convert,
+    prepare,
+    prepare_qat,
+    propagate_qconfig_,
+    quantize,
+    quantize_dynamic,
+    quantize_qat,
+    swap_module,
+)

@@ -3,8 +3,6 @@
 import unittest
 
 import pytorch_test_common
-
-import torch
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -13,11 +11,6 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch.ao import quantization
-from torch.autograd import Variable
-from torch.onnx import OperatorExportTypes
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
 from torchvision.models.densenet import densenet121
@@ -30,6 +23,14 @@ from torchvision.models.segmentation import deeplabv3_resnet101, fcn_resnet101
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 from torchvision.models.video import mc3_18, r2plus1d_18, r3d_18
 from verify import verify
+
+import torch
+from torch.ao import quantization
+from torch.autograd import Variable
+from torch.onnx import OperatorExportTypes
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
+
 
 if torch.cuda.is_available():
 
@@ -253,7 +254,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(fcn_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(fcn_resnet101(weights=None, weights_backbone=None)),
             toC(x),
             rtol=1e-3,
             atol=1e-5,
@@ -263,7 +264,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(deeplabv3_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(deeplabv3_resnet101(weights=None, weights_backbone=None)),
             toC(x),
             rtol=1e-3,
             atol=1e-5,

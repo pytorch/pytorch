@@ -1,9 +1,7 @@
 #pragma once
-
-namespace torch {
-namespace autograd {
+#include <torch/csrc/utils/pythoncapi_compat.h>
+namespace torch::autograd {
 
 void initSpecialFunctions(PyObject* module);
 
 }
-} // namespace torch

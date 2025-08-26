@@ -9,10 +9,11 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
-C10_DECLARE_bool(torch_jit_enable_new_executor);
+TORCH_DECLARE_bool(torch_jit_enable_new_executor);
 
-namespace torch {
-namespace jit {
+TORCH_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
+
+namespace torch::jit {
 struct GraphExecutorState;
 struct Code;
 
@@ -24,7 +25,11 @@ enum ExecutorExecutionMode {
 struct ExecutionPlan {
   ExecutionPlan() = default;
   ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
-      : code(graph, std::move(function_name)), graph(std::move(graph)) {}
+      : code(graph, std::move(function_name)),
+        graph(
+            FLAGS_torch_jit_execution_plan_reuse_code_graph
+                ? code.graph()
+                : std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -38,7 +43,6 @@ struct ExecutionPlan {
 // They are only valid only right after you call getDebugState() and should
 // never be used again once another GraphExecutor function is called.
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {
   const Graph* graph = nullptr;
   ExecutionPlan fallback; // XXX: members of this field are optional
@@ -82,7 +86,7 @@ struct TORCH_API GraphExecutor {
   // current global fusion strategy settings.
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
-      c10::optional<size_t> remaining_bailout_depth = c10::nullopt);
+      std::optional<size_t> remaining_bailout_depth = std::nullopt);
   GraphExecutorState getDebugState();
 
   void debugFlushCompilationCache();
@@ -140,5 +144,4 @@ GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
 // with less plumbing.
 } // namespace detail
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

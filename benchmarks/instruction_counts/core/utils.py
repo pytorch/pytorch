@@ -1,28 +1,31 @@
+# mypy: ignore-errors
 import atexit
-import shutil
 import re
+import shutil
 import textwrap
-from typing import List, Optional, Tuple
-
-from torch.utils.benchmark.utils.common import _make_temp_dir
+from typing import Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
 
+from torch.utils.benchmark.utils.common import _make_temp_dir
+
 
 _TEMPDIR: Optional[str] = None
+
+
 def get_temp_dir() -> str:
     global _TEMPDIR
     if _TEMPDIR is None:
-        _TEMPDIR = _make_temp_dir(prefix="instruction_count_microbenchmarks", gc_dev_shm=True)
+        _TEMPDIR = _make_temp_dir(
+            prefix="instruction_count_microbenchmarks", gc_dev_shm=True
+        )
         atexit.register(shutil.rmtree, path=_TEMPDIR)
     return _TEMPDIR
 
 
 def _flatten(
-    key_prefix: Label,
-    sub_schema: Definition,
-    result: FlatIntermediateDefinition
+    key_prefix: Label, sub_schema: Definition, result: FlatIntermediateDefinition
 ) -> None:
     for k, value in sub_schema.items():
         if isinstance(k, tuple):
@@ -56,7 +59,7 @@ def flatten(schema: Definition) -> FlatIntermediateDefinition:
     return result
 
 
-def parse_stmts(stmts: str) -> Tuple[str, str]:
+def parse_stmts(stmts: str) -> tuple[str, str]:
     """Helper function for side-by-side Python and C++ stmts.
 
     For more complex statements, it can be useful to see Python and C++ code
@@ -67,11 +70,11 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
       - The column separator is " | ", not "|". Whitespace matters.
     """
     stmts = textwrap.dedent(stmts).strip()
-    lines: List[str] = stmts.splitlines(keepends=False)
+    lines: list[str] = stmts.splitlines(keepends=False)
     assert len(lines) >= 3, f"Invalid string:\n{stmts}"
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
-    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"
+    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"  # noqa: F841
     separation_pattern = r"^[-]{40} | [-]{40}$"
     code_pattern = r"^(.{40}) \|($| (.*)$)"
 
@@ -79,12 +82,13 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
     if column_match is None:
         raise ValueError(
             f"Column header `{lines[0]}` "
-            f"does not match pattern `{column_header_pattern}`")
+            f"does not match pattern `{column_header_pattern}`"
+        )
 
     assert re.search(separation_pattern, lines[1])
 
-    py_lines: List[str] = []
-    cpp_lines: List[str] = []
+    py_lines: list[str] = []
+    cpp_lines: list[str] = []
     for l in lines[2:]:
         l_match = re.search(code_pattern, l)
         if l_match is None:

@@ -3,8 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <unordered_set>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // [ Using ForwardGrad ]
 // ForwardGrad needs to be a shared_ptr to satisfy constraints of its inner
@@ -28,7 +27,7 @@ struct ForwardGrad;
 //   - Ensure that we can keep the level that we expose to the user API simple
 //   (an integer
 //     that represents the nesting depth) while avoiding confusions when the
-//     level index is re-used.
+//     level index is reused.
 
 // The important external APIs from this file are:
 //   - ForwardADLevel::get_next_idx() that can be used to enter a new level and
@@ -208,5 +207,4 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
   mutable std::mutex mutex_;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

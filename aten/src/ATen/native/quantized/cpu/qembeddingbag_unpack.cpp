@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -17,8 +18,6 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-int register_embedding_params();
-
 at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
   at::Tensor weight_origin;
@@ -26,8 +25,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   if (bit_rate_ == 8 || bit_rate_ == 4) {
     const auto input_rows = packed_weight.size(0);
     const auto input_columns = packed_weight.size(1);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int scale_bias_bytes;
+    int scale_bias_bytes = 0;
     const auto num_elem_per_byte = 8 / bit_rate_;
     if (bit_rate_ == 8) {
       // The last 2 values are used to store the FP32 scale and zero_point
@@ -37,7 +35,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
       scale_bias_bytes = 4;
     }
 
-    const auto* input = packed_weight.data_ptr<uint8_t>();
+    const auto* input = packed_weight.const_data_ptr<uint8_t>();
     // Calculate the output shape, accounting for the last n bytes to be used
     // for scale/bias rest of the entries are packed depending on the bit_width.
     std::vector<int64_t> output_shape = {
@@ -46,13 +44,12 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
             num_elem_per_byte};
 
     auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_scale.data(), w_scale.size(), at::device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_zp.data(), w_zp.size(), at::device(c10::kCPU).dtype(c10::kFloat));
 
     auto output_columns = output_shape[1];
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint8_t* output_data;
+    uint8_t* output_data = nullptr;
 
     // Allocate output weight tensor based on the bit_width
     if (bit_rate_ == 8) {
@@ -61,7 +58,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           scales.toType(c10::kFloat),
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt8));
+          at::device(c10::kCPU).dtype(c10::kQUInt8));
       output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     } else {
       // We create empty qtensor with the full output shape, and dtype set to
@@ -72,7 +69,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           scales.toType(c10::kFloat),
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt4x2));
+          at::device(c10::kCPU).dtype(c10::kQUInt4x2));
       output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     }
 
@@ -100,8 +97,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   return weight_origin;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
@@ -125,7 +121,7 @@ Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weigh
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
   const int32_t output_columns = input_columns - 2 * sizeof(float);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
 
   std::vector<int64_t> output_shape = packed_weight_sizes.vec();
   output_shape[col_dim] = output_columns;
@@ -167,12 +163,27 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   return output;
 }
 
+Tensor qembeddingbag_byte_unpack_meta(const Tensor& packed_weight) {
+  const auto packed_weight_sizes = packed_weight.sym_sizes();
+  const auto col_dim = packed_weight_sizes.size() - 1;
+  const auto input_columns = packed_weight_sizes[col_dim];
+  // The last 2 values are used to store the FP32 scale and zero_point values
+  // per row.
+  const auto output_columns = input_columns - 2 * sizeof(float);
+
+  auto output_shape = packed_weight_sizes.vec();
+  output_shape[col_dim] = output_columns;
+
+  at::SymDimVector output_shape_vec(output_shape);
+  return at::empty_symint(output_shape_vec, packed_weight.options().dtype(kFloat), packed_weight.suggest_memory_format());
+}
+
 Tensor _qembeddingbag_nbit_unpack_helper(
     const Tensor& packed_weight,
     int BIT_RATE) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
@@ -271,6 +282,11 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
       TORCH_FN(QEmbeddingUnpackWeights::run));
 }
 
+TORCH_LIBRARY_IMPL(quantized, Meta, m) {
+  m.impl(
+      "quantized::embedding_bag_byte_unpack",
+      qembeddingbag_byte_unpack_meta);
+}
+
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

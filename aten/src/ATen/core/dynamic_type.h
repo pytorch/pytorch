@@ -1,10 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
 #include <ATen/core/jit_type_base.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 
@@ -120,7 +121,7 @@ class DynamicType : public SharedType {
    * A implementation detail to support NamedTuple.
    */
   struct LabeledDynamicType {
-    c10::optional<std::string> label;
+    std::optional<std::string> label;
     DynamicTypePtr ty;
     explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
 
@@ -137,7 +138,7 @@ class DynamicType : public SharedType {
   struct Arguments {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
-    Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
@@ -155,14 +156,19 @@ class DynamicType : public SharedType {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
-  explicit DynamicType(Tag, c10::string_view, Arguments);
+  explicit DynamicType(Tag, std::string_view, Arguments);
+
+  DynamicType(DynamicType&& other) = delete;
+  DynamicType(const DynamicType&) = delete;
+  DynamicType& operator=(const DynamicType&) = delete;
+  DynamicType& operator=(DynamicType&&) = delete;
 
   TypePtr containedType(size_t) const override;
   size_t containedTypeSize() const override;
   Tag tag() const {
     return tag_;
   }
-  const c10::optional<std::string>& name() const {
+  const std::optional<std::string>& name() const {
     return name_;
   }
   const Arguments& arguments() const {
@@ -181,12 +187,14 @@ class DynamicType : public SharedType {
     return false;
   }
   friend struct Type;
-  static std::shared_ptr<const DynamicType> create(const Type& ty);
+  // NOTE: Here we are using SingletonOrSharedTypePtr to mean
+  // "original-type-because-it-was-actually-a-DynamicType or shared".
+  static SingletonOrSharedTypePtr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
   bool equals(const DynamicType& other) const;
 
   template <typename F>
-  bool compareArguments(const DynamicType& other, F&& f) const {
+  bool compareArguments(const DynamicType& other, const F& f) const {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
@@ -199,7 +207,7 @@ class DynamicType : public SharedType {
   }
 
   Tag tag_;
-  c10::optional<std::string> name_;
+  std::optional<std::string> name_;
   union {
     Arguments arguments_;
     ClassTypePtr class_;

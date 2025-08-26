@@ -3,6 +3,7 @@
 
 using namespace c10::guts;
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
 
 namespace test_is_equality_comparable {
@@ -50,7 +51,7 @@ struct Functor {
 auto lambda = []() {};
 // func() and func__ just exists to silence a compiler warning about lambda
 // being unused
-bool func() {
+static bool func() {
   lambda();
   return true;
 }
@@ -67,7 +68,7 @@ static_assert(is_function_type<int(MyClass)>::value, "");
 static_assert(is_function_type<int(const MyClass&)>::value, "");
 static_assert(is_function_type<int(MyClass&&)>::value, "");
 static_assert(is_function_type < MyClass && () > ::value, "");
-static_assert(is_function_type < MyClass && (MyClass &&) > ::value, "");
+static_assert(is_function_type < MyClass && (MyClass&&) > ::value, "");
 static_assert(is_function_type<const MyClass&(int, float, MyClass)>::value, "");
 
 static_assert(!is_function_type<void>::value, "");
@@ -150,17 +151,21 @@ struct MyStatelessConstFunctor final {
   Result operator()(Args...) const {}
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void func() {
   auto stateless_lambda = [](int a) { return a; };
   static_assert(is_stateless_lambda<decltype(stateless_lambda)>::value, "");
 
   int b = 4;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_1 = [&](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_1)>::value, "");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_2 = [=](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_2)>::value, "");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_3 = [b](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_3)>::value, "");
 
@@ -191,3 +196,4 @@ void func() {
       !is_stateless_lambda<Func*>::value, "A function pointer is not a lambda");
 }
 } // namespace test_lambda_is_stateless
+// NOLINTEND(modernize-unary-static-assert)

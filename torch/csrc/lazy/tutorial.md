@@ -135,7 +135,7 @@ Here's our model definition:
 
 ```python
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
@@ -218,7 +218,7 @@ If we don't stop the trace after `optimizer_step` it will include two or more it
 Another important point is that after `mark_step()` we actually continue tracing the next iteration! And... start executing the previous one at the same time! Really, nothing stops us from tracing the next iteration ...and then the one after next until we hit `if batch_idx % log_interval == 0:` where
 we actually need to wait for execution to catch up, so we can print out `loss`. Remember to avoid accessing intermediate results too often if you would like to extract the maximum benefit out of Lazy Tensor.
 
-Since every iteration looks exactly like the one before it, the TS backend will be re-using the same TS compilation.
+Since every iteration looks exactly like the one before it, the TS backend will be reusing the same TS compilation.
 
 Alright, let's run it now!
 

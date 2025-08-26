@@ -1,5 +1,14 @@
+from __future__ import annotations
+
+import itertools
 import re
-from typing import Mapping, Match, Optional, Sequence
+import textwrap
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
 
 # match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
@@ -19,8 +28,8 @@ class CodeTemplate:
     filename: str
 
     @staticmethod
-    def from_file(filename: str) -> "CodeTemplate":
-        with open(filename, "r") as f:
+    def from_file(filename: str) -> CodeTemplate:
+        with open(filename) as f:
             return CodeTemplate(f.read(), filename)
 
     def __init__(self, pattern: str, filename: str = "") -> None:
@@ -28,7 +37,7 @@ class CodeTemplate:
         self.filename = filename
 
     def substitute(
-        self, env: Optional[Mapping[str, object]] = None, **kwargs: object
+        self, env: Mapping[str, object] | None = None, **kwargs: object
     ) -> str:
         if env is None:
             env = {}
@@ -38,11 +47,14 @@ class CodeTemplate:
             return kwargs[v] if v in kwargs else env[v]
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
-            return "".join(
-                [indent + l + "\n" for e in v for l in str(e).splitlines()]
-            ).rstrip()
+            content = "\n".join(
+                itertools.chain.from_iterable(str(e).splitlines() for e in v)
+            )
+            content = textwrap.indent(content, prefix=indent)
+            # Remove trailing whitespace on each line
+            return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
-        def replace(match: Match[str]) -> str:
+        def replace(match: re.Match[str]) -> str:
             indent = match.group(1)
             key = match.group(2)
             comma_before = ""

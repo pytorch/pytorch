@@ -19,8 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
   TORCH_CHECK(self.dim() >= 2, "tril: input tensor must have at least 2 dimensions")
@@ -32,9 +31,9 @@ TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
   set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
-}  // namespace meta
+}  // namespace at::meta
 
-namespace native {
+namespace at::native {
 namespace {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -42,7 +41,7 @@ namespace {
 template <typename scalar_t>
 void apply_triu_tril_single(
     scalar_t* result,
-    scalar_t* self,
+    const scalar_t* self,
     bool inplace,
     int64_t k,
     int64_t n,
@@ -62,7 +61,7 @@ void apply_triu_tril_single(
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = std::max(zero, i + k); j < m; j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+            result[i * res_row_stride + j * res_col_stride] = c10::load(&self[i * self_row_stride + j * self_col_stride]);
           }
         }
       }
@@ -75,7 +74,7 @@ void apply_triu_tril_single(
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+            result[i * res_row_stride + j * res_col_stride] = c10::load(&self[i * self_row_stride + j * self_col_stride]);
           }
         }
       }
@@ -87,15 +86,14 @@ template <typename scalar_t>
 void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int64_t k, bool upper) {
   auto n = self.size(-2);
   auto m = self.size(-1);
-  auto self_data = self.data_ptr<scalar_t>();
+  auto self_data = self.const_data_ptr<scalar_t>();
   auto self_stride = (self.dim() > 2 && self.stride(-3) > 0) ? self.stride(-3) : 1;
   auto batchsize = batchCountTrilTriu(result);
   auto self_row_stride = self.stride(-2);
   auto self_col_stride = self.stride(-1);
 
   auto result_data = result.data_ptr<scalar_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t result_stride, result_row_stride, result_col_stride;
+  int64_t result_stride = 0, result_row_stride = 0, result_col_stride = 0;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
     result_row_stride = result.stride(-2);
@@ -108,7 +106,7 @@ void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int
 
   parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
     for (const auto b : c10::irange(start, end)) {
-      scalar_t* self_batch = &self_data[b * self_stride];
+      const scalar_t* self_batch = &self_data[b * self_stride];
       scalar_t* result_batch = &result_data[b * result_stride];
       apply_triu_tril_single<scalar_t>(
           result_batch,
@@ -181,10 +179,6 @@ TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
-static Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
-    return at::native::trace_backward_symint(grad, c10::fromIntArrayRefSlow(sizes));
-}
-
 Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
   if (sizes.size() != 2) {
     throw std::runtime_error("expected matrix input");
@@ -202,5 +196,4 @@ Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
   return grad_input.view_symint(sizes);
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

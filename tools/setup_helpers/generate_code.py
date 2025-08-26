@@ -1,35 +1,39 @@
+from __future__ import annotations
+
 import argparse
 import os
-import pathlib
 import sys
-from typing import Any, cast, Optional
+from pathlib import Path
+from typing import Any, cast
 
 import yaml
+
 
 try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
+    from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
+
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 
 def generate_code(
-    gen_dir: pathlib.Path,
-    native_functions_path: Optional[str] = None,
-    tags_path: Optional[str] = None,
-    install_dir: Optional[str] = None,
-    subset: Optional[str] = None,
+    gen_dir: Path,
+    native_functions_path: str | None = None,
+    tags_path: str | None = None,
+    install_dir: str | None = None,
+    subset: str | None = None,
     disable_autograd: bool = False,
     force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
-    from torchgen.selective_build.selector import SelectiveBuilder
-
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
+
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -40,7 +44,7 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
+    autograd_dir = os.fspath(Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -75,7 +79,7 @@ def generate_code(
 def get_selector_from_legacy_operator_selection_list(
     selected_op_list_path: str,
 ) -> Any:
-    with open(selected_op_list_path, "r") as f:
+    with open(selected_op_list_path) as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
         selected_op_list = {
@@ -103,12 +107,13 @@ def get_selector_from_legacy_operator_selection_list(
 
 
 def get_selector(
-    selected_op_list_path: Optional[str],
-    operators_yaml_path: Optional[str],
+    selected_op_list_path: str | None,
+    operators_yaml_path: str | None,
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
+    REPO_ROOT = Path(__file__).absolute().parents[2]
+    sys.path.insert(0, str(REPO_ROOT))
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (
@@ -132,8 +137,8 @@ def main() -> None:
     parser.add_argument("--tags-path")
     parser.add_argument(
         "--gen-dir",
-        type=pathlib.Path,
-        default=pathlib.Path("."),
+        type=Path,
+        default=Path("."),
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
@@ -207,12 +212,12 @@ def main() -> None:
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
 
-        assert os.path.isfile(
-            ts_backend_yaml
-        ), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
-        assert os.path.isfile(
-            ts_native_functions
-        ), f"Unable to access {ts_native_functions}"
+        assert os.path.isfile(ts_backend_yaml), (
+            f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        )
+        assert os.path.isfile(ts_native_functions), (
+            f"Unable to access {ts_native_functions}"
+        )
         from torchgen.dest.lazy_ir import GenTSLazyIR
         from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 

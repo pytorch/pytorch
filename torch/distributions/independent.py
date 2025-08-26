@@ -1,12 +1,21 @@
+# mypy: allow-untyped-defs
+from typing import Generic, Optional, TypeVar
+
 import torch
+from torch import Size, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
-from typing import Dict
+from torch.types import _size
 
-__all__ = ['Independent']
 
-class Independent(Distribution):
+__all__ = ["Independent"]
+
+
+D = TypeVar("D", bound=Distribution)
+
+
+class Independent(Distribution, Generic[D]):
     r"""
     Reinterprets some of the batch dims of a distribution as event dims.
 
@@ -35,17 +44,25 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
 
-    def __init__(self, base_distribution, reinterpreted_batch_ndims, validate_args=None):
+    arg_constraints: dict[str, constraints.Constraint] = {}
+    base_dist: D
+
+    def __init__(
+        self,
+        base_distribution: D,
+        reinterpreted_batch_ndims: int,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
-            raise ValueError("Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
-                             "actual {} vs {}".format(reinterpreted_batch_ndims,
-                                                      len(base_distribution.batch_shape)))
-        shape = base_distribution.batch_shape + base_distribution.event_shape
-        event_dim = reinterpreted_batch_ndims + len(base_distribution.event_shape)
-        batch_shape = shape[:len(shape) - event_dim]
-        event_shape = shape[len(shape) - event_dim:]
+            raise ValueError(
+                "Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "
+                f"actual {reinterpreted_batch_ndims} vs {len(base_distribution.batch_shape)}"
+            )
+        shape: Size = base_distribution.batch_shape + base_distribution.event_shape
+        event_dim: int = reinterpreted_batch_ndims + len(base_distribution.event_shape)
+        batch_shape = shape[: len(shape) - event_dim]
+        event_shape = shape[len(shape) - event_dim :]
         self.base_dist = base_distribution
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -53,19 +70,22 @@ class Independent(Distribution):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Independent, _instance)
         batch_shape = torch.Size(batch_shape)
-        new.base_dist = self.base_dist.expand(batch_shape +
-                                              self.event_shape[:self.reinterpreted_batch_ndims])
+        new.base_dist = self.base_dist.expand(
+            batch_shape + self.event_shape[: self.reinterpreted_batch_ndims]
+        )
         new.reinterpreted_batch_ndims = self.reinterpreted_batch_ndims
-        super(Independent, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super(Independent, new).__init__(
+            batch_shape, self.event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
     @property
-    def has_rsample(self):
+    def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
     @property
-    def has_enumerate_support(self):
+    def has_enumerate_support(self) -> bool:  # type: ignore[override]
         if self.reinterpreted_batch_ndims > 0:
             return False
         return self.base_dist.has_enumerate_support
@@ -78,21 +98,21 @@ class Independent(Distribution):
         return result
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.base_dist.mean
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.base_dist.mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()) -> Tensor:
         return self.base_dist.sample(sample_shape)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):
@@ -105,8 +125,13 @@ class Independent(Distribution):
 
     def enumerate_support(self, expand=True):
         if self.reinterpreted_batch_ndims > 0:
-            raise NotImplementedError("Enumeration over cartesian product is not implemented")
+            raise NotImplementedError(
+                "Enumeration over cartesian product is not implemented"
+            )
         return self.base_dist.enumerate_support(expand=expand)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, {})'.format(self.base_dist, self.reinterpreted_batch_ndims)
+        return (
+            self.__class__.__name__
+            + f"({self.base_dist}, {self.reinterpreted_batch_ndims})"
+        )

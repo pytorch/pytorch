@@ -9,11 +9,36 @@
 namespace c10d {
 namespace detail {
 
+// TCPStore is a key-value store used by PyTorch mainly for distributed
+// rendezvous, but for other purposes as well. (e.g., a centralized storage for
+// synchronization among different processes.)
+//
+// It is run via a classic client-server architecture, where the server runs
+// a separate background thread (alternatively we call it daemon thread). The
+// client and server communicate via TCP sockets.
+//
+// Currently we have two types of server backends:
+// 1. TCPStoreBackend: a single thread to handle all incoming request
+// synchronously.
+// 2. LibUVTCPStoreBackend: an event-driven asynchronous stream processing that
+// leverages libuv library (https://github.com/libuv/libuv) for better
+// performance. And this backend now is recommended to users. (We set the
+// default value of `useLibUV` inside `TCPStoreOptions` to true now, so users
+// should get it by default).
+//
+// Code structure:
+// ├── TCPStore client side API and server setup code:
+// │   TCPStore.hpp/TCPStore.cpp
+// ├── TCPStoreBackend server side API implementation code:
+// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
+// |   (actual class:`TCPStoreMasterDaemon`)
+// ├── LibUVTCPStoreBackend
+// │   TCPStoreLibUvBackend.cpp
+// |   (actual class: `LibUVStoreDaemon`)
+
 class TCPServer;
 
 class TCPClient;
-
-class TCPCallbackClient;
 
 struct SocketAddress {
   std::string host{};
@@ -27,7 +52,7 @@ struct TCPStoreOptions {
 
   std::uint16_t port = kDefaultPort;
   bool isServer = false;
-  c10::optional<std::size_t> numWorkers = c10::nullopt;
+  std::optional<std::size_t> numWorkers = std::nullopt;
   bool waitWorkers = true;
   std::chrono::milliseconds timeout = Store::kDefaultTimeout;
 
@@ -38,22 +63,21 @@ struct TCPStoreOptions {
   // If specified, and if isServer is true, the underlying TCPServer will take
   // over the bound socket associated to this fd. This option is useful to avoid
   // port assignment races in certain scenarios.
-  c10::optional<int> masterListenFd = c10::nullopt;
+  std::optional<int> masterListenFd = std::nullopt;
+
+  // A boolean value indicating whether to use the experimental libUV backend.
+  bool useLibUV = true;
 };
 
 class TORCH_API TCPStore : public Store {
  public:
+  static constexpr std::chrono::milliseconds kConnectRetryDelay{1000};
+
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
-  [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
-      const std::string& masterAddr,
-      std::uint16_t masterPort,
-      c10::optional<int> numWorkers = c10::nullopt,
-      bool isServer = false,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout,
-      bool waitWorkers = true);
-
   ~TCPStore() override;
+
+  c10::intrusive_ptr<Store> clone() override;
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
@@ -68,13 +92,6 @@ class TORCH_API TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
-  // watchKey() is a blocking operation. It will register the socket on
-  // TCPStoreMasterDaemon and the callback on TCPStoreWorkerDaemon. It will
-  // return once it has verified the callback is registered on both background
-  // threads. Only one thread can call watchKey() at a time.
-  void watchKey(const std::string& key, WatchKeyCallback callback) override;
-
   bool check(const std::vector<std::string>& keys) override;
 
   int64_t getNumKeys() override;
@@ -85,17 +102,24 @@ class TORCH_API TCPStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
-  void append(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
 
-  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
 
   void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values) override;
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
+
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
 
   // Waits for all workers to join.
   void waitForWorkers();
@@ -110,8 +134,20 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
+  bool isLibUvBackend() const noexcept {
+    return usingLibUv_;
+  }
+
+  // note(xilunwu): this function is only for internal testing
+  void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
+  std::string repr() const;
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
+
+  void ping();
+  void validate();
 
   std::vector<uint8_t> doGet(const std::string& key);
 
@@ -122,12 +158,12 @@ class TORCH_API TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
-  std::unique_ptr<detail::TCPCallbackClient> callbackClient_;
-  c10::optional<std::size_t> numWorkers_;
+  std::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
+  bool usingLibUv_ = true;
 };
 
 } // namespace c10d

@@ -1,4 +1,3 @@
-#include <c10/util/variant.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <ATen/ExpandUtils.h>
@@ -6,7 +5,6 @@
 #include <ATen/TensorGeometry.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
@@ -19,6 +17,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
+
+#include <utility>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -44,8 +44,8 @@ static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 static bool te_must_use_llvm_on_cpu = true;
-static bool cat_wo_conditionals = true; // NOLINT
-static bool opt_conditionals = false; // NOLINT
+static bool cat_wo_conditionals = true;
+static bool opt_conditionals = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -54,47 +54,49 @@ bool setFallbackAllowed(bool value) {
 }
 
 bool fallbackAllowed() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
 }
 
 static bool fallbackEnforced() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
   }
-  if (!enable_c_str) {
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "2") {
+  if (enable_opt == "2") {
     return true;
   }
   return false;
 }
 
 static int64_t randomTransformsRequested() {
-  const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
-  if (!enable_c_str) {
+  const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_opt.has_value()) {
     return 0;
   }
-  return std::stoi(std::string(enable_c_str));
+  return std::stoi(enable_opt.value());
 }
 
 #ifdef TORCH_ENABLE_LLVM
 static bool dontUseLLVMFlag() {
-  static const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_opt) {
     return false;
   }
-  return std::string(enable_c_str) == "1";
+  return enable_opt == "1";
 }
 #endif
 
@@ -129,14 +131,14 @@ bool& getOptConditionals() {
   return opt_conditionals;
 }
 
-c10::optional<at::Device> pickDeviceType(
+std::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs) {
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   for (auto const& input : inputs) {
     auto tt = input->type()->cast<TensorType>();
     if (tt && tt->device()) {
       if (device && *device != *tt->device()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       device = *tt->device();
     }
@@ -144,9 +146,9 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-static c10::optional<at::Device> pickDeviceType(
+static std::optional<at::Device> pickDeviceType(
     const std::shared_ptr<Graph>& graph) {
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
       if (auto tt = input->type()->cast<TensorType>()) {
@@ -180,16 +182,16 @@ static c10::optional<at::Device> pickDeviceType(
 
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
-static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
+static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
 
   c10::ScalarType dtype = c10::ScalarType::Float;
 
   if (!it) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (!it->isComplete()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (it->scalarType()) {
     // TODO: ideally we should be strict here and return nullopt if the dtype is
@@ -199,11 +201,11 @@ static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   auto concrete_sizes = it->sizes().concrete_sizes();
   if (!concrete_sizes) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
-static std::vector<int64_t> _pair_int(IValue v) {
+static std::vector<int64_t> _pair_int(const IValue& v) {
   if (v.isIntList()) {
     return v.toIntVector();
   } else {
@@ -226,7 +228,7 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   }
 
   // Check dimension size first
-  int ndims = (*sizes).size();
+  auto ndims = (*sizes).size();
   if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
       (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
     return false;
@@ -391,7 +393,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 
 } // namespace torch::jit::tensorexpr
 
-static at::ScalarType tensorType(BufPtr b) {
+static at::ScalarType tensorType(const BufPtr& b) {
   return static_cast<at::ScalarType>(b->dtype().scalar_type());
 }
 
@@ -437,9 +439,9 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
     if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
-    } else if (c10::get_if<BufHandle>(&vec[0])) {
+    } else if (std::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
-    } else if (c10::get_if<int64_t>(&vec[0])) {
+    } else if (std::get_if<int64_t>(&vec[0])) {
       return convertVecArgValue<int64_t>(vec);
     }
     throw unsupported_dtype();
@@ -483,7 +485,11 @@ ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
   if (it == shapeSymbolToVar_.end()) {
     VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
+#endif
   }
   return it->second;
 }
@@ -528,7 +534,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   throw malformed_input(msg);
 }
 
-static c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+static std::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
     if (tt->scalarType()) {
@@ -561,7 +567,7 @@ static bool constZeroDimTensorAsScalarArg(
     default:
       std::stringstream ss;
       ss << "Unsupported tensor dtype:" << dtype
-         << " for converting constant 0-dim Tensor to scalar" << std::endl;
+         << " for converting constant 0-dim Tensor to scalar" << '\n';
       throw unsupported_dtype(ss.str());
   }
 }
@@ -608,7 +614,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
       argInputs.emplace_back(toArg(inp));
     }
     // handle optional bias
-    if (c10::get_if<ArgNone>(&argInputs[2])) {
+    if (std::get_if<ArgNone>(&argInputs[2])) {
       Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
       std::vector<ExprHandle> biasShape;
       biasShape.push_back(outputShape[1]);
@@ -668,7 +674,7 @@ static bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-static void fuseAllLoops(StmtPtr st) {
+static void fuseAllLoops(const StmtPtr& st) {
   auto block = to<tensorexpr::Block>(st);
   if (block == nullptr) {
     return;
@@ -697,7 +703,6 @@ static void fuseAllLoops(StmtPtr st) {
       continue;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr fusedLoop;
     if (!LoopNest::fuseLoops(outer_loops, &fusedLoop)) {
       continue;
@@ -708,13 +713,13 @@ static void fuseAllLoops(StmtPtr st) {
 }
 
 // Compute the trip count of a loop if it is a constant.
-static c10::optional<int64_t> tripCount(ForPtr loop) {
+static std::optional<int64_t> tripCount(const ForPtr& loop) {
   auto tc = IRSimplifier::simplify(
       cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
   if (auto val = to<LongImm>(tc.node())) {
     return val->value();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // Prune innermost loops until iterations satisfies a minimum grain size.
@@ -755,7 +760,7 @@ static void pruneByThreadCount(std::vector<ForPtr>& loops) {
 // in the inner loop, and a maximum level of thread-level parallelism in the
 // outer loops.
 template <typename Bufs>
-static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
+static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
   for (auto const& buf : bufs) {
     auto loops = l.getLoopStmtsFor(buf);
     pruneByGrainSize(loops);
@@ -788,7 +793,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
 }
 
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
-  torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
+  torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
   int64_t random_tr_seed = randomTransformsRequested();
@@ -861,7 +866,6 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
       int blockSize = getTECudaPointwiseBlockSize();
 
       if (loopLevels == 2) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
@@ -871,9 +875,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         flattened->set_gpu_block_index(0);
         inner->set_gpu_thread_index(0);
       } else if (loopLevels == 3) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner1;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
@@ -886,7 +888,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + c10::to_string(loopLevels));
+            "Invalid loop-level: " + std::to_string(loopLevels));
       }
     }
   }
@@ -954,12 +956,12 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          c10::to_string(static_cast<int>(backendType)));
+          std::to_string(static_cast<int>(backendType)));
   }
 }
 
 template <typename T>
-static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
+static bool isValidPrimProperty(const std::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
 }
 
@@ -988,7 +990,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
 // we use the debug names in printing cuda code, they need to be removed
 // of characters that can't be used in a variable identifier
 void TensorExprKernel::genInputDebugNames() {
-  std::unordered_map<std::string, const torch::jit::Value*> name_to_value;
   std::unordered_set<std::string> name_set;
   std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
   for (const torch::jit::Value* input : graph_->inputs()) {
@@ -1025,7 +1026,11 @@ ExprHandle TensorExprKernel::getStrideArg(
         kLong);
     strideArgToVar_[std::pair<size_t, size_t>(
         tensor_input_index, stride_index)] = var;
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
+#endif
   }
   return it->second;
 }
@@ -1058,14 +1063,12 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     auto strides = stride_input[0] == StrideInput::TENSOR_CONT
         ? make_contiguous_strides(inputTensorDims)
         : make_channels_last_strides(inputTensorDims);
-    return fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); });
+    return fmap(
+        strides, [&](ExprPtr stride) { return ExprHandle(std::move(stride)); });
   }
 
   inputTensorStrides.resize(rank);
-  std::vector<bool> stride_set;
-  for (size_t i = 0; i < rank; ++i) {
-    stride_set.push_back(false);
-  }
+  std::vector<bool> stride_set(rank, false);
   // first, generate non-dependent values
   size_t generated_strides = 0;
   for (const auto i : c10::irange(rank)) {
@@ -1191,7 +1194,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
-          "input" + c10::to_string(bufs_.size() + 1),
+          "input" + std::to_string(bufs_.size() + 1),
           size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
@@ -1238,7 +1241,7 @@ NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
 }
 
 template <typename T>
-std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
+static std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
   std::vector<size_t> idx(v.size());
   iota(idx.begin(), idx.end(), 0);
@@ -1260,11 +1263,11 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
     const std::vector<size_t>& sorted_stride_indices_descending,
     const std::vector<ExprPtr>& strides,
     BufPtr& buf) {
-  // We need to convert the output tensor so that its values are layed
+  // We need to convert the output tensor so that its values are laid
   // so that when viewed from the output strides the values are correct.
-  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // A contiguous Tensor of size(2, 3) with values 0-5 is laid out as:
   // [0] [1] [2] [3] [4] [5]
-  // The same valued tensor with strides (1, 2) would be layed out like
+  // The same valued tensor with strides (1, 2) would be laid out like
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
   // we are iterating per-element of the input, and we are fixed
@@ -1287,8 +1290,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
           ExprHandle stride(default_strides[i]);
-          ExprHandle axis = axes[i];
-          absolute_position = absolute_position + (stride * axis);
+          absolute_position = absolute_position + (stride * axes[i]);
         }
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
@@ -1316,7 +1318,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
-  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != c10::nullopt);
+  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != std::nullopt);
 
   auto stride_desc = getSymbolicStrideDesc(v);
   TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
@@ -1376,7 +1378,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
       tt->strides().concrete_sizes(),
       buildErrorMessage("Output strides are unknown."));
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
-  // All Tensors in NNC are layed out in default, contiguous layout.
+  // All Tensors in NNC are laid out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
     return Tensor(buf, nullptr);
@@ -1428,7 +1430,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     std::vector<ExprPtr> dims;
     BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
     auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
-    // NOLINTNEXTLINE
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     constants_.push_back({buf, dataPtr, const_cast<Node*>(v->node())});
     bufs_[v] = buf;
     return;
@@ -1452,7 +1454,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
       ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
-    const_tensor = const_tensor.clone().contiguous();
+    const_tensor = const_tensor.clone(at::MemoryFormat::Contiguous);
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 
@@ -1673,7 +1675,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   // Synchronize the symbolic strides information
   auto graph_outputs = graph_->outputs();
   TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
-  for (int i : c10::irange(graph_outputs.size())) {
+  for (auto i : c10::irange(graph_outputs.size())) {
     auto el_orig = _orignal_graph_outputs.at(i);
     auto el_new = graph_outputs.at(i);
     if (symbolic_strides_.count(el_orig) && (el_orig != el_new)) {
@@ -1750,7 +1752,6 @@ void TensorExprKernel::compile() {
             VarPtr v = t.buf()->base_handle();
             scalars_[output] = VarHandle(v);
             block->append_stmt(t.stmt());
-            std::vector<ExprPtr> dims;
             BufHandle buf(
                 "scalar_" + sanitizeName(output->debugName()), {}, v->dtype());
             StmtPtr store = Store::make(buf, {}, ExprHandle(v));
@@ -1810,7 +1811,6 @@ void TensorExprKernel::compile() {
       if (properly_strided_output.stmt()) {
         block->append_stmt(properly_strided_output.stmt());
       }
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       bufs_[output] = properly_strided_output.buf();
       auto sizes = *tt->sizes().concrete_sizes();
       tensorOutputSizes_.push_back(sizes);
@@ -1862,7 +1862,7 @@ void TensorExprKernel::recompile() {
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
-    const std::string& kernel_func_name,
+    std::string kernel_func_name,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
     bool pre_alloc /*= false*/,
@@ -1874,10 +1874,10 @@ TensorExprKernel::TensorExprKernel(
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
-      kernel_func_name_(kernel_func_name),
+      kernel_func_name_(std::move(kernel_func_name)),
       symbolic_strides_(std::move(symbolic_strides)) {
   optimizeOwningGraph();
-
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   allow_fallback_ = fallbackAllowed();
 
   if (!allow_fallback_) {
@@ -2081,7 +2081,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
 
   std::vector<int64_t> int_inputs(nInputs_);
   for (auto i : c10::irange(nInputs_)) {
-    auto inp = stack_inputs[i];
+    const auto& inp = stack_inputs[i];
     if (inp.isInt()) {
       int_inputs[i] = inp.toInt();
       args.emplace_back(&int_inputs[i]);

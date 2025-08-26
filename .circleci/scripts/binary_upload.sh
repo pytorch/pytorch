@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PACKAGE_TYPE=${PACKAGE_TYPE:-conda}
+PACKAGE_TYPE=${PACKAGE_TYPE:-wheel}
 
 PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
 
@@ -11,29 +11,23 @@ PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
 # currently set within `designate_upload_channel`
 UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 # Designates what subfolder to put packages into
-UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-cpu}
+UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
 BUILD_NAME=${BUILD_NAME:-}
 
-# this is temporary change to upload pypi-cudnn builds to separate folder
-if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
-  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
-fi
-
 DRY_RUN=${DRY_RUN:-enabled}
 # Don't actually do work unless explicit
-ANACONDA="true anaconda"
 AWS_S3_CP="aws s3 cp --dryrun"
 if [[ "${DRY_RUN}" = "disabled" ]]; then
-  ANACONDA="anaconda"
   AWS_S3_CP="aws s3 cp"
 fi
 
-# Sleep 2 minutes between retries for conda upload
-retry () {
-  "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")
-}
+# this is special build with all dependencies packaged
+if [[ ${BUILD_NAME} == *-full* ]]; then
+  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
+fi
+
 
 do_backup() {
   local backup_dir
@@ -45,53 +39,33 @@ do_backup() {
   )
 }
 
-conda_upload() {
-  (
-    set -x
-    retry \
-    ${ANACONDA} \
-    upload  \
-    ${PKG_DIR}/*.tar.bz2 \
-    -u "pytorch-${UPLOAD_CHANNEL}" \
-    --label main \
-    --no-progress \
-    --force
-  )
-}
-
 s3_upload() {
   local extension
   local pkg_type
   extension="$1"
   pkg_type="$2"
-  s3_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}/"
+  s3_root_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}"
+  if [[ -z ${UPLOAD_SUBFOLDER:-} ]]; then
+    s3_upload_dir="${s3_root_dir}/"
+  else
+    s3_upload_dir="${s3_root_dir}/${UPLOAD_SUBFOLDER}/"
+  fi
   (
     for pkg in ${PKG_DIR}/*.${extension}; do
       (
         set -x
-        ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_dir}"
+        shm_id=$(sha256sum "${pkg}" | awk '{print $1}')
+        ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_upload_dir}" \
+          --metadata "checksum-sha256=${shm_id}"
       )
     done
   )
 }
 
 # Install dependencies (should be a no-op if previously installed)
-conda install -yq anaconda-client
-pip install -q awscli
+pip install -q awscli uv
 
 case "${PACKAGE_TYPE}" in
-  conda)
-    conda_upload
-    # Fetch  platform (eg. win-64, linux-64, etc.) from index file
-    # Because there's no actual conda command to read this
-    subdir=$(\
-      tar -xOf ${PKG_DIR}/*.bz2 info/index.json \
-        | grep subdir  \
-        | cut -d ':' -f2 \
-        | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//' \
-    )
-    BACKUP_DIR="conda/${subdir}"
-    ;;
   libtorch)
     s3_upload "zip" "libtorch"
     BACKUP_DIR="libtorch/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"

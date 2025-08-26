@@ -26,6 +26,7 @@ ENDIF(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
 
 # Old search lapack script
 include(CheckFortranFunctionExists)
+include(CheckFunctionExists)
 
 macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
   # This macro checks for the existence of the combination of fortran libraries
@@ -93,6 +94,13 @@ if(BLAS_FOUND)
     ENDIF(MKL_LAPACK_LIBRARIES)
     SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
     SET(LAPACK_INFO "mkl")
+  ENDIF()
+
+  # NVPL
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "nvpl"))
+    FIND_PACKAGE(NVPL_LAPACK REQUIRED)
+    SET(LAPACK_LIBRARIES nvpl::lapack_lp64_omp)
+    SET(LAPACK_INFO "nvpl")
   ENDIF()
 
   # Accelerate
@@ -215,6 +223,37 @@ if(BLAS_FOUND)
     endif(LAPACK_LIBRARIES)
   endif()
 
+  #Arm Performance Libraries
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "apl"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    if(UNIX)
+      list(APPEND CMAKE_REQUIRED_LIBRARIES -lm)
+    endif(UNIX)
+    check_function_exists("cheev_" APL_LAPACK_WORKS)
+    if(APL_LAPACK_WORKS)
+      check_function_exists("cgesdd_" LAPACK_CGESDD_WORKS)
+      if(NOT LAPACK_CGESDD_WORKS)
+        find_library(GFORTRAN_LIBRARY
+          NAMES libgfortran.a gfortran
+          PATHS ${CMAKE_C_IMPLICIT_LINK_DIRECTORIES})
+        list(APPEND CMAKE_REQUIRED_LIBRARIES "${GFORTRAN_LIBRARY}")
+        unset(LAPACK_CGESDD_WORKS CACHE)
+        check_function_exists("cgesdd_" LAPACK_CGESDD_WORKS)
+        if(LAPACK_CGESDD_WORKS)
+          list(APPEND LAPACK_LIBRARIES "${GFORTRAN_LIBRARY}")
+        else()
+          message(WARNING "APL has been compiled with Lapack support, but cgesdd can not be used")
+          set(APL_LAPACK_WORKS NO)
+        endif()
+      endif()
+    endif()
+    set(CMAKE_REQUIRED_LIBRARIES)
+    if(APL_LAPACK_WORKS)
+      SET(LAPACK_INFO "apl")
+    else()
+      message(STATUS "It seems APL has not been compiled with Lapack support")
+    endif()
+  endif()
 else(BLAS_FOUND)
   message(STATUS "LAPACK requires BLAS")
 endif(BLAS_FOUND)

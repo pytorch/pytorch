@@ -19,10 +19,8 @@
 #include <ATen/ops/from_blob.h>
 #endif
 
-int register_linear_params();
-
 #ifdef USE_FBGEMM
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   auto packB = w.get();
 
   int64_t N = static_cast<int64_t>(packB->numCols());
@@ -34,16 +32,16 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
         {N, K}, at::device(c10::kCPU).dtype(c10::kQInt8), w_scale[0], w_zp[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
     auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_scale.data(), w_scale.size(), at::device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kInt));
+        w_zp.data(), w_zp.size(), at::device(c10::kCPU).dtype(c10::kInt));
 
     weight_origin = at::_empty_per_channel_affine_quantized(
         {N, K},
         scales.toType(c10::kDouble),
         zero_points.toType(c10::kLong),
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
@@ -53,16 +51,16 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
   // (QLinearUnpackWeightInt8): ");
   packB->unpack(weight_ptr_int8);
 
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       weight_origin, bias_);
 }
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
   if (orig_weight.defined()) {
-    return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+    return std::tuple<at::Tensor, std::optional<at::Tensor>>(
         orig_weight, bias_);
   } else {
     // Unpacking requires reverting *make_zero_points_and_scales_tensor*
@@ -83,10 +81,10 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
       auto scales = at::from_blob(
           weight_scales_data,
           w_scales.sizes()[0] - kPaddingChannels,
-          device(c10::kCPU).dtype(c10::kFloat));
+          at::device(c10::kCPU).dtype(c10::kFloat));
 
       at::Tensor zero_points = at::empty(
-          w_zero_points.size() - kPaddingChannels, at::device(c10::kCPU).dtype(c10::kLong));
+          static_cast<int64_t>(w_zero_points.size() - kPaddingChannels), at::device(c10::kCPU).dtype(c10::kLong));
       for (const auto i : c10::irange(zero_points.numel())) {
         zero_points[i] = ((int64_t)w_zero_points[i] - 128);
       }
@@ -95,7 +93,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
                           scales,
                           zero_points.toType(c10::kLong),
                           0, // The output channel axis is 0
-                          device(c10::kCPU).dtype(c10::kQInt8))
+                          at::device(c10::kCPU).dtype(c10::kQInt8))
                           .contiguous();
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
@@ -110,14 +108,14 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
       weight_ptr_int8[i] = (int8_t)(weight_ptr_int8[i] - 128);
     }
 
-    return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+    return std::tuple<at::Tensor, std::optional<at::Tensor>>(
         weight_origin, bias_);
   }
 }
 #endif // USE_PYTORCH_QNNPACK
 
 #ifdef USE_FBGEMM
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightFp16::
     unpack() {
   auto& packed_weight_ptr = w;
 
@@ -135,8 +133,8 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
 #endif // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       orig_weight_, orig_bias_);
 }
 #endif // #if AT_MKLDNN_ENABLED()

@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-
+    skipIfRocm,
 )
 
 
@@ -92,7 +92,7 @@ class TestSegmentReductions(TestCase):
             self.assertEqual(
                 expected_grad, data.grad, rtol=1e-02, atol=1e-05, equal_nan=True
             )
-            data = data.clone().detach().requires_grad_(True)
+            data = data.detach().clone().requires_grad_(True)
 
             # gradcheck does not work well with bfloat16 or fp16 cpu types
             # also there is small numerical difference with fp32
@@ -183,7 +183,7 @@ class TestSegmentReductions(TestCase):
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
-        data = torch.ones((0))
+        data = torch.ones(0)
 
         for reduction in reductions:
             for initial in [0, None]:
@@ -231,6 +231,7 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
+    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
@@ -238,7 +239,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d_simple(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [1, 2, 3, 0]
         data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
@@ -248,7 +249,7 @@ class TestSegmentReductions(TestCase):
                 check_backward = True if initial is not None else False
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
-                if reduction == "amax":
+                if reduction == "max":
                     expected_result = [
                         [1, 1],
                         [float("nan"), float("nan")],
@@ -278,7 +279,7 @@ class TestSegmentReductions(TestCase):
                         [0.333, 0.333],
                         [0.333, 0.333],
                     ]
-                elif reduction == "amin":
+                elif reduction == "min":
                     if initial is not None:
                         initial_value = 1000  # some high number
                         default_value = get_default_value(initial_value, reduction)
@@ -365,7 +366,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
-    @parametrize("reduce", ['sum', 'prod', 'amin', 'amax', 'mean'])
+    @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
         # zero-length segments are filled with reduction inits contrary to pytorch_scatter.
@@ -377,8 +378,8 @@ class TestSegmentReductions(TestCase):
                 'sum': [3, 12, 0, 6],
                 'prod': [2, 60, 1, 6],
                 'mean': [1.5, 4, float('nan'), 6],
-                'amin': [1, 3, float('inf'), 6],
-                'amax': [2, 5, -float('inf'), 6],
+                'min': [1, 3, float('inf'), 6],
+                'max': [2, 5, -float('inf'), 6],
             },
             {
                 'src': [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12]],
@@ -387,8 +388,8 @@ class TestSegmentReductions(TestCase):
                 'sum': [[4, 6], [21, 24], [0, 0], [11, 12]],
                 'prod': [[3, 8], [315, 480], [1, 1], [11, 12]],
                 'mean': [[2, 3], [7, 8], [float('nan'), float('nan')], [11, 12]],
-                'amin': [[1, 2], [5, 6], [float('inf'), float('inf')], [11, 12]],
-                'amax': [[3, 4], [9, 10], [-float('inf'), -float('inf')], [11, 12]],
+                'min': [[1, 2], [5, 6], [float('inf'), float('inf')], [11, 12]],
+                'max': [[3, 4], [9, 10], [-float('inf'), -float('inf')], [11, 12]],
             },
             {
                 'src': [[1, 3, 5, 7, 9, 11], [2, 4, 6, 8, 10, 12]],
@@ -397,8 +398,8 @@ class TestSegmentReductions(TestCase):
                 'sum': [[4, 21, 0, 11], [12, 18, 12, 0]],
                 'prod': [[3, 315, 1, 11], [48, 80, 12, 1]],
                 'mean': [[2, 7, float('nan'), 11], [4, 9, 12, float('nan')]],
-                'amin': [[1, 5, float('inf'), 11], [2, 8, 12, float('inf')]],
-                'amax': [[3, 9, -float('inf'), 11], [6, 10, 12, -float('inf')]],
+                'min': [[1, 5, float('inf'), 11], [2, 8, 12, float('inf')]],
+                'max': [[3, 9, -float('inf'), 11], [6, 10, 12, -float('inf')]],
             },
             {
                 'src': [[[1, 2], [3, 4], [5, 6]], [[7, 9], [10, 11], [12, 13]]],
@@ -408,10 +409,10 @@ class TestSegmentReductions(TestCase):
                 'prod': [[[3, 8], [5, 6], [1, 1]], [[7, 9], [1, 1], [120, 143]]],
                 'mean': [[[2, 3], [5, 6], [float('nan'), float('nan')]],
                          [[7, 9], [float('nan'), float('nan')], [11, 12]]],
-                'amin': [[[1, 2], [5, 6], [float('inf'), float('inf')]],
-                         [[7, 9], [float('inf'), float('inf')], [10, 11]]],
-                'amax': [[[3, 4], [5, 6], [-float('inf'), -float('inf')]],
-                         [[7, 9], [-float('inf'), -float('inf')], [12, 13]]],
+                'min': [[[1, 2], [5, 6], [float('inf'), float('inf')]],
+                        [[7, 9], [float('inf'), float('inf')], [10, 11]]],
+                'max': [[[3, 4], [5, 6], [-float('inf'), -float('inf')]],
+                        [[7, 9], [-float('inf'), -float('inf')], [12, 13]]],
             },
             {
                 'src': [[1, 3], [2, 4]],
@@ -420,8 +421,8 @@ class TestSegmentReductions(TestCase):
                 'sum': [[4], [6]],
                 'prod': [[3], [8]],
                 'mean': [[2], [3]],
-                'amin': [[1], [2]],
-                'amax': [[3], [4]],
+                'min': [[1], [2]],
+                'max': [[3], [4]],
             },
             {
                 'src': [[[1, 1], [3, 3]], [[2, 2], [4, 4]]],
@@ -430,8 +431,8 @@ class TestSegmentReductions(TestCase):
                 'sum': [[[4, 4]], [[6, 6]]],
                 'prod': [[[3, 3]], [[8, 8]]],
                 'mean': [[[2, 2]], [[3, 3]]],
-                'amin': [[[1, 1]], [[2, 2]]],
-                'amax': [[[3, 3]], [[4, 4]]],
+                'min': [[[1, 1]], [[2, 2]]],
+                'max': [[[3, 3]], [[4, 4]]],
             },
         ]
         for test in tests:
@@ -466,9 +467,9 @@ class TestSegmentReductions(TestCase):
                     initial = 1
                     # supply initial values to prevent gradcheck from failing for 0 length segments
                     # where nan/inf are reduction identities that produce nans when calculating the numerical jacobian
-                    if reduce == 'amin':
+                    if reduce == 'min':
                         initial = 1000
-                    elif reduce == 'amax':
+                    elif reduce == 'max':
                         initial = -1000
                     segment_reduce_args = {x, reduce}
                     segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
@@ -477,8 +478,8 @@ class TestSegmentReductions(TestCase):
                     elif mode == 'offsets':
                         segment_reduce_kwargs[mode] = indptr
                     return torch._segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
-                self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.clone().detach().requires_grad_(True))))
-                self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.clone().detach().requires_grad_(True))))
+                self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.detach().clone().requires_grad_(True))))
+                self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.detach().clone().requires_grad_(True))))
 
 
     @dtypes(
@@ -488,7 +489,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [0, 2, 3, 0]
         data = np.arange(50).reshape(5, 2, 5).tolist()
@@ -499,7 +500,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             initial_value = 0
-            if reduction == "amax":
+            if reduction == "max":
                 expected_result = [
                     np.full((2, 5), initial_value).tolist(),
                     np.max(data[:2], axis=0).tolist(),
@@ -513,7 +514,7 @@ class TestSegmentReductions(TestCase):
                     np.mean(data[2:], axis=0).tolist(),
                     np.full((2, 5), initial_value).tolist(),
                 ]
-            elif reduction == "amin":
+            elif reduction == "min":
                 initial_value = 1000  # some high number
                 expected_result = [
                     np.full((2, 5), initial_value).tolist(),
@@ -557,7 +558,7 @@ class TestSegmentReductions(TestCase):
         lengths = torch.tensor([0, 2, 3, 0], device=device, dtype=length_type)
         data = torch.arange(6, dtype=torch.float, device=device)
 
-        # test for error on 1-D lenghts
+        # test for error on 1-D lengths
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
 

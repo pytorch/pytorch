@@ -34,7 +34,9 @@ inline Vectorized<BFloat16> convert_float_bfloat16(
   return Vectorized<BFloat16>::loadu(arr2);
 }
 
-inline void load_fp32_from_bf16(const c10::BFloat16* data, Vectorized<float>& out) {
+inline void load_fp32_from_bf16(
+    const c10::BFloat16* data,
+    Vectorized<float>& out) {
   __at_align__ float values[Vectorized<float>::size()];
   for (const auto k : c10::irange(Vectorized<float>::size())) {
     values[k] = data[k];
@@ -51,6 +53,23 @@ inline void load_fp32_from_bf16(
   load_fp32_from_bf16(data, out2);
 }
 
-} // namespace
+inline void load_fp32_from_fp16(const c10::Half* data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_fp16(
+    const c10::Half* data,
+    Vectorized<float>& out1,
+    Vectorized<float>& out2) {
+  load_fp32_from_fp16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_fp16(data, out2);
+}
+
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

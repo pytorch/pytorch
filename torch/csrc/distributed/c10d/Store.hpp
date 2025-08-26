@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -11,10 +10,10 @@
 
 namespace c10d {
 
-// callback function will be given arguments (optional<string> oldValue,
-// optional<string> newValue)
+// callback function will be given arguments (std::optional<string> oldValue,
+// std::optional<string> newValue)
 using WatchKeyCallback =
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>;
+    std::function<void(std::optional<std::string>, std::optional<std::string>)>;
 
 class TORCH_API Store : public torch::CustomClassHolder {
  public:
@@ -28,7 +27,14 @@ class TORCH_API Store : public torch::CustomClassHolder {
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
 
-  ~Store() override;
+  Store(const Store&) = default;
+  Store(Store&&) noexcept = default;
+
+  ~Store() override = default;
+
+  // Clone a thread safe copy of this store object that points to the same
+  // underlying store.
+  virtual c10::intrusive_ptr<Store> clone() = 0;
 
   void set(const std::string& key, const std::string& value);
 
@@ -45,7 +51,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& currentValue,
       const std::vector<uint8_t>& newValue) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
+    C10_THROW_ERROR(NotImplementedError, "Not implemented.");
   }
 
   std::string get_to_str(const std::string& key);
@@ -70,38 +76,74 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
-
-  // watchKey() takes two arguments: key and callback function. The callback
-  // should be run whenever the key is changed (create, update, or delete). The
-  // callback function takes two parameters: currentValue and newValue, which
-  // are optional depending on how the key is changed. These key updates should
-  // trigger the callback as follows:
-  // CREATE: callback(c10::nullopt, newValue) // null currentValue
-  // UPDATE: callback(currentValue, newValue)
-  // DELETE: callback(currentValue, c10::nullopt) // null newValue
+  // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       WatchKeyCallback /* unused */) {
-    TORCH_CHECK(
-        false,
-        "watchKey only implemented for TCPStore and PrefixStore that wraps TCPStore.");
+    C10_THROW_ERROR(
+        NotImplementedError,
+        "watchKey is deprecated, no implementation support it.");
   }
 
   virtual void append(
       const std::string& key,
       const std::vector<uint8_t>& value);
 
-  virtual std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys);
+  virtual std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys);
 
   virtual void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values);
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values);
 
-  // Returns true if this store support watchKey, append, multiGet and multiSet
+  // Returns true if this store support append, multiGet and multiSet
   virtual bool hasExtendedApi() const;
+
+  virtual void queuePush(
+      const std::string& key,
+      const std::vector<uint8_t>& value) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
+
+  virtual std::vector<uint8_t> queuePop(const std::string& key, bool block) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
+
+  virtual int64_t queueLen(const std::string& key) {
+    C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
+  }
 
  protected:
   std::chrono::milliseconds timeout_;
+};
+
+/*
+StoreTimeoutGuard is a RAII guard that will set the store timeout and restore it
+when it returns.
+*/
+class StoreTimeoutGuard {
+ public:
+  explicit StoreTimeoutGuard(
+      Store& store,
+      const std::chrono::milliseconds& timeout)
+      : store_(store), oldTimeout_(store.getTimeout()) {
+    store.setTimeout(timeout);
+  }
+
+  ~StoreTimeoutGuard() {
+    store_.setTimeout(oldTimeout_);
+  }
+
+  /* Disabling copy and move semantics */
+  StoreTimeoutGuard(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard& operator=(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard(StoreTimeoutGuard&&) = delete;
+  StoreTimeoutGuard& operator=(StoreTimeoutGuard&&) = delete;
+
+ private:
+  Store& store_;
+  std::chrono::milliseconds oldTimeout_{};
 };
 
 } // namespace c10d

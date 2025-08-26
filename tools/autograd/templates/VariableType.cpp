@@ -37,16 +37,16 @@ using namespace torch::autograd::generated;
 using namespace torch::autograd::generated::details;
 
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 namespace VariableType {
 namespace{
-  C10_UNUSED void reset_grad_accumulator(Variable & self) {
-    AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
-    if (meta != nullptr) {
-      meta->grad_accumulator_.reset();
-    }
+[[maybe_unused]] void reset_grad_accumulator(Variable& self) {
+  AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
+  if (meta != nullptr) {
+    meta->grad_accumulator_.reset();
   }
+}
 }
 
 namespace {
@@ -62,4 +62,4 @@ ${wrapper_registrations}
 
 }
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

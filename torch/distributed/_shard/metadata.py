@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass
-from typing import List, Union, Optional
 from functools import reduce
+from typing import Optional, Union
 
 from torch.distributed.remote_device import _remote_device
+
 
 @dataclass
 class ShardMetadata:
@@ -21,17 +23,17 @@ class ShardMetadata:
             Specifies the placement of this shard.
     """
 
-    __slots__ = ['shard_offsets', 'shard_sizes', 'placement']
+    __slots__ = ["shard_offsets", "shard_sizes", "placement"]
 
-    shard_offsets: List[int]
-    shard_sizes: List[int]
+    shard_offsets: list[int]
+    shard_sizes: list[int]
     placement: Optional[_remote_device]
 
     def __init__(
         self,
-        shard_offsets: List[int],
-        shard_sizes: List[int],
-        placement: Optional[Union[str, _remote_device]] = None
+        shard_offsets: list[int],
+        shard_sizes: list[int],
+        placement: Optional[Union[str, _remote_device]] = None,
     ):
         self.shard_offsets = shard_offsets
         self.shard_sizes = shard_sizes
@@ -41,15 +43,16 @@ class ShardMetadata:
             self.placement = placement
         if len(self.shard_offsets) != len(self.shard_sizes):
             raise ValueError(
-                f'shard_offsets and shard_sizes should have '
-                f'the same number of elements, found {len(self.shard_offsets)} '
-                f'and {self.shard_sizes} respectively')
+                f"shard_offsets and shard_sizes should have "
+                f"the same number of elements, found {len(self.shard_offsets)} "
+                f"and {self.shard_sizes} respectively"
+            )
 
         for i in range(len(self.shard_offsets)):
             if self.shard_offsets[i] < 0:
-                raise ValueError('shard_offsets should be >=0')
+                raise ValueError("shard_offsets should be >=0")
             if self.shard_sizes[i] < 0:
-                raise ValueError('shard_sizes should be >= 0')
+                raise ValueError("shard_sizes should be >= 0")
 
     def __hash__(self):
         def _hash_reduce(a, b):

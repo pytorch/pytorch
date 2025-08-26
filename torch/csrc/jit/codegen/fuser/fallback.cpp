@@ -9,9 +9,7 @@
 
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
@@ -21,7 +19,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 
 // Registers fused operators so that fused graphs can properly generate fallback
 // code.
-RegisterOperators reg_fused_operators({Operator(
+static RegisterOperators reg_fused_operators({Operator(
     prim::FusedConcat,
     [](const Node* node) -> Operation {
       int64_t dim = node->i(attr::dim);
@@ -46,6 +44,4 @@ void runFallback(int64_t key, Stack& stack) {
   InterpreterState{(*maybe_spec)->code()}.run(stack);
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

@@ -6,14 +6,39 @@ body:
   - type: markdown
     attributes:
       value: >
+        #### Note: Please write your bug report in English to ensure it can be understood and addressed by the development team.
+  - type: markdown
+    attributes:
+      value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/pytorch/issues)
-        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/master/dynamo/index.html)
+        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)
+
+        Note: if you're submitting an issue that you generated from a fuzzer. Please do the following:
+
+        - Ensure rtol/atol are at default tolerances
+
+        - Don't compare indices of max/min etc, because that avoids the above requirement
+
+        - When comparing eager and torch.compile, use a higher precision result as a baseline. `torch._dynamo.utils.same` with fp64_ref will handle this comparison.
+
+        - Ensure rng state used to compare results is equivalent. Use `torch._inductor.config.fallback_random=True` and reset the torch rng seed between comparisons
+
+        If the above requirements are met, add the label "topic: fuzzer" to your issue.
+
   - type: textarea
     attributes:
       label: 🐛 Describe the bug
       description: |
         Please provide a clear and concise description of what the bug is.
+
+        See https://pytorch.org/docs/main/torch.compiler_troubleshooting.html#reporting-issues
+        for guidance on what to additionally include. In particular, consider including:
+
+        - The `tlparse` for your program
+        - Ablation - which `torch.compile` backend/mode/settings cause the bug
+        - A minimal reproducer
+
       placeholder: |
         A clear and concise description of what the bug is.
     validations:
@@ -28,25 +53,7 @@ body:
         Error...
     validations:
       required: false
-  - type: textarea
-    attributes:
-      label: Minified repro
-      description: |
-        Please run the minifier on your example and paste the minified code below
-        Learn more here https://pytorch.org/docs/master/compile/troubleshooting.html
-      placeholder: |
-        env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
-        or
-        env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
 
-        import torch
-        ...
-
-        # torch version: 2.0.....
-
-        class Repro(torch.nn.Module)
-    validations:
-      required: false
   - type: textarea
     attributes:
       label: Versions

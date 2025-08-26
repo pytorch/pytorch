@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import os
 import sys
@@ -6,15 +7,18 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+
+
 
 def secretly_aliasing(x):
     return x.view(-1)
@@ -26,17 +30,17 @@ def secretly_mutating(x):
 def output_is_input(x):
     return x
 
-custom_lib = torch.library.Library("bad_schemas", "DEF")
+custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: TOR901
 custom_lib.define("secretly_aliasing(Tensor x) -> Tensor")
 custom_lib.define("secretly_mutating(Tensor x) -> Tensor")
 custom_lib.define("output_is_input(Tensor(a) x) -> Tensor(a)")
 
-custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")
+custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: TOR901
 custom_lib_cpu.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_cpu.impl("secretly_mutating", secretly_mutating)
 custom_lib_cpu.impl("output_is_input", output_is_input)
 
-custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")
+custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: TOR901
 custom_lib_meta.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_meta.impl("secretly_mutating", secretly_mutating)
 custom_lib_meta.impl("output_is_input", output_is_input)
@@ -52,8 +56,6 @@ class IncorrectAliasTensor(torch.Tensor):
     elem: torch.Tensor
 
     __slots__ = ['elem']
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
@@ -96,6 +98,11 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
+    def setUp(self):
+        if TEST_WITH_TORCHDYNAMO:
+            self.skipTest("SchemaCheckMode is ignored by dynamo")
+        super().setUp()
+
     # Tests that SchemaCheckMode records operator order with grad
     def test_schema_check_mode_operator_order(self):
         with SchemaCheckMode() as schema_check:
@@ -228,7 +235,7 @@ class TestSchemaCheck(JitTestCase):
             actual = x.relu().sin()
         self.assertEqual(expected, actual)
 
-    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overriden
+    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overridden
     def test_schema_check_mode_functionality_default_replaced(self):
         x = torch.rand((3, 3), requires_grad=True)
         expected = x.add(x, alpha=2)
@@ -258,7 +265,7 @@ class TestSchemaCheck(JitTestCase):
     @unittest.skipIf(not torch._C.has_spectral, "ATen not built with FFT.")
     def test_schema_check_mode_functionality_kwarg_tensor(self):
         x = torch.rand((3, 5))
-        w = torch.rand((4))
+        w = torch.rand(4)
         expected = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
         with SchemaCheckMode():
             actual = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
@@ -295,7 +302,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(m_expected, m_actual)
         self.assertEqual(e_expected, e_actual)
 
-    # Tests that SchemaCheckMode wraps Torch.tensor with aliasing ouputs due to aliasing inputs
+    # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
     def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)
@@ -489,9 +496,9 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
-
 class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
+    @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
         # Currently torch.equal isn't supported with torch.complex32
         # There's also errors with complex64 and complex128

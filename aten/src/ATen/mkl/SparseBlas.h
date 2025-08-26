@@ -14,9 +14,7 @@
 
 #include <mkl_spblas.h>
 
-namespace at {
-namespace mkl {
-namespace sparse {
+namespace at::mkl::sparse {
 
 #define MKL_SPARSE_CREATE_CSR_ARGTYPES(scalar_t)                              \
   sparse_matrix_t *A, const sparse_index_base_t indexing, const MKL_INT rows, \
@@ -186,7 +184,7 @@ void spmmd<c10::complex<double>>(
       const scalar_t *x, scalar_t *y
 
 template <typename scalar_t>
-inline void trsv(MKL_SPARSE_TRSV_ARGTYPES(scalar_t)) {
+inline sparse_status_t trsv(MKL_SPARSE_TRSV_ARGTYPES(scalar_t)) {
   TORCH_INTERNAL_ASSERT(
       false,
       "at::mkl::sparse::trsv: not implemented for ",
@@ -194,13 +192,13 @@ inline void trsv(MKL_SPARSE_TRSV_ARGTYPES(scalar_t)) {
 }
 
 template <>
-void trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float));
+sparse_status_t trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float));
 template <>
-void trsv<double>(MKL_SPARSE_TRSV_ARGTYPES(double));
+sparse_status_t trsv<double>(MKL_SPARSE_TRSV_ARGTYPES(double));
 template <>
-void trsv<c10::complex<float>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<float>));
+sparse_status_t trsv<c10::complex<float>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<float>));
 template <>
-void trsv<c10::complex<double>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<double>));
+sparse_status_t trsv<c10::complex<double>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<double>));
 
 #define MKL_SPARSE_TRSM_ARGTYPES(scalar_t)                                    \
   const sparse_operation_t operation, const scalar_t alpha,                   \
@@ -209,7 +207,7 @@ void trsv<c10::complex<double>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<double>));
       const MKL_INT ldx, scalar_t *y, const MKL_INT ldy
 
 template <typename scalar_t>
-inline void trsm(MKL_SPARSE_TRSM_ARGTYPES(scalar_t)) {
+inline sparse_status_t trsm(MKL_SPARSE_TRSM_ARGTYPES(scalar_t)) {
   TORCH_INTERNAL_ASSERT(
       false,
       "at::mkl::sparse::trsm: not implemented for ",
@@ -217,14 +215,12 @@ inline void trsm(MKL_SPARSE_TRSM_ARGTYPES(scalar_t)) {
 }
 
 template <>
-void trsm<float>(MKL_SPARSE_TRSM_ARGTYPES(float));
+sparse_status_t trsm<float>(MKL_SPARSE_TRSM_ARGTYPES(float));
 template <>
-void trsm<double>(MKL_SPARSE_TRSM_ARGTYPES(double));
+sparse_status_t trsm<double>(MKL_SPARSE_TRSM_ARGTYPES(double));
 template <>
-void trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>));
+sparse_status_t trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>));
 template <>
-void trsm<c10::complex<double>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<double>));
+sparse_status_t trsm<c10::complex<double>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<double>));
 
-} // namespace sparse
-} // namespace mkl
-} // namespace at
+} // namespace at::mkl::sparse

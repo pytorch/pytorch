@@ -16,8 +16,7 @@
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 distributed::rpc::RegisterWorkerInfoOnce workerInfo{};
@@ -103,7 +102,7 @@ void prepare_and_call_rpc_op(
     std::vector<std::string> names;
     for (const auto& entry : kwargsDict) {
       const IValue& keyIValue = entry.key();
-      const string& keyStr = keyIValue.toStringRef();
+      const std::string& keyStr = keyIValue.toStringRef();
       names.emplace_back(keyStr);
     }
     throw std::runtime_error(functionSchema.findErrorInKwargs(names));
@@ -283,5 +282,4 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 }
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

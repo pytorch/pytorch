@@ -7,15 +7,12 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
   AdamOptions(double lr = 1e-3);
@@ -32,7 +29,6 @@ struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
   TORCH_API friend bool operator==(
       const AdamOptions& lhs,
       const AdamOptions& rhs);
-  ~AdamOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -50,17 +46,14 @@ struct TORCH_API AdamParamState
   TORCH_API friend bool operator==(
       const AdamParamState& lhs,
       const AdamParamState& rhs);
-  ~AdamParamState() override = default;
 };
 
 class TORCH_API Adam : public Optimizer {
  public:
   explicit Adam(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       AdamOptions defaults = {})
-      : Optimizer(
-            std::move(param_groups),
-            std::make_unique<AdamOptions>(defaults)) {
+      : Optimizer(param_groups, std::make_unique<AdamOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     auto betas = defaults.betas();
@@ -78,7 +71,7 @@ class TORCH_API Adam : public Optimizer {
         defaults.weight_decay());
   }
   explicit Adam(std::vector<Tensor> params, AdamOptions defaults = {})
-      : Adam({OptimizerParamGroup(std::move(params))}, defaults) {}
+      : Adam({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -90,5 +83,4 @@ class TORCH_API Adam : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adam);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

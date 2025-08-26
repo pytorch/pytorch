@@ -6,10 +6,12 @@ struct ModuleHolderIndicator {};
 
 // A type trait that is true for types that are `ModuleHolder`s.
 template <typename T>
-using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
+using is_module_holder =
+    std::is_base_of<ModuleHolderIndicator, std::decay_t<T>>;
 
 template <typename T>
-using disable_if_module_holder_t = disable_if_t<is_module_holder<T>::value>;
+using disable_if_module_holder_t =
+    std::enable_if_t<!is_module_holder<T>::value>;
 
 // A collection of templates that answer the question whether a type `T` is a
 // `ModuleHolder`, and if so whether its contained type is of type `C`. This is
@@ -43,8 +45,8 @@ struct is_module_holder_of_impl<true, T, C>
 template <typename T, typename C>
 struct is_module_holder_of : is_module_holder_of_impl<
                                  is_module_holder<T>::value,
-                                 decay_t<T>,
-                                 decay_t<C>> {};
+                                 std::decay_t<T>,
+                                 std::decay_t<C>> {};
 
 // A collection of templates that allow deducing the return type of the
 // `forward()` method, but only if a module actually has a `forward()` method,

@@ -16,71 +16,6 @@ endforeach()
 set(${OUTPUT} ${OUT} PARENT_SCOPE)
 endfunction(prepend)
 
-
-################################################################################################
-# Clears variables from list
-# Usage:
-#   caffe_clear_vars(<variables_list>)
-macro(caffe_clear_vars)
-  foreach(_var ${ARGN})
-    unset(${_var})
-  endforeach()
-endmacro()
-
-################################################################################################
-# Prints list element per line
-# Usage:
-#   caffe_print_list(<list>)
-function(caffe_print_list)
-  foreach(e ${ARGN})
-    message(STATUS ${e})
-  endforeach()
-endfunction()
-
-################################################################################################
-# Reads set of version defines from the header file
-# Usage:
-#   caffe_parse_header(<file> <define1> <define2> <define3> ..)
-macro(caffe_parse_header FILENAME FILE_VAR)
-  set(vars_regex "")
-  set(__parnet_scope OFF)
-  set(__add_cache OFF)
-  foreach(name ${ARGN})
-    if("${name}" STREQUAL "PARENT_SCOPE")
-      set(__parnet_scope ON)
-    elseif("${name}" STREQUAL "CACHE")
-      set(__add_cache ON)
-    elseif(vars_regex)
-      set(vars_regex "${vars_regex}|${name}")
-    else()
-      set(vars_regex "${name}")
-    endif()
-  endforeach()
-  if(EXISTS "${FILENAME}")
-    file(STRINGS "${FILENAME}" ${FILE_VAR} REGEX "#define[ \t]+(${vars_regex})[ \t]+[0-9]+" )
-  else()
-    unset(${FILE_VAR})
-  endif()
-  foreach(name ${ARGN})
-    if(NOT "${name}" STREQUAL "PARENT_SCOPE" AND NOT "${name}" STREQUAL "CACHE")
-      if(${FILE_VAR})
-        if(${FILE_VAR} MATCHES ".+[ \t]${name}[ \t]+([0-9]+).*")
-          string(REGEX REPLACE ".+[ \t]${name}[ \t]+([0-9]+).*" "\\1" ${name} "${${FILE_VAR}}")
-        else()
-          set(${name} "")
-        endif()
-        if(__add_cache)
-          set(${name} ${${name}} CACHE INTERNAL "${name} parsed from ${FILENAME}" FORCE)
-        elseif(__parnet_scope)
-          set(${name} "${${name}}" PARENT_SCOPE)
-        endif()
-      else()
-        unset(${name} CACHE)
-      endif()
-    endif()
-  endforeach()
-endmacro()
-
 ################################################################################################
 # Parses a version string that might have values beyond major, minor, and patch
 # and set version variables for the library.
@@ -101,7 +36,7 @@ endfunction()
 # setting to `python -c`, or using with pycmd. This allows multiline code to be
 # nested nicely in the surrounding code structure.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -109,11 +44,11 @@ endfunction()
 #     text   : text to remove indentation from
 #
 function(dedent outvar text)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python3")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
   file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
@@ -134,11 +69,11 @@ endfunction()
 
 
 function(pycmd_no_exit outvar exitcode cmd)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   # run the actual command
   execute_process(
@@ -159,7 +94,7 @@ endfunction()
 # Common indentation in the text of `cmd` is removed before the command is
 # executed, so the caller does not need to worry about indentation issues.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -228,27 +163,14 @@ macro(caffe2_interface_library SRC DST)
   # link command for the specific SRC library.
   if(${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
-    if(APPLE)
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
-    elseif(MSVC)
-      # In MSVC, we will add whole archive in default.
-      target_link_libraries(
-         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
-      target_link_options(
-         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
-    else()
-      # Assume everything else is like gcc
-      target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
-    endif()
+    target_link_libraries(${DST} INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,${SRC}>)
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
     # that are the dependent library of the source library. Note that we cannot
     # use the populated INTERFACE_LINK_LIBRARIES property, because if one of the
     # dependent library is not a target, cmake creates a $<LINK_ONLY:src> wrapper
     # and then one is not able to find target "src". For more discussions, check
-    #   https://gitlab.kitware.com/cmake/cmake/issues/15415
+    #   https://cmake.org/Bug/print_bug_page.php?bug_id=15415
     #   https://cmake.org/pipermail/cmake-developers/2013-May/019019.html
     # Specifically the following quote
     #
@@ -317,9 +239,6 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB AND NOT USE_SYSTEM_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
-  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -375,26 +294,37 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
+# Get the XPU arch flags specified by TORCH_XPU_ARCH_LIST.
+# Usage:
+#   torch_xpu_get_arch_list(variable_to_store_flags)
+#
+macro(torch_xpu_get_arch_list store_var)
+  if(DEFINED ENV{TORCH_XPU_ARCH_LIST})
+    set(${store_var} $ENV{TORCH_XPU_ARCH_LIST})
+  endif()
+endmacro()
+
+##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
 # Usage:
 #   torch_cuda_get_nvcc_gencode_flag(variable_to_store_flags)
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-    message(WARNING
-        "In the future we will require one to explicitly pass "
-        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-        "env variable. This will become a FATAL_ERROR in future version of "
-        "pytorch.")
+  # We need to support the explicitly and conveniently defined TORCH_CUDA_ARCH_LIST
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
     set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   endif()
-  if(EXISTS ${CUDA_ARCH_NAME})
+  if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
         "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    if(NOT TORCH_CUDA_ARCH_LIST)
+      set(TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    else()
+      list(APPEND TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    endif()
   endif()
 
   # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
@@ -408,12 +338,6 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
-  set(private_compile_options "")
-
-  # ---[ Check if warnings should be errors.
-  if(WERROR)
-    list(APPEND private_compile_options -Werror)
-  endif()
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -424,6 +348,20 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
+      # Add /permissive- flag for conformance mode to the compiler.
+      # This will force more strict check to the code standard.
+      # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+      #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
+      #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
+      # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+    endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
+
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}
@@ -432,26 +370,23 @@ function(torch_compile_options libname)
         /bigobj>
       )
   else()
-    list(APPEND private_compile_options
+    set(private_compile_options
       -Wall
       -Wextra
+      -Wdeprecated
+      -Wunused
       -Wno-unused-parameter
-      -Wno-unused-function
-      -Wno-unused-result
       -Wno-missing-field-initializers
-      -Wno-unknown-pragmas
-      -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
       -Wno-strict-overflow
       -Wno-strict-aliasing
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces
       )
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options
-        -Wno-range-loop-analysis)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      list(APPEND private_compile_options -Wredundant-move)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      list(APPEND private_compile_options -Wextra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -459,24 +394,37 @@ function(torch_compile_options libname)
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options
+        -Werror
+        -Werror=ignored-attributes
+        -Werror=inconsistent-missing-override
+        -Werror=inconsistent-missing-destructor-override
+        -Werror=pedantic
+        -Werror=unused
+        -Wno-error=unused-parameter
+      )
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+      endif()
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
-    string(FIND "${private_compile_options}" " " space_position)
-    if(NOT space_position EQUAL -1)
-      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
-    endif()
-    # Convert CMake list to comma-separated list
-    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
+    foreach(option IN LISTS private_compile_options)
+      if(CMAKE_CUDA_HOST_COMPILER_ID STREQUAL "GNU")
+        if("${option}" STREQUAL "-Wextra-semi")
+          continue()
+        endif()
+        if("${option}" STREQUAL "-Wunused-private-field")
+          continue()
+        endif()
+      endif()
+      target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
+    endforeach()
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)
@@ -533,6 +481,8 @@ function(torch_update_find_cuda_flags)
   endif()
 endfunction()
 
+include(CheckCXXCompilerFlag)
+
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
@@ -541,7 +491,13 @@ endfunction()
 function(append_cxx_flag_if_supported flag outputvar)
     string(TOUPPER "HAS${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
-    check_cxx_compiler_flag("${flag}" ${_FLAG_NAME})
+    # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      string(REGEX REPLACE "Wno-" "W" new_flag "${flag}")
+    else()
+      set(new_flag ${flag})
+    endif()
+    check_cxx_compiler_flag("${new_flag}" ${_FLAG_NAME})
     if(${_FLAG_NAME})
         string(APPEND ${outputvar} " ${flag}")
         set(${outputvar} "${${outputvar}}" PARENT_SCOPE)

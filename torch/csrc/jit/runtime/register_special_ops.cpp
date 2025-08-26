@@ -2,6 +2,7 @@
 #include <torch/library.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
@@ -15,11 +16,9 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <regex>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -33,7 +32,7 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(*NumberType::get()) &&
-      elem_type != BoolType::get()) {
+      !elem_type->isSubtypeOf(*BoolType::get())) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
@@ -78,7 +77,8 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
 
 void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   if (seq_size != n) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected sequence of length ",
         n,
         " at dim ",
@@ -187,8 +187,7 @@ template <bool if_set_requires_grad>
 void createTensorFromList(Stack& stack) {
   // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
   // we use the template arg to distinguish between these two cases
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool requires_grad;
+  bool requires_grad = false;
   IValue data;
   IValue dtype;
   IValue device;
@@ -292,28 +291,31 @@ RegisterOperators reg({
           aliasAnalysisFromSchema()),
 
     DEFINE_TORCH_TENSOR_OP(
-        float,
-        double,
-        at::native::scalar_tensor(
-            scalar_val,
-            typeMetaToScalarType(c10::get_default_dtype()),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory*/))
-        DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
+        bool,
+        bool,
+        at::empty({}, at::device(at::kCPU).dtype(at::kBool)).fill_(scalar_val))
+        DEFINE_TORCH_TENSOR_OP(
+            float,
+            double,
+            at::native::scalar_tensor(
+                scalar_val,
+                typeMetaToScalarType(c10::get_default_dtype()),
+                std::nullopt /* layout */,
+                at::kCPU,
+                std::nullopt /* pin_memory*/))
             DEFINE_TORCH_TENSOR_OP(
-                bool,
-                bool,
-                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                int,
+                int64_t,
+                at::scalar_to_tensor(scalar_val))
                 DEFINE_TORCH_TENSOR_OP(
                     complex,
                     c10::complex<double>,
                     at::native::scalar_tensor(
                         scalar_val,
                         typeMetaToScalarType(c10::get_default_complex_dtype()),
-                        c10::nullopt /* layout */,
+                        std::nullopt /* layout */,
                         at::kCPU,
-                        c10::nullopt /* pin_memory */))
+                        std::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
@@ -331,10 +333,8 @@ RegisterOperators reg({
         [](Stack& stack) {
           at::Tensor weight;
           at::Tensor input;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double max_norm;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double norm_type;
+          double max_norm = 0;
+          double norm_type = 0;
           pop(stack, weight, input, max_norm, norm_type);
 
           // TODO: remove when script supports setting grad mode
@@ -393,34 +393,36 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
+            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double a;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double b;
+          std::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
+
+          double a = 0;
+          double b = 0;
           pop(stack, tensor, a, b);
-          push(stack, tensor.uniform_(a, b));
+          push(stack, tensor.uniform_(a, b, generator));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)"),
+            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double mean;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double std;
+          double mean = 0;
+          double std = 0;
+          std::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
+
           pop(stack, tensor, mean, std);
-          push(stack, tensor.normal_(mean, std));
+          push(stack, tensor.normal_(mean, std, generator));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
@@ -431,8 +433,7 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double val;
+          double val = 0;
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));
         },
@@ -463,5 +464,4 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
 });
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

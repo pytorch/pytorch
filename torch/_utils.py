@@ -1,9 +1,15 @@
+# mypy: allow-untyped-defs
 import copyreg
+import functools
+import importlib
+import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional
+from types import ModuleType
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 
@@ -48,71 +54,51 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     return dtype(self.size()).copy_(self, non_blocking)
 
 
-def _hpu(self, device=None, non_blocking=False, **kwargs):
-    """Returns a copy of this object in HPU memory.
+def _to(self, device, non_blocking=False):
+    """Returns a copy of this object in device memory.
 
-    If this object is already in HPU memory and on the correct device, then
-    no copy is performed and the original object is returned.
+    If this object is already on the correct device, then no copy is performed
+    and the original object is returned.
 
     Args:
-        device (int): The destination HPU id. Defaults to the current device.
+        device (int): The destination device.
         non_blocking (bool): If ``True`` and the source is in pinned memory,
             the copy will be asynchronous with respect to the host. Otherwise,
             the argument has no effect.
-        **kwargs: For compatibility, may contain the key ``async`` in place of
-            the ``non_blocking`` argument.
     """
-    non_blocking = _get_async_or_non_blocking("hpu", non_blocking, kwargs)
-    hpu = getattr(torch, "hpu", None)
-    assert hpu is not None, "HPU device module is not loaded"
-    if self.is_hpu:
-        if device is None:
-            device = hpu.current_device()
-        if self.get_device() == device:
-            return self
-    else:
-        if device is None:
-            device = -1
-    with hpu.device(device):
-        assert not self.is_sparse, "sparse storage is not supported for HPU tensors"
-        untyped_storage = torch.UntypedStorage(self.size(), device=torch.device("hpu"))
+    if self.device == device:
+        return self
+
+    if device.type == "cpu":
+        pin_memory = non_blocking and self.device.type in (
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        untyped_storage = torch.empty(
+            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=pin_memory
+        ).untyped_storage()
         untyped_storage.copy_(self, non_blocking)
         return untyped_storage
 
-
-def _cuda(self, device=None, non_blocking=False, **kwargs):
-    """Returns a copy of this object in CUDA memory.
-
-    If this object is already in CUDA memory and on the correct device, then
-    no copy is performed and the original object is returned.
-
-    Args:
-        device (int): The destination GPU id. Defaults to the current device.
-        non_blocking (bool): If ``True`` and the source is in pinned memory,
-            the copy will be asynchronous with respect to the host. Otherwise,
-            the argument has no effect.
-        **kwargs: For compatibility, may contain the key ``async`` in place of
-            the ``non_blocking`` argument.
-    """
-    non_blocking = _get_async_or_non_blocking("cuda", non_blocking, kwargs)
-    if self.is_cuda:
-        if device is None:
-            device = torch.cuda.current_device()
-        if self.get_device() == device:
-            return self
-    else:
-        if device is None:
-            device = -1
-    with torch.cuda.device(device):
-        if self.is_sparse:
-            new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = torch.Tensor._indices(self).cuda(device, non_blocking)
-            values = torch.Tensor._values(self).cuda(device, non_blocking)
+    device_module = getattr(torch, device.type, None)
+    assert device_module is not None, (
+        f"{device.type.upper()} device module is not loaded"
+    )
+    with device_module.device(device):
+        if self.is_sparse and hasattr(device_module, "sparse"):
+            new_type = getattr(device_module.sparse, self.__class__.__name__)
+            indices = getattr(torch.Tensor._indices(self), device.type)(
+                device, non_blocking
+            )
+            values = getattr(torch.Tensor._values(self), device.type)(
+                device, non_blocking
+            )
             return new_type(indices, values, self.size())
         else:
-            untyped_storage = torch.UntypedStorage(
-                self.size(), device=torch.device("cuda")
+            assert not self.is_sparse, (
+                f"sparse storage is not supported for {device.type.upper()} tensors"
             )
+            untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
 
@@ -135,6 +121,28 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs["async"]
 
 
+def _get_restore_location(device):
+    """Return the map_location location.
+
+    Used for rebuild functions where the tensor device is distinct from the storage
+    """
+
+    map_location = torch.serialization._serialization_tls.map_location
+    if map_location is None:
+        return device
+    else:
+        if isinstance(map_location, dict):
+            return map_location.get(device, device)
+        elif isinstance(map_location, (str, torch.device)):
+            return map_location
+        else:
+            assert callable(map_location)
+            raise RuntimeError(
+                "Callable map_location not supported with _rebuild_wrapper_subclass "
+                "or _rebuild_device_tensor_from_numpy"
+            )
+
+
 # Note [Don't serialize hooks]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Since time immemorial, we have serialized the backward hooks associated with
@@ -149,9 +157,9 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 #     serialize the *state_dict* of a model, not the model itself
 #     (since this is more stable to code changes affecting the model
 #     serialization), and the state dict saves "data" only, thus
-#     stripping the the backward hooks.  In some cases, hooks are
+#     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
-#     but DDP already manages readding the hooks!
+#     but DDP already manages re-adding the hooks!
 #
 #   - We didn't serialize them in many cases.  Prior to #10220, we
 #     were dropping backward hooks in ForkingPickler.  We "fixed" this
@@ -176,13 +184,13 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    t = torch.empty((0,), dtype=storage.dtype, device=storage._untyped_storage.device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
 def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
-    # Currently, this only returns a dict[string, bool] specifing whether
+    # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
     assert isinstance(tensor, torch.Tensor)
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
@@ -195,8 +203,24 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
+
+
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    metadata=None,
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
@@ -207,10 +231,36 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+def _rebuild_tensor_v3(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    dtype,
+    metadata=None,
+):
+    t = torch.empty(
+        (0,),
+        dtype=dtype,
+        device=storage._untyped_storage.device,
+        requires_grad=requires_grad,
+    )
+    t.set_(storage._untyped_storage, storage_offset, size, stride)
+    if metadata:
+        set_tensor_metadata(t, metadata)
+    t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
+    return t
+
+
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -224,11 +274,25 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
 def _validate_loaded_sparse_tensors():
+    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+        # Skip sparse tensor invariants validation for better
+        # performance. See check_sparse_tensor_invariants
+        # documentation for how to control sparse tensor invariants
+        # checking.
+        _sparse_tensors_to_validate.clear()
+        return
     try:
+        # We disable pinning check (see check_pinning=False below) to
+        # avoid gh-153143. In fact, pinning check is unnecessary
+        # anywhy when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size()
+                    t._indices(),
+                    t._values(),
+                    t.size(),
+                    t.is_coalesced(),
+                    check_pinning=False,
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -249,11 +313,16 @@ def _validate_loaded_sparse_tensors():
                         t.row_indices(),
                     )
                 torch._validate_sparse_compressed_tensor_args(
-                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
+                    compressed_indices,
+                    plain_indices,
+                    t.values(),
+                    t.size(),
+                    t.layout,
+                    check_pinning=False,
                 )
             else:
                 raise NotImplementedError(
-                    "_validate_loaded_sparse_tensors for layout `%s`" % (t.layout)
+                    f"_validate_loaded_sparse_tensors for layout `{t.layout}`"
                 )
 
     finally:
@@ -275,9 +344,9 @@ def _rebuild_sparse_tensor(layout, data):
             is_coalesced = None
         else:
             indices, values, size, is_coalesced = data
-        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
-        if is_coalesced is not None:
-            result._coalesced_(is_coalesced)
+        result = torch.sparse_coo_tensor(
+            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
+        )
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -299,10 +368,22 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
+    raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
+
+
+def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
+    return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
+
+
+def _rebuild_device_tensor_from_cpu_tensor(data, dtype, device, requires_grad):
+    device = _get_restore_location(device)
+    tensor = data.to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
+    device = _get_restore_location(device)
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
     return tensor
@@ -319,12 +400,21 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
 
 
 def _rebuild_wrapper_subclass(
-    cls, dtype, size, stride, storage_offset, layout, device, requires_grad
+    cls,
+    dtype,
+    size,
+    stride,
+    storage_offset,
+    layout,
+    device,
+    requires_grad,
 ):
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    device = _get_restore_location(device)
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,
+        dtype=dtype,
         storage_offset=storage_offset,
         layout=layout,
         device=device,
@@ -375,9 +465,7 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(
-            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
-        )
+        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -411,7 +499,7 @@ def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
 
 def _get_obj_state(obj):
     # Get the state of the python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
+    # This loosely mimics the function on the object class but since Tensor do not inherit
     # from it, we cannot call that function directly
     # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
     # Note that starting with Python 3.11, this `__getstate__` is always defined and thus
@@ -464,22 +552,6 @@ def _import_dotted_name(name):
     for component in components[1:]:
         obj = getattr(obj, component)
     return obj
-
-
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
 
 
 def _flatten_dense_tensors(tensors):
@@ -597,7 +669,7 @@ def _take_tensors(tensors, size_limit):
         Blocks of tensors of same type and within size_limit. The yielded
         tensors are only ordered as the original sequence within its types.
     """
-    buf_dict: DefaultDict[str, List] = defaultdict(lambda: [[], 0])
+    buf_dict: defaultdict[str, list] = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
@@ -636,7 +708,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -655,6 +727,8 @@ def render_call(fn, args, kwargs):
 
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
+
+    __slots__ = ()
 
     def __repr__(self):
         return self
@@ -676,9 +750,7 @@ class ExceptionWrapper:
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = "Caught {} {}.\nOriginal {}".format(
-            self.exc_type.__name__, self.where, self.exc_msg
-        )
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -690,9 +762,9 @@ class ExceptionWrapper:
             raise self.exc_type(message=msg)
         try:
             exception = self.exc_type(msg)
-        except TypeError:
-            # If the exception takes multiple arguments, don't try to
-            # instantiate since we don't know how to
+        except Exception:
+            # If the exception takes multiple arguments or otherwise can't
+            # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
 
@@ -700,8 +772,12 @@ class ExceptionWrapper:
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
+    if hasattr(torch, "mtia") and torch.mtia.is_available():
+        return "mtia"
     custom_backend_name = torch._C._get_privateuse1_backend_name()
     custom_device_mod = getattr(torch, custom_backend_name, None)
     if custom_device_mod and custom_device_mod.is_available():
@@ -714,8 +790,12 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "mps":
+        return get_member(torch.mps)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
+    if device_type and device_type.lower() == "mtia":
+        return get_member(torch.mtia)
     if device_type == torch._C._get_privateuse1_backend_name():
         return get_member(getattr(torch, device_type))
     # add more available device types here
@@ -749,7 +829,9 @@ def get_current_device_index() -> int:
 
 
 def _get_device_index(
-    device: Any, optional: bool = False, allow_cpu: bool = False
+    device: Any,
+    optional: bool = False,
+    allow_cpu: bool = False,
 ) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
@@ -771,7 +853,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError("Expected a non cpu device, but got: {}".format(device))
+            raise ValueError(f"Expected a non cpu device, but got: {device}")
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device
@@ -788,8 +870,7 @@ def _get_device_index(
                 device_idx = _get_current_device_index()
         else:
             raise ValueError(
-                "Expected a torch.device with a specified index "
-                "or an integer, but got:{}".format(device)
+                f"Expected a torch.device with a specified index or an integer, but got:{device}"
             )
     return device_idx
 
@@ -841,6 +922,190 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-# Whether we are compiling with torch.compile or not
-def is_compiling():
-    return False
+if TYPE_CHECKING:
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
+
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
+            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+            # FutureWarning,  # TorchScript does not support Warning type
+            stacklevel=2,
+        )
+        return torch.compiler.is_compiling()
+
+
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        # Why?
+        # (1) If there are input mutations in the graph, then they will be re-applied during
+        #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
+        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
+        #     which dispatches to a bunch of view ops
+        # (3) The input to these view ops is our inner FunctionalTensorWrapper
+        #     (since the sync was called from C++), not the python FunctionalTensor
+        # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
+        #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
+        #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
+        maybe_functional_mode = torch._C._unset_dispatch_mode(
+            torch._C._TorchDispatchModeKey.FUNCTIONAL
+        )
+        try:
+            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
+        finally:
+            if maybe_functional_mode is not None:
+                torch._C._set_dispatch_mode(maybe_functional_mode)
+    else:
+        torch._functionalize_sync(t)  # type: ignore[attr-defined]
+
+
+@functools.lru_cache(2)
+def _get_device_module(device_type: str):
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
+        )
+    return device_module
+
+
+def _dummy_type(name: str) -> type:
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
+        return err_fn
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> list:
+        return self.call_order
+
+
+logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+
+
+class CallbackRegistry(Generic[P]):
+    def __init__(self, name: str):
+        self.name = name
+        self.callback_list: list[Callable[P, None]] = []
+
+    def add_callback(self, cb: Callable[P, None]) -> None:
+        self.callback_list.append(cb)
+
+    def fire_callbacks(self, *args: P.args, **kwargs: P.kwargs) -> None:
+        for cb in self.callback_list:
+            try:
+                cb(*args, **kwargs)
+            except Exception:
+                logger.exception(
+                    "Exception in callback for %s registered with gpu trace", self.name
+                )
+
+
+def try_import(module_name: str) -> Optional[ModuleType]:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        assert spec.loader is not None, "The loader attribute should always be set"
+        spec.loader.exec_module(module)
+        return module
+
+    return None
+
+
+# IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
+# for use in the weights_only Unpickler.
+
+IMPORT_MAPPING = {
+    "__builtin__": "builtins",
+    "copy_reg": "copyreg",
+    "Queue": "queue",
+    "repr": "reprlib",
+    "_abcoll": "collections.abc",
+    # Non-mutual mappings.
+    "UserDict": "collections",
+    "UserList": "collections",
+    "UserString": "collections",
+    "whichdb": "dbm",
+    "StringIO": "io",
+    "cStringIO": "io",
+}
+
+
+# This contains rename rules that are easy to handle.  We ignore the more
+# complex stuff (e.g. mapping the names in the urllib and types modules).
+# These rules should be run before import names are fixed.
+NAME_MAPPING = {
+    ("__builtin__", "xrange"): ("builtins", "range"),
+    ("__builtin__", "reduce"): ("functools", "reduce"),
+    ("__builtin__", "intern"): ("sys", "intern"),
+    ("__builtin__", "unichr"): ("builtins", "chr"),
+    ("__builtin__", "unicode"): ("builtins", "str"),
+    ("__builtin__", "long"): ("builtins", "int"),
+    ("itertools", "izip"): ("builtins", "zip"),
+    ("itertools", "imap"): ("builtins", "map"),
+    ("itertools", "ifilter"): ("builtins", "filter"),
+    ("itertools", "ifilterfalse"): ("itertools", "filterfalse"),
+    ("itertools", "izip_longest"): ("itertools", "zip_longest"),
+    ("UserDict", "IterableUserDict"): ("collections", "UserDict"),
+    ("UserList", "UserList"): ("collections", "UserList"),
+    ("UserString", "UserString"): ("collections", "UserString"),
+    # Non-mutual mappings.
+    ("__builtin__", "basestring"): ("builtins", "str"),
+    ("exceptions", "StandardError"): ("builtins", "Exception"),
+    ("UserDict", "UserDict"): ("collections", "UserDict"),
+}

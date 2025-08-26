@@ -1,11 +1,11 @@
 import abc
-import torch.nn as nn
-
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
+import torch.nn as nn
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
+
 
 @dataclass
 class ShardingPlan:
@@ -38,7 +38,7 @@ class ShardingPlan:
 
         >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> class MyModule(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>        super().__init__()
         >>>        self.fc1 = nn.Linear()
         >>>        self.gelu = nn.GELU()
@@ -61,9 +61,10 @@ class ShardingPlan:
         >>>    return_local_tensor=["fc2"]
         >>> )
     """
-    plan: Dict[str, Union[ShardingSpec, Sharder]]
-    output_plan: Optional[Dict[str, ShardingSpec]] = None
-    return_local_tensor: Optional[List[str]] = None
+
+    plan: dict[str, Union[ShardingSpec, Sharder]]
+    output_plan: Optional[dict[str, ShardingSpec]] = None
+    return_local_tensor: Optional[list[str]] = None
 
 
 class ShardingPlanner(abc.ABC):
@@ -71,6 +72,7 @@ class ShardingPlanner(abc.ABC):
     Default ShardingPlanner interface, can be extended and
     implement advanced sharding strategies.
     """
+
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """
@@ -83,4 +85,3 @@ class ShardingPlanner(abc.ABC):
             A :class:`torch.distributed._shard.sharding_plan.ShardingPlan` object that
             represents how to shard the module.
         """
-        pass

@@ -6,27 +6,25 @@
 #include <math.h>
 #endif
 
-#include <stdint.h>
 
 #ifdef __CUDACC__
 #include <cuda.h>
 #endif
 
-#include <ATen/core/Array.h>
+#include <array>
 #include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
-#include <c10/util/Half.h>
 #include <cmath>
+#include <cstdint>
 
 namespace at {
 
 // typedefs for holding vector data
 namespace detail {
 
-typedef at::detail::Array<uint32_t, 4> UINT4;
-typedef at::detail::Array<uint32_t, 2> UINT2;
-typedef at::detail::Array<double, 2> DOUBLE2;
-typedef at::detail::Array<float, 2> FLOAT2;
+typedef std::array<uint32_t, 4> UINT4;
+typedef std::array<uint32_t, 2> UINT2;
+typedef std::array<double, 2> DOUBLE2;
+typedef std::array<float, 2> FLOAT2;
 
 } // namespace detail
 
@@ -68,6 +66,7 @@ typedef at::detail::Array<float, 2> FLOAT2;
 class philox_engine {
 public:
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST_DEVICE inline explicit philox_engine(uint64_t seed = 67280421310721,
                                  uint64_t subsequence = 0,
                                  uint64_t offset = 0) {
@@ -80,7 +79,7 @@ public:
                                  uint64_t subsequence = 0) {
     key_[0] = static_cast<uint32_t>(seed);
     key_[1] = static_cast<uint32_t>(seed >> 32);
-    counter_ = detail::UINT4(0);
+    counter_ = detail::UINT4{};
     counter_[2] = static_cast<uint32_t>(subsequence);
     counter_[3] = static_cast<uint32_t>(subsequence >> 32);
     STATE = 0;
@@ -113,7 +112,7 @@ public:
       output_ = rand(counter, key, n_rounds);
       incr();
     }
-    uint32_t ret = output_[STATE];
+    uint32_t ret = output_[static_cast<int>(STATE)];
     STATE = (STATE + 1) & 3;
     return ret;
   }
@@ -132,7 +131,7 @@ public:
     // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = 1 - uint32_to_uniform_float(output_[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
     float u2 = 1 - uint32_to_uniform_float(output_[1]);
-    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
+    return static_cast<float>(std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2));
   }
 
   /**
@@ -201,8 +200,8 @@ private:
   }
 
   C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
-    uint32_t hi0;
-    uint32_t hi1;
+    uint32_t hi0 = 0;
+    uint32_t hi1 = 0;
     uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
     uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
     detail::UINT4 ret;

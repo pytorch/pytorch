@@ -1,11 +1,19 @@
+#include <ATen/CPUGeneratorImpl.h>
+// TODO(antoniojkim): Add CUDA support for make_generator_for_device
+// #ifdef USE_CUDA
+// #include <ATen/cuda/CUDAGeneratorImpl.h>
+// #endif
+#ifdef USE_MPS
+#include <ATen/mps/MPSGeneratorImpl.h>
+#endif
+
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
@@ -26,7 +34,7 @@ void listIndex<at::Tensor>(Stack& stack) {
   if (pos != list.end()) {
     push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
-    AT_ERROR("'", elem, "' is not in list");
+    TORCH_CHECK(false, "'", elem, "' is not in list");
   }
 }
 
@@ -99,7 +107,7 @@ void listRemove<at::Tensor>(Stack& stack) {
   if (pos != list.end()) {
     list.erase(pos);
   } else {
-    AT_ERROR("list.remove(x): x not in list");
+    TORCH_CHECK(false, "list.remove(x): x not in list");
   }
 }
 
@@ -125,7 +133,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + c10::to_string(a) + " to integer", "");
+        "Cannot convert float " + std::to_string(a) + " to integer");
     return;
   }
 }
@@ -197,7 +205,7 @@ void listPopImpl(Stack& stack, const char* empty_message) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
-    AT_ERROR(empty_message);
+    TORCH_CHECK(false, empty_message);
   }
 
   push(stack, getItem(list, idx));
@@ -257,8 +265,7 @@ void listSelect(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  auto element = getItem(list, idx);
-  push(stack, std::move(element));
+  push(stack, getItem(list, idx));
 }
 
 void listLen(Stack& stack) {
@@ -280,12 +287,12 @@ void listAdd(Stack& stack) {
   c10::List<IValue> ret = make_result_list<IValue>(a.elementType());
 
   if (a.use_count() == 1) {
-    ret = std::move(a);
+    ret = a;
   } else {
     ret = a.copy();
   }
 
-  ret.append(std::move(b));
+  ret.append(b);
 
   push(stack, std::move(ret));
 }
@@ -293,7 +300,7 @@ void listAdd(Stack& stack) {
 void listInplaceAdd(Stack& stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
-  a.append(std::move(b));
+  a.append(b);
   push(stack, std::move(a));
 }
 
@@ -304,8 +311,7 @@ void listMulIntLeftInPlace(Stack& stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (const auto i : c10::irange(1, n)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(1, n)) {
       for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
@@ -323,8 +329,7 @@ void listMulIntLeft(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -341,8 +346,7 @@ void listMulIntRight(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -375,8 +379,7 @@ void listSlice(Stack& stack) {
   sliced_list.reserve(num_values);
 
   int i = start;
-  for (const auto j : c10::irange(num_values)) {
-    (void)j; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
     sliced_list.push_back(list.get(i));
     i += step;
   }
@@ -393,5 +396,40 @@ void listSetItem(Stack& stack) {
 
   push(stack, std::move(list));
 }
-} // namespace jit
-} // namespace torch
+
+at::Generator make_generator_for_device(
+    c10::Device device,
+    std::optional<int64_t> seed) {
+  if (device.is_cpu()) {
+    if (seed.has_value()) {
+      return at::detail::createCPUGenerator(seed.value());
+    } else {
+      return at::detail::createCPUGenerator();
+    }
+// TODO(antoniojkim): Enable support for CUDA device
+//                    Implementation below causes issues during rocm build
+// #ifdef USE_CUDA
+//   } else if (device.is_cuda()) {
+//     auto generator = at::cuda::detail::createCUDAGenerator(device.index());
+//     if (seed.has_value()) {
+//       generator.set_current_seed(seed.value());
+//     }
+//     return generator;
+// #endif
+#ifdef USE_MPS
+  } else if (device.is_mps()) {
+    if (seed.has_value()) {
+      return at::mps::detail::createMPSGenerator(seed.value());
+    } else {
+      return at::mps::detail::createMPSGenerator();
+    }
+#endif
+  } else {
+    TORCH_CHECK(
+        false,
+        "Unsupported device for at::make_generator_for_device found: ",
+        device.str());
+  }
+}
+
+} // namespace torch::jit

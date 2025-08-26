@@ -1,0 +1,67 @@
+name: inductor-perf-nightly-macos
+
+on:
+  schedule:
+    - cron: 0 7 * * *
+  workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (on by default)?
+        required: false
+        type: boolean
+        default: true
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: torchbench_perf_mps
+  pull_request:
+    paths:
+      - .github/workflows/inductor-perf-test-nightly-macos.yml
+      - .ci/pytorch/macos-test.sh
+
+concurrency:
+  group:  ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  macos-perf-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
+    name: macos-perf-py3-arm64
+    uses: ./.github/workflows/_mac-build.yml
+    with:
+      sync-tag: macos-perf-py3-arm64-build
+      build-environment: macos-py3-arm64-distributed
+      runner-type: macos-m1-stable
+      build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python-version: 3.12.7
+      test-matrix: |
+        { include: [
+          { config: "perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-15" },
+        ]}
+    secrets: inherit
+
+  macos-perf-py3-arm64-test:
+    name: macos-perf-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test.yml
+    needs: macos-perf-py3-arm64-build
+    with:
+      build-environment: macos-py3-arm64-distributed
+      # Same as the build job
+      python-version: 3.12.7
+      test-matrix: ${{ needs.macos-perf-py3-arm64-build.outputs.test-matrix }}
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+
+    secrets: inherit

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 
 import torch._C as C
@@ -69,7 +70,7 @@ class PythonDispatcher:
     ]
     supported_keys = runtime_keys + alias_keys
 
-    def __init__(self):
+    def __init__(self) -> None:
         C._dispatch_check_invariants(self.name)  # type: ignore[attr-defined]
         self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")
         self.ref.def_("foo(Tensor x) -> Tensor")
@@ -91,10 +92,10 @@ class PythonDispatcher:
     """
 
     def register(self, dispatchKeys):
-        # Overriden is not supported and triggers a warning in C++ dispatcher.
+        # Overridden is not supported and triggers a warning in C++ dispatcher.
         if len(set(dispatchKeys)) != len(dispatchKeys):
             raise RuntimeError(
-                f"Overriden is not allowed but found duplicates in {dispatchKeys}."
+                f"Overridden is not allowed but found duplicates in {dispatchKeys}."
             )
         # We currently forbid this in codegen instead of C++ dispatcher.
         if (
@@ -116,7 +117,7 @@ class PythonDispatcher:
     """
 
     def _format_line(self, key, kernel):
-        return "{:<15} {}\n".format(key, kernel)
+        return f"{key:<15} {kernel}\n"
 
     """
     Helper function to print a table header.
@@ -136,7 +137,7 @@ class PythonDispatcher:
     """
 
     def rawRegistrations(self):
-        return C._dispatch_dump("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
+        return C._dispatch_dump(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
 
     """
     Returns raw output of computed dispatch table for debugging only.
@@ -144,7 +145,7 @@ class PythonDispatcher:
     """
 
     def rawDispatchTable(self):
-        return C._dispatch_dump_table("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
+        return C._dispatch_dump_table(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
 
     """
     Returns a table(str) including all the registrations from users.

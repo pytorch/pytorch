@@ -10,20 +10,20 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 namespace detail {
 // Utility function to save state
 template <typename DerivedOptimizerParamState>
 void serialize(
     serialize::OutputArchive& archive,
-    const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+    const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
         state) {
   for (const auto& item : state) {
     serialize::OutputArchive param_state_archive(archive.compilation_unit());
-    std::string tensorimpl_key = item.first;
+    std::string tensorimpl_key =
+        std::to_string(reinterpret_cast<size_t>(item.first));
     const DerivedOptimizerParamState& curr_state =
-        static_cast<const DerivedOptimizerParamState&>(*(item.second.get()));
+        static_cast<const DerivedOptimizerParamState&>(*(item.second));
     curr_state.serialize(param_state_archive);
     archive.write(tensorimpl_key, param_state_archive);
   }
@@ -33,15 +33,15 @@ void serialize(
 template <typename DerivedOptimizerParamState>
 void serialize(
     serialize::InputArchive& archive,
-    ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-        state) {
+    ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& state) {
   std::vector<std::string> tensorimpl_keys = archive.keys();
   for (const std::string& tensorimpl_key : tensorimpl_keys) {
     serialize::InputArchive param_state_archive;
     archive.read(tensorimpl_key, param_state_archive);
     DerivedOptimizerParamState param_state;
     param_state.serialize(param_state_archive);
-    state[tensorimpl_key] =
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    state[reinterpret_cast<void*>(std::stoull(tensorimpl_key))] =
         std::make_unique<DerivedOptimizerParamState>(param_state);
   }
 }
@@ -61,8 +61,9 @@ void serialize(
         "params/size", torch::tensor(static_cast<int64_t>(params.size())));
     for (const auto index : c10::irange(params.size())) {
       param_group_archive.write(
-          "params/" + c10::guts::to_string(index),
-          IValue(c10::guts::to_string(params[index].unsafeGetTensorImpl())));
+          "params/" + std::to_string(index),
+          IValue(std::to_string(
+              reinterpret_cast<size_t>(params[index].unsafeGetTensorImpl()))));
     }
     const DerivedOptimizerParamOptions& param_group_options =
         static_cast<const DerivedOptimizerParamOptions&>(
@@ -71,8 +72,7 @@ void serialize(
         param_group_archive.compilation_unit());
     param_group_options.serialize(param_group_options_archive);
     param_group_archive.write("options", param_group_options_archive);
-    archive.write(
-        "param_groups/" + c10::guts::to_string(i), param_group_archive);
+    archive.write("param_groups/" + std::to_string(i), param_group_archive);
   }
 }
 
@@ -92,15 +92,14 @@ void serialize(
   const int64_t param_groups_size = param_groups_size_tensor.item<int64_t>();
   for (const auto i : c10::irange(param_groups_size)) {
     serialize::InputArchive param_group_archive;
-    archive.read(
-        "param_groups/" + c10::guts::to_string(i), param_group_archive);
+    archive.read("param_groups/" + std::to_string(i), param_group_archive);
     torch::Tensor size_tensor;
     param_group_archive.read("params/size", size_tensor);
     const int64_t size = size_tensor.item<int64_t>();
     std::vector<std::string> params;
     for (const auto index : c10::irange(size)) {
       IValue ivalue;
-      param_group_archive.read("params/" + c10::to_string(index), ivalue);
+      param_group_archive.read("params/" + std::to_string(index), ivalue);
       std::string element = ivalue.toStringRef();
       params.emplace_back(element);
     }
@@ -170,8 +169,7 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
   TORCH_INTERNAL_ASSERT(pytorch_version.toStringRef() == "1.5.0");
   serialize::InputArchive state_archive;
   archive.read("state", state_archive);
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>
-      saved_state;
+  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>> saved_state;
   detail::serialize<DerivedOptimizerParamState>(state_archive, saved_state);
 
   serialize::InputArchive param_groups_archive;
@@ -182,7 +180,7 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
   detail::serialize<DerivedOptimizerParamOptions>(
       param_groups_archive, saved_param_groups);
 
-  // update state
+  // update state and optimizer options
   TORCH_CHECK(
       saved_param_groups.size() == optimizer.param_groups().size(),
       "loaded state dict has a different number of parameter groups");
@@ -194,12 +192,20 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
         "loaded state dict contains a parameter group that has a different size than the optimizer's parameter group");
 
     for (const auto idx : c10::irange(params.size())) {
-      if (saved_state.find(param_group_old_keys[idx]) != saved_state.end()) {
-        optimizer
-            .state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
-            std::move(saved_state[param_group_old_keys[idx]]);
+      auto param_group_old_key =
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          reinterpret_cast<void*>(std::stoull(param_group_old_keys[idx]));
+      if (saved_state.find(param_group_old_key) != saved_state.end()) {
+        optimizer.state()[params[idx].unsafeGetTensorImpl()] =
+            std::move(saved_state[param_group_old_key]);
       }
     }
+
+    auto& saved_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        *saved_param_groups[i].second);
+    auto& current_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        optimizer.param_groups()[i].options());
+    current_options = saved_options;
   }
 }
 
@@ -213,7 +219,7 @@ void serialize(
       key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
   for (const auto index : c10::irange(buffers.size())) {
     archive.write(
-        key + "/" + c10::to_string(index), buffers[index], /*is_buffer=*/true);
+        key + "/" + std::to_string(index), buffers[index], /*is_buffer=*/true);
   }
 }
 
@@ -230,7 +236,7 @@ void serialize(
   for (const auto index : c10::irange(size)) {
     buffers.emplace_back();
     archive.read(
-        key + "/" + c10::to_string(index), buffers.back(), /*is_buffer=*/true);
+        key + "/" + std::to_string(index), buffers.back(), /*is_buffer=*/true);
   }
 }
 
@@ -277,16 +283,16 @@ std::deque<T> list_to_deque(const c10::List<T>& list) {
     archive.write(#name, ivalue);                              \
   }
 
-#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name)                   \
-  {                                                                   \
-    c10::IValue ivalue;                                               \
-    bool exists = archive.try_read(#name, ivalue);                    \
-    if (exists) {                                                     \
-      name(ivalue.to<T>());                                           \
-    } else {                                                          \
-      bool is_tensor_type = std::is_base_of<torch::Tensor, T>::value; \
-      TORCH_INTERNAL_ASSERT(is_tensor_type);                          \
-    }                                                                 \
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name)                        \
+  {                                                                        \
+    c10::IValue ivalue;                                                    \
+    bool exists = archive.try_read(#name, ivalue);                         \
+    if (exists) {                                                          \
+      name(ivalue.to<T>());                                                \
+    } else {                                                               \
+      constexpr bool is_tensor_type = std::is_base_of_v<torch::Tensor, T>; \
+      TORCH_INTERNAL_ASSERT(is_tensor_type);                               \
+    }                                                                      \
   }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) \
@@ -306,5 +312,4 @@ std::deque<T> list_to_deque(const c10::List<T>& list) {
     name(list_to_deque(list));                            \
   }
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

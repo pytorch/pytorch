@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
-import numpy as np
 import torch
 
 
@@ -26,7 +26,7 @@ class FuzzedParameter:
         name: str,
         minval: Optional[Union[int, float]] = None,
         maxval: Optional[Union[int, float]] = None,
-        distribution: Optional[Union[str, Dict[Any, float]]] = None,
+        distribution: Optional[Union[str, dict[Any, float]]] = None,
         strict: bool = False,
     ):
         """
@@ -102,6 +102,7 @@ class FuzzedParameter:
         return distribution
 
     def _loguniform(self, state):
+        import numpy as np
         output = int(2 ** state.uniform(
             low=np.log2(self._minval) if self._minval is not None else None,
             high=np.log2(self._maxval) if self._maxval is not None else None,
@@ -118,6 +119,7 @@ class FuzzedParameter:
         return state.uniform(low=self._minval, high=self._maxval)
 
     def _custom_distribution(self, state):
+        import numpy as np
         # If we directly pass the keys to `choice`, numpy will convert
         # them to numpy dtypes.
         index = state.choice(
@@ -180,8 +182,8 @@ class FuzzedTensor:
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
-        steps: Optional[Tuple[Union[str, int], ...]] = None,
+        size: tuple[Union[str, int], ...],
+        steps: Optional[tuple[Union[str, int], ...]] = None,
         probability_contiguous: float = 0.5,
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
@@ -265,6 +267,7 @@ class FuzzedTensor:
             return torch.randint(1, 127, size=size, dtype=dtype, device="cpu")
 
     def _make_tensor(self, params, state):
+        import numpy as np
         size, steps, allocation_size = self._get_size_and_steps(params)
         constructor = (
             self._tensor_constructor or
@@ -287,7 +290,7 @@ class FuzzedTensor:
             raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
 
         slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
-        tensor = raw_tensor[slices]
+        tensor = raw_tensor[tuple(slices)]
 
         properties = {
             "numel": int(tensor.numel()),
@@ -343,9 +346,9 @@ class FuzzedTensor:
 class Fuzzer:
     def __init__(
         self,
-        parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
-        tensors: List[Union[FuzzedTensor, List[FuzzedTensor]]],
-        constraints: Optional[List[Callable]] = None,
+        parameters: list[Union[FuzzedParameter, list[FuzzedParameter]]],
+        tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
+        constraints: Optional[list[Callable]] = None,
         seed: Optional[int] = None
     ):
         """
@@ -368,8 +371,9 @@ class Fuzzer:
                 also be used to set the PyTorch random seed so that random
                 ops will create reproducible Tensors.
         """
+        import numpy as np
         if seed is None:
-            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
+            seed = int(np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64))
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
@@ -386,11 +390,12 @@ class Fuzzer:
 
     @staticmethod
     def _unpack(values, cls):
-        return tuple(it.chain(
-            *[[i] if isinstance(i, cls) else i for i in values]
+        return tuple(it.chain.from_iterable(
+            [[i] if isinstance(i, cls) else i for i in values]
         ))
 
     def take(self, n):
+        import numpy as np
         state = np.random.RandomState(self._seed)
         torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
         for _ in range(n):
@@ -410,9 +415,9 @@ class Fuzzer:
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+        strict_params: dict[str, Union[float, int, ParameterAlias]] = {}
         for _ in range(1000):
-            candidate_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+            candidate_params: dict[str, Union[float, int, ParameterAlias]] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/AutogradState.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Export.h>
 
@@ -70,6 +72,11 @@ struct C10_API InferenceMode {
     cur_keyset.set_excluded(excluded);
     c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
   }
+
+  InferenceMode(const InferenceMode&) = delete;
+  InferenceMode(InferenceMode&&) = delete;
+  InferenceMode& operator=(const InferenceMode&) = delete;
+  InferenceMode& operator=(InferenceMode&&) = delete;
 
   ~InferenceMode() {
     AutogradState::set_tls_state(prev_mode);

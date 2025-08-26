@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
@@ -16,8 +15,7 @@ namespace ONNX_NAMESPACE {
 class ModelProto;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This map is used to keep track of parameters that should be exported
 // externally. When `defer_weight_export` is true, the returned map contains
@@ -30,6 +28,7 @@ namespace jit {
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
+using DimSymbolMap = std::map<std::string, c10::ShapeSymbol>;
 
 using NodeNameMap = std::unordered_map<const Node*, std::string>;
 
@@ -71,7 +70,7 @@ class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
-      : writer_(export_writer), current_source_range_tag_(0) {}
+      : writer_(export_writer) {}
 
   void writeFiles(const std::string& code_dir);
   void serialize(
@@ -137,7 +136,7 @@ class TORCH_API ScriptModuleSerializer {
   // just source information about where the node is, since bytecode inlines the
   // graph before saving it.
   SourceRangeTagMap source_range_tags_;
-  int64_t current_source_range_tag_;
+  int64_t current_source_range_tag_{0};
 };
 
 // For testing purposes
@@ -215,7 +214,7 @@ struct TORCH_API BytecodeEmitMode {
 // true: instruction of default argument values (like LOADC) is emitted.
 // false: instruction of default argument values are not emitted. Instead
 // they are fetched from operator schema.
-// default_args_before_out_args (to forward compatibile support
+// default_args_before_out_args (to forward compatible support
 // operators allowing out arguments and default arguments):
 // true: the number of specified arguments will deserialized to (#all_args -
 // #default_args). false: the number of specified arguments will deserialized to
@@ -276,5 +275,4 @@ TORCH_API void save_jit_module_to_write_func(
     bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

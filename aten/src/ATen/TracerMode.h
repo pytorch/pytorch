@@ -27,7 +27,7 @@
 //    ops (ops being called by other ops). After the intermediate op call
 //    finishes it's set back to the original `TracingState` object.
 //
-//    The `TracingState` obect in TLS can also be read/written via its Python
+//    The `TracingState` object in TLS can also be read/written via its Python
 //    binding in `python_tracer.cpp`, and `get/setTracingState()` C++ APIs,
 //    which are also exposed as `TORCH_API`.
 //
@@ -108,19 +108,17 @@
 //   guard is essentially no-op when the master `setTracingState()` switch is
 //   off.
 
-namespace at {
 // TODO: move this from `at::` to `jit::torch::` after
 // `aten/src/ATen/cpp_custom_type_hack.h` is removed.
 
-namespace tracer {
-namespace impl {
+namespace at::tracer::impl {
 
-static inline bool is_dispatch_enabled() {
+inline bool is_dispatch_enabled() {
   return c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Tracer) &&
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer);
 }
 
-static inline void set_dispatch_enabled(bool enabled) {
+inline void set_dispatch_enabled(bool enabled) {
   TORCH_INTERNAL_ASSERT(
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer),
       "Cannot enable tracing within the scope of NoTracerDispatchMode!");
@@ -131,6 +129,4 @@ struct NoTracerDispatchMode {
   c10::impl::ExcludeDispatchKeyGuard guard_{at::DispatchKey::Tracer};
 };
 
-} // namespace impl
-} // namespace tracer
-} // namespace at
+} // namespace at::tracer::impl

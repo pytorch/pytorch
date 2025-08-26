@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import importlib.util
 import os
 import sys
+from importlib.util import module_from_spec, spec_from_file_location
 from itertools import chain
 from pathlib import Path
 
@@ -16,11 +16,11 @@ module_name = "torch.jit._shape_functions"
 err_msg = """Could not find shape functions file, please make sure
 you are in the root directory of the Pytorch git repo"""
 if not file_path.exists():
-    raise Exception(err_msg)
+    raise Exception(err_msg)  # noqa: TRY002
 
-spec = importlib.util.spec_from_file_location(module_name, file_path)
+spec = spec_from_file_location(module_name, file_path)
 assert spec is not None
-module = importlib.util.module_from_spec(spec)
+module = module_from_spec(spec)
 sys.modules[module_name] = module
 assert spec.loader is not None
 assert module is not None
@@ -102,7 +102,7 @@ def gen_serialized_decompisitions() -> str:
     output_strs.append(curr_str)
 
     final_output = ""
-    # Windows compiler doesnt correctly handle adjacent
+    # Windows compiler doesn't correctly handle adjacent
     # string literals
     for output_str in output_strs:
         start = '+ std::string(R"=====('

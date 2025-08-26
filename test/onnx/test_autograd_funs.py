@@ -1,9 +1,9 @@
 # Owner(s): ["module: onnx"]
 
 import pytorch_test_common
+from onnx_test_common import run_model_test
 
 import torch
-from onnx_test_common import run_model_test
 from torch.onnx import OperatorExportTypes
 from torch.onnx._globals import GLOBALS
 from torch.onnx.utils import _model_to_graph
@@ -65,7 +65,7 @@ class TestAutogradFuns(pytorch_test_common.ExportTestCase):
             @staticmethod
             def forward(ctx, input):
                 ctx.save_for_backward(input)
-                values, indices = torch.topk(input, 3)
+                values, _ = torch.topk(input, 3)
                 return values
 
         class Caller(torch.nn.Module):

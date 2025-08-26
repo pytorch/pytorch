@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/qint8.h>
 #include <array>
 
@@ -24,13 +24,15 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
 inline namespace CPU_CAPABILITY {
 
+template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
 template <>
 struct Vectorized<c10::qint8> {
  private:
@@ -91,7 +93,7 @@ struct Vectorized<c10::qint8> {
           vec_vsx_ld(offset0, reinterpret_cast<const vint8*>(ptr)),
           vec_vsx_ld(offset16, reinterpret_cast<const vint8*>(ptr))};
     }
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
   }
@@ -144,21 +146,85 @@ struct Vectorized<c10::qint8> {
     vfloat32 vecf1_3 = vec_float(veci7);
     vfloat32 scale_vec0 = scale.vec0();
     vfloat32 scale_vec1 = scale.vec1();
-    vfloat32 scale_zp_premul0 = scale_zp_premul.vec0();
-    vfloat32 scale_zp_premul1 = scale_zp_premul.vec1();
+
+    vfloat32 zero_point_vec0 = zero_point.vec0();
+    vfloat32 zero_point_vec1 = zero_point.vec1();
+
+    vfloat32 vec_substract_src_zp0_0 = vec_sub(vecf0_0, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_0 = vec_sub(vecf1_0, zero_point_vec1);
+    Vectorized<float> vf0_zp = {
+        vec_mul(scale_vec0, vec_substract_src_zp0_0),
+        vec_mul(scale_vec1, vec_substract_src_zp1_0)};
+
+    vfloat32 vec_substract_src_zp0_1 = vec_sub(vecf0_1, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_1 = vec_sub(vecf1_1, zero_point_vec1);
+    Vectorized<float> vf1_zp = {
+        vec_mul(scale_vec0, vec_substract_src_zp0_1),
+        vec_mul(scale_vec1, vec_substract_src_zp1_1)};
+
+    vfloat32 vec_substract_src_zp0_2 = vec_sub(vecf0_2, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_2 = vec_sub(vecf1_2, zero_point_vec1);
+    Vectorized<float> vf2_zp = {
+        vec_mul(scale_vec0, vec_substract_src_zp0_2),
+        vec_mul(scale_vec1, vec_substract_src_zp1_2)};
+
+    vfloat32 vec_substract_src_zp0_3 = vec_sub(vecf0_3, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_3 = vec_sub(vecf1_3, zero_point_vec1);
+    Vectorized<float> vf3_zp = {
+        vec_mul(scale_vec0, vec_substract_src_zp0_3),
+        vec_mul(scale_vec1, vec_substract_src_zp1_3)};
+
+    return {vf0_zp, vf1_zp, vf2_zp, vf3_zp};
+  }
+
+  float_vec_return_type C10_ALWAYS_INLINE
+  dequantize(Vectorized<float> scale, Vectorized<float> zero_point) const {
+    vint16 vecshi0 = vec_unpackh(_vec0);
+    vint16 vecshi1 = vec_unpackl(_vec0);
+
+    vint16 vecshi2 = vec_unpackh(_vec1);
+    vint16 vecshi3 = vec_unpackl(_vec1);
+
+    vint32 veci0 = vec_unpackh(vecshi0);
+    vint32 veci1 = vec_unpackl(vecshi0);
+
+    vint32 veci2 = vec_unpackh(vecshi1);
+    vint32 veci3 = vec_unpackl(vecshi1);
+
+    vint32 veci4 = vec_unpackh(vecshi2);
+    vint32 veci5 = vec_unpackl(vecshi2);
+
+    vint32 veci6 = vec_unpackh(vecshi3);
+    vint32 veci7 = vec_unpackl(vecshi3);
+
+    vfloat32 vecf0_0 = vec_float(veci0);
+    vfloat32 vecf1_0 = vec_float(veci1);
+
+    vfloat32 vecf0_1 = vec_float(veci2);
+    vfloat32 vecf1_1 = vec_float(veci3);
+
+    vfloat32 vecf0_2 = vec_float(veci4);
+    vfloat32 vecf1_2 = vec_float(veci5);
+
+    vfloat32 vecf0_3 = vec_float(veci6);
+    vfloat32 vecf1_3 = vec_float(veci7);
+    vfloat32 scale_vec0 = scale.vec0();
+    vfloat32 scale_vec1 = scale.vec1();
+    vfloat32 zero_point0 = zero_point.vec0();
+    vfloat32 zero_point1 = zero_point.vec1();
     return {
         Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_0, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_0, scale_zp_premul1)},
+            (vecf0_0 - zero_point0) * scale_vec0,
+            (vecf1_0 - zero_point1) * scale_vec1},
         Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_1, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_1, scale_zp_premul1)},
+            (vecf0_1 - zero_point0) * scale_vec0,
+            (vecf1_1 - zero_point1) * scale_vec1},
         Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_2, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_2, scale_zp_premul1)},
+            (vecf0_2 - zero_point0) * scale_vec0,
+            (vecf1_2 - zero_point1) * scale_vec1},
         Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_3, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_3, scale_zp_premul1)}};
+            (vecf0_3 - zero_point0) * scale_vec0,
+            (vecf1_3 - zero_point1) * scale_vec1}};
   }
 
   static Vectorized<c10::qint8> quantize(
@@ -239,7 +305,8 @@ struct Vectorized<c10::qint8> {
     return {vec0, vec1};
   }
 
-  Vectorized<c10::qint8> C10_ALWAYS_INLINE relu(Vectorized<c10::qint8> zero_point) const {
+  Vectorized<c10::qint8> C10_ALWAYS_INLINE
+  relu(Vectorized<c10::qint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 
@@ -391,6 +458,55 @@ Vectorized<c10::qint8> inline minimum(
     const Vectorized<c10::qint8>& b) {
   return a.minimum(b);
 }
-} // namespace
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator+(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator-(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator*(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator/(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{a.vec0() / b.vec0(), a.vec1() / b.vec1()};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator&(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator|(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator^(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

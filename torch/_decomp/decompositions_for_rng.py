@@ -1,15 +1,18 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
-from typing import Callable, Dict
+from typing import Callable
 
 import torch
 import torch._decomp as decomp
 from torch._decomp import get_decompositions
 from torch._ops import OpOverload
 
+
 aten = torch.ops.aten
 
-rng_decompositions: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
+rng_decompositions: dict[str, dict[OpOverload, Callable]] = defaultdict(dict)
 
 
 def register_rng_decomposition(aten_op):
@@ -64,11 +67,11 @@ class PhiloxState:
     """
     Represents a PhiloxRngState - (seed, offset) where offset = base_offset +
     relative_offset. seed and base_offset basically point to the rng state just
-    before tracing starts. relative offset tracks the totaly consumed offset at
+    before tracing starts. relative offset tracks the totally consumed offset at
     trace time.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.reset()
 
     def reset(self):
@@ -214,13 +217,13 @@ class PhiloxStateTracker:
 
 
 # Adding more decompositions which eventually use rand_like inside decomps.
-# Adding these in rng_decompositins ensures the functionalization of rand_like
+# Adding these in rng_decompositions ensures the functionalization of rand_like
 # ops used in these decomps. The list is copied from inductor codebase, which
 # uses it for similar purpose.
 #
 # Caution - These decomps do not have same accuracy as that of eager. However,
 # we can't just disable them with a config flag like fallback_random, because
-# for fuctionalization of rng ops, we have to decompose these ops.
+# for functionalization of rng ops, we have to decompose these ops.
 extra_random_decomps = get_decompositions(
     [
         aten.cauchy,
@@ -235,6 +238,8 @@ extra_random_decomps = get_decompositions(
         aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
+        aten.rrelu_with_noise,
+        aten.rrelu_with_noise_,
         aten.uniform_,
     ]
 )

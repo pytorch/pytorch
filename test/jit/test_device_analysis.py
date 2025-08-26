@@ -1,24 +1,18 @@
 # Owner(s): ["oncall: jit"]
 
-from itertools import product
 import unittest
+from itertools import product
 
 import torch
-from torch.testing._internal.common_utils import TEST_CUDA
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.jit._passes._property_propagation import apply_input_props_using_example
+from torch.testing._internal.common_utils import raise_on_run_directly, TEST_CUDA
+from torch.testing._internal.jit_utils import JitTestCase
+
 
 try:
     from torchvision import models
 except ImportError:
     models = None
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestDeviceAnalysis(JitTestCase):
@@ -335,3 +329,7 @@ class TestDeviceAnalysis(JitTestCase):
             test_fn, [self.mkldnn, self.mkldnn, None, None], self.mkldnn
         )
         self.assert_device_equal(test_fn, [self.cpu, self.cuda, None, None], None)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

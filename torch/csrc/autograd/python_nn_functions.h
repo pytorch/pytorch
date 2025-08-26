@@ -1,9 +1,7 @@
 #pragma once
-
-namespace torch {
-namespace autograd {
+#include <torch/csrc/utils/python_compat.h>
+namespace torch::autograd {
 
 void initNNFunctions(PyObject* module);
 
 }
-} // namespace torch

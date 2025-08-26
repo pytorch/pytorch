@@ -156,9 +156,7 @@ void calculate_mode(
   scalar_t* iter_begin = data;
   scalar_t* iter_end = data + n_element;
 
-  scalar_t mode;
-  int64_t index;
-  std::tie(mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end);
+  auto [mode, index] = ModeImpl<scalar_t>{}(iter_begin, iter_end);
 
   // Place mode, index in output
   scalar_t* values_data = values.mutable_data_ptr<scalar_t>();
@@ -209,7 +207,7 @@ void handle_fused_mode(
   constexpr int num_threads = size / 2;
   int warp_size = at::cuda::warp_size();
   TORCH_INTERNAL_ASSERT(num_threads % warp_size == 0 &&
-                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
+                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads(), "");
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>

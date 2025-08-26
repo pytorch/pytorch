@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
+
 import torch
 import torch.nn as nn
-
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 

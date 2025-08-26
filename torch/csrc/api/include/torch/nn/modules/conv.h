@@ -17,8 +17,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
@@ -26,11 +25,14 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_)
       : options(std::move(options_)) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-    reset();
+    ConvNdImpl::reset();
   }
 
   void reset() override {
+    TORCH_CHECK(
+        options.in_channels() > 0 && options.groups() > 0 &&
+            options.out_channels() > 0,
+        "in_channels, groups and out_channels must be a positive integer.");
     TORCH_CHECK(
         options.in_channels() % options.groups() == 0,
         "in_channels must be divisible by groups");
@@ -38,7 +40,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
         options.out_channels() % options.groups() == 0,
         "out_channels must be divisible by groups");
 
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](enumtype::kValid) {
               _reversed_padding_repeated_twice.resize(2 * D);
@@ -103,9 +105,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
         /*a=*/std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
     if (bias.defined()) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t fan_in, fan_out;
-      std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+      auto [fan_in, fan_out] = init::_calculate_fan_in_and_fan_out(weight);
       auto bound = 1 / std::sqrt(fan_in);
       init::uniform_(bias, -bound, bound);
     }
@@ -117,7 +117,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
            << "(" << options.in_channels() << ", " << options.out_channels()
            << ", kernel_size=" << options.kernel_size()
            << ", stride=" << options.stride();
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](enumtype::kValid) { stream << ", padding='valid'"; },
             [&](enumtype::kSame) { stream << ", padding='same'"; },
@@ -139,7 +139,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
     if (!options.bias()) {
       stream << ", bias=" << std::boolalpha << false;
     }
-    if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
       stream << ", padding_mode="
              << enumtype::get_enum_name(options.padding_mode());
     }
@@ -166,7 +166,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv1dOptions` class to learn what
@@ -198,7 +198,7 @@ TORCH_MODULE(Conv1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv2d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv2dOptions` class to learn what
@@ -233,7 +233,7 @@ TORCH_MODULE(Conv2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv3d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv3dOptions` class to learn what
@@ -272,7 +272,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
   explicit ConvTransposeNdImpl(detail::ConvNdOptions<D> options_)
       : ConvNdImpl<D, Derived>(options_) {
     TORCH_INTERNAL_ASSERT(
-        c10::holds_alternative<ExpandingArray<D>>(this->options.padding()),
+        std::holds_alternative<ExpandingArray<D>>(this->options.padding()),
         "ConvTranspose padding cannot be a string");
   }
 
@@ -299,7 +299,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
     if (!this->options.bias()) {
       stream << ", bias=" << std::boolalpha << false;
     }
-    if (!c10::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
+    if (!std::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
       stream << ", padding_mode="
              << enumtype::get_enum_name(this->options.padding_mode());
     }
@@ -308,12 +308,12 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 
  protected:
   const ExpandingArray<D>& padding() const {
-    return c10::get<ExpandingArray<D>>(this->options.padding());
+    return std::get<ExpandingArray<D>>(this->options.padding());
   }
 
   std::vector<int64_t> _output_padding(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size,
+      const std::optional<at::IntArrayRef>& output_size,
       const ExpandingArray<D>& stride,
       const ExpandingArray<D>& padding,
       const ExpandingArray<D>& kernel_size);
@@ -323,7 +323,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose1dOptions` class to learn
@@ -348,10 +348,10 @@ class TORCH_API ConvTranspose1dImpl
   explicit ConvTranspose1dImpl(ConvTranspose1dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose1dImpl`.
@@ -365,7 +365,7 @@ TORCH_MODULE(ConvTranspose1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose2dOptions` class to learn
@@ -390,10 +390,10 @@ class TORCH_API ConvTranspose2dImpl
   explicit ConvTranspose2dImpl(ConvTranspose2dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose2dImpl`.
@@ -407,7 +407,7 @@ TORCH_MODULE(ConvTranspose2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose3dOptions` class to learn
@@ -432,10 +432,10 @@ class TORCH_API ConvTranspose3dImpl
   explicit ConvTranspose3dImpl(ConvTranspose3dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
 };
 
 /// A `ModuleHolder` subclass for `ConvTranspose3dImpl`.
@@ -445,5 +445,4 @@ class TORCH_API ConvTranspose3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ConvTranspose3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

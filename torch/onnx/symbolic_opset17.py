@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 17.
 
 Note [ONNX Operators that are added/updated in opset 17]
@@ -16,17 +18,19 @@ New operators:
 """
 
 import functools
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import _C
 from torch.onnx import _type_utils, errors, symbolic_helper
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
 
-__all__ = ["layer_norm", "stft"]
+__all__ = ["layer_norm", "stft", "quantized_layer_norm"]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
@@ -47,6 +51,16 @@ def layer_norm(
     # layer_norm normalizes on the last D dimensions,
     # where D is the size of normalized_shape
     axis = -len(normalized_shape)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.FLOAT
+    )
+    dtype = scalar_type.dtype()
+    if symbolic_helper._is_none(weight):
+        weight_value = torch.ones(normalized_shape, dtype=dtype)
+        weight = g.op("Constant", value_t=weight_value)
+    if symbolic_helper._is_none(bias):
+        bias_value = torch.zeros(normalized_shape, dtype=dtype)
+        bias = g.op("Constant", value_t=bias_value)
     return g.op(
         "LayerNormalization",
         input,
@@ -55,6 +69,24 @@ def layer_norm(
         epsilon_f=eps,
         axis_i=axis,
     )
+
+
+@_onnx_symbolic("quantized::layer_norm")
+def quantized_layer_norm(
+    g: jit_utils.GraphContext,
+    x,
+    normalized_shape,
+    weight,
+    bias,
+    eps,
+    op_scale,
+    op_zero_point,
+):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+    output = layer_norm(g, x, normalized_shape, weight, bias, eps, False)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
 def _compute_edge_sizes(n_fft, window_size):
@@ -66,8 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b")
-@_beartype.beartype
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -78,6 +109,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
+    align_to_window: Optional[bool] = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.
@@ -106,6 +138,12 @@ def stft(
             msg="STFT does not currently support complex types", value=input
         )
 
+    if align_to_window is not None:
+        raise errors.SymbolicValueError(
+            msg="STFT does not currently support the align_to_window option",
+            value=input,
+        )  # TODO(#145944): add compatibility with align_to_window option.
+
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
     frame_step_const = g.op(
@@ -125,7 +163,7 @@ def stft(
             signal,
             g.op("Constant", value_t=torch.tensor([0], dtype=torch.int64)),
         )
-    elif signal_rank > 2:
+    elif signal_rank is None or signal_rank > 2:
         raise errors.SymbolicValueError(
             msg="STFT can only take inputs of 1 [signal] or 2 [batch, signal] dimensions. "
             f"Current rank of signal is {signal_rank}, please reduce it.",
@@ -144,8 +182,8 @@ def stft(
         # Center window around zeros if needed (required by ONNX's STFT)
         if n_win < n_fft:
             left, right = _compute_edge_sizes(n_fft, n_win)
-            left_win = g.op("Constant", value_t=torch.zeros((left)))
-            right_win = g.op("Constant", value_t=torch.zeros((right)))
+            left_win = g.op("Constant", value_t=torch.zeros(left))
+            right_win = g.op("Constant", value_t=torch.zeros(right))
             window = g.op("Concat", left_win, window, right_win, axis_i=0)
 
     # Create window, if needed
@@ -161,11 +199,11 @@ def stft(
             # Center window, if needed
             left, right = _compute_edge_sizes(n_fft, win_length)
             torch_window = torch.hstack(
-                (torch.zeros((left)), torch.ones((win_length)), torch.zeros((right)))
+                (torch.zeros(left), torch.ones(win_length), torch.zeros(right))
             )
         else:
             # Rectangle window
-            torch_window = torch.ones((n_fft))
+            torch_window = torch.ones(n_fft)
         assert torch_window.shape[0] == n_fft
         window = g.op("Constant", value_t=torch_window)
     window = g.op(

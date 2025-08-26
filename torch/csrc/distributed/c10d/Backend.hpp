@@ -1,30 +1,35 @@
 #pragma once
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
-#include <stdexcept>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
+enum class ErrorType {
+  SUCCESS = 0,
+  TIMEOUT = 1,
+  // e.g., NCCL error, etc
+  COMM_ERROR = 2,
+  // TODO, do we need to distinguish between remote timeout or remote COMM
+  // errors?
+  REMOTE_ERROR = 3
+};
+
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
-
   // Backend Options is a base struct that defines the basic options
   // when constructing a Backend. Each Backend subclass should
   // extend this struct and define its options if it wants to provide more
@@ -39,7 +44,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     std::chrono::milliseconds timeout;
 
     // backend name
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
+    std::string group_name;
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   explicit Backend(int rank, int size);
@@ -53,22 +61,61 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
+  // Returns an unique opaque ID of this backend that can be used to correlate
+  // with its collectives.
+  int64_t getID() const {
+    return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  virtual bool supportsSplitting() const {
+    return false;
+  }
+
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
+  virtual bool supportsTimeEstimation() const {
+    return false;
+  }
+
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support setting timeout"));
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), " does not implement startCoalescing"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not implement startCoalescing"));
   }
 
   virtual c10::intrusive_ptr<Work> endCoalescing() {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), " does not implement endCoalescing"));
+        c10::str(
+            "Backend ", getBackendName(), " does not implement endCoalescing"));
   }
 
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
-  };
+  }
+
+  // Subclasses must override this method to return the backend name
+  virtual c10::intrusive_ptr<Options> getBackendOptions() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not implement getBackendOptions."));
+  }
 
   virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
@@ -84,6 +131,17 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -201,8 +259,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector corresponds to
-  // an input/output of one `reduce_scatter_tensor` operation.
+  // still named as `_reduce_scatter_base`). Each tensor in the vector
+  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
   virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& /* outputs */,
       std::vector<at::Tensor>& /* inputs */,
@@ -279,7 +337,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* dstRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), " does not support send"));
+        false,
+        c10::str("Backend ", getBackendName(), " does not support send"));
   }
 
   virtual c10::intrusive_ptr<Work> recv(
@@ -287,7 +346,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* srcRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), " does not support recv"));
+        false,
+        c10::str("Backend ", getBackendName(), " does not support recv"));
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
@@ -306,18 +366,148 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support barrier"));
   }
 
+  virtual void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+    TORCH_CHECK(
+        false,
+        "Only ProcessGrouppNCCL supports onCompletion hook, but got ",
+        getBackendName(),
+        " backend.");
+  }
+
+  virtual void waitForPendingWorks() {
+    TORCH_CHECK(
+        false,
+        "Only ProcessGrouppNCCL supports waitForPendingWorks, but got ",
+        getBackendName(),
+        " backend.");
+  }
+
+  virtual void enableCollectivesTiming() {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of enableCollectivesTiming.");
+  }
+
+  virtual c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Options>& opts) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of split.");
+  }
+
+  virtual c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Options>& opts,
+      const int& rank,
+      const int& size) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of merge.");
+  }
+
+  bool hasHooks() const {
+    return onCompletionHook_ != nullptr;
+  }
+
+  // Do not call this directly, use ProcessGroup::setGroupName instead.
+  void setGroupUid(const std::string& pg_uid) {
+    pg_uid_ = pg_uid;
+  }
+
+  const std::string& getGroupUid() const {
+    return pg_uid_;
+  }
+
+  void setGroupDesc(const std::string& desc) {
+    pg_desc_ = desc;
+  }
+
+  const std::string& getGroupDesc() const {
+    return pg_desc_;
+  }
+
+  // See similar functions in ProcessGroup.hpp for context.
+  std::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  // Perform an eager connect to the specified device if the backend supports
+  // it.
+  virtual void eagerConnectSingleDevice(at::Device device) {
+    // no-op in the default case; this is an optimization some
+    // backends may perform
+  }
+
+  void setBoundDeviceId(std::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
+
+  virtual ErrorType getError() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support getError"));
+  }
+
+  virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support getMemAllocator"));
+  }
+
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  // Returns true if backend supports tensor allocation
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+    // Change to true in concrete backend if supported
+    return false;
+  }
+
+  // Aborts all pending operations and connections in the backend if the backend
+  // supports it.
+  virtual void abort() {}
+
+  // Shutdown the backend if the backend supports it. This should be used for
+  // normal shutdown.
+  virtual void shutdown() {}
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int rank_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+  std::string pg_uid_;
+  std::string pg_desc_;
+
+  std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
+
+  std::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

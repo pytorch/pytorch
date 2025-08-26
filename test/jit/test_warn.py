@@ -1,23 +1,20 @@
 # Owner(s): ["oncall: jit"]
 
+import io
 import os
 import sys
-import io
-
-import torch
 import warnings
 from contextlib import redirect_stderr
+
+import torch
 from torch.testing import FileCheck
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
 
 class TestWarn(JitTestCase):
@@ -30,12 +27,9 @@ class TestWarn(JitTestCase):
         with redirect_stderr(f):
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=1,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=1, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_only_once(self):
         @torch.jit.script
@@ -47,12 +41,9 @@ class TestWarn(JitTestCase):
         with redirect_stderr(f):
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=1,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=1, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_only_once_in_loop_func(self):
         def w():
@@ -67,12 +58,9 @@ class TestWarn(JitTestCase):
         with redirect_stderr(f):
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=1,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=1, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_once_per_func(self):
         def w1():
@@ -90,12 +78,9 @@ class TestWarn(JitTestCase):
         with redirect_stderr(f):
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=2,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=2, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_once_per_func_in_loop(self):
         def w1():
@@ -114,12 +99,9 @@ class TestWarn(JitTestCase):
         with redirect_stderr(f):
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=2,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=2, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_multiple_calls_multiple_warnings(self):
         @torch.jit.script
@@ -131,12 +113,9 @@ class TestWarn(JitTestCase):
             fn()
             fn()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you",
-                count=2,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you", count=2, exactly=True
+        ).run(f.getvalue())
 
     def test_warn_multiple_calls_same_func_diff_stack(self):
         def warn(caller: str):
@@ -155,13 +134,16 @@ class TestWarn(JitTestCase):
             foo()
             bar()
 
-        FileCheck() \
-            .check_count(
-                str="UserWarning: I am warning you from foo",
-                count=1,
-                exactly=True) \
-            .check_count(
-                str="UserWarning: I am warning you from bar",
-                count=1,
-                exactly=True) \
-            .run(f.getvalue())
+        FileCheck().check_count(
+            str="UserWarning: I am warning you from foo",
+            count=1,
+            exactly=True,
+        ).check_count(
+            str="UserWarning: I am warning you from bar",
+            count=1,
+            exactly=True,
+        ).run(f.getvalue())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

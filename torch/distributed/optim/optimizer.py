@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import logging
-
 from collections import defaultdict
 from threading import Lock
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -11,7 +11,9 @@ import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
+
 from .utils import functional_optim_map
+
 
 __all__ = ["DistributedOptimizer"]
 
@@ -49,7 +51,7 @@ class _ScriptLocalOptimizer(nn.Module):
     def step(self, autograd_ctx_id: int):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
-        grads: List[Optional[Tensor]] = [
+        grads: list[Optional[Tensor]] = [
             all_local_grads[p] if p in all_local_grads else None
             for p in self._local_params
         ]
@@ -204,7 +206,7 @@ class DistributedOptimizer:
                 "(i.e. Distributed Model Parallel training on CPU) due to the Python's "
                 "Global Interpreter Lock (GIL). Please file an issue if you need this "
                 "optimizer in TorchScript. ",
-                optimizer_class
+                optimizer_class,
             )
             optimizer_new_func = _new_local_optimizer
 
@@ -236,18 +238,18 @@ class DistributedOptimizer:
         """
         dist_autograd._is_valid_context(context_id)
 
-        if self.is_functional_optim:
-            optimizer_step_func = _script_local_optimizer_step
-        else:
-            optimizer_step_func = _local_optimizer_step
+        optimizer_step_func = (
+            _script_local_optimizer_step
+            if self.is_functional_optim
+            else _local_optimizer_step
+        )
 
-        rpc_futs = []
-        for optimizer in self.remote_optimizers:
-            rpc_futs.append(
-                rpc.rpc_async(
-                    optimizer.owner(),
-                    optimizer_step_func,
-                    args=(optimizer, context_id),
-                )
+        rpc_futs = [
+            rpc.rpc_async(
+                optimizer.owner(),
+                optimizer_step_func,
+                args=(optimizer, context_id),
             )
+            for optimizer in self.remote_optimizers
+        ]
         _wait_for_all(rpc_futs)

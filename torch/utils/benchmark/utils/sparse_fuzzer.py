@@ -1,4 +1,5 @@
-from typing import Optional, Tuple, Union
+# mypy: allow-untyped-defs
+from typing import Optional, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor
@@ -8,7 +9,7 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
+        size: tuple[Union[str, int], ...],
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
         dim_parameter: Optional[str] = None,
@@ -97,7 +98,7 @@ class FuzzedSparseTensor(FuzzedTensor):
 
         is_coalesced = params['coalesced']
         sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
-        sparse_dim = len(size) if len(size) < sparse_dim else sparse_dim
+        sparse_dim = min(sparse_dim, len(size))
         tensor = self.sparse_tensor_constructor(size, self._dtype, sparse_dim, nnz, is_coalesced)
 
         if self._cuda:

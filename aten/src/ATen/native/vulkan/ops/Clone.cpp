@@ -8,15 +8,12 @@
 #include <ATen/ops/empty_strided.h>
 #endif
 
-namespace at {
-namespace native {
-namespace vulkan {
-namespace ops {
+namespace at::native::vulkan::ops {
 namespace {
 
 Tensor clone(
     const Tensor& src,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
   TORCH_CHECK(
       (c10::MemoryFormat::Preserve == memory_format) ||
@@ -48,7 +45,4 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 #endif /* USE_VULKAN_API */
 
 } // namespace
-} // namespace ops
-} // namespace vulkan
-} // namespace native
-} // namespace at
+} // namespace at::native::vulkan::ops

@@ -3,10 +3,10 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 #ifdef TORCH_USE_CUDA_DSA
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 // Copy string from `src` to `dst`
 static __device__ void dstrcpy(char* dst, const char* src) {
   int i = 0;
@@ -65,6 +65,7 @@ static __device__ void dsa_add_new_assertion_failure(
   self.thread_id[1] = thread_id.y;
   self.thread_id[2] = thread_id.z;
 }
+C10_CLANG_DIAGNOSTIC_POP()
 
 // Emulates a kernel assertion. The assertion won't stop the kernel's progress,
 // so you should assume everything the kernel produces is garbage if there's an
@@ -94,5 +95,4 @@ static __device__ void dsa_add_new_assertion_failure(
 #define CUDA_KERNEL_ASSERT2(condition) assert(condition)
 #endif
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

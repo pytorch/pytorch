@@ -12,12 +12,12 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
+
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict, TypeVar
 
-from torchgen.model import BaseTy, ScalarType
-
-from .types_base import (
+from torchgen.api.types.types_base import (
     BaseCppType,
     BaseCType,
     boolT,
@@ -30,12 +30,12 @@ from .types_base import (
     longT,
     shortT,
 )
+from torchgen.model import BaseTy, ScalarType
 
-_T = TypeVar("_T")
 
 TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
-    "const c10::List<c10::optional<at::Tensor>> &",
+    "const c10::List<::std::optional<at::Tensor>> &",
     "const at::ITensorListRef &",
 ]
 
@@ -47,6 +47,11 @@ complexHalfT = BaseCppType(
 complexFloatT = BaseCppType("c10", "complex<float>")
 complexDoubleT = BaseCppType("c10", "complex<double>")
 bfloat16T = BaseCppType("at", "BFloat16")
+float8_e5m2T = BaseCppType("at", "Float8_e5m2")
+float8_e5m2fnuzT = BaseCppType("at", "Float8_e5m2fnuz")
+float8_e4m3fnT = BaseCppType("at", "Float8_e4m3fn")
+float8_e4m3fnuzT = BaseCppType("at", "Float8_e4m3fnuz")
+float8_e8m0fnuT = BaseCppType("at", "Float8_e8m0fnu")
 stringT = BaseCppType("c10", "string_view")
 generatorT = BaseCppType("at", "Generator")
 scalarTypeT = BaseCppType("at", "ScalarType")
@@ -60,6 +65,7 @@ dimnameListT = BaseCppType("at", "DimnameList")
 dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
+deviceIndexT = BaseCppType("at", "DeviceIndex")
 scalarT = BaseCppType("at", "Scalar")
 optionalScalarRefT = BaseCppType("at", "OptionalScalarRef")
 memoryFormatT = BaseCppType("at", "MemoryFormat")
@@ -80,7 +86,7 @@ symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
 scalar_t = BaseCppType("", "scalar_t")
 opmath_t = BaseCppType("", "opmath_t")
 
-ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
+ScalarTypeToCppMapping: dict[ScalarType, BaseCppType] = {
     ScalarType.Byte: byteT,
     ScalarType.Char: charT,
     ScalarType.Short: shortT,
@@ -93,10 +99,14 @@ ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
     ScalarType.ComplexFloat: complexFloatT,
     ScalarType.ComplexDouble: complexDoubleT,
     ScalarType.Bool: boolT,
-    ScalarType.BFloat16: bfloat16T,
+    ScalarType.Float8_e5m2: float8_e5m2T,
+    ScalarType.Float8_e5m2fnuz: float8_e5m2fnuzT,
+    ScalarType.Float8_e4m3fn: float8_e4m3fnT,
+    ScalarType.Float8_e4m3fnuz: float8_e4m3fnuzT,
+    ScalarType.Float8_e8m0fnu: float8_e8m0fnuT,
 }
 
-BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
+BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
@@ -108,6 +118,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
+    BaseTy.DeviceIndex: deviceIndexT,
     BaseTy.Scalar: scalarT,
     BaseTy.MemoryFormat: memoryFormatT,
     BaseTy.QScheme: qschemeT,
@@ -121,46 +132,37 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
 
 @dataclass(frozen=True)
 class OptionalCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f"c10::optional<{self.elem.cpp_type()}>"
+        return f"::std::optional<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        return f"c10::optional<{self.elem.cpp_type_registration_declarations()}>"
-
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return OptionalCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ListCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f"c10::List<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        return f"c10::List<{self.elem.cpp_type_registration_declarations()}>"
-
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return ListCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ArrayRefCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f"at::ArrayRef<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        return f"ArrayRef<{self.elem.cpp_type_registration_declarations()}>"
-
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return ArrayRefCType(self.elem.remove_const_ref())
 
 
@@ -175,8 +177,5 @@ class VectorizedCType(CType):
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         return f"at::vec::Vectorized<{self.elem.cpp_type()}>"
 
-    def cpp_type_registration_declarations(self) -> str:
-        raise NotImplementedError
-
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return self

@@ -1,5 +1,6 @@
+#pragma once
+
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
@@ -19,6 +20,8 @@ struct IncrementRAII final {
   ~IncrementRAII() {
     _counter->fetch_sub(1);
   }
+  IncrementRAII(IncrementRAII&&) = delete;
+  IncrementRAII& operator=(IncrementRAII&&) = delete;
 
  private:
   std::atomic<int32_t>* _counter;
@@ -56,8 +59,7 @@ class LeftRight final {
       : _counters{{{0}, {0}}},
         _foregroundCounterIndex(0),
         _foregroundDataIndex(0),
-        _data{{T{args...}, T{args...}}},
-        _writeMutex() {}
+        _data{{T{args...}, T{args...}}} {}
 
   // Copying and moving would not be threadsafe.
   // Needs more thought and careful design to make that work.
@@ -68,7 +70,9 @@ class LeftRight final {
 
   ~LeftRight() {
     // wait until any potentially running writers are finished
-    { std::unique_lock<std::mutex> lock(_writeMutex); }
+    {
+      std::unique_lock<std::mutex> lock(_writeMutex);
+    }
 
     // wait until any potentially running readers are finished
     while (_counters[0].load() != 0 || _counters[1].load() != 0) {
@@ -77,26 +81,26 @@ class LeftRight final {
   }
 
   template <typename F>
-  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
+  auto read(F&& readFunc) const {
     detail::IncrementRAII _increment_counter(
         &_counters[_foregroundCounterIndex.load()]);
 
-    return readFunc(_data[_foregroundDataIndex.load()]);
+    return std::forward<F>(readFunc)(_data[_foregroundDataIndex.load()]);
   }
 
   // Throwing an exception in writeFunc is ok but causes the state to be either
   // the old or the new state, depending on if the first or the second call to
   // writeFunc threw.
   template <typename F>
-  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
+  auto write(F&& writeFunc) {
     std::unique_lock<std::mutex> lock(_writeMutex);
 
-    return _write(writeFunc);
+    return _write(std::forward<F>(writeFunc));
   }
 
  private:
   template <class F>
-  auto _write(const F& writeFunc) -> typename c10::invoke_result_t<F, T&> {
+  auto _write(const F& writeFunc) {
     /*
      * Assume, A is in background and B in foreground. In simplified terms, we
      * want to do the following:
@@ -164,7 +168,7 @@ class LeftRight final {
   template <class F>
   auto _callWriteFuncOnBackgroundInstance(
       const F& writeFunc,
-      uint8_t localDataIndex) -> typename c10::invoke_result_t<F, T&> {
+      uint8_t localDataIndex) {
     try {
       return writeFunc(_data[localDataIndex ^ 1]);
     } catch (...) {
@@ -202,16 +206,20 @@ class RWSafeLeftRightWrapper final {
   RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
   RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
   RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
+  ~RWSafeLeftRightWrapper() = default;
 
   template <typename F>
-  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+  auto read(F&& readFunc) const {
     return data_.withLock(
-        [&readFunc](T const& data) { return readFunc(data); });
+        [&readFunc](T const& data) { return std::forward<F>(readFunc)(data); });
   }
 
   template <typename F>
-  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
-    return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+  auto write(F&& writeFunc) {
+    return data_.withLock(
+        [&writeFunc](T& data) { return std::forward<F>(writeFunc)(data); });
   }
 
  private:

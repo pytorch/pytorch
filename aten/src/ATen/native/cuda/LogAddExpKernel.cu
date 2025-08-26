@@ -32,8 +32,8 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp2_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
@@ -51,7 +51,7 @@ void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
-REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda)
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda)
 
 } // namespace at::native

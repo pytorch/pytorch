@@ -14,13 +14,10 @@ import sys
 import time
 from typing import Any, BinaryIO
 
+
 LINTER_CODE = "RUFF"
+SYNTAX_ERROR = "E999"
 IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    """Print to stderr."""
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, enum.Enum):
@@ -149,7 +146,7 @@ def add_default_options(parser: argparse.ArgumentParser) -> None:
 
 def explain_rule(code: str) -> str:
     proc = run_command(
-        ["ruff", "rule", "--format=json", code],
+        ["ruff", "rule", "--output-format=json", code],
         check=True,
     )
     rule = json.loads(str(proc.stdout, "utf-8").strip())
@@ -187,7 +184,7 @@ def get_issue_severity(code: str) -> LintSeverity:
 
     # "F821": Undefined name
     # "E999": syntax error
-    if any(code.startswith(x) for x in ("F821", "E999", "PLE")):
+    if any(code.startswith(x) for x in ("F821", SYNTAX_ERROR, "PLE")):
         return LintSeverity.ERROR
 
     # "F": PyFlakes Error
@@ -225,9 +222,10 @@ def check_files(
                 sys.executable,
                 "-m",
                 "ruff",
+                "check",
                 "--exit-zero",
                 "--quiet",
-                "--format=json",
+                "--output-format=json",
                 *([f"--config={config}"] if config else []),
                 *filenames,
             ],
@@ -268,27 +266,28 @@ def check_files(
     else:
         rules = {}
 
-    return [
-        LintMessage(
+    def lint_message(vuln: dict[str, Any]) -> LintMessage:
+        code = vuln["code"] or SYNTAX_ERROR
+        return LintMessage(
             path=vuln["filename"],
-            name=vuln["code"],
+            name=code,
             description=(
                 format_lint_message(
                     vuln["message"],
-                    vuln["code"],
+                    code,
                     rules,
-                    show_disable,
+                    show_disable and bool(vuln["code"]),
                 )
             ),
             line=int(vuln["location"]["row"]),
             char=int(vuln["location"]["column"]),
             code=LINTER_CODE,
-            severity=severities.get(vuln["code"], get_issue_severity(vuln["code"])),
+            severity=severities.get(code, get_issue_severity(code)),
             original=None,
             replacement=None,
         )
-        for vuln in vulnerabilities
-    ]
+
+    return [lint_message(v) for v in vulnerabilities]
 
 
 def check_file_for_fixes(
@@ -307,6 +306,7 @@ def check_file_for_fixes(
                     sys.executable,
                     "-m",
                     "ruff",
+                    "check",
                     "--fix-only",
                     "--exit-zero",
                     *([f"--config={config}"] if config else []),

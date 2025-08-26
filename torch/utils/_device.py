@@ -1,9 +1,15 @@
-import torch
-from torch.overrides import TorchFunctionMode
-from torch.utils._contextlib import context_decorator
+# mypy: allow-untyped-defs
 import functools
+from typing import Optional
 
-CURRENT_DEVICE = None
+import torch
+from torch._C import _len_torch_function_stack
+from torch.overrides import _pop_mode, _push_mode, TorchFunctionMode
+from torch.utils._contextlib import context_decorator
+
+
+CURRENT_DEVICE: Optional[torch.device] = None
+
 
 @functools.lru_cache(1)
 def _device_constructors():
@@ -21,7 +27,6 @@ def _device_constructors():
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
         torch.full,
-        torch.fill,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
@@ -30,7 +35,6 @@ def _device_constructors():
         torch.nested.nested_tensor,
         # This function doesn't actually take a device argument
         # torch.normal,
-        torch.ones,
         torch.rand,
         torch.randn,
         torch.randint,
@@ -44,7 +48,6 @@ def _device_constructors():
         torch.sparse_bsc_tensor,
         torch.tril_indices,
         torch.triu_indices,
-        torch.vander,
         torch.zeros,
         torch.asarray,
         # weird ones
@@ -52,6 +55,7 @@ def _device_constructors():
         torch.as_tensor,
         torch.scalar_tensor,
     }
+
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
@@ -62,28 +66,53 @@ class DeviceContext(TorchFunctionMode):
         global CURRENT_DEVICE
         self.old_device = CURRENT_DEVICE
         CURRENT_DEVICE = self.device
-        return super().__enter__()
+        # We need to put the device at the bottom of the stack
+        # If we set default device within a function mode context
+        # exiting that context mode will pop the device function mode off
+        # of the stack incorrectly
+        cur_stack = [_pop_mode() for _ in range(_len_torch_function_stack())]
+
+        _push_mode(self)
+
+        for mode in reversed(cur_stack):
+            _push_mode(mode)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE
         CURRENT_DEVICE = self.old_device
-        return super().__exit__(exc_type, exc_val, exc_tb)
+        cur_stack = []
+        # Invariant: there should only be one DeviceContext on the stack at any time
+        # (At the bottom), pop all modes until we hit the bottom, assert it's a DeviceContext
+        # or else someone else has popped it!
+        for _ in range(_len_torch_function_stack() - 1):
+            mode = _pop_mode()
+            assert not isinstance(mode, DeviceContext)
+            cur_stack.append(mode)
+
+        if _len_torch_function_stack() > 0:
+            mode = _pop_mode()
+            assert isinstance(mode, DeviceContext)
+
+        for mode in reversed(cur_stack):
+            _push_mode(mode)
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if func in _device_constructors() and kwargs.get('device') is None:
-            kwargs['device'] = self.device
+        if func in _device_constructors() and kwargs.get("device") is None:
+            kwargs["device"] = self.device
         return func(*args, **kwargs)
+
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 def device_decorator(device, func):
     return context_decorator(lambda: device, func)
 
+
 def set_device(device):
     """
-    Decorator which sets the default device inside of the wrapped
-    function.  If you would like to use this as a context manager,
-    use device as a context manager directly, e.g.,
-    ``with torch.device(device)``.
+    Set the default device inside of the wrapped function by decorating it with this function.
+
+    If you would like to use this as a context manager, use device as a
+    context manager directly, e.g., ``with torch.device(device)``.
     """
     return lambda func: device_decorator(torch.device(device), func)

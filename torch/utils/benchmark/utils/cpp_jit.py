@@ -5,7 +5,7 @@ import re
 import shutil
 import textwrap
 import threading
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType, TimeitModuleType
@@ -63,7 +63,7 @@ def _get_build_root() -> str:
 #   analysis and the shims no longer justify their maintenance and code
 #   complexity costs) back testing paths will be removed.
 
-CXX_FLAGS: Optional[List[str]]
+CXX_FLAGS: Optional[list[str]]
 if hasattr(torch.__config__, "_cxx_flags"):
     try:
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
@@ -81,7 +81,7 @@ else:
     # FIXME: Remove when back testing is no longer required.
     CXX_FLAGS = ["-O2", "-fPIC", "-g"]
 
-EXTRA_INCLUDE_PATHS: List[str] = [os.path.join(SOURCE_ROOT, "valgrind_wrapper")]
+EXTRA_INCLUDE_PATHS: list[str] = [os.path.join(SOURCE_ROOT, "valgrind_wrapper")]
 CONDA_PREFIX = os.getenv("CONDA_PREFIX")
 if CONDA_PREFIX is not None:
     # Load will automatically search /usr/include, but not conda include.
@@ -137,7 +137,7 @@ def _compile_template(
         os.makedirs(build_dir, exist_ok=True)
 
         src_path = os.path.join(build_dir, "timer_src.cpp")
-        with open(src_path, "wt") as f:
+        with open(src_path, "w") as f:
             f.write(src)
 
     # `cpp_extension` has its own locking scheme, so we don't need our lock.
@@ -154,7 +154,7 @@ def _compile_template(
 
 def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> TimeitModuleType:
     template_path: str = os.path.join(SOURCE_ROOT, "timeit_template.cpp")
-    with open(template_path, "rt") as f:
+    with open(template_path) as f:
         src: str = f.read()
 
     module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
@@ -164,7 +164,7 @@ def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> Time
 
 def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> str:
     template_path: str = os.path.join(SOURCE_ROOT, "valgrind_wrapper", "timer_callgrind_template.cpp")
-    with open(template_path, "rt") as f:
+    with open(template_path) as f:
         src: str = f.read()
 
     target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)

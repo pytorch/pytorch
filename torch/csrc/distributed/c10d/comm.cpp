@@ -60,15 +60,14 @@ class BroadcastWork {
 
 // Broadcast many tensors to all processes in the process group.
 void broadcast_coalesced(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank) {
   // Coalesce tensors into buckets taking into account the maximum buffer size.
   // This routine is multi-device aware, so the tensors can be split across
   // multiple devices and can contain a mix of CPU and CUDA tensors.
-  std::vector<std::vector<size_t>> buckets;
-  std::tie(buckets, std::ignore) =
+  auto [buckets, _] =
       compute_bucket_assignment_by_size(tensors.vec(), {buffer_size});
 
   // Returns tensor at specified index in input tensor list.

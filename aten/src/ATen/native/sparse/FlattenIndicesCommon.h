@@ -48,10 +48,9 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
   const auto hash_coeffs = std::get<0>(*hash_coeffs_storage);
 
   const auto hash_indices = [&]() -> Tensor {
-    // non-const because of gcc-5/clang-5 issues
-    auto sparse_dim = indices.size(0);
-    auto indices_dim_stride = indices.stride(0);
-    auto indices_nnz_stride = indices.stride(1);
+    const auto sparse_dim = indices.size(0);
+    const auto indices_dim_stride = indices.stride(0);
+    const auto indices_nnz_stride = indices.stride(1);
 
     auto hash = at::arange(indices.size(1), indices.options().dtype(kLong));
 
@@ -62,7 +61,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
       .build();
 
     {
-      const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
+      const auto* RESTRICT ptr_indices = indices.const_data_ptr<index_t>();
 
       KernelLauncher<kernel_t>::launch(iter,
           // NOTE: capture by value required by CUDA
@@ -87,7 +86,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
 template <template <typename func_t> class kernel_t>
 Tensor _flatten_indices(const Tensor& indices, IntArrayRef size) {
   TORCH_CHECK(indices.dim() > 1 && static_cast<size_t>(indices.size(0)) == size.size(),
-      NAME, "(): the dimensionality of sparse `indices` and the lenght of `size` must match. ",
+      NAME, "(): the dimensionality of sparse `indices` and the length of `size` must match. ",
             "Got `indices.size(0) == ", indices.size(0), "` != `size.size() == ", size.size(), "`.");
   Tensor flattened_indices;
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME, [&] () {

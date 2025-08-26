@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
 HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
@@ -25,10 +26,7 @@ try:
     PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 except subprocess.CalledProcessError:
     # If git is not installed, compute repo root as 3 folders up from this file
-    path_ = os.path.abspath(__file__)
-    for _ in range(4):
-        path_ = os.path.dirname(path_)
-    PYTORCH_ROOT = path_
+    PYTORCH_ROOT = str(Path(__file__).absolute().parents[3])
 
 DRY_RUN = False
 
@@ -59,7 +57,7 @@ def report_download_progress(
     if file_size != -1:
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = "#" * int(64 * percent)
-        sys.stdout.write("\r0% |{:<64}| {}%".format(bar, int(percent * 100)))
+        sys.stdout.write(f"\r0% |{bar:<64}| {int(percent * 100)}%")
 
 
 def check(binary_path: Path, reference_hash: str) -> bool:
@@ -205,7 +203,7 @@ if __name__ == "__main__":
     # If the host platform is not in platform_to_hash, it is unsupported.
     if host_platform not in config:
         logging.error("Unsupported platform: %s/%s", HOST_PLATFORM, HOST_PLATFORM_ARCH)
-        exit(1)
+        sys.exit(1)
 
     url = config[host_platform]["download_url"]
     hash = config[host_platform]["hash"]

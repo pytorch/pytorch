@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
 #include <cstddef>
 #include <functional>
 #include <utility>

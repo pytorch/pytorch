@@ -1,0 +1,48 @@
+name: Build almalinux docker images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-almalinux-images.yml
+      - .github/actions/binary-docker-build/**
+  pull_request:
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-almalinux-images.yml
+      - .github/actions/binary-docker-build/**
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-docker:
+    if: github.repository_owner == 'pytorch'
+    environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
+    runs-on: linux.9xlarge.ephemeral
+    strategy:
+      matrix:
+        tag: ["cuda12.6", "cuda12.8", "cuda12.9", "cuda13.0", "rocm6.3", "rocm6.4", "cpu"]
+    steps:
+      - name: Build docker image
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        with:
+          docker-image-name: almalinux-builder
+          custom-tag-prefix: ${{matrix.tag}}
+          docker-build-dir: almalinux
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}

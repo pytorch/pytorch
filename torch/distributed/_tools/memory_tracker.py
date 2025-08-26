@@ -1,31 +1,25 @@
-from collections import defaultdict
-
-from itertools import chain
-
+# mypy: allow-untyped-defs
+import operator
 import pickle
-
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    no_type_check,
-    Sequence,
-)
+from collections import defaultdict
+from collections.abc import Sequence
+from itertools import chain
+from typing import Any, Callable, no_type_check, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 BYTES_PER_MB = 1024 * 1024.0
 
 
 class MemoryProfileDispatchMode(TorchDispatchMode):
-    """
-    Run in ``TorchDispatchMode`` to get memory stats at operator level.
-    """
+    """Run in ``TorchDispatchMode`` to get memory stats at operator level."""
 
     def __init__(self, memory_tracker) -> None:
         self.memory_tracker = memory_tracker
@@ -51,8 +45,9 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
 
 class MemoryTracker:
     """
-    Collect and plot the memory stats including ``memories_allocated``, ``memories_active``
-    and ``memories_reserved`` at operator level.
+    Collect and plot the memory stats at operator level.
+
+    Includes ``memories_allocated``, ``memories_active`` and ``memories_reserved``.
     It also prints a summary for the top 20 operators that generate the most memories.
 
     Example usage:
@@ -78,21 +73,23 @@ class MemoryTracker:
 
     def __init__(self) -> None:
         torch._C._log_api_usage_once("torch.distributed.memory_tracker")
-        self._hooks: List[RemovableHandle] = []
-        self._operator_names: Dict[str, int] = defaultdict(int)
-        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict()
-        self.memories_active: Dict[int, Dict[str, float]] = defaultdict()
-        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict()
-        self._markers: Dict[str, int] = defaultdict(int)
+        self._hooks: list[RemovableHandle] = []
+        self._operator_names: dict[str, int] = defaultdict(int)
+        self.memories_allocated: dict[int, dict[str, float]] = defaultdict()
+        self.memories_active: dict[int, dict[str, float]] = defaultdict()
+        self.memories_reserved: dict[int, dict[str, float]] = defaultdict()
+        self._markers: dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
-        self._num_cuda_retries: int = 0
+        self._num_alloc_retries: int = 0
+        self._device_module = torch.get_device_module()
 
     @no_type_check
     def start_monitor(self, root_module: nn.Module) -> None:
         """
-        Register module hooks and entering ``MemoryProfileDispatchMode``, so that
-        operator level memory stats can be tracked during module runtime.
+        Register module hooks and entering ``MemoryProfileDispatchMode``.
+
+        This enables operator level memory stats can be tracked during module runtime.
         """
         self._clear_state()
         root_module.__setattr__("_memory_tracker_is_root", True)
@@ -110,7 +107,7 @@ class MemoryTracker:
             # clear and remove it for now as it does not really capture important info.
             # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
-        torch.cuda.empty_cache()
+        self._device_module.empty_cache()
         assert getattr(self, "profile_mode", None) is None
         self.profile_mode = MemoryProfileDispatchMode(self)
         self.profile_mode.__enter__()
@@ -118,12 +115,13 @@ class MemoryTracker:
     @no_type_check
     def stop(self) -> None:
         """
-        Remove module hooks and exit ``MemoryProfileDispatchMode`` to stop
-        tracking memory stats at operator level.
-        Get some aggregated stats when the memory_tracker() is enabled, like
-        cuda ``num_alloc_retries``.
+        Remove module hooks and exit ``MemoryProfileDispatchMode`` to stop tracking memory stats at operator level.
+
+        Get some aggregated stats when the memory_tracker() is enabled, like ``num_alloc_retries``.
         """
-        self._num_cuda_retries = torch.cuda.memory_stats().get("num_alloc_retries", 0)
+        self._num_alloc_retries = self._device_module.memory_stats().get(
+            "num_alloc_retries", 0
+        )
 
         for h in self._hooks:
             h.remove()
@@ -135,10 +133,11 @@ class MemoryTracker:
     @no_type_check
     def summary(self, top: int = 20) -> None:
         """
-        Print out the top operators that generate the most memories. The number
-        of the top operators can be configured.
+        Print out the top operators that generate the most memories.
+
+        The number of the top operators can be configured.
         """
-        op_diff: Dict[str, float] = defaultdict(float)
+        op_diff: dict[str, float] = defaultdict(float)
         op_name, previous_allocated_memory = self.memories_allocated[0]
         for i in range(1, self._op_index):
             op_name, current_allocated_memory = self.memories_allocated[i]
@@ -146,9 +145,9 @@ class MemoryTracker:
             previous_allocated_memory = current_allocated_memory
 
         print("------------------------------------------------")
-        print(f"The number of cuda retries are: {self._num_cuda_retries}")
+        print(f"The number of alloc retries are: {self._num_alloc_retries}")
         print(f"Top {top} ops that generates memory are:")
-        for k, v in sorted(op_diff.items(), key=lambda item: item[1], reverse=True)[
+        for k, v in sorted(op_diff.items(), key=operator.itemgetter(1), reverse=True)[
             :top
         ]:
             print(f"{k}: {v}MB")
@@ -159,8 +158,8 @@ class MemoryTracker:
         import matplotlib.pyplot as plt
 
         def _plot_figure(x, y_values, labels):
-            min_val = min(list(chain(*y_values))) * 0.999
-            max_val = max(list(chain(*y_values))) * 1.001
+            min_val = min(chain.from_iterable(y_values)) * 0.999
+            max_val = max(chain.from_iterable(y_values)) * 1.001
             plt.figure()
             for y, label in zip(y_values, labels):
                 plt.plot(x, y, label=label)
@@ -204,26 +203,20 @@ class MemoryTracker:
         _plot_figure(x, [list(y_3)], ["reserved_memory"])
 
     def save_stats(self, path: str) -> None:
-        """
-        Save the stats using pickle during runtime if users want to plot the traces
-        in other places like notebook.
-        """
+        """Save the stats using pickle during runtime if users want to plot the traces in other places like notebook."""
         stats = {
             "memories_allocated": self.memories_allocated,
             "memories_active": self.memories_active,
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
-            "num_alloc_retries": self._num_cuda_retries,
+            "num_alloc_retries": self._num_alloc_retries,
         }
 
         with open(path, "wb") as f:
             pickle.dump(stats, f, pickle.HIGHEST_PROTOCOL)
 
     def load(self, path: str) -> None:
-        """
-        Load the pickled memory stats to plot the traces or print the summary.
-        """
-
+        """Load the pickled memory stats to plot the traces or print the summary."""
         with open(path, "rb") as f:
             stats = pickle.load(f)
 
@@ -231,13 +224,10 @@ class MemoryTracker:
         self.memories_active = stats["memories_active"]
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
-        self._num_cuda_retries = stats["num_alloc_retries"]
+        self._num_alloc_retries = stats["num_alloc_retries"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
-        """
-        The pre_forward_hook is to insert current module name with forward prefix for the operator
-        name, also it inserts the marker "fw_start" when the forward pass begins.
-        """
+        """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
 
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
@@ -250,10 +240,7 @@ class MemoryTracker:
         return _pre_forward_hook
 
     def _create_post_forward_hook(self, name: str) -> Callable:
-        """
-        The post_forward_hook inserts the marker 'fw_bw_boundary' at the boundary
-        of forward pass and backward pass.
-        """
+        """Insert the marker 'fw_bw_boundary' at the boundary of forward and backward pass."""
 
         def _post_forward_hook(
             module: nn.Module,
@@ -269,9 +256,7 @@ class MemoryTracker:
         return _post_forward_hook
 
     def _create_backward_hook(self, name: str) -> Callable:
-        """
-        The backward_hook inserts the current module name with backward prefix for the operator name.
-        """
+        """Insert the current module name with backward prefix for the operator name."""
 
         def _backward_hook(
             module: nn.Module, grad_input: torch.Tensor, grad_output: torch.Tensor
@@ -284,12 +269,14 @@ class MemoryTracker:
     def _record_memory_stats(self, fn_name: str) -> None:
         """
         Record current memory allocated, current memory active and current memory reserved.
+
         The memory stats dict is indexed with ``self._op_index``.
         """
-        memory_allocated: float = torch.cuda.memory_allocated() / BYTES_PER_MB
-        memory_reserved: float = torch.cuda.memory_reserved() / BYTES_PER_MB
+        memory_allocated: float = self._device_module.memory_allocated() / BYTES_PER_MB
+        memory_reserved: float = self._device_module.memory_reserved() / BYTES_PER_MB
         memory_active: float = (
-            torch.cuda.memory_stats().get("active_bytes.all.current", 0) / BYTES_PER_MB
+            self._device_module.memory_stats().get("active_bytes.all.current", 0)
+            / BYTES_PER_MB
         )
         self.memories_allocated[self._op_index] = (fn_name, memory_allocated)
         self.memories_reserved[self._op_index] = (fn_name, memory_reserved)
@@ -297,16 +284,12 @@ class MemoryTracker:
         self._op_index += 1
 
     def _add_marker(self, marker_name: str) -> None:
-        """
-        Set the marker's x-axis value.
-        """
+        """Set the marker's x-axis value."""
         marker_val = len(self.memories_allocated.values())
         self._markers[marker_name] = marker_val
 
     def _clear_state(self) -> None:
-        """
-        Clear states when start_monitor() is called.
-        """
+        """Clear states when start_monitor() is called."""
         self._operator_names.clear()
         self.memories_allocated.clear()
         self.memories_active.clear()
@@ -314,4 +297,4 @@ class MemoryTracker:
         self._markers.clear()
         self._cur_module_name = ""
         self._op_index = 0
-        self._num_cuda_retries = 0
+        self._num_alloc_retries = 0

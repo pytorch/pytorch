@@ -2,10 +2,14 @@
 
 import pickle
 from io import BytesIO
+from sys import version_info
 from textwrap import dedent
+from unittest import skipIf
 
+import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import run_tests
+
 
 try:
     from .common import PackageTestCase
@@ -14,6 +18,7 @@ except ImportError:
     from common import PackageTestCase
 
 from pathlib import Path
+
 
 packaging_directory = Path(__file__).parent
 
@@ -80,7 +85,7 @@ class TestSaveLoad(PackageTestCase):
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        loaded_obj = hi.load_pickle("res", "obj.pkl")
+        hi.load_pickle("res", "obj.pkl")
 
         package_b = hi.import_module("package_b")
         self.assertEqual(package_b.result, "package_b")
@@ -163,7 +168,9 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as exporter:
             exporter.intern("**")
-            exporter.save_pickle("container", "container.pkl", container, pickle_protocol=4)
+            exporter.save_pickle(
+                "container", "container.pkl", container, pickle_protocol=4
+            )
 
         buffer.seek(0)
         importer = PackageImporter(buffer)
@@ -201,11 +208,10 @@ class TestSaveLoad(PackageTestCase):
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 
-        # This should fail. The 'PackageAObject' type defined from 'importer1'
-        # is not necessarily the same 'obj2's version of 'PackageAObject'.
+        # This succeeds because OrderedImporter.get_name() properly
+        # falls back to sys_importer which can find the original PackageAObject
         pe = make_exporter()
-        with self.assertRaises(pickle.PicklingError):
-            pe.save_pickle("obj", "obj.pkl", obj2)
+        pe.save_pickle("obj", "obj.pkl", obj2)
 
         # This should also fail. The 'PackageAObject' type defined from 'importer1'
         # is not necessarily the same as the one defined from 'importer2'
@@ -260,6 +266,20 @@ class TestSaveLoad(PackageTestCase):
         with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+
+    @skipIf(version_info >= (3, 13), "https://github.com/pytorch/pytorch/issues/142170")
+    def test_save_load_fp8(self):
+        tensor = torch.rand(20, 20).to(torch.float8_e4m3fn)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.save_pickle("fp8_model", "model.pkl", tensor)
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_tensor = importer.load_pickle("fp8_model", "model.pkl")
+        self.assertTrue(torch.equal(tensor, loaded_tensor))
 
 
 if __name__ == "__main__":

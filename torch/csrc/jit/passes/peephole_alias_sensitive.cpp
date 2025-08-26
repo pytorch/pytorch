@@ -6,11 +6,9 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This pass only does optimizations which requires Alias Analysis
 // It is separated out from Peephole Pass so that Peephole does not have
@@ -20,7 +18,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
       std::shared_ptr<Graph> graph,
       bool shape_peepholes)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)),
+        aliasDb_(std::make_unique<AliasDb>(graph_)),
         shape_peepholes_(shape_peepholes) {}
 
   bool run() {
@@ -28,7 +26,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
   }
 
  private:
-  void replaceWithIValue(Value* v, IValue val) {
+  void replaceWithIValue(Value* v, const IValue& val) {
     WithInsertPoint guard(v->node());
     v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
   }
@@ -171,5 +169,4 @@ bool PeepholeOptimizeAliasSensitive(
   return opt.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

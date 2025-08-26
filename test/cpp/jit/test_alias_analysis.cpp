@@ -4,10 +4,10 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/TensorOperators.h>
 
@@ -23,7 +23,7 @@ class TopologicalMoveTest : public ::testing::Test {
  protected:
   TopologicalMoveTest() {
     createGraph();
-    aliasDb = torch::make_unique<AliasDb>(graph);
+    aliasDb = std::make_unique<AliasDb>(graph);
   }
 
   // Nodes are named after their output.
@@ -298,7 +298,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   } catch (const Exception& e) {
     if (std::string(e.what()).find(expectMessageContains) ==
         std::string::npos) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "Expected error message to contain \"",
           expectMessageContains,
           "\" but error message was: ",
@@ -306,7 +307,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
     }
     return;
   }
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Expected to throw exception containing \"",
       expectMessageContains,
       "\" but didn't throw");
@@ -1031,9 +1033,8 @@ TEST(ContainerAliasingTest, MovesAcrossContainedWrites) {
   auto ops = torch::RegisterOperators().op(
       "uses::list",
       torch::RegisterOperators::options()
-          .catchAllKernel([](torch::List<at::Tensor> in) {
-            return torch::rand({2, 3});
-          })
+          .catchAllKernel(
+              [](torch::List<at::Tensor> in) { return torch::rand({2, 3}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
@@ -1071,9 +1072,8 @@ TEST(ContainerAliasingTest, MovesAcrossContainedWritesNested) {
   auto ops = torch::RegisterOperators().op(
       "uses::list",
       torch::RegisterOperators::options()
-          .catchAllKernel([](torch::List<at::Tensor> in) {
-            return torch::rand({2, 3});
-          })
+          .catchAllKernel(
+              [](torch::List<at::Tensor> in) { return torch::rand({2, 3}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
@@ -1255,9 +1255,8 @@ TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand1",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand1");
   auto graph = std::make_shared<Graph>();
@@ -1272,9 +1271,8 @@ TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand2(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand2");
   auto graph = std::make_shared<Graph>();
@@ -1289,9 +1287,8 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
 
   const auto rand_op = Symbol::fromQualString("foo::rand3");
@@ -1310,9 +1307,8 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand4");
   auto graph = std::make_shared<Graph>();
@@ -1332,9 +1328,8 @@ TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
         torch::RegisterOperators().op(
             "foo::rand5",
             torch::RegisterOperators::options()
-                .catchAllKernel([](at::Tensor) -> at::Tensor {
-                  return at::rand({2, 2});
-                })
+                .catchAllKernel(
+                    [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
       },
       "Tried to register operator foo::rand5(Tensor _0) -> Tensor _0 with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
@@ -1344,9 +1339,8 @@ TEST(AliasRegistrationTest, FromSchemaInferredPure) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand6(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
   const auto rand_op = Symbol::fromQualString("foo::rand6");
   auto graph = std::make_shared<Graph>();
@@ -1393,9 +1387,8 @@ TEST(AliasRegistrationTest, PureNoSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand9",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand9");
   auto graph = std::make_shared<Graph>();
@@ -1410,9 +1403,8 @@ TEST(AliasRegistrationTest, PureWithSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand10(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand10");
   auto graph = std::make_shared<Graph>();
@@ -1690,6 +1682,18 @@ TEST(NonDeterminismBackwardsCompatibility, BackwardsCompatibility) {
         c10::OperatorName(schema.name(), schema.overload_name()));
     ASSERT_TRUE(op_handle->hasTag(at::Tag::nondeterministic_seeded));
   }
+}
+
+TEST(TypeHashing, HashTypes) {
+  HashType hasher;
+
+  const TypePtr int_type = IntType::get();
+  const TypePtr float_type = FloatType::get();
+  ASSERT_NE(hasher(int_type), hasher(float_type));
+
+  const TypePtr int2_type = TupleType::create({int_type, int_type});
+  const TypePtr int3_type = TupleType::create({int_type, int_type, int_type});
+  ASSERT_NE(hasher(int2_type), hasher(int3_type));
 }
 
 } // namespace jit

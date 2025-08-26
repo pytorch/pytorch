@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: package/deploy"]
 
 import os
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
+
 try:
     from torchvision.models import resnet18
 
@@ -34,6 +34,7 @@ except ImportError:
 
 from pathlib import Path
 
+
 packaging_directory = Path(__file__).parent
 
 
@@ -45,7 +46,10 @@ class DirectoryReaderTest(PackageTestCase):
     """Tests use of DirectoryReader as accessor for opened packages."""
 
     @skipIfNoTorchVision
-    @skipIf(True, "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115")
+    @skipIf(
+        True,
+        "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115",
+    )
     def test_loading_pickle(self):
         """
         Test basic saving and loading of modules and pickles from a DirectoryReader.
@@ -102,23 +106,22 @@ class DirectoryReaderTest(PackageTestCase):
             self.assertTrue(dir_importer.zip_reader.has_record("package_a/__init__.py"))
             self.assertFalse(dir_importer.zip_reader.has_record("package_a"))
 
-    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
         with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")
@@ -173,7 +176,7 @@ class DirectoryReaderTest(PackageTestCase):
 
             self.assertIsNone(importer.get_resource_reader("nonexistent_package"))
 
-    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
+    @skipIf(version_info >= (3, 13), "https://github.com/python/cpython/issues/127012")
     def test_package_resource_access(self):
         """Packaged modules should be able to use the importlib.resources API to access
         resources saved in the package.
@@ -202,12 +205,11 @@ class DirectoryReaderTest(PackageTestCase):
                 "my sekrit plays",
             )
 
-    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_importer_access(self):
         filename = self.temp()
         with PackageExporter(filename) as he:
             he.save_text("main", "main", "my string")
-            he.save_binary("main", "main_binary", "my string".encode("utf-8"))
+            he.save_binary("main", "main_binary", b"my string")
             src = dedent(
                 """\
                 import importlib
@@ -226,16 +228,15 @@ class DirectoryReaderTest(PackageTestCase):
             dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             m = dir_importer.import_module("main")
             self.assertEqual(m.t, "my string")
-            self.assertEqual(m.b, "my string".encode("utf-8"))
+            self.assertEqual(m.b, b"my string")
 
-    @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_resource_access_by_path(self):
         """
         Tests that packaged code can used importlib.resources.path.
         """
         filename = self.temp()
         with PackageExporter(filename) as e:
-            e.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            e.save_binary("string_module", "my_string", b"my string")
             src = dedent(
                 """\
                 import importlib.resources
@@ -279,7 +280,7 @@ class DirectoryReaderTest(PackageTestCase):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
                 dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
-                dir_mod = dir_importer.load_pickle("res", "mod.pkl")
+                dir_importer.load_pickle("res", "mod.pkl")
 
 
 if __name__ == "__main__":

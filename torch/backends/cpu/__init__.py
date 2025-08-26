@@ -1,10 +1,13 @@
 import torch
 
-__all__ = ["get_cpu_capability", ]
+
+__all__ = [
+    "get_cpu_capability",
+]
 
 
 def get_cpu_capability() -> str:
-    r"""Returns cpu capability as a string value.
+    r"""Return cpu capability as a string value.
 
     Possible values:
     - "DEFAULT"
@@ -13,5 +16,6 @@ def get_cpu_capability() -> str:
     - "NO AVX"
     - "AVX2"
     - "AVX512"
+    - "SVE256"
     """
     return torch._C._get_cpu_capability()

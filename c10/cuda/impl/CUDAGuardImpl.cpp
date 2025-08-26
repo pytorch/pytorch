@@ -1,13 +1,7 @@
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 
-namespace c10 {
-namespace cuda {
-namespace impl {
+namespace c10::cuda::impl {
 
-constexpr DeviceType CUDAGuardImpl::static_type;
+C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl)
 
-C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl);
-
-} // namespace impl
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::impl

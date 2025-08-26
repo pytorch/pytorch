@@ -1,13 +1,17 @@
+# mypy: allow-untyped-defs
 import math
+from typing import Optional, Union
 
 import torch
-from torch import inf
+from torch import inf, Tensor
 from torch.distributions import constraints
-from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import AbsTransform
 
-__all__ = ['HalfCauchy']
+
+__all__ = ["HalfCauchy"]
+
 
 class HalfCauchy(TransformedDistribution):
     r"""
@@ -18,7 +22,7 @@ class HalfCauchy(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = HalfCauchy(torch.tensor([1.0]))
         >>> m.sample()  # half-cauchy distributed with scale=1
         tensor([ 2.3214])
@@ -26,11 +30,17 @@ class HalfCauchy(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Cauchy distribution
     """
-    arg_constraints = {'scale': constraints.positive}
+
+    arg_constraints = {"scale": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
+    base_dist: Cauchy
 
-    def __init__(self, scale, validate_args=None):
+    def __init__(
+        self,
+        scale: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         base_dist = Cauchy(0, scale, validate_args=False)
         super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 
@@ -39,26 +49,32 @@ class HalfCauchy(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def scale(self):
+    def scale(self) -> Tensor:
         return self.base_dist.scale
 
     @property
-    def mean(self):
-        return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
+    def mean(self) -> Tensor:
+        return torch.full(
+            self._extended_shape(),
+            math.inf,
+            dtype=self.scale.dtype,
+            device=self.scale.device,
+        )
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.scale)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.base_dist.variance
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
-                                device=self.base_dist.scale.device)
+        value = torch.as_tensor(
+            value, dtype=self.base_dist.scale.dtype, device=self.base_dist.scale.device
+        )
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob = torch.where(value >= 0, log_prob, -inf)
         return log_prob

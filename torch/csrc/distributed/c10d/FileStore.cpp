@@ -1,3 +1,4 @@
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
@@ -17,19 +18,14 @@
 
 #include <chrono>
 #include <cstdio>
-#include <functional>
-#include <iostream>
-#include <limits>
-#include <sstream>
-#include <system_error>
 #include <thread>
 #include <utility>
 
 #include <c10/util/Exception.h>
 
-#define SYSASSERT(rv, ...)                                                 \
-  if ((rv) < 0) {                                                          \
-    throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
+#define SYSASSERT(rv, ...)                                         \
+  if ((rv) < 0) {                                                  \
+    C10_THROW_ERROR(DistStoreError, c10::utils::str_error(errno)); \
   }
 
 #ifdef _WIN32
@@ -71,7 +67,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-typename c10::invoke_result_t<F> syscall(F fn) {
+auto syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {
@@ -81,6 +77,7 @@ typename c10::invoke_result_t<F> syscall(F fn) {
     }
     return rv;
   }
+  return typename std::invoke_result_t<F>{-1};
 }
 
 // For a comprehensive overview of file locking methods,
@@ -95,12 +92,14 @@ class Lock {
     flock(operation);
   }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Lock() {
     unlock();
   }
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
@@ -171,6 +170,10 @@ class File {
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) noexcept = delete;
+  File& operator=(File&&) noexcept = delete;
 
   ~File() {
     ::close(fd_);
@@ -260,7 +263,7 @@ off_t refresh(
     File& file,
     off_t pos,
     std::unordered_map<std::string, std::vector<uint8_t>>& cache,
-    const std::string deletePrefix) {
+    const std::string& deletePrefix) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -284,8 +287,7 @@ off_t refresh(
 } // namespace
 
 FileStore::FileStore(std::string path, int numWorkers)
-    : Store(),
-      path_(std::move(path)),
+    : path_(std::move(path)),
 
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
@@ -295,12 +297,17 @@ FileStore::FileStore(std::string path, int numWorkers)
   addHelper(refCountKey_, 1);
 }
 
+c10::intrusive_ptr<Store> FileStore::clone() {
+  return c10::make_intrusive<FileStore>(path_, numWorkers_);
+}
+
+// NOLINTNEXTLINE(bugprone-exception-escape)
 FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
   // GC. If python code has directory cleanup procedure, the race condition may
-  // occur between that code and this deconstructor. As a result, we check for
-  // file existense before cleanup
+  // occur between that code and this destructor. As a result, we check for
+  // file existence before cleanup
 #ifdef _WIN32
   int res = syscall(std::bind(::_access, path_.c_str(), 0));
 #else
@@ -316,7 +323,7 @@ FileStore::~FileStore() {
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
   auto refCount = addHelper(refCountKey_, -1);
   // The last worker cleans up the file. If numWorkers was not initialized to
-  // a specific postive value (i.e. meaning that there was not a fixed number
+  // a specific positive value (i.e. meaning that there was not a fixed number
   // of workers), we don't attempt to clean.
   // Clean up the file if number of references is 0.
   if (refCount == 0 && numWorkers_ >= 0 && numFinishedWorker >= numWorkers_) {
@@ -429,7 +436,7 @@ int64_t FileStore::getNumKeys() {
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  return cache_.size();
+  return static_cast<int64_t>(cache_.size());
 }
 
 bool FileStore::deleteKey(const std::string& key) {

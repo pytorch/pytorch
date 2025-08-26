@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from functools import partial
 from torch.testing import make_tensor
@@ -66,7 +68,7 @@ class CubeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
-        input, dinput = ctx.saved_tensors
+        _input, dinput = ctx.saved_tensors
         result = grad_output * dinput + 6 * dinput
         return result
 
@@ -140,6 +142,9 @@ def sample_inputs_numpy_mul(opinfo, device, dtype, requires_grad, **kwargs):
     # Broadcasting
     yield SampleInput(make_arg(4, low=0.9, high=2), args=(make_arg(3, 4, low=0.9, high=2),))
 
+def sample_inputs_numpy_mul_scalar(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(4, low=0.9, high=2), args=(), kwargs={"scalar": 3.14})
 
 class MulGenVmap(torch.autograd.Function):
     generate_vmap_rule = True
@@ -208,7 +213,6 @@ class NumpySort(torch.autograd.Function):
         x = to_numpy(x)
         ind = np.argsort(x, axis=dim)
         ind_inv = np.argsort(ind, axis=dim)
-        result = np.take_along_axis(x, ind, axis=dim)
         return (
             torch.tensor(x, device=device),
             torch.tensor(ind, device=device),
@@ -217,7 +221,7 @@ class NumpySort(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        x, dim = inputs
+        _x, dim = inputs
         _, ind, ind_inv = output
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
@@ -247,7 +251,6 @@ class SortGenVmap(torch.autograd.Function):
 
     @staticmethod
     def forward(x, dim):
-        device = x.device
         ind = torch.argsort(x, dim=dim)
         ind_inv = torch.argsort(ind, axis=dim)
         result = torch.take_along_dim(x, ind, dim=dim)
@@ -296,7 +299,7 @@ class NumpyTake(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        x, ind, ind_inv, dim = inputs
+        _x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
@@ -342,7 +345,7 @@ class TakeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
-        x, ind, ind_inv, dim = inputs
+        _x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
@@ -463,6 +466,40 @@ class ZeroGradientsGenVmap(torch.autograd.Function):
             torch.zeros(gy.shape, dtype=gy.dtype, device=gy.device),
         )
 
+
+def sample_inputs_forward_default_args(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(3, 5))
+
+
+class ForwardHasDefaultArgs(torch.autograd.Function):
+    @staticmethod
+    def forward(x, idx=(2,)):
+        return x[idx]
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        x, idx = inputs
+        ctx.x_shape = x.shape
+        ctx.idx = idx
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        result = grad_output.new_zeros(ctx.x_shape)
+        result[ctx.idx] = grad_output
+        return result, None
+
+    @staticmethod
+    def vmap(info, in_dims, x, idx):
+        x_bdim, _ = in_dims
+        x = x.movedim(x_bdim, 1)
+        return ForwardHasDefaultArgs.apply(x, idx), 0
+
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        return ForwardHasDefaultArgs.apply(x_tangent, ctx.idx)
+
+
 autograd_function_db = [
     OpInfo(
         'NumpyCubeAutogradFunction',
@@ -581,6 +618,15 @@ autograd_function_db = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_mul,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+    ),
+    OpInfo(
+        'ForwardHasDefaultArgsAutogradFunction',
+        op=ForwardHasDefaultArgs.apply,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_forward_default_args,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),

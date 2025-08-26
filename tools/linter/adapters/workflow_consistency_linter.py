@@ -2,21 +2,29 @@
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.
 """
+
+from __future__ import annotations
+
 import argparse
 import itertools
 import json
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, NamedTuple, Optional
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 from yaml import dump, load
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 
 class LintSeverity(str, Enum):
@@ -27,15 +35,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def glob_yamls(path: Path) -> Iterable[Path]:
@@ -51,8 +59,8 @@ def is_workflow(yaml: Any) -> bool:
     return yaml.get("jobs") is not None
 
 
-def print_lint_message(path: Path, job: Dict[str, Any], sync_tag: str) -> None:
-    job_id = list(job.keys())[0]
+def print_lint_message(path: Path, job: dict[str, Any], sync_tag: str) -> None:
+    job_id = next(iter(job.keys()))
     with open(path) as f:
         lines = f.readlines()
     for i, line in enumerate(lines):
@@ -101,6 +109,10 @@ if __name__ == "__main__":
             # trunk, say.)
             if "if" in job:
                 del job["if"]
+
+            # same is true for ['with']['test-matrix']
+            if "test-matrix" in job.get("with", {}):
+                del job["with"]["test-matrix"]
 
             tag_to_jobs[sync_tag].append((path, {job_id: job}))
 

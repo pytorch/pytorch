@@ -17,7 +17,7 @@ set(BACKEND_WITH_COMPILER_SRCS
 )
 if(USE_KINETO)
   # Testing edge profiler for backend use
-  # profiler_edge should only be aded when USE_KINETO flag is on
+  # profiler_edge should only be added when USE_KINETO flag is on
   list(APPEND BACKEND_WITH_COMPILER_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp)
 endif()
@@ -39,6 +39,7 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
+  ${JIT_TEST_ROOT}/source_range_test.cpp
   ${JIT_TEST_ROOT}/test_add_if_then_else.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
@@ -70,6 +71,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_ir.cpp
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
+  ${JIT_TEST_ROOT}/test_lexer.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter_direct.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
@@ -115,13 +117,15 @@ target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
+else()
+  target_link_libraries(test_jit PRIVATE onnx_library)
 endif()
 
 if(USE_MKLDNN)
   target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
+set(JIT_TEST_DEPENDENCIES torch gtest_main jitbackend_test backend_with_compiler gmock)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
@@ -129,9 +133,6 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
-if(NOT MSVC)
-  target_compile_options(test_jit PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-variable>)
-endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded
@@ -139,12 +140,6 @@ if(LINUX)
 endif()
 
 if(USE_CUDA)
-  target_link_libraries(test_jit PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
   # Suppress sign compare checks for NVFUSER JIT tests
   if(NOT MSVC)
@@ -152,14 +147,15 @@ if(USE_CUDA)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(test_jit PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_HCC_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

@@ -1,14 +1,16 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <c10/util/flat_hash_map.h>
-#include <c10/util/hash.h>
 
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -17,9 +19,9 @@ namespace api {
 
 class ShaderLayout final {
  public:
-  using Signature = c10::SmallVector<VkDescriptorType, 6u>;
+  using Signature = std::vector<VkDescriptorType>;
 
-  explicit ShaderLayout(const VkDevice, const Signature&);
+  explicit ShaderLayout(VkDevice, const Signature&);
 
   ShaderLayout(const ShaderLayout&) = delete;
   ShaderLayout& operator=(const ShaderLayout&) = delete;
@@ -56,7 +58,7 @@ struct ShaderInfo final {
   // Shader Metadata
   utils::uvec3 out_tile_size{1u, 1u, 1u};
 
-  c10::SmallVector<uint32_t, 4> tile_size;
+  std::vector<uint32_t> tile_size;
   StorageType bias_storage_type{StorageType::UNKNOWN};
   StorageType weight_storage_type{StorageType::UNKNOWN};
 
@@ -66,12 +68,12 @@ struct ShaderInfo final {
       std::string,
       const uint32_t*,
       const uint32_t,
-      const std::vector<VkDescriptorType>&);
+      std::vector<VkDescriptorType>);
   explicit ShaderInfo(
       std::string,
       const uint32_t*,
       const uint32_t,
-      const std::vector<VkDescriptorType>&,
+      std::vector<VkDescriptorType>,
       const std::vector<uint32_t>& tile_size,
       const StorageType bias_storage_type,
       const StorageType weight_storage_type);
@@ -81,7 +83,7 @@ bool operator==(const ShaderInfo& _1, const ShaderInfo& _2);
 
 class ShaderModule final {
  public:
-  explicit ShaderModule(const VkDevice device, const ShaderInfo& source);
+  explicit ShaderModule(VkDevice device, const ShaderInfo& source);
 
   ShaderModule(const ShaderModule&) = delete;
   ShaderModule& operator=(const ShaderModule&) = delete;
@@ -108,7 +110,7 @@ class ShaderModule final {
 
 class ShaderLayoutCache final {
  public:
-  explicit ShaderLayoutCache(const VkDevice device);
+  explicit ShaderLayoutCache(VkDevice device);
 
   ShaderLayoutCache(const ShaderLayoutCache&) = delete;
   ShaderLayoutCache& operator=(const ShaderLayoutCache&) = delete;
@@ -126,7 +128,8 @@ class ShaderLayoutCache final {
       size_t hashed = 0u;
 
       for (const VkDescriptorType type : signature) {
-        hashed = c10::hash_combine(hashed, c10::get_hash(type));
+        hashed =
+            utils::hash_combine(hashed, std::hash<VkDescriptorType>()(type));
       }
 
       return hashed;
@@ -139,7 +142,7 @@ class ShaderLayoutCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkDescriptorSetLayout retrieve(const Key&);
@@ -148,7 +151,7 @@ class ShaderLayoutCache final {
 
 class ShaderCache final {
  public:
-  explicit ShaderCache(const VkDevice device);
+  explicit ShaderCache(VkDevice device);
 
   ShaderCache(const ShaderCache&) = delete;
   ShaderCache& operator=(const ShaderCache&) = delete;
@@ -163,7 +166,13 @@ class ShaderCache final {
 
   struct Hasher {
     inline size_t operator()(const ShaderInfo& source) const {
-      return c10::get_hash(source.src_code.bin, source.src_code.size);
+      size_t seed = 0;
+      seed = utils::hash_combine(
+          seed, std::hash<const uint32_t*>()(source.src_code.bin));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(source.src_code.size));
+
+      return seed;
     }
   };
 
@@ -173,7 +182,7 @@ class ShaderCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkShaderModule retrieve(const Key&);

@@ -7,7 +7,7 @@
 # Each line is a file pattern followed by one or more owners.
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
-/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
+/torch/utils/cpp_extension.py @fmassa @ezyang @malfet
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
@@ -18,8 +18,10 @@
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
+/.github/merge_rules.yaml @albanD @malfet
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
@@ -42,30 +44,26 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
-# Distributed package
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
-/torch/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
-/torch/distributed/_composable @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles @fegin @fduwjj @kiukchung @d4l3k
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj @kiukchung @d4l3k
-
-# Distributed tests
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/test/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
-/torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
+# Distributed
+# c10d backend APIs
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
-/torch/onnx/ @bowenbao @abock @thiagocrepaldi
-/test/onnx/ @bowenbao @abock @thiagocrepaldi
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/test/onnx/  @titaiwangms @xadupre @justinchuby
+
+# CI
+/.ci  @pytorch/pytorch-dev-infra
 
 # Docker
 /.ci/docker/ @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel @bertmaher
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -82,22 +80,22 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk
+/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
 # code
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
 /test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
 
 # OpInfo-related files
-/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
-/torch/testing/_internal/common_device_type.py @mruberry @ngimel
-test/test_ops.py @mruberry @ngimel
-test/test_ops_gradients.py @mruberry @ngimel @soulitzer
-test/test_ops_fwd_gradients.py @mruberry @ngimel @soulitzer
-test/test_unary_ufuncs.py @mruberry @ngimel
-test/test_binary_ufuncs.py @mruberry @ngimel
-test/test_reductions.py @mruberry @ngimel
-test/test_type_promotion.py @mruberry @ngimel
+/torch/testing/_internal/common_methods_invocations.py @mruberry
+/torch/testing/_internal/common_device_type.py @mruberry
+test/test_ops.py @mruberry
+test/test_ops_gradients.py @mruberry @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @soulitzer
+test/test_unary_ufuncs.py @mruberry
+test/test_binary_ufuncs.py @mruberry
+test/test_reductions.py @mruberry
+test/test_type_promotion.py @mruberry
 
 # functorch-related things
 # This list is for people wanting to be notified every time there's a change
@@ -105,19 +103,101 @@ test/test_type_promotion.py @mruberry @ngimel
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# This is the file where people can add new argument types to torch.fx.
+torch/fx/proxy.py @zou3519
+
+# HOPs
+torch/_higher_order_ops/*.py @zou3519
+torch/_dynamo/variables/higher_order_ops.py @zou3519
+test/test_hop_infra.py @zou3519
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
+
+# AOTAutograd
+torch/_functorch/_aot_autograd/*.py @bdhirsh
+torch/_functorch/aot_autograd.py @bdhirsh
+
 # torch MPS
-test/test_mps.py @kulinseth
-aten/src/ATen/mps/ @kulinseth
-aten/src/ATen/native/mps/ @kulinseth
+test/test_mps.py @kulinseth @malfet
+aten/src/ATen/mps/ @kulinseth @malfet
+aten/src/ATen/native/mps/ @kulinseth @malfet
+
+# MTIA
+aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi
-torch/autograd/profiler* @aaronenyeshi
-torch/csrc/profiler/ @aaronenyeshi
-torch/profiler/ @aaronenyeshi
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @ejguan
+torch/utils/data/ @divyanshk @ramanishsingh @scotts
+
+# hipify
+torch/utils/hipify/ @jeffdaily @jithunnair-amd
+tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# ROCm-specific files
+aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+c10/hip @jeffdaily @jithunnair-amd
+caffe2/core/hip @jeffdaily @jithunnair-amd
+caffe2/operators/hip @jeffdaily @jithunnair-amd
+caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
+caffe2/utils/hip @jeffdaily @jithunnair-amd
+
+# XPU-specific files
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/test/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
+/third_party/xpu.txt @EikanWang @gujinghui
+
+# torch.export
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
+
+# Dynamic Shapes
+/torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
+
+# serialization-related files
+/aten/src/ATen/MapAllocator* @mikaylagawarecki
+/caffe2/serialize/ @mikaylagawarecki
+/torch/serialization.py @mikaylagawarecki
+/torch/storage.py @mikaylagawarecki
+/torch/csrc/Storage* @mikaylagawarecki
+# subscribing for PyTorchFileWriter/PyTorchFileReader changes
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki
+
+# CUDA and CUDA math libraries
+aten/src/ATen/cuda/ @eqy @syed-ahmed
+aten/src/ATen/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
+c10/cuda @eqy @syed-ahmed
+torch/cuda/ @eqy @syed-ahmed
+torch/csrc/cuda/ @eqy @syed-ahmed
+torch/backends/cuda/ @eqy @syed-ahmed
+torch/backends/cudnn/ @eqy @syed-ahmed
+
+# PyTree utilities
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/utils/pytree/ @XuehaiPan
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan
+
+# Relating to libtorch ABI
+/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
+/torch/headeronly/ @janeyx99
+/torch/header_only_apis.txt @janeyx99

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+
 import sys
 from pathlib import Path
-from typing import Any, cast, Dict, List, Set
+from typing import Any, cast
 
 import yaml
+
 
 GITHUB_DIR = Path(__file__).parent.parent
 
 
-def get_workflows_push_tags() -> Set[str]:
+def get_workflows_push_tags() -> set[str]:
     "Extract all known push tags from workflows"
-    rc: Set[str] = set()
+    rc: set[str] = set()
     for fname in (GITHUB_DIR / "workflows").glob("*.yml"):
         with fname.open("r") as f:
             wf_yml = yaml.safe_load(f)
@@ -23,19 +25,19 @@ def get_workflows_push_tags() -> Set[str]:
     return rc
 
 
-def filter_ciflow_tags(tags: Set[str]) -> List[str]:
+def filter_ciflow_tags(tags: set[str]) -> list[str]:
     "Return sorted list of ciflow tags"
     return sorted(
         tag[:-2] for tag in tags if tag.startswith("ciflow/") and tag.endswith("/*")
     )
 
 
-def read_probot_config() -> Dict[str, Any]:
+def read_probot_config() -> dict[str, Any]:
     with (GITHUB_DIR / "pytorch-probot.yml").open("r") as f:
-        return cast(Dict[str, Any], yaml.safe_load(f))
+        return cast(dict[str, Any], yaml.safe_load(f))
 
 
-def update_probot_config(labels: Set[str]) -> None:
+def update_probot_config(labels: set[str]) -> None:
     orig = read_probot_config()
     orig["ciflow_push_tags"] = filter_ciflow_tags(labels)
     with (GITHUB_DIR / "pytorch-probot.yml").open("w") as f:

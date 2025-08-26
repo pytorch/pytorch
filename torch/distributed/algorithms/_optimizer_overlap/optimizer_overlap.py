@@ -1,21 +1,20 @@
-from abc import ABC
+# mypy: allow-untyped-defs
 import inspect
-from typing import Dict, Type
-
-from torch.distributed.fsdp import FullyShardedDataParallel
-from torch.nn.parallel import DistributedDataParallel
-from torch.optim import Optimizer
-from torch.distributed.optim import as_functional_optim
+from abc import ABC, abstractmethod
 
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
-
 from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+    _hook_then_optimizer,
     _OptimizerHookState,
-    _hook_then_optimizer
 )
+from torch.distributed.fsdp import FullyShardedDataParallel
+from torch.distributed.optim import as_functional_optim
+from torch.nn.parallel import DistributedDataParallel
+from torch.optim import Optimizer
+
 
 # Contains the mappings between the regular and overlapped optimizer types.
-_registered_overlapped_optims: Dict[Type, Type] = {}
+_registered_overlapped_optims: dict[type, type] = {}
 
 
 def register_overlapped(optim_cls):
@@ -28,23 +27,28 @@ def register_overlapped(optim_cls):
             )
         _registered_overlapped_optims[optim_cls] = target_overlapped_optim_cls
         return target_overlapped_optim_cls
+
     return decorator
 
 
 class OverlappedOptimizer(ABC):
-    def __init__(self, optim_cls: Type) -> None:
+    def __init__(self, optim_cls: type) -> None:
         """
-        OverlappedOptimizer is a base class that child classes can implement to
+        Initialize the OverlappedOptimizer.
+
+        Overlappedoptimizer is a base class that child classes can implement to
         specify how different optimizers will register themselves with DDP.
         """
         self.optim_cls = optim_cls
 
+    @abstractmethod
     def register_ddp(self, ddp: DistributedDataParallel) -> None:
         """Registers the overlapped optimizer with DDP."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped DDP."
         )
 
+    @abstractmethod
     def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
         """Registers the overlapped optimizer with FSDP."""
         raise NotImplementedError(
@@ -56,7 +60,7 @@ class OverlappedOptimizer(ABC):
 class _OverlappedStandardOptimizer(OverlappedOptimizer):
     """Overlaps a regular ``Optimizer``."""
 
-    def __init__(self, optim_cls: Type, params, *optim_args, **optim_kwargs) -> None:
+    def __init__(self, optim_cls: type, params, *optim_args, **optim_kwargs) -> None:
         super().__init__(optim_cls)
         f_optim = as_functional_optim(self.optim_cls, *optim_args, **optim_kwargs)
         self._opt_hook_state = _OptimizerHookState(f_optim, params)
@@ -66,19 +70,24 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
         # yet supported.
         ddp_inst.register_comm_hook(  # type: ignore[operator]
             None,  # wrapped hook state
-            _hook_then_optimizer(allreduce_hook, self._opt_hook_state)
+            _hook_then_optimizer(allreduce_hook, self._opt_hook_state),
         )
 
     # TODO: register_fsdp once FSDP supports communication hook.
+    def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
+        """Register the overlapped optimizer with FSDP."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support overlapped FSDP."
+        )
 
 
-def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
-    """
-    Returns a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
-    """
+def _as_overlapped_optim(optim_cls: type, params, *args, **kwargs):
+    """Return a new ``OverlappedOptimizer`` instance that supports ``optim_cls``."""
     for clz in inspect.getmro(optim_cls):
         try:
-            return _registered_overlapped_optims[clz](optim_cls, params, *args, **kwargs)
+            return _registered_overlapped_optims[clz](
+                optim_cls, params, *args, **kwargs
+            )
         except KeyError:
             pass
 

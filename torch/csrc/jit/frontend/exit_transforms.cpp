@@ -2,10 +2,8 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch::jit {
@@ -76,7 +74,7 @@ struct ExitTransformer {
     // this value will never be used, since we will always throw before it is
     // accessed
     throws_val_ = getUnitValue(BoolType::get());
-  };
+  }
 
   void transformReturnStmts() {
     current_exit_kind_ = prim::ReturnStmt;
@@ -291,8 +289,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* has_exited;
+    Value* has_exited = nullptr;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
       // then we have exited.
@@ -336,7 +333,7 @@ struct ExitTransformer {
     std::vector<Value*> exit_block_vals;
     // after an exit, the only values that will get used
     // are the hasExited() and exitValues(), so we match the existing
-    // block outputs with unitialized
+    // block outputs with uninitialized
     exit_block_vals = matchValuesWithUnitialized(block->outputs());
 
     // Set the new if to have the same outputs of the original block,
@@ -365,7 +362,7 @@ struct ExitTransformer {
   //    break
   //    j = j + 1
   // where the j + 1 value will be a block output, but since they will
-  // never be used, it is safe to replace them with unitialized value
+  // never be used, it is safe to replace them with uninitialized value
   void destroyNodeAfterExit(Node* n) {
     for (auto output : n->outputs()) {
       if (!output->uses().empty()) {
@@ -553,10 +550,8 @@ static bool inlineConsecutiveIfs(Node* node) {
   bool else_value = maybe_else_value->toBool();
 
   for (const auto i : c10::irange(2)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* first_if_block;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* second_if_block;
+    Block* first_if_block = nullptr;
+    Block* second_if_block = nullptr;
 
     if (i == 0) {
       first_if_block = first_if.thenBlock();

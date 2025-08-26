@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // A StorageGroup represents a collection of tensors that share backing storage.
 class StorageGroup {
@@ -173,15 +172,15 @@ class MemoryPlanner {
     return managed_output_tensors_.size();
   }
 
-  C10_NODISCARD size_t total_num_unmanaged() const {
+  [[nodiscard]] size_t total_num_unmanaged() const {
     return num_unmanaged_non_scalars() + num_unmanaged_scalars();
   }
 
-  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
+  [[nodiscard]] size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
   }
 
-  C10_NODISCARD size_t num_unmanaged_scalars() const {
+  [[nodiscard]] size_t num_unmanaged_scalars() const {
     return num_unmanaged_scalar_ivalues_;
   }
 
@@ -296,5 +295,4 @@ class StandardMemoryPlanner : public MemoryPlanner {
   std::vector<StorageGroup> managed_tensors_{};
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

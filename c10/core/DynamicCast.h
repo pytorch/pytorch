@@ -71,6 +71,9 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
     const void* ptr) {
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
+    FETCH_AND_CAST_CASE(uint16_t, UInt16)
+    FETCH_AND_CAST_CASE(uint32_t, UInt32)
+    FETCH_AND_CAST_CASE(uint64_t, UInt64)
     default:
       ERROR_UNSUPPORTED_CAST
   }
@@ -90,6 +93,9 @@ C10_HOST_DEVICE inline void cast_and_store(
     src_t value) {
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
+    CAST_AND_STORE_CASE(uint16_t, UInt16)
+    CAST_AND_STORE_CASE(uint32_t, UInt32)
+    CAST_AND_STORE_CASE(uint64_t, UInt64)
     default:;
   }
   ERROR_UNSUPPORTED_CAST

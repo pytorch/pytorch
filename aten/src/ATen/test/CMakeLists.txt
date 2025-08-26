@@ -13,10 +13,10 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/broadcast_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_key_set_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
@@ -44,7 +44,6 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/type_ptr_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/undefined_tensor_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/verify_api_visibility.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/legacy_vmap_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
@@ -55,6 +54,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   )
 
 list(APPEND ATen_CUDA_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_caching_host_allocator_test.cpp
@@ -64,12 +64,14 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_exchange_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_half_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
 if(CAFFE2_USE_CUDNN)
@@ -108,21 +110,20 @@ list(APPEND ATen_VEC_TEST_SRCS
 
 list(APPEND ATen_MPS_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_metal_library.cpp)
 if(APPLE AND USE_MPS)
   list(APPEND ATen_MPS_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
 endif()
 
-# Caffe2 specific tests
-if(BUILD_CAFFE2)
-  list(APPEND ATen_CPU_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/ExclusivelyOwned_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp)
-  list(APPEND ATen_CUDA_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp)
-endif()
-
+list(APPEND ATen_XPU_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_caching_host_allocator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_device_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_event_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_generator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_reportMemoryUsage_test.cpp
+  )
 
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
@@ -132,3 +133,4 @@ set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
+set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)

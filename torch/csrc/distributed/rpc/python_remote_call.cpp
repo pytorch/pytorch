@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 PythonRemoteCall::PythonRemoteCall(
     SerializedPyObj&& serializedPyObj,
@@ -46,8 +44,8 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
 
   // remove the last elements from values and convert it back to an RRef
   TORCH_INTERNAL_ASSERT(
-      values.size() >= 3,
-      "Expect at least 3 elements in the unpickled values, but got ",
+      values.size() > 3,
+      "Expect at least 4 elements in the unpickled values, but got ",
       values.size());
   bool isAsyncExecution = values.back().toBool();
   values.pop_back();
@@ -64,6 +62,4 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       isAsyncExecution);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

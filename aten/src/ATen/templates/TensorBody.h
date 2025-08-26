@@ -24,7 +24,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
@@ -65,6 +65,7 @@ struct Node;
 namespace at {
 
 class OptionalTensorRef;
+class TensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 using ITensorList = c10::IListRef<Tensor>;
@@ -96,6 +97,7 @@ class TORCH_API Tensor: public TensorBase {
   explicit Tensor(unsafe_borrow_t, const TensorBase& rhs): TensorBase(unsafe_borrow_t{}, rhs) {}
   friend MaybeOwnedTraits<Tensor>;
   friend OptionalTensorRef;
+  friend TensorRef;
 
  public:
   Tensor() = default;
@@ -193,7 +195,7 @@ class TORCH_API Tensor: public TensorBase {
   //
   // TODO: temporarily disabled
 
-  Tensor& operator=(const TensorBase& x) & {
+  Tensor& operator=(const TensorBase& x) & noexcept {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
@@ -202,7 +204,7 @@ class TORCH_API Tensor: public TensorBase {
     return *this;
   }
 
-  Tensor& operator=(const Tensor &x) & {
+  Tensor& operator=(const Tensor &x) & noexcept {
     return operator=(static_cast<const TensorBase&>(x));
   }
   Tensor& operator=(Tensor &&x) & noexcept {
@@ -329,32 +331,32 @@ class TORCH_API Tensor: public TensorBase {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const {
-    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // TODO: The Python version also accepts arguments
   Tensor cuda() const {
-    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor hip() const {
-    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor ve() const {
-    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {
-    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor metal() const {
-    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor meta() const {
-    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -396,7 +398,7 @@ class TORCH_API Tensor: public TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -431,7 +433,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
     // currently does not support optional of TensorList our approach is to replace
@@ -489,7 +491,7 @@ class TORCH_API Tensor: public TensorBase {
         "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
         "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
         "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
-        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more information.");
     }
     return maybe_grad;
   }
@@ -578,9 +580,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -624,7 +626,7 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::data();
   }
 
-  void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+  void _backward(TensorList inputs, const std::optional<Tensor>& gradient, std::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const {
     TensorBase::requires_grad_(_requires_grad);
@@ -735,10 +737,10 @@ struct ExclusivelyOwnedTraits<at::Tensor> {
 namespace at {
 
 inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
-    const c10::optional<Tensor>& opt) {
+    const std::optional<Tensor>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 }
 
 inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_format) const & {

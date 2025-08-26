@@ -1,7 +1,8 @@
 # Owner(s): ["oncall: jit"]
 
-import torch
 from typing import List, Tuple
+
+import torch
 
 
 class SubmoduleNoForwardInputs(torch.nn.Module):
@@ -87,7 +88,7 @@ class SubmoduleForwardTupleInput(torch.nn.Module):
         self.name = name
 
     def forward(self, input: Tuple[int]):
-        input_access = input[0]
+        input_access = input[0]  # noqa: F841
         return (1,)
 
 
@@ -98,7 +99,7 @@ class ModuleForwardTupleInput(torch.nn.Module):
         self.submodule = SubmoduleForwardTupleInput(submodule_name)
 
     def forward(self, input: Tuple[int]):
-        input_access = input[0]
+        input_access = input[0]  # noqa: F841
         return self.submodule((1,))
 
 
@@ -527,3 +528,9 @@ def create_submodule_forward_single_input_return_not_tupled():
     m.submodule.register_forward_hook(forward_hook)
 
     return m
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This file is a collection of utils, it should be imported not executed directly"
+    )

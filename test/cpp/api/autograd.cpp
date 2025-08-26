@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
 #include <test/cpp/api/support.h>
@@ -29,6 +30,22 @@ std::string graph_desc(std::shared_ptr<Node> node) {
 
 Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
+}
+
+TEST(AutogradAPITests, RegisterHookVoidReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::TensorBase x) { return; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
+TEST(AutogradAPITests, RegisterHookTensorReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::Tensor x) -> at::Tensor { return x; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
 }
 
 TEST(AutogradAPITests, BackwardSimpleTest) {
@@ -1182,7 +1199,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
   auto z = x * x;
   {
     WarningCapture warnings;
-    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    z.backward(torch::ones({5, 5}), std::nullopt, true);
     ASSERT_TRUE(
         warnings.str().find("Using backward() with create_graph=True") !=
         std::string::npos);
@@ -1190,7 +1207,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
 
   {
     WarningCapture warnings;
-    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, std::nullopt, true);
     ASSERT_TRUE(
         warnings.str().find("Using backward() with create_graph=True") !=
         std::string::npos);
@@ -1249,7 +1266,7 @@ int64_t ret_single_non_tensor(
 
 torch::Tensor opt_op(
     const torch::Tensor& self,
-    const c10::optional<at::Tensor>& other) {
+    const std::optional<at::Tensor>& other) {
   if (other.has_value()) {
     return self + other.value();
   } else {
@@ -1445,11 +1462,11 @@ TEST(TestAutogradNotImplementedFallback, OptOp) {
   auto opHandle =
       c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
   auto op = [&](const torch::Tensor& _1,
-                const c10::optional<torch::Tensor>& _2) {
+                const std::optional<torch::Tensor>& _2) {
     return callOpUnboxed<
         torch::Tensor,
         const torch::Tensor&,
-        const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+        const std::optional<torch::Tensor>&>(opHandle, _1, _2);
   };
 
   auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
@@ -1484,14 +1501,11 @@ TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
       "_test::ret_tuple_non_tensor", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    torch::Tensor out0;
-    torch::Tensor out1;
-    int64_t out2;
     auto out = callOpUnboxed<
         std::tuple<torch::Tensor, torch::Tensor, int64_t>,
         const torch::Tensor&,
         const torch::Tensor&>(opHandle, _1, _2);
-    std::tie(out0, out1, out2) = std::move(out);
+    auto [out0, out1, out2] = std::move(out);
     return out0;
   };
 
@@ -1648,11 +1662,41 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[0]}),
-      "One of the differentiated Tensors does not require grad");
+      "element 0 of the input tensors does not require grad");
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[1]}), "is not implemented");
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
+}
+
+static std::string test_format_error(const std::string& s) {
+  return s;
+}
+
+TEST(TestAutogradUtils, ValidateOutputsReduce) {
+  auto input = torch::ones({}, {torch::kFloat32});
+  auto grad = torch::ones({2, 3}, {torch::kFloat32});
+
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  input_metadata.emplace_back(InputMetadata(input));
+  std::vector<torch::Tensor> grads;
+  grads.emplace_back(grad);
+
+  torch::autograd::validate_outputs(input_metadata, grads, test_format_error);
+  ASSERT_TRUE(at::allclose(grads[0], grad.sum()));
+}
+
+TEST(TestAutogradUtils, ValidateOutputsBasic) {
+  auto input = torch::zeros({2, 3}, {torch::kFloat32});
+  auto grad = torch::ones({2, 3}, {torch::kFloat32});
+
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  input_metadata.emplace_back(InputMetadata(input));
+  std::vector<torch::Tensor> grads;
+  grads.emplace_back(grad);
+
+  torch::autograd::validate_outputs(input_metadata, grads, test_format_error);
+  ASSERT_TRUE(at::allclose(grad, torch::ones({2, 3})));
 }
 
 // TODO add these tests if needed

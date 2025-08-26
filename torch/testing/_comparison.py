@@ -1,42 +1,34 @@
+# mypy: allow-untyped-defs
 import abc
 import cmath
 import collections.abc
 import contextlib
-import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    List,
-    NoReturn,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Sequence
+from typing import Any, Callable, NoReturn, Optional, Union
+from typing_extensions import deprecated
 
 import torch
+
 
 try:
     import numpy as np
 
-    NUMPY_AVAILABLE = True
+    HAS_NUMPY = True
 except ModuleNotFoundError:
-    NUMPY_AVAILABLE = False
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 
 
 class ErrorMeta(Exception):
     """Internal testing exception that makes that carries error metadata."""
 
     def __init__(
-        self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
+        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> None:
         super().__init__(
             "If you are a user and see this message during normal operation "
             "please file an issue at https://github.com/pytorch/pytorch/issues. "
-            "If you are a developer and working on the comparison functions, please `raise ErrorMeta().to_error()` "
+            "If you are a developer and working on the comparison functions, please `raise ErrorMeta.to_error()` "
             "for user facing errors."
         )
         self.type = type
@@ -71,23 +63,17 @@ _DTYPE_PRECISIONS = {
 # The default tolerances of torch.float32 are used for quantized dtypes, because quantized tensors are compared in
 # their dequantized and floating point representation. For more details see `TensorLikePair._compare_quantized_values`
 _DTYPE_PRECISIONS.update(
-    {
-        dtype: _DTYPE_PRECISIONS[torch.float32]
-        for dtype in (
-            torch.quint8,
-            torch.quint2x4,
-            torch.quint4x2,
-            torch.qint8,
-            torch.qint32,
-        )
-    }
+    dict.fromkeys(
+        (torch.quint8, torch.quint2x4, torch.quint4x2, torch.qint8, torch.qint32),
+        _DTYPE_PRECISIONS[torch.float32],
+    )
 )
 
 
 def default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[Dict[torch.dtype, Tuple[float, float]]] = None,
-) -> Tuple[float, float]:
+    dtype_precisions: Optional[dict[torch.dtype, tuple[float, float]]] = None,
+) -> tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
     See :func:`assert_close` for a table of the default tolerance for each dtype.
@@ -114,8 +100,8 @@ def get_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
     rtol: Optional[float],
     atol: Optional[float],
-    id: Tuple[Any, ...] = (),
-) -> Tuple[float, float]:
+    id: tuple[Any, ...] = (),
+) -> tuple[float, float]:
     """Gets absolute and relative to be used for numeric comparisons.
 
     If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
@@ -142,16 +128,47 @@ def get_tolerances(
         return default_tolerances(*inputs)
 
 
+def _make_bitwise_mismatch_msg(
+    *,
+    default_identifier: str,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    extra: Optional[str] = None,
+    first_mismatch_idx: Optional[tuple[int]] = None,
+):
+    """Makes a mismatch error message for bitwise values.
+
+    Args:
+        default_identifier (str): Default description of the compared values, e.g. "Tensor-likes".
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional identifier that overrides
+            ``default_identifier``. Can be passed as callable in which case it will be called with
+            ``default_identifier`` to create the description at runtime.
+        extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
+        first_mismatch_idx (Optional[tuple[int]]): the index of the first mismatch, for each dimension.
+    """
+    if identifier is None:
+        identifier = default_identifier
+    elif callable(identifier):
+        identifier = identifier(default_identifier)
+
+    msg = f"{identifier} are not 'equal'!\n\n"
+
+    if extra:
+        msg += f"{extra.strip()}\n"
+    if first_mismatch_idx is not None:
+        msg += f"The first mismatched element is at index {first_mismatch_idx}.\n"
+    return msg.strip()
+
+
 def _make_mismatch_msg(
     *,
     default_identifier: str,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
     extra: Optional[str] = None,
     abs_diff: float,
-    abs_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
+    abs_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
     atol: float,
     rel_diff: float,
-    rel_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
+    rel_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
     rtol: float,
 ) -> str:
     """Makes a mismatch error message for numeric values.
@@ -177,7 +194,7 @@ def _make_mismatch_msg(
         *,
         type: str,
         diff: float,
-        idx: Optional[Union[int, Tuple[int, ...]]],
+        idx: Optional[Union[int, tuple[int, ...]]],
         tol: float,
     ) -> str:
         if idx is None:
@@ -259,7 +276,7 @@ def make_tensor_mismatch_msg(
             Defaults to "Tensor-likes".
     """
 
-    def unravel_flat_index(flat_index: int) -> Tuple[int, ...]:
+    def unravel_flat_index(flat_index: int) -> tuple[int, ...]:
         if not matches.shape:
             return ()
 
@@ -277,6 +294,15 @@ def make_tensor_mismatch_msg(
         f"Mismatched elements: {total_mismatches} / {number_of_elements} "
         f"({total_mismatches / number_of_elements:.1%})"
     )
+    if actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+        # skip checking for max_abs_diff and max_rel_diff for float8-like values
+        first_mismatch_idx = tuple(torch.nonzero(~matches, as_tuple=False)[0].tolist())
+        return _make_bitwise_mismatch_msg(
+            default_identifier="Tensor-likes",
+            identifier=identifier,
+            extra=extra,
+            first_mismatch_idx=first_mismatch_idx,
+        )
 
     actual_flat = actual.flatten()
     expected_flat = expected.flatten()
@@ -332,7 +358,7 @@ class Pair(abc.ABC):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         **unknown_parameters: Any,
     ) -> None:
         self.actual = actual
@@ -342,16 +368,16 @@ class Pair(abc.ABC):
 
     @staticmethod
     def _inputs_not_supported() -> NoReturn:
-        raise UnsupportedInputs()
+        raise UnsupportedInputs
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[type, tuple[type, ...]]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
 
     def _fail(
-        self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
+        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
@@ -366,7 +392,7 @@ class Pair(abc.ABC):
     def compare(self) -> None:
         """Compares the inputs and raises an :class`ErrorMeta` in case they mismatch."""
 
-    def extra_repr(self) -> Sequence[Union[str, Tuple[str, Any]]]:
+    def extra_repr(self) -> Sequence[Union[str, tuple[str, Any]]]:
         """Returns extra information that will be included in the representation.
 
         Should be overwritten by all subclasses that use additional options. The representation of the object will only
@@ -448,29 +474,29 @@ class BooleanPair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...],
+        id: tuple[Any, ...],
         **other_parameters: Any,
     ) -> None:
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
     @property
-    def _supported_types(self) -> Tuple[Type, ...]:
-        cls: List[Type] = [bool]
-        if NUMPY_AVAILABLE:
+    def _supported_types(self) -> tuple[type, ...]:
+        cls: list[type] = [bool]
+        if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
-    ) -> Tuple[bool, bool]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...]
+    ) -> tuple[bool, bool]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = [
+        actual, expected = (
             self._to_bool(bool_like, id=id) for bool_like in (actual, expected)
-        ]
+        )
         return actual, expected
 
-    def _to_bool(self, bool_like: Any, *, id: Tuple[Any, ...]) -> bool:
+    def _to_bool(self, bool_like: Any, *, id: tuple[Any, ...]) -> bool:
         if isinstance(bool_like, bool):
             return bool_like
         elif isinstance(bool_like, np.bool_):
@@ -529,7 +555,7 @@ class NumberPair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         rtol: Optional[float] = None,
         atol: Optional[float] = None,
         equal_nan: bool = False,
@@ -549,28 +575,28 @@ class NumberPair(Pair):
         self.check_dtype = check_dtype
 
     @property
-    def _supported_types(self) -> Tuple[Type, ...]:
+    def _supported_types(self) -> tuple[type, ...]:
         cls = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
+        if HAS_NUMPY:
             cls.append(np.number)
         return tuple(cls)
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
-    ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...]
+    ) -> tuple[Union[int, float, complex], Union[int, float, complex]]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = [
+        actual, expected = (
             self._to_number(number_like, id=id) for number_like in (actual, expected)
-        ]
+        )
         return actual, expected
 
     def _to_number(
-        self, number_like: Any, *, id: Tuple[Any, ...]
+        self, number_like: Any, *, id: tuple[Any, ...]
     ) -> Union[int, float, complex]:
-        if NUMPY_AVAILABLE and isinstance(number_like, np.number):
+        if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
-            return number_like
+            return number_like  # type: ignore[return-value]
         else:
             raise ErrorMeta(
                 TypeError, f"Unknown number type {type(number_like)}.", id=id
@@ -638,7 +664,7 @@ class TensorLikePair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         allow_subclasses: bool = True,
         rtol: Optional[float] = None,
         atol: Optional[float] = None,
@@ -664,8 +690,8 @@ class TensorLikePair(Pair):
         self.check_stride = check_stride
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...], allow_subclasses: bool
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         directly_related = isinstance(actual, type(expected)) or isinstance(
             expected, type(actual)
         )
@@ -675,7 +701,7 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             self._inputs_not_supported()
 
-        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        actual, expected = (self._to_tensor(input) for input in (actual, expected))
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
@@ -689,9 +715,10 @@ class TensorLikePair(Pair):
         except Exception:
             self._inputs_not_supported()
 
-    def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
+    def _check_supported(self, tensor: torch.Tensor, *, id: tuple[Any, ...]) -> None:
         if tensor.layout not in {
             torch.strided,
+            torch.jagged,
             torch.sparse_coo,
             torch.sparse_csr,
             torch.sparse_csc,
@@ -771,7 +798,7 @@ class TensorLikePair(Pair):
 
     def _equalize_attributes(
         self, actual: torch.Tensor, expected: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Equalizes some attributes of two tensors for value comparison.
 
         If ``actual`` and ``expected`` are ...
@@ -800,7 +827,16 @@ class TensorLikePair(Pair):
             expected = expected.cpu()
 
         if actual.dtype != expected.dtype:
-            dtype = torch.promote_types(actual.dtype, expected.dtype)
+            actual_dtype = actual.dtype
+            expected_dtype = expected.dtype
+            # For uint64, this is not sound in general, which is why promote_types doesn't
+            # allow it, but for easy testing, we're unlikely to get confused
+            # by large uint64 overflowing into negative int64
+            if actual_dtype in [torch.uint64, torch.uint32, torch.uint16]:
+                actual_dtype = torch.int64
+            if expected_dtype in [torch.uint64, torch.uint32, torch.uint16]:
+                expected_dtype = torch.int64
+            dtype = torch.promote_types(actual_dtype, expected_dtype)
             actual = actual.to(dtype)
             expected = expected.to(dtype)
 
@@ -825,6 +861,37 @@ class TensorLikePair(Pair):
             torch.sparse_bsc,
         }:
             compare_fn = self._compare_sparse_compressed_values
+        elif actual.layout == torch.jagged:
+            actual, expected = actual.values(), expected.values()
+            compare_fn = self._compare_regular_values_close
+        elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+
+            def bitwise_comp(
+                actual: torch.Tensor,
+                expected: torch.Tensor,
+                *,
+                rtol: float,
+                atol: float,
+                equal_nan: bool,
+                identifier: Optional[Union[str, Callable[[str], str]]] = None,
+            ) -> None:
+                if rtol != 0.0 or atol != 0.0:
+                    raise ErrorMeta(
+                        AssertionError,
+                        f"Rtol={rtol} and atol={atol} are not supported for bitwise comparison of low"
+                        " dimensional floats. Please use rtol=0.0 and atol=0.0.",
+                    )
+
+                return self._compare_regular_values_close(
+                    actual,
+                    expected,
+                    rtol=rtol,
+                    atol=atol,
+                    equal_nan=equal_nan,
+                    identifier=identifier,
+                )
+
+            compare_fn = bitwise_comp
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -954,7 +1021,7 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formates can be `torch.int32` _or_
+        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formats can be `torch.int32` _or_
         # `torch.int64`. While the same dtype is enforced for the compressed and plain indices of a single tensor, it
         # can be different between two tensors. Thus, we need to convert them to the same dtype, or the comparison will
         # fail.
@@ -1043,12 +1110,12 @@ def originate_pairs(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]],
-    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
-    id: Tuple[Any, ...] = (),
+    pair_types: Sequence[type[Pair]],
+    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
+    id: tuple[Any, ...] = (),
     **options: Any,
-) -> List[Pair]:
+) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1083,8 +1150,8 @@ def originate_pairs(
         and isinstance(expected, sequence_types)
         and not isinstance(expected, str)
     ):
-        actual_len = len(actual)
-        expected_len = len(expected)
+        actual_len = len(actual)  # type: ignore[arg-type]
+        expected_len = len(expected)  # type: ignore[arg-type]
         if actual_len != expected_len:
             raise ErrorMeta(
                 AssertionError,
@@ -1096,8 +1163,8 @@ def originate_pairs(
         for idx in range(actual_len):
             pairs.extend(
                 originate_pairs(
-                    actual[idx],
-                    expected[idx],
+                    actual[idx],  # type: ignore[index]
+                    expected[idx],  # type: ignore[index]
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1108,8 +1175,8 @@ def originate_pairs(
         return pairs
 
     elif isinstance(actual, mapping_types) and isinstance(expected, mapping_types):
-        actual_keys = set(actual.keys())
-        expected_keys = set(expected.keys())
+        actual_keys = set(actual.keys())  # type: ignore[attr-defined]
+        expected_keys = set(expected.keys())  # type: ignore[attr-defined]
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
@@ -1132,8 +1199,8 @@ def originate_pairs(
         for key in keys:
             pairs.extend(
                 originate_pairs(
-                    actual[key],
-                    expected[key],
+                    actual[key],  # type: ignore[index]
+                    expected[key],  # type: ignore[index]
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1181,11 +1248,11 @@ def not_close_error_metas(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
-    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
+    pair_types: Sequence[type[Pair]] = (ObjectPair,),
+    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
     **options: Any,
-) -> List[ErrorMeta]:
+) -> list[ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1214,9 +1281,9 @@ def not_close_error_metas(
         )
     except ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
-        raise error_meta.to_error() from None
+        raise error_meta.to_error() from None  # noqa: RSE102
 
-    error_metas: List[ErrorMeta] = []
+    error_metas: list[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()
@@ -1235,7 +1302,16 @@ def not_close_error_metas(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    return error_metas
+    # [ErrorMeta Cycles]
+    # ErrorMeta objects in this list capture
+    # tracebacks that refer to the frame of this function.
+    # The local variable `error_metas` refers to the error meta
+    # objects, creating a reference cycle. Frames in the traceback
+    # would not get freed until cycle collection, leaking cuda memory in tests.
+    # We break the cycle by removing the reference to the error_meta objects
+    # from this frame as it returns.
+    error_metas = [error_metas]
+    return error_metas.pop()
 
 
 def assert_close(
@@ -1462,7 +1538,9 @@ def assert_close(
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
         >>> # The default error message can be overwritten.
-        >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
+        >>> torch.testing.assert_close(
+        ...     actual, expected, msg="Argh, the tensors are not close!"
+        ... )
         Traceback (most recent call last):
         ...
         AssertionError: Argh, the tensors are not close!
@@ -1511,6 +1589,12 @@ def assert_close(
         raise error_metas[0].to_error(msg)
 
 
+@deprecated(
+    "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
+    "Please use `torch.testing.assert_close()` instead. "
+    "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
+    category=FutureWarning,
+)
 def assert_allclose(
     actual: Any,
     expected: Any,
@@ -1526,14 +1610,6 @@ def assert_allclose(
        Please use :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
        `here <https://github.com/pytorch/pytorch/issues/61844>`_.
     """
-    warnings.warn(
-        "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
-        "Please use `torch.testing.assert_close()` instead. "
-        "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):

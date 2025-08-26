@@ -1,10 +1,12 @@
+# mypy: allow-untyped-defs
+import re
+from typing import Callable
+
 import torch
 from torch import Tensor
-from typing import Callable, List
 
-import re
 
-__all__ : List[str] = []
+__all__: list[str] = []
 
 
 class _CodeParser:
@@ -17,20 +19,30 @@ class _CodeParser:
         function_params = r"(?P<function_params>\(.+\))"
         function_body = r"(?P<function_body>\{.+\})"
 
-        pattern = \
-            optional_ws \
-            + "template" \
-            + optional_ws + template_params \
-            + optional_ws + return_type \
-            + required_ws + function_name \
-            + optional_ws + function_params \
-            + optional_ws + function_body \
+        pattern = (
+            optional_ws
+            + "template"
             + optional_ws
+            + template_params
+            + optional_ws
+            + return_type
+            + required_ws
+            + function_name
+            + optional_ws
+            + function_params
+            + optional_ws
+            + function_body
+            + optional_ws
+        )
 
-        result = re.match(pattern, code_string, re.DOTALL)  # DOTALL for matching multiline
+        result = re.match(
+            pattern, code_string, re.DOTALL
+        )  # DOTALL for matching multiline
 
         if result is None:
-            raise Exception(f"Couldn't parse code, please check correctness:\n {code_string}")
+            raise Exception(  # noqa: TRY002
+                f"Couldn't parse code, please check correctness:\n {code_string}"
+            )
 
         self.template_params = result["template_params"]
         self.return_type = result["return_type"]
@@ -40,10 +52,14 @@ class _CodeParser:
 
 
 class _JittedFunction:
-    def __init__(self, code_string: str, return_by_ref: bool, num_outputs: int, **kwargs):
+    def __init__(
+        self, code_string: str, return_by_ref: bool, num_outputs: int, **kwargs
+    ):
         self.code_string = code_string
 
-        assert return_by_ref or num_outputs == 1, "Return by value only works for single output. "
+        assert return_by_ref or num_outputs == 1, (
+            "Return by value only works for single output. "
+        )
         self.return_by_ref = return_by_ref
         self.num_outputs = num_outputs
 
@@ -56,7 +72,9 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        assert self.is_cuda_available, "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
+        assert self.is_cuda_available, (
+            "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
+        )
 
         assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 
@@ -73,7 +91,8 @@ class _JittedFunction:
             self.return_by_ref,
             self.num_outputs,
             tensors,
-            expanded_kwargs)
+            expanded_kwargs,
+        )
 
 
 def _create_jit_fn(code_string: str, **kwargs) -> Callable:
@@ -95,8 +114,8 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
 
         code_string = "template <typename T> T my_kernel(T x, T y, T alpha) { return -x + alpha * y; }"
         jitted_fn = create_jit_fn(code_string, alpha=1.0)
-        a = torch.rand(3, device='cuda')
-        b = torch.rand(3, device='cuda')
+        a = torch.rand(3, device="cuda")
+        b = torch.rand(3, device="cuda")
         # invoke jitted function like a regular python function
         result = jitted_fn(a, b, alpha=3.14)
 
@@ -104,11 +123,13 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
 
     Example::
 
-        code_string = "template <typename T> T util_fn(T x, T y) { return ::sin(x) + ::cos(y); }"
+        code_string = (
+            "template <typename T> T util_fn(T x, T y) { return ::sin(x) + ::cos(y); }"
+        )
         code_string += "template <typename T> T my_kernel(T x, T y, T val) { return ::min(val, util_fn(x, y)); }"
         jitted_fn = create_jit_fn(code_string, val=0.0)
-        a = torch.rand(3, device='cuda')
-        b = torch.rand(3, device='cuda')
+        a = torch.rand(3, device="cuda")
+        b = torch.rand(3, device="cuda")
         # invoke jitted function like a regular python function
         result = jitted_fn(a, b)  # using default val=0.0
 
@@ -120,9 +141,9 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         code_string = "template <typename T> T my_gelu(T a) { return a > 0 ? a : 0; }"
         my_gelu = create_jit_fn(code_string)
         my_lib = torch.library.Library("aten", "IMPL")
-        my_lib.impl('aten::gelu', my_gelu, "CUDA")
+        my_lib.impl("aten::gelu", my_gelu, "CUDA")
         # torch.nn.GELU and torch.nn.function.gelu are now overridden
-        a = torch.rand(3, device='cuda')
+        a = torch.rand(3, device="cuda")
         torch.allclose(torch.nn.functional.gelu(a), torch.nn.functional.relu(a))
 
     .. warning::
@@ -134,11 +155,12 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     .. warning::
         All input tensors must live in CUDA device
     """
-
     return _JittedFunction(code_string, return_by_ref=False, num_outputs=1, **kwargs)
 
 
-def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) -> Callable:
+def _create_multi_output_jit_fn(
+    code_string: str, num_outputs: int, **kwargs
+) -> Callable:
     """
     Create a jiterator-generated cuda kernel for an elementwise op that supports returning one or more outputs.
 
@@ -151,8 +173,8 @@ def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) ->
 
         code_string = "template <typename T> void my_kernel(T x, T y, T alpha, T& out) { out = -x + alpha * y; }"
         jitted_fn = create_jit_fn(code_string, alpha=1.0)
-        a = torch.rand(3, device='cuda')
-        b = torch.rand(3, device='cuda')
+        a = torch.rand(3, device="cuda")
+        b = torch.rand(3, device="cuda")
         # invoke jitted function like a regular python function
         result = jitted_fn(a, b, alpha=3.14)
 
@@ -162,5 +184,6 @@ def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) ->
     .. warning::
         This API only supports up to 8 inputs and 8 outputs
     """
-
-    return _JittedFunction(code_string, return_by_ref=True, num_outputs=num_outputs, **kwargs)
+    return _JittedFunction(
+        code_string, return_by_ref=True, num_outputs=num_outputs, **kwargs
+    )

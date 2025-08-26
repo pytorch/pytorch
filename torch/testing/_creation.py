@@ -3,14 +3,31 @@ This module contains tensor creation utilities.
 """
 
 import collections.abc
+import functools
 import math
 import warnings
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 
-_INTEGRAL_TYPES = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+
+_INTEGRAL_TYPES = [
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+]
 _FLOATING_TYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
+_FLOATING_8BIT_TYPES = [
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+]
 _COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]
 _BOOLEAN_OR_INTEGRAL_TYPES = [torch.bool, *_INTEGRAL_TYPES]
 _FLOATING_OR_COMPLEX_TYPES = [*_FLOATING_TYPES, *_COMPLEX_TYPES]
@@ -26,7 +43,7 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
+    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
     dtype: torch.dtype,
     device: Union[str, torch.device],
     low: Optional[float] = None,
@@ -98,11 +115,11 @@ def make_tensor(
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
-        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
+        >>> make_tensor((3,), device="cpu", dtype=torch.float32, low=-1, high=1)
         >>> # xdoctest: +SKIP
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
-        >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
+        >>> make_tensor((2, 2), device="cuda", dtype=torch.bool)
         tensor([[False, False],
                 [False, True]], device='cuda:0')
     """
@@ -115,7 +132,7 @@ def make_tensor(
         highest_exclusive: float,
         default_low: float,
         default_high: float,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high)
         if required.
@@ -135,8 +152,9 @@ def make_tensor(
             warnings.warn(
                 "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
                 "is deprecated since 2.1 and will be removed in 2.3. "
-                "Use torch.full(...) instead.",
+                "Use `torch.full(...)` instead.",
                 FutureWarning,
+                stacklevel=3,
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")
@@ -159,7 +177,7 @@ def make_tensor(
 
     if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
         shape = shape[0]  # type: ignore[assignment]
-    shape = cast(Tuple[int, ...], tuple(shape))
+    shape = cast(tuple[int, ...], tuple(shape))
 
     if noncontiguous and memory_format is not None:
         raise ValueError(
@@ -172,9 +190,15 @@ def make_tensor(
             f"`requires_grad=True` is not supported for boolean and integral dtypes, but got {dtype=}"
         )
 
+    noncontiguous = noncontiguous and functools.reduce(lambda x, y: x * y, shape, 1) > 1
+    if noncontiguous:
+        # Double the size of the shape in the last dimension, so that we have
+        # non-identical values when we make the non-contiguous operation.
+        shape = cast(tuple[int, ...], (*shape[:-1], 2 * shape[-1]))
+
     if dtype is torch.bool:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,
@@ -187,7 +211,7 @@ def make_tensor(
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,
@@ -217,15 +241,27 @@ def make_tensor(
         _uniform_random_(
             torch.view_as_real(result) if dtype in _COMPLEX_TYPES else result, low, high
         )
+    elif dtype in _FLOATING_8BIT_TYPES:
+        low, high = modify_low_high(
+            low,
+            high,
+            lowest_inclusive=torch.finfo(dtype).min,
+            highest_exclusive=torch.finfo(dtype).max,
+            default_low=-9,
+            default_high=9,
+        )
+        result = torch.empty(shape, device=device, dtype=torch.float32)
+        _uniform_random_(result, low, high)
+        result = result.to(dtype)
     else:
         raise TypeError(
             f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
             " To request support, file an issue at: https://github.com/pytorch/pytorch/issues"
         )
 
-    if noncontiguous and result.numel() > 1:
-        result = torch.repeat_interleave(result, 2, dim=-1)
-        result = result[..., ::2]
+    if noncontiguous:
+        # Offset by 1 to also catch offsetting issues
+        result = result[..., 1::2]
     elif memory_format is not None:
         result = result.clone(memory_format=memory_format)
 

@@ -1,10 +1,15 @@
+# mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
 
-__all__ = ['Categorical']
+
+__all__ = ["Categorical"]
+
 
 class Categorical(Distribution):
     r"""
@@ -35,7 +40,7 @@ class Categorical(Distribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
         tensor(3)
@@ -44,35 +49,45 @@ class Categorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real_vector}
+
+    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
-            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
+            raise ValueError(
+                "Either `probs` or `logits` must be specified, but not both."
+            )
         if probs is not None:
             if probs.dim() < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
+            assert logits is not None  # helps mypy
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
-        batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
+        batch_shape = (
+            self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
+        )
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Categorical, _instance)
         batch_shape = torch.Size(batch_shape)
         param_shape = batch_shape + torch.Size((self._num_events,))
-        if 'probs' in self.__dict__:
+        if "probs" in self.__dict__:
             new.probs = self.probs.expand(param_shape)
             new._param = new.probs
-        if 'logits' in self.__dict__:
+        if "logits" in self.__dict__:
             new.logits = self.logits.expand(param_shape)
             new._param = new.logits
         new._num_events = self._num_events
@@ -88,28 +103,38 @@ class Categorical(Distribution):
         return constraints.integer_interval(0, self._num_events - 1)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     @property
-    def mean(self):
-        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+    def mean(self) -> Tensor:
+        return torch.full(
+            self._extended_shape(),
+            nan,
+            dtype=self.probs.dtype,
+            device=self.probs.device,
+        )
 
     @property
-    def mode(self):
-        return self.probs.argmax(axis=-1)
+    def mode(self) -> Tensor:
+        return self.probs.argmax(dim=-1)
 
     @property
-    def variance(self):
-        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+    def variance(self) -> Tensor:
+        return torch.full(
+            self._extended_shape(),
+            nan,
+            dtype=self.probs.dtype,
+            device=self.probs.device,
+        )
 
     def sample(self, sample_shape=torch.Size()):
         if not isinstance(sample_shape, torch.Size):

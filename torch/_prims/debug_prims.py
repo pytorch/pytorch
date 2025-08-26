@@ -1,15 +1,16 @@
 import contextlib
-from typing import Sequence
+from collections.abc import Generator, Sequence
+from typing import Optional
 
 import torch
-from torch._custom_op.impl import custom_op
 from torch.utils._content_store import ContentStoreReader
 
-LOAD_TENSOR_READER = None
+
+LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
 
 
 @contextlib.contextmanager
-def load_tensor_reader(loc):
+def load_tensor_reader(loc: str) -> Generator[None, None, None]:
     global LOAD_TENSOR_READER
     assert LOAD_TENSOR_READER is None
     # load_tensor is an "op", and we will play merry hell on
@@ -25,20 +26,20 @@ def load_tensor_reader(loc):
         LOAD_TENSOR_READER = None
 
 
-def register_debug_prims():
-    @custom_op("debugprims::load_tensor")
-    def load_tensor(
+def register_debug_prims() -> None:
+    torch.library.define(
+        "debugprims::load_tensor",
+        "(str name, int[] size, int[] stride, *, ScalarType dtype, Device device) -> Tensor",
+    )
+
+    @torch.library.impl("debugprims::load_tensor", "BackendSelect")
+    def load_tensor_factory(
         name: str,
         size: Sequence[int],
         stride: Sequence[int],
-        *,
         dtype: torch.dtype,
         device: torch.device,
     ) -> torch.Tensor:
-        ...
-
-    @load_tensor.impl_factory()
-    def load_tensor_factory(name, size, stride, dtype, device):
         if LOAD_TENSOR_READER is None:
             from torch._dynamo.testing import rand_strided
 
@@ -55,5 +56,5 @@ def register_debug_prims():
             # Unlike the other properties, we will do coercions for dtype
             # mismatch
             if r.dtype != dtype:
-                r = clone_input(r, dtype=dtype)
+                r = clone_input(r, dtype=dtype)  # type: ignore[no-untyped-call]
             return r

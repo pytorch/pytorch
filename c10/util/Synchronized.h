@@ -2,8 +2,6 @@
 
 #include <mutex>
 
-#include <c10/util/C++17.h>
-
 namespace c10 {
 
 /**
@@ -28,7 +26,7 @@ class Synchronized final {
  public:
   Synchronized() = default;
   Synchronized(T const& data) : data_(data) {}
-  Synchronized(T&& data) : data_(data) {}
+  Synchronized(T&& data) : data_(std::move(data)) {}
 
   // Don't permit copy construction, move, assignment, or
   // move assignment, since the underlying std::mutex
@@ -37,6 +35,7 @@ class Synchronized final {
   Synchronized(Synchronized&&) = delete;
   Synchronized operator=(Synchronized const&) = delete;
   Synchronized operator=(Synchronized&&) = delete;
+  ~Synchronized() = default;
 
   /**
    * To use, call withLock<T> with a callback that accepts T either
@@ -44,9 +43,9 @@ class Synchronized final {
    * provided callback safely.
    */
   template <typename CB>
-  typename c10::invoke_result_t<CB, T&> withLock(CB cb) {
+  auto withLock(CB&& cb) {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    return cb(this->data_);
+    return std::forward<CB>(cb)(this->data_);
   }
 
   /**
@@ -55,9 +54,9 @@ class Synchronized final {
    * the provided callback safely.
    */
   template <typename CB>
-  typename c10::invoke_result_t<CB, T const&> withLock(CB cb) const {
+  auto withLock(CB&& cb) const {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    return cb(this->data_);
+    return std::forward<CB>(cb)(this->data_);
   }
 };
 } // end namespace c10

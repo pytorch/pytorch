@@ -6,10 +6,11 @@ import unittest
 import onnx_test_common
 import parameterized
 import PIL
+import torchvision
 
 import torch
-import torchvision
 from torch import nn
+from torch.testing._internal import common_utils
 
 
 def _get_test_image_tensor():
@@ -95,3 +96,7 @@ class TestQuantizedModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
             pretrained=True, quantize=True
         )
         self.run_test(model, _get_test_image_tensor())
+
+
+if __name__ == "__main__":
+    common_utils.run_tests()

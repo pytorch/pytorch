@@ -92,12 +92,12 @@ We can now run the following commands to build the application from within the
   cmake --build . --config Release
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
-distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can be queried
+distribution. If PyTorch was installed via pip, `CMAKE_PREFIX_PATH` can be queried
 using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
 
 .. code-block:: sh
 
-  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+  cmake -DCMAKE_PREFIX_PATH=`python3 -c 'import torch;print(torch.utils.cmake_prefix_path)'` ..
 
 If all goes well, it will look something like this:
 
@@ -153,6 +153,18 @@ should now merrily print the tensor (exact output subject to randomness):
   build your project in debug mode, please try the debug version of LibTorch.
   Also, make sure you specify the correct configuration in the ``cmake --build .``
   line above.
+
+System Requirements
+-------------------
+
+To ensure smooth installation and usage of LibTorch, please ensure your system
+meets the following requirements:
+
+1. **GLIBC Version**:
+  - GLIBC 2.29 or newer for cxx11 ABI version
+
+2. **GCC Version**:
+  - GCC 9 or newer for cxx11
 
 Visual Studio Extension
 -----------------------

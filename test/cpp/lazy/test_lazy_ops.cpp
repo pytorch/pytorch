@@ -11,7 +11,6 @@
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/torch.h>
-#include <iostream>
 
 namespace torch {
 namespace lazy {
@@ -475,8 +474,8 @@ TEST_F(LazyOpsTest, TestDiv) {
 }
 
 TEST_F(LazyOpsTest, TestDivWithRoundingMode) {
-  c10::optional<c10::string_view> rounding_modes[] = {
-      "trunc", "floor", c10::nullopt};
+  std::optional<std::string_view> rounding_modes[] = {
+      "trunc", "floor", std::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 :
          {torch::kFloat,
@@ -535,8 +534,8 @@ TEST_F(LazyOpsTest, TestDivInPlace) {
 }
 
 TEST_F(LazyOpsTest, TestDivInPlaceWithRoundingMode) {
-  c10::optional<c10::string_view> rounding_modes[] = {
-      "trunc", "floor", c10::nullopt};
+  std::optional<std::string_view> rounding_modes[] = {
+      "trunc", "floor", std::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 : {torch::kFloat}) {
       torch::Tensor a = isFloatingType(scalar_type1)
@@ -1553,7 +1552,7 @@ TEST_F(LazyOpsTest, TestStdWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, std::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1573,7 +1572,7 @@ TEST_F(LazyOpsTest, TestStdMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, std::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1710,7 +1709,7 @@ TEST_F(LazyOpsTest, TestVarWithDim) {
 TEST_F(LazyOpsTest, TestVarWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, std::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (bool keepDim : {true, false}) {
       for (const auto& correction : corrections) {
@@ -1730,7 +1729,7 @@ TEST_F(LazyOpsTest, TestVarWithCorrection) {
 TEST_F(LazyOpsTest, TestVarMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, std::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (const auto& correction : corrections) {
       for (auto keepdim : {true, false}) {
@@ -2676,11 +2675,11 @@ TEST_F(LazyOpsTest, TestCumProdCastLong) {
 TEST_F(LazyOpsTest, TestArgMin) {
   torch::Tensor a = torch::rand(
       {4, 4, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::argmin(a, c10::nullopt, /*keepdim=*/false);
+  torch::Tensor b = torch::argmin(a, std::nullopt, /*keepdim=*/false);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b =
-        torch::argmin(lazy_a, c10::nullopt, /*keepdim=*/false);
+        torch::argmin(lazy_a, std::nullopt, /*keepdim=*/false);
     AllEqual(b, lazy_b);
   });
 }
@@ -2738,11 +2737,11 @@ TEST_F(LazyOpsTest, TestArgMinWrapper) {
 TEST_F(LazyOpsTest, TestArgMax) {
   torch::Tensor a = torch::rand(
       {4, 4, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::argmax(a, c10::nullopt, /*keepdim=*/false);
+  torch::Tensor b = torch::argmax(a, std::nullopt, /*keepdim=*/false);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b =
-        torch::argmax(lazy_a, c10::nullopt, /*keepdim=*/false);
+        torch::argmax(lazy_a, std::nullopt, /*keepdim=*/false);
     AllEqual(b, lazy_b);
   });
 }
@@ -2776,11 +2775,11 @@ TEST_F(LazyOpsTest, TestArgMaxDimKeep) {
 TEST_F(LazyOpsTest, TestArgMaxSameValue) {
   torch::Tensor a = torch::ones(
       {4, 4, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::argmax(a, c10::nullopt, /*keepdim=*/false);
+  torch::Tensor b = torch::argmax(a, std::nullopt, /*keepdim=*/false);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b =
-        torch::argmax(lazy_a, c10::nullopt, /*keepdim=*/false);
+        torch::argmax(lazy_a, std::nullopt, /*keepdim=*/false);
     AllEqual(b, lazy_b);
   });
 }
@@ -3001,10 +3000,10 @@ TEST_F(LazyOpsTest, TestClampMin) {
   torch::Tensor a = torch::rand(
       {2, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   torch::Scalar min_val(0.311);
-  torch::Tensor b = torch::clamp(a, min_val, c10::nullopt);
+  torch::Tensor b = torch::clamp(a, min_val, std::nullopt);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = torch::clamp(lazy_a, min_val, c10::nullopt);
+    torch::Tensor lazy_b = torch::clamp(lazy_a, min_val, std::nullopt);
     AllClose(b, lazy_b);
   });
 }
@@ -3013,10 +3012,10 @@ TEST_F(LazyOpsTest, TestClampMax) {
   torch::Tensor a = torch::rand(
       {2, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   torch::Scalar max_val(0.409);
-  torch::Tensor b = torch::clamp(a, c10::nullopt, max_val);
+  torch::Tensor b = torch::clamp(a, std::nullopt, max_val);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = torch::clamp(lazy_a, c10::nullopt, max_val);
+    torch::Tensor lazy_b = torch::clamp(lazy_a, std::nullopt, max_val);
     AllClose(b, lazy_b);
   });
 }
@@ -4033,9 +4032,9 @@ TEST_F(LazyOpsTest, TestUpsampleNearest2DWithScale) {
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
     torch::Tensor result = torch::upsample_nearest2d(
-        input, c10::nullopt, at::ArrayRef<double>{scale_h, scale_w});
+        input, std::nullopt, at::ArrayRef<double>{scale_h, scale_w});
     torch::Tensor lazy_result = torch::upsample_nearest2d(
-        lazy_input, c10::nullopt, at::ArrayRef<double>{scale_h, scale_w});
+        lazy_input, std::nullopt, at::ArrayRef<double>{scale_h, scale_w});
     AllClose(result, lazy_result);
   });
 }
@@ -4049,7 +4048,7 @@ TEST_F(LazyOpsTest, TestUpsampleNearest2DBackwardWithScale) {
   double scale_w = 3.4;
   auto testfn = [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
     return torch::upsample_nearest2d(
-        inputs[0], c10::nullopt, at::ArrayRef<double>{scale_h, scale_w});
+        inputs[0], std::nullopt, at::ArrayRef<double>{scale_h, scale_w});
   };
   ForEachDevice([&](const torch::Device& device) {
     TestBackward(
@@ -8136,9 +8135,6 @@ TEST_F(LazyOpsTest, TestMaxUnpool3D) {
 }
 
 TEST_F(LazyOpsTest, TestNllLoss) {
-  // TODO(whc) debug divide-by-zero failure under ASAN
-  GTEST_SKIP();
-
   int batch = 6;
   int classes = 2;
   // TODO(asuhan): Fix the torch::kDouble case.
@@ -10917,9 +10913,6 @@ TEST_F(LazyOpsTest, TestBinaryCrossEntropyBackward) {
 }
 
 TEST_F(LazyOpsTest, TestNllLossBackward) {
-  // TODO(whc) debug divide-by-zero failure under ASAN
-  GTEST_SKIP();
-
   int batch = 6;
   int classes = 2;
   // TODO(asuhan): Fix the torch::kDouble case.

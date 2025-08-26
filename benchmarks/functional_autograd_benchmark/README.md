@@ -1,6 +1,6 @@
 # Benchmarking tool for the autograd API
 
-This folder contain a set of self-contained scripts that allow to benchmark the autograd with different common models.
+This folder contain a set of self-contained scripts that allows you to benchmark autograd with different common models.
 It is designed to run the benchmark before and after your change and will generate a table to share on the PR.
 
 To do so, you can use `functional_autograd_benchmark.py` to run the benchmarks before your change (using as output `before.txt`) and after your change (using as output `after.txt`).
@@ -17,8 +17,8 @@ export DEBUG=0
 export OMP_NUM_THREADS=10
 
 # Compile pytorch with the base revision
-git checkout master
-python setup.py develop
+git checkout main
+python -m pip install --no-build-isolation -v -e .
 
 # Install dependencies:
 # Scipy is required by detr
@@ -32,7 +32,7 @@ python functional_autograd_benchmark.py --output before.txt
 # Compile pytorch with your change
 popd
 git checkout your_feature_branch
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 
 # Run the benchmark for the new version
 pushd benchmarks/functional_autograd_benchmark

@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 using SchemaSpecialCasePair =
     std::pair<c10::FunctionSchema, std::unordered_set<std::string>>;
@@ -30,9 +29,9 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(const c10::SchemaArgument& argument);
 
-  bool is_mutable(c10::string_view name);
+  bool is_mutable(std::string_view name);
 
-  bool has_argument(c10::string_view name);
+  bool has_argument(std::string_view name);
 
   bool is_nondeterministic() const;
 
@@ -61,7 +60,7 @@ struct TORCH_API SchemaInfo {
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
   void addArgumentValues(
-      const std::vector<c10::optional<at::IValue>>& value_list);
+      const std::vector<std::optional<at::IValue>>& value_list);
 
   void addArgumentValues(
       const std::unordered_map<std::string, at::IValue>& values);
@@ -107,11 +106,11 @@ struct TORCH_API SchemaInfo {
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;
 
   bool has_init_;
 };
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

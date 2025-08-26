@@ -170,7 +170,7 @@ std::vector<c10::IValue> create_inputs(
     std::vector<int64_t> input_dims;
     input_dims.reserve(input_dims_str.size());
     for (const auto& s : input_dims_str) {
-      input_dims.push_back(c10::stoi(s));
+      input_dims.push_back(std::stoi(s));
     }
 
     at::ScalarType input_type;
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
 
   c10::CPUCachingAllocator caching_allocator;
-  c10::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
+  std::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
   if (FLAGS_use_caching_allocator) {
     caching_allocator_guard.emplace(&caching_allocator);
   }

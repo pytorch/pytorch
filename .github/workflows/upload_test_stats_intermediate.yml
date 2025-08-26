@@ -1,0 +1,45 @@
+name: Upload test stats intermediate
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_id:
+        description: workflow_id of the run
+        required: true
+
+permissions:
+  id-token: write
+
+jobs:
+  intermediate_upload_test_stats:
+    name: Intermediate upload test stats for ${{ inputs.workflow_id }}
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 boto3==1.35.42
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_upload_test_stats_intermediate_workflow
+          aws-region: us-east-1
+
+      - name: Upload test stats
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ inputs.workflow_id }}
+        run: |
+          python3 -m tools.stats.upload_test_stats_intermediate \
+            --workflow-run-id "${WORKFLOW_RUN_ID}"

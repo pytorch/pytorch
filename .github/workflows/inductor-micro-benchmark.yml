@@ -1,0 +1,57 @@
+name: inductor-micro-benchmark
+
+on:
+  schedule:
+    - cron: 0 7 * * *
+  push:
+    tags:
+      - ciflow/inductor-micro-benchmark/*
+  workflow_dispatch:
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-default-label-prefix:
+    name: get-default-label-prefix
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  build:
+    name: cuda12.8-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-default-label-prefix
+    with:
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.aws.a100", owners: ["oncall:pt2"] },
+        ]}
+    secrets: inherit
+
+  test:
+    name: cuda12.8-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+      timeout-minutes: 720
+    secrets: inherit

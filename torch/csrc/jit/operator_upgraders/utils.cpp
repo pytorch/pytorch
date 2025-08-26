@@ -1,17 +1,16 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 
-#include <c10/util/Optional.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <iostream>
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
-c10::optional<UpgraderEntry> findUpgrader(
+std::optional<UpgraderEntry> findUpgrader(
     const std::vector<UpgraderEntry>& upgraders_for_schema,
     size_t current_version) {
   // we want to find the entry which satisfies following two conditions:
@@ -28,7 +27,7 @@ c10::optional<UpgraderEntry> findUpgrader(
   if (pos != upgraders_for_schema.end()) {
     return *pos;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isOpCurrentBasedOnUpgraderEntries(
@@ -52,7 +51,7 @@ bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
 
 std::vector<std::string> loadPossibleHistoricOps(
     const std::string& name,
-    c10::optional<size_t> version) {
+    std::optional<size_t> version) {
   std::vector<std::string> possibleSchemas;
 
   if (!version.has_value()) {
@@ -95,5 +94,4 @@ std::vector<UpgraderRange> getUpgradersRangeForOp(const std::string& name) {
   return output;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

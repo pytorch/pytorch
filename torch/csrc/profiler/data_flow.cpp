@@ -1,16 +1,14 @@
 #include <torch/csrc/profiler/data_flow.h>
 
 #include <c10/util/overloaded.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/profiler/collection.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct RawTensorInfo {
   TensorImplAddress impl_;
   StorageImplData storage_;
@@ -18,8 +16,8 @@ struct RawTensorInfo {
   bool is_free_;
 
   // Used to assign back to the original structs.
-  std::reference_wrapper<c10::optional<AllocationID>> allocation_id_ref_;
-  std::reference_wrapper<c10::optional<TensorID>> id_ref_;
+  std::reference_wrapper<std::optional<AllocationID>> allocation_id_ref_;
+  std::reference_wrapper<std::optional<TensorID>> id_ref_;
 };
 
 struct RawTensors {
@@ -32,7 +30,7 @@ struct RawTensors {
         t.impl(), t.data_, t.device_, false, t.allocation_id_, t.id_});
   }
 
-  void operator()(c10::optional<TensorMetadata>& t) {
+  void operator()(std::optional<TensorMetadata>& t) {
     if (t.has_value()) {
       (*this)(*t);
     }
@@ -60,7 +58,7 @@ struct RawTensors {
 
 void calculateUniqueTensorIDs(
     std::vector<std::shared_ptr<Result>>& sorted_results) {
-  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
+  // This task is equivalent to https://leetcode.com/problems/number-of-islands/
   // We first cluster events with a greedy index assignment, and then merge
   // groups that overlap.
   std::vector<RawTensorInfo> tensors;
@@ -77,7 +75,7 @@ void calculateUniqueTensorIDs(
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& i : torch_op.inputs_) {
-              c10::visit(raw_tensors, i);
+              std::visit(raw_tensors, i);
             }
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {
@@ -129,7 +127,8 @@ void calculateUniqueTensorIDs(
     ska::flat_hash_set<AllocationID> tensor_set;
     for (const auto& t : tensors) {
       if (t.impl_ != NoTensorImpl) {
-        tensor_set.insert(*t.allocation_id_ref_.get());
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        tensor_set.insert(t.allocation_id_ref_.get().value());
       }
     }
     tensors.erase(
@@ -137,7 +136,7 @@ void calculateUniqueTensorIDs(
             tensors.begin(),
             tensors.end(),
             [&tensor_set](const auto& i) {
-              auto it = tensor_set.find(*i.allocation_id_ref_.get());
+              auto it = tensor_set.find(i.allocation_id_ref_.get().value());
               return it == tensor_set.end();
             }),
         tensors.end());
@@ -156,6 +155,7 @@ void calculateUniqueTensorIDs(
         continue;
       }
 
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto allocation_id = *t.allocation_id_ref_.get();
       const auto it = impl_map.insert({t.impl_, allocation_id}).first;
 
@@ -187,11 +187,10 @@ void calculateUniqueTensorIDs(
   // Write back to Tensor IDs.
   // --------------------------------------------------------------------------
   for (const auto& t : tensors) {
-    const auto id = id_map.at(*t.allocation_id_ref_.get());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    const auto id = id_map.at(t.allocation_id_ref_.get().value());
     t.id_ref_.get().emplace(TensorID(id));
   }
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

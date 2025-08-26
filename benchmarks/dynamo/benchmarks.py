@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
+
 import argparse
 import os
+import sys
 
-from typing import Set
+
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
 
 
 # Note - hf and timm have their own version of this, torchbench does not
-# TOOD(voz): Someday, consolidate all the files into one runner instead of a shim like this...
-def model_names(filename: str) -> Set[str]:
+# TODO(voz): Someday, consolidate all the files into one runner instead of a shim like this...
+def model_names(filename: str) -> set[str]:
     names = set()
-    with open(filename, "r") as fh:
+    with open(filename) as fh:
         lines = fh.readlines()
         lines = [line.rstrip() for line in lines]
         for line in lines:
@@ -17,6 +23,8 @@ def model_names(filename: str) -> Set[str]:
             if len(line_parts) == 1:
                 line_parts = line.split(",")
             model_name = line_parts[0]
+            if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+                continue
             names.add(model_name)
     return names
 
@@ -87,7 +95,7 @@ if __name__ == "__main__":
             torchbench.torchbench_main()
         else:
             print(f"Illegal model name? {name}")
-            exit(-1)
+            sys.exit(-1)
     else:
         import torchbench
 

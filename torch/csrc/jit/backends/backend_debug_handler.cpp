@@ -2,8 +2,7 @@
 
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};
 
@@ -27,11 +26,10 @@ int64_t BackendDebugInfoRecorder::getNextDebugHandle(const Node* node) {
 BackendDebugInfoMapType BackendDebugInfoRecorder::stopRecording() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
-  // bump of refcount. Not performant, but this is not intented
+  // bump of refcount. Not performant, but this is not intended
   // to be used in perf critical path.
   // Alternate might be do move but that will be destructive
   return handles_to_inlined_callstack_ptrs_;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

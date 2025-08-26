@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 from enum import Enum
-from typing import Dict, List, Set
+from pathlib import Path
 
 
 # <project folder>
 HOME_DIR = os.environ["HOME"]
-TOOLS_FOLDER = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), os.path.pardir, os.path.pardir
-)
+TOOLS_FOLDER = str(Path(__file__).resolve().parents[2])
 
 
 # <profile folder>
@@ -22,8 +22,8 @@ LOG_DIR = os.path.join(PROFILE_DIR, "log")
 
 # test type, DO NOT change the name, it should be consistent with [buck query --output-attribute] result
 class TestType(Enum):
-    CPP: str = "cxx_test"
-    PY: str = "python_test"
+    CPP = "cxx_test"
+    PY = "python_test"
 
 
 class Test:
@@ -41,8 +41,8 @@ class Test:
         self.test_type = test_type
 
 
-TestList = List[Test]
-TestStatusType = Dict[str, Set[str]]
+TestList = list[Test]
+TestStatusType = dict[str, set[str]]
 
 
 # option
@@ -57,11 +57,11 @@ class Option:
 
 # test platform
 class TestPlatform(Enum):
-    FBCODE: str = "fbcode"
-    OSS: str = "oss"
+    FBCODE = "fbcode"
+    OSS = "oss"
 
 
 # compiler type
 class CompilerType(Enum):
-    CLANG: str = "clang"
-    GCC: str = "gcc"
+    CLANG = "clang"
+    GCC = "gcc"

@@ -2,8 +2,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// Computes the sum of gradients of given tensors with respect to graph leaves.
 ///
@@ -48,7 +47,7 @@ namespace autograd {
 TORCH_API void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors = {},
-    c10::optional<bool> retain_graph = c10::nullopt,
+    std::optional<bool> retain_graph = std::nullopt,
     bool create_graph = false,
     const variable_list& inputs = {});
 
@@ -82,7 +81,7 @@ TORCH_API variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs = {},
-    c10::optional<bool> retain_graph = c10::nullopt,
+    std::optional<bool> retain_graph = std::nullopt,
     bool create_graph = false,
     bool allow_unused = false);
 
@@ -102,5 +101,4 @@ TORCH_API uint64_t enter_dual_level();
 TORCH_API void exit_dual_level(uint64_t level);
 
 } // namespace forward_ad
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

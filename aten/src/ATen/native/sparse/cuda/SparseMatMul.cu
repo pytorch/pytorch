@@ -40,7 +40,7 @@
 #include <thrust/iterator/discard_iterator.h>
 
 
-#if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000)
+#if defined(__CUDACC__) && ((CUSPARSE_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 60300))
 #define IS_CUSPARSE11_AVAILABLE() 1
 #else
 #define IS_CUSPARSE11_AVAILABLE() 0
@@ -50,8 +50,7 @@
 #include <library_types.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -94,7 +93,7 @@ void create_general_description_(cusparseMatDescr_t& description_) {
 }
 
 // csrMatrixRef is used to have a representation of a raw CSR matrix representation
-// comming from `sparse_sparse_matmul_cuda_kernel` function.
+// coming from `sparse_sparse_matmul_cuda_kernel` function.
 // Moreover this implements a RAII guard for a cusparse descriptor
 template<class scalar_t>
 struct csrMatrixRef {
@@ -180,6 +179,18 @@ struct csrOutput {
     cusparseDestroyMatDescr(description_);
   }
 
+  csrOutput(const csrOutput&) = delete;
+  csrOutput& operator=(const csrOutput&) = delete;
+  csrOutput(csrOutput&& rhs) {
+    csr_indices_ = std::move(rhs.csr_indices_);
+    csr_pointers_ = std::move(rhs.csr_pointers_);
+    csr_values_ = std::move(rhs.csr_values_);
+    nnz_ = rhs.nnz_;
+    size_ = std::move(rhs.size_);
+    description_ = rhs.description_;
+    rhs.description_ = 0;
+  }
+  csrOutput& operator=(csrOutput&&) = delete;
   int size(int index) const {
     return size_.at(index);
   }
@@ -196,13 +207,20 @@ struct CusparseMatrixMultiplyOp {
 
   CusparseMatrixMultiplyOp() {
     static_assert(
-      std::is_same<c10::Half, scalar_t>::value ||
-          std::is_same<c10::BFloat16, scalar_t>::value ||
-          std::is_same<float, scalar_t>::value ||
-          std::is_same<double, scalar_t>::value ||
-          std::is_same<c10::complex<float>, scalar_t>::value ||
-          std::is_same<c10::complex<double>, scalar_t>::value,
-      "cusparseSpGEMM only supports data type of half, bfloat16, float, double and complex float, double.");
+      #if !defined(USE_ROCM)
+          std::is_same_v<c10::Half, scalar_t> ||
+          std::is_same_v<c10::BFloat16, scalar_t> ||
+      #endif
+          std::is_same_v<float, scalar_t> ||
+          std::is_same_v<double, scalar_t> ||
+          std::is_same_v<c10::complex<float>, scalar_t> ||
+          std::is_same_v<c10::complex<double>, scalar_t>,
+      #if !defined(USE_ROCM)
+          "cusparseSpGEMM only supports data type of half, bfloat16, float, double and complex float, double."
+      #else
+          "cusparseSpGEMM only supports data type of float, double and complex float, double."
+      #endif
+      );
     // SpGEMM Computation
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&spgemmDesc));
   }
@@ -235,9 +253,9 @@ struct CusparseMatrixMultiplyOp {
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
     csrMatrixRef<scalar_t> C(
-      nullptr,
-      nullptr,
-      nullptr,
+      dC_columns,
+      dC_csrOffsets,
+      dC_values,
       /*nnz*/0,
       {A_num_rows, B_num_cols}
     );
@@ -257,11 +275,16 @@ struct CusparseMatrixMultiplyOp {
 
     // If a specific GPU model does not provide native support for a given data type,
     // the routine returns CUSPARSE_STATUS_ARCH_MISMATCH error
+    #if defined(USE_ROCM)
+    TORCH_CHECK(!(computeType == CUDA_R_16F || computeType == CUDA_R_16BF),
+        "sparse_mm: Float16 and BFloat16 are not supported on ROCm");
+    #else // defined(USE_ROCM)
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(prop->major >= 5 && !((10*prop->major + prop->minor) < 53 && computeType == CUDA_R_16F),
         "sparse_mm: CUDA Float16 requires compute capability >= 53 (current: ", prop->major, prop->minor, ")");
     TORCH_CHECK(!(prop->major < 8 && computeType == CUDA_R_16BF),
         "sparse_mm: CUDA BFloat16 requires compute capability >= 80 (current: ", prop->major, prop->minor, ")");
+    #endif // defined(USE_ROCM)
 
     // ask bufferSize1 bytes for external memory
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
@@ -283,7 +306,7 @@ struct CusparseMatrixMultiplyOp {
 
     at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
     dBuffer1 = dataPtr1.get();
-    // inspect the matrices A and B to understand the memory requiremnent for
+    // inspect the matrices A and B to understand the memory requirement for
     // the next step
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
         handle,
@@ -388,7 +411,7 @@ struct CusparseMatrixMultiplyOp {
       Tensor &output_values,
       Tensor &output_indices)
   {
-    TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
+    static_assert(false&&sizeof(scalar_t), "cusparse csr sparse-sparse MM only supports data type of float and double.");
   }
 };
 
@@ -658,12 +681,12 @@ void sparse_sparse_matmul_cuda_kernel(
     const Tensor& mat2) {
 
   static_assert(
-    std::is_same<c10::Half, scalar_t>::value ||
-        std::is_same<c10::BFloat16, scalar_t>::value ||
-        std::is_same<float, scalar_t>::value ||
-        std::is_same<double, scalar_t>::value ||
-        std::is_same<c10::complex<float>, scalar_t>::value ||
-        std::is_same<c10::complex<double>, scalar_t>::value,
+    std::is_same_v<c10::Half, scalar_t> ||
+        std::is_same_v<c10::BFloat16, scalar_t> ||
+        std::is_same_v<float, scalar_t> ||
+        std::is_same_v<double, scalar_t> ||
+        std::is_same_v<c10::complex<float>, scalar_t> ||
+        std::is_same_v<c10::complex<double>, scalar_t>,
     "sparse_sparse_matmul_cuda_kernel only supports data type of half, bfloat16, float, double and complex float, double.");
 
   // older versions of cusparse on Windows segfault for complex128 dtype
@@ -799,9 +822,14 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-#if IS_CUSPARSE11_AVAILABLE()
+#if IS_CUSPARSE11_AVAILABLE() && !defined(USE_ROCM)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, mat1_.scalar_type(), "sparse_matmul", [&] {
-    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+      sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+  });
+#elif IS_CUSPARSE11_AVAILABLE() && defined(USE_ROCM)
+  // ROCm does not support half and bfloat16 types for sparse_matmul
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
+      sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
@@ -811,5 +839,4 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

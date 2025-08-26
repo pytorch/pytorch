@@ -15,8 +15,7 @@
 #include <ATen/ops/from_blob.h>
 #endif
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 int register_linear_params();
 
 #ifdef USE_FBGEMM
@@ -47,7 +46,7 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
@@ -101,7 +100,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
@@ -139,4 +138,4 @@ TORCH_LIBRARY_IMPL(sparse, CatchAll, m) {
       TORCH_FN(QLinearUnpackWeightInt8::run));
 }
 }  // namespace
-}}  // namespace ao::sparse
+}  // namespace ao::sparse

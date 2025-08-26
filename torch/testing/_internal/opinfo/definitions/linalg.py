@@ -1,14 +1,16 @@
+# mypy: ignore-errors
+
 import itertools
+import random
 import unittest
+from collections.abc import Iterable
 from functools import partial
 from itertools import chain, product
-from typing import Iterable, List
 
 import numpy as np
 from numpy import inf
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
@@ -32,11 +34,9 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
-    get_all_complex_dtypes,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
-    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -184,37 +184,6 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     yield SampleInput(make_arg((S, S)), make_arg((S - 2,), low=None, high=None))
     # m = S, n = S -1, k = S - 2
     yield SampleInput(make_arg((S, S - 1)), make_arg((S - 2,), low=None, high=None))
-
-
-def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-    def make_singular_matrix_batch_base(size, rank):
-        assert size[-1] == size[-2]
-        assert rank > 0 and rank < size[-1]
-
-        n = size[-1]
-        a = make_arg(size[:-2] + (n, rank)) / 10
-        b = make_arg(size[:-2] + (rank, n)) / 10
-        x = a @ b
-        lu, pivs, _ = torch.linalg.lu_factor_ex(x)
-        p, l, u = torch.lu_unpack(lu, pivs)
-        u_diag_abs = u.diagonal(0, -2, -1).abs()
-        u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
-        u_diag_abs_smallest_idxs = torch.topk(
-            u_diag_abs, k=(n - rank), largest=False
-        ).indices
-        u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
-        u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
-        matrix = p @ l @ u
-
-        matrix.requires_grad_(requires_grad)
-        return matrix
-
-    for batch, size in product(((), (2,), (2, 2)), range(6)):
-        shape = batch + (size, size)
-        for rank in range(1, size):
-            yield SampleInput(make_singular_matrix_batch_base(shape, rank))
 
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **kwargs):
@@ -534,7 +503,7 @@ def sample_inputs_linalg_pinv_singular(
     size = [0, 3, 50]
 
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, min(m, n))):
+        for k in range(min(3, m, n)):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
             a = (
@@ -745,18 +714,18 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
 
     device = torch.device(device)
 
-    drivers: Tuple[str, ...]
+    drivers: tuple[str, ...]
     if device.type == "cuda":
         drivers = ("gels",)
     else:
         drivers = ("gels", "gelsy", "gelss", "gelsd")
 
     # we generate matrices of shape (..., n + delta, n)
-    deltas: Tuple[int, ...]
+    deltas: tuple[int, ...]
     if device.type == "cpu" or has_cusolver():
         deltas = (-1, 0, +1)
     # only square systems if Cusolver is not available
-    # becase we solve a lstsq problem with a transposed matrix in the backward
+    # because we solve a lstsq problem with a transposed matrix in the backward
     else:
         deltas = (0,)
 
@@ -804,7 +773,7 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     # Shapes for 3D Tensors
     shapes_3d = ((S, S, S),)
 
-    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_2d = ({}, dict(offset=2), dict(offset=2), dict(offset=1))
     kwargs_3d = (
         dict(offset=1, dim1=1, dim2=2),
         dict(offset=2, dim1=0, dim2=1),
@@ -933,7 +902,9 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     # Samples do not need to be Hermitian, as we're using gradcheck_wrapper_hermitian_input
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
-        sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+        # Note: we cannot use np.random.choice here as TorchDynamo
+        # does not support tensors of strings.
+        sample.kwargs = {"UPLO": random.choice(["L", "U"])}
         sample.output_process_fn_grad = out_fn
         yield sample
 
@@ -999,7 +970,7 @@ def sample_inputs_linalg_solve(
         make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
-    batches = [(), (0,), (2,)]
+    batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
     if vector_rhs_allowed:
         nrhs = [(), (1,), (3,)]
@@ -1007,7 +978,7 @@ def sample_inputs_linalg_solve(
         nrhs = [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+        yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
 
 
 def sample_inputs_linalg_solve_triangular(
@@ -1165,13 +1136,12 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(inp, ind=len(shape_lhs))
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     OpInfo(
         "linalg.cross",
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
         op=torch.linalg.cross,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
         error_inputs_func=error_inputs_cross,
@@ -1197,87 +1167,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
         check_batched_gradgrad=False,
-    ),
-    OpInfo(
-        "linalg.det",
-        aten_name="linalg_det",
-        op=torch.linalg.det,
-        variant_test_name="singular",
-        aliases=("det",),
-        dtypes=floating_and_complex_types(),
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        check_batched_gradgrad=False,
-        sample_inputs_func=sample_inputs_linalg_det_singular,
-        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
-        skips=(
-            DecorateInfo(
-                unittest.skip("The backward may give different results"),
-                "TestCommon",
-                "test_noncontiguous_samples",
-            ),
-            DecorateInfo(
-                unittest.skip("Gradients are incorrect on macos"),
-                "TestBwdGradients",
-                "test_fn_grad",
-                device_type="cpu",
-                dtypes=(torch.float64,),
-                active_if=IS_MACOS,
-            ),
-            DecorateInfo(
-                unittest.skip("Gradients are incorrect on macos"),
-                "TestFwdGradients",
-                "test_forward_mode_AD",
-                device_type="cpu",
-                dtypes=(torch.float64,),
-                active_if=IS_MACOS,
-            ),
-            # Both Hessians are incorrect on complex inputs??
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestBwdGradients",
-                "test_fn_gradgrad",
-                dtypes=(torch.complex128,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestFwdGradients",
-                "test_fn_fwgrad_bwgrad",
-                dtypes=(torch.complex128,),
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestBwdGradients",
-                "test_fn_gradgrad",
-                device_type="cuda",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestFwdGradients",
-                "test_fn_fwgrad_bwgrad",
-                device_type="cuda",
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93044"
-                ),
-                "TestBwdGradients",
-                "test_fn_grad",
-                device_type="cuda",
-                dtypes=get_all_complex_dtypes(),
-                active_if=TEST_WITH_ROCM,
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93045"
-                ),
-                "TestFwdGradients",
-                "test_forward_mode_AD",
-                device_type="cuda",
-                dtypes=get_all_complex_dtypes(),
-                active_if=TEST_WITH_ROCM,
-            ),
-        ),
     ),
     OpInfo(
         "linalg.diagonal",
@@ -1320,8 +1209,7 @@ op_db: List[OpInfo] = [
         "linalg.vecdot",
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
-        dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1338,6 +1226,12 @@ op_db: List[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.half: tol(atol=1.2e-2, rtol=1.7e-2)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
             ),
         ),
     ),
@@ -1424,12 +1318,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
-            # exits early on eager extremal value test
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values",
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1554,6 +1442,7 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.complex128,),
             ),
+            skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
     ),
     OpInfo(
@@ -1629,8 +1518,9 @@ op_db: List[OpInfo] = [
         "linalg.lstsq",
         aten_name="linalg_lstsq",
         variant_test_name="grad_oriented",
-        # gradchecks for forward AD fails with multi-Tensor outputs
-        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
+        # gradchecks for forward AD fails with full output tuple
+        # works when taking [:2], which is (solution, residuals)
+        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[:2],
         supports_out=False,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_lstsq,
@@ -1665,13 +1555,21 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_grad=False,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=8e-5, rtol=2e-6)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
+        ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
     ),
     OpInfo(
         "linalg.multi_dot",
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
@@ -1767,22 +1665,6 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFakeTensor",
-                "test_fake_crossref_backward_amp",
-                device_type="cuda",
-                dtypes=[torch.float32],
-                active_if=TEST_WITH_ROCM,
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFakeTensor",
-                "test_fake_crossref_backward_no_amp",
-                device_type="cuda",
-                dtypes=[torch.float32],
-                active_if=TEST_WITH_ROCM,
-            ),
         ),
     ),
     OpInfo(
@@ -1869,13 +1751,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
         aten_name="linalg_vector_norm",
-        skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
-            ),
-        ),
     ),
     OpInfo(
         "linalg.lu_factor",
@@ -2026,7 +1901,16 @@ op_db: List[OpInfo] = [
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[
+            skipCUDAIfNoMagmaAndNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=6e-04)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -2059,7 +1943,16 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_solve,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[
+            skipCUDAIfNoMagmaAndNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=6e-04)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -2387,6 +2280,18 @@ op_db: List[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=8e-04, rtol=7e-06)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-04, rtol=3e-06)}),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
         ],
         skips=(
             DecorateInfo(
@@ -2398,30 +2303,43 @@ op_db: List[OpInfo] = [
     ),
 ]
 
-python_ref_db: List[OpInfo] = [
+python_ref_db: list[OpInfo] = [
     #
     # torch.linalg
     #
     PythonRefInfo(
+        "_refs.linalg.cross",
+        torch_opinfo_name="linalg.cross",
+        supports_out=True,
+        op_db=op_db,
+        skips=(
+            # TODO: is this really needed?
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
+            ),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,
-        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.vecdot",
+        torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
     ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
-        supports_nvfuser=False,  # clone_default
         op_db=op_db,
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",
         torch_opinfo_name="linalg.matrix_norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2431,8 +2349,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.norm",
         torch_opinfo_name="linalg.norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2442,14 +2358,12 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.svd",
         torch_opinfo_name="linalg.svd",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
         torch_opinfo_name="linalg.svdvals",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
 ]

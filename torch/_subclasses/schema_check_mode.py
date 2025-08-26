@@ -1,12 +1,15 @@
+# mypy: ignore-errors
+
 from collections import namedtuple
 from copy import deepcopy
 from itertools import combinations
 
 import torch
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.jit_utils import clone_inputs
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
+
 
 # Named Tuples used within SchemaCheckMode
 Mutation = namedtuple("Mutation", ["op_name", "arg_name"])
@@ -24,8 +27,40 @@ SchemaInfo = torch._C._SchemaInfo
 #  - Checks for aliasing on all inputs
 
 
+# move these 2 functions here to avoid numpy dependency in testing/_internal/common_utils.py
+
+
+def is_iterable_of_tensors(iterable):
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+    try:
+        if len(iterable) == 0:
+            return False
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+    except TypeError:
+        return False
+    return True
+
+
+def clone_inputs(args):
+    inputs = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
+
+
 class SchemaCheckMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self) -> None:
         # Information recorded for testing purposes. For example:
         #  - incorrect schemas
         #  - overly conservative schemas
@@ -42,6 +77,14 @@ class SchemaCheckMode(TorchDispatchMode):
         print(*self.ops, sep=",")
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def bitwise_equal(lhs, rhs):
+            if lhs.is_quantized:
+                # TODO: This is only OK if can't have NaN quantized; idk if
+                # this is actually true
+                return torch.equal(lhs, rhs)
+            else:
+                return torch.allclose(lhs, rhs, equal_nan=True)
+
         def has_mutated(before, after, md):
             are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
             if (
@@ -51,7 +94,7 @@ class SchemaCheckMode(TorchDispatchMode):
             ):
                 return not (
                     before.size() == after.size()
-                    and torch.allclose(before, after, equal_nan=True)
+                    and bitwise_equal(before, after)
                     and md[0] == after.stride()
                     and md[1] == after._typed_storage()._cdata
                 )
@@ -73,7 +116,7 @@ class SchemaCheckMode(TorchDispatchMode):
             if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
                 try:
                     return e.elem
-                except AttributeError as t:
+                except AttributeError:
                     return e
             return e
 
@@ -86,7 +129,7 @@ class SchemaCheckMode(TorchDispatchMode):
                             deepcopy(current.stride()),
                             current._typed_storage()._cdata,
                         )
-                    except AttributeError as t:
+                    except AttributeError:
                         return None
                 # Sparse CSR tensors do not have strides or storage
                 elif e.layout != torch.sparse_csr:
@@ -105,7 +148,9 @@ class SchemaCheckMode(TorchDispatchMode):
             name: tree_map(unwrap, c_p_args.get(name)) for name in c_p_args
         }
         cloned_metadata = {
-            name: tree_map(parse_metadata, tree_flatten(pre_arguments.get(name))[0])
+            name: [
+                parse_metadata(a) for a in pytree.tree_leaves(pre_arguments.get(name))
+            ]
             for name in pre_arguments
         }
 
@@ -161,7 +206,7 @@ However, we found that `outputs[{str(j)}] is {name}"""
                 if any(
                     has_mutated(a, b, c)
                     for a, b, c in zip(
-                        tree_flatten(before)[0], tree_flatten(after)[0], md
+                        pytree.tree_leaves(before), pytree.tree_leaves(after), md
                     )
                 ):
                     if not schema_info.is_mutable(

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -8,10 +7,9 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <atomic>
+#include <optional>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
@@ -320,7 +318,7 @@ class TORCH_API RRefContext {
   //     RRef is forwarded to the callee as new UserRRefs (if the callee is not
   //     the owner). In this case, we block running the user function until all
   //     UserRRefs are confirmed by the owner.
-  // This contract gurantees that no UserRRefs can be used remotely without
+  // This contract guarantees that no UserRRefs can be used remotely without
   // confirmation. Note that, however, the UserRRef created by rpc.remote can
   // still be passed to local functions as arguments and used there. This is by
   // design, because this feature is especially useful when, say a master node
@@ -334,6 +332,4 @@ class TORCH_API RRefContext {
   static thread_local bool recording_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

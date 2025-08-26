@@ -8,12 +8,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -23,8 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Def;
 struct Property;
@@ -88,7 +86,7 @@ struct TORCH_API CompilationUnit {
   // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Functions just defined.
   std::vector<Function*> define(
-      const c10::optional<c10::QualifiedName>& prefix,
+      const std::optional<c10::QualifiedName>& prefix,
       const std::vector<Property>& properties,
       const std::vector<ResolverPtr>& propResolvers,
       const std::vector<Def>& definitions,
@@ -99,10 +97,10 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       // see [name mangling]
       bool shouldMangle = false,
-      c10::optional<size_t> operator_set_version = c10::nullopt);
+      std::optional<size_t> operator_set_version = std::nullopt);
 
   void define_hooks(
-      const c10::optional<c10::QualifiedName>& prefix,
+      const std::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& hookDefs,
       const std::vector<ResolverPtr>& hookResolvers,
       const std::vector<Def>& preHookDefs,
@@ -114,7 +112,7 @@ struct TORCH_API CompilationUnit {
   // Returns the list of Functions just defined.
   std::vector<Function*> define(
       // prefix namespace to put all the defined functions into
-      const c10::optional<c10::QualifiedName>& prefix,
+      const std::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
       const Self* self);
@@ -132,7 +130,7 @@ struct TORCH_API CompilationUnit {
     if (shouldMangle) {
       name = mangle(name);
     }
-    auto fn = torch::make_unique<GraphFunction>(
+    auto fn = std::make_unique<GraphFunction>(
         std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
@@ -182,7 +180,7 @@ struct TORCH_API CompilationUnit {
         "' already defined.");
     classes_.push_back(std::move(namedType));
     classDict_[*classes_.back()->name()] = classes_.size() - 1;
-  };
+  }
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
     auto type = get_type(name);
@@ -288,19 +286,19 @@ struct TORCH_API CompilationUnit {
 
  private:
   std::unique_ptr<Function> define(
-      const c10::optional<c10::QualifiedName>& prefix,
+      const std::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
       bool shouldMangle = false,
       FunctionType type = FunctionType::Method,
-      c10::optional<size_t> version = c10::nullopt) const;
+      std::optional<size_t> version = std::nullopt) const;
 
   // Define a property on \p self.
   struct PropertyPair;
   PropertyPair define_property(
-      const c10::optional<c10::QualifiedName>& prefix,
+      const std::optional<c10::QualifiedName>& prefix,
       const Property& prop,
       const ResolverPtr& resolver,
       const Self* self,
@@ -322,7 +320,7 @@ struct TORCH_API CompilationUnit {
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
 
-  // [class ownership] Right now there aree two relationships between classes
+  // [class ownership] Right now there are two relationships between classes
   // and compilation units:
   // 1. Classes have compilation units internally that hold their methods.
   // 2. On load, the TypePtrs of any imported classes are owned by the main
@@ -350,5 +348,4 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using CompilationUnit = ::torch::jit::CompilationUnit;
 } // namespace script
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

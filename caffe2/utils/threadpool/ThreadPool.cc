@@ -1,22 +1,25 @@
 #include "caffe2/utils/threadpool/ThreadPool.h"
 #include "WorkersPool.h"
-#include "caffe2/core/logging.h"
 
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
+#else
+#include <thread>
+#endif
 
 C10_DEFINE_bool(
     caffe2_threadpool_force_inline,
     false,
-    "Force to always run jobs on the calling thread");
+    "Force to always run jobs on the calling thread")
 
 // Whether or not threadpool caps apply to Android
-C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_android_cap, true, "")
 
 // Whether or not threadpool caps apply to iOS and MacOS
-C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
-C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "")
+C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "")
 
-C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
+C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.")
 
 namespace caffe2 {
 
@@ -41,8 +44,14 @@ namespace {
 }
 
 size_t getDefaultNumThreads() {
-  CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
-  int numThreads = cpuinfo_get_processors_count();
+#if !defined(__s390x__) && !defined(__powerpc__)
+  auto numThreads = 1U;
+  if (cpuinfo_initialize()) {
+    numThreads = std::max(cpuinfo_get_processors_count(), 1U);
+  } else {
+    LOG(WARNING) << "cpuinfo initialization failed";
+    numThreads = std::max(std::thread::hardware_concurrency(), 1U);
+  }
 
   bool applyCap = false;
 #if defined(C10_ANDROID)
@@ -95,6 +104,9 @@ size_t getDefaultNumThreads() {
         break;
     }
   }
+#else
+  auto numThreads = std::max(std::thread::hardware_concurrency(), 1U);
+#endif
 
   if (FLAGS_pthreadpool_size) {
     // Always give precedence to explicit setting.
@@ -109,7 +121,7 @@ size_t getDefaultNumThreads() {
    * detect if we are running under tsan, for now capping the default
    * threadcount to the tsan limit unconditionally.
    */
-  int tsanThreadLimit = 63;
+  auto tsanThreadLimit = 63U;
   numThreads = std::min(numThreads, tsanThreadLimit);
 
   return numThreads;
@@ -172,14 +184,10 @@ void ThreadPoolImpl::run(const std::function<void(int, size_t)>& fn, size_t rang
   }
 
   struct FnTask : public Task {
-    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
-    FnTask(){};
-    // NOLINTNEXTLINE(modernize-use-equals-default)
-    ~FnTask() override{};
-    const std::function<void(int, size_t)>* fn_;
-    int idx_;
-    size_t start_;
-    size_t end_;
+    const std::function<void(int, size_t)>* fn_{};
+    int idx_{};
+    size_t start_{};
+    size_t end_{};
     void Run() override {
       for (auto i = start_; i < end_; ++i) {
         (*fn_)(idx_, i);

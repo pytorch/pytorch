@@ -1,4 +1,6 @@
 #include <ATen/ThreadLocalState.h>
+#include <distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
@@ -9,7 +11,7 @@ Work::Work(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
     auto recordingFunction =
@@ -38,7 +40,7 @@ Work::Work(
   }
 }
 
-OpType Work::retrieveOpType() {
+OpType Work::retrieveOpType() const {
   return opType_;
 }
 
@@ -70,7 +72,12 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
-void Work::synchronize() {}
+void Work::synchronize() {
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
+  }
+}
 
 bool Work::wait(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -94,18 +101,30 @@ bool Work::wait(std::chrono::milliseconds timeout) {
   return true;
 }
 
+void Work::blockCurrentStream() {
+  // block cuda stream indefinitely until work is completed.
+  std::shared_ptr<c10d::cuda::StreamBlock> handle =
+      c10d::cuda::block_stream(std::chrono::milliseconds(0));
+
+  getFuture()->addCallback(
+      [handle](c10::ivalue::Future& future) { handle->abort(); });
+}
+
 void Work::abort() {
   TORCH_CHECK(false, "Work::abort not implemented.");
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture() {
-  TORCH_CHECK(false, "Work::getFuture not implemented.")
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
+    TORCH_CHECK(false, "Work::getFuture not implemented.")}
+
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
+  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
 }
 
 void Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = exception;
+  exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -117,7 +136,7 @@ void Work::finish(std::exception_ptr exception) {
 void Work::finishAndThrow(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
-  exception_ = exception;
+  exception_ = std::move(exception);
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
@@ -127,10 +146,18 @@ void Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
+float Work::getDuration() const {
+  TORCH_CHECK(false, "This Backend doesn't support getDuration.");
+}
+
+uint64_t Work::getSequencenumber() const {
+  TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
+}
+
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : Work(), _fut(std::move(fut)) {}
+      : _fut(std::move(fut)) {}
 
   ~FutureWrappingWork() override = default;
 
@@ -176,7 +203,7 @@ class FutureWrappingWork : public Work {
 };
 
 c10::intrusive_ptr<Work> Work::create_from_future(
-    c10::intrusive_ptr<c10::ivalue::Future> future) {
+    const c10::intrusive_ptr<c10::ivalue::Future>& future) {
   return c10::make_intrusive<FutureWrappingWork>(future);
 }
 

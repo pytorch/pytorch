@@ -1,9 +1,12 @@
+# mypy: allow-untyped-defs
+from collections.abc import Iterable
 from io import IOBase
-from typing import Iterable, Tuple, Optional
+from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+
 
 __all__ = [
     "FileOpenerIterDataPipe",
@@ -11,10 +14,9 @@ __all__ = [
 
 
 @functional_datapipe("open_files")
-class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
     r"""
-    Given pathnames, opens files and yield pathname and file stream
-    in a tuple (functional name: ``open_files``).
+    Given pathnames, opens files and yield pathname and file stream in a tuple (functional name: ``open_files``).
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
@@ -31,8 +33,12 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
-        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
+        >>> from torchdata.datapipes.iter import (
+        ...     FileLister,
+        ...     FileOpener,
+        ...     StreamReader,
+        ... )
+        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith(".txt"))
         >>> dp = FileOpener(dp)
         >>> dp = StreamReader(dp)
         >>> list(dp)
@@ -40,22 +46,23 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     """
 
     def __init__(
-            self,
-            datapipe: Iterable[str],
-            mode: str = 'r',
-            encoding: Optional[str] = None,
-            length: int = -1):
+        self,
+        datapipe: Iterable[str],
+        mode: str = "r",
+        encoding: Optional[str] = None,
+        length: int = -1,
+    ):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
         self.encoding: Optional[str] = encoding
 
-        if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
-            raise ValueError("Invalid mode {}".format(mode))
+        if self.mode not in ("b", "t", "rb", "rt", "r"):
+            raise ValueError(f"Invalid mode {mode}")
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
 
-        if 'b' in mode and encoding is not None:
+        if "b" in mode and encoding is not None:
             raise ValueError("binary mode doesn't take an encoding argument")
 
         self.length: int = length
@@ -64,9 +71,11 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     # is determined at runtime based on mode. Some `DataPipe` requiring
     # a subtype would cause mypy error.
     def __iter__(self):
-        yield from get_file_binaries_from_pathnames(self.datapipe, self.mode, self.encoding)
+        yield from get_file_binaries_from_pathnames(
+            self.datapipe, self.mode, self.encoding
+        )
 
     def __len__(self):
         if self.length == -1:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length

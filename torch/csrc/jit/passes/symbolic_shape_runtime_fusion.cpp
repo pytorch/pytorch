@@ -15,8 +15,7 @@
 #include <sstream>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Inserts the Compute for Each Symbolic Shape in the TensorExpr Graph
 // and returns back a map from Symbolic Shape Value to its runtime Value *
@@ -70,7 +69,7 @@ static std::map<int64_t, Value*> InsertSymbolicShapesCompute(
   return sym_shape_to_enclosing_graph_value;
 }
 
-void insertDynamicShapesGuard(
+static void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
     Node* guarded_node,
     bool add_composed_op,
@@ -116,7 +115,7 @@ StrideInput strideInputFromString(const std::string& si) {
 // in the runtime guard, strides are serialized as one flat
 // vector. stride_inputs_offset indexes into that vector
 // where the strides of this tensor begin
-inline StrideInput summarizeStrideDim(
+static inline StrideInput summarizeStrideDim(
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides,
     size_t dim,
@@ -155,7 +154,7 @@ static std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
         summarizeStrideDim(sizes, strides, dim, stride_inputs, 0));
   }
   return stride_inputs;
-};
+}
 
 // Todo: incorporate in codegen
 static StrideInput summarizeOutputStrides(const TensorType& tt) {
@@ -178,9 +177,9 @@ static StrideInput summarizeOutputStrides(const TensorType& tt) {
 // Also summarize input striding behavior. The Size information is stored on the
 // type, The striding is returned. See StrideInput for description of stride
 // specializations
-static c10::optional<std::vector<std::vector<StrideInput>>>
+static std::optional<std::vector<std::vector<StrideInput>>>
 TryGeneralizeInputDimensionsToSymbolicShapes(
-    std::shared_ptr<Graph> tensorexpr_graph) {
+    const std::shared_ptr<Graph>& tensorexpr_graph) {
   std::map<size_t, int64_t> shape_to_sym_shape;
   std::vector<std::vector<StrideInput>> input_striding;
 
@@ -190,7 +189,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
     }
     auto tt = v->type()->expectRef<TensorType>();
     if (!tt.sizes().isComplete() || !tt.strides().isComplete()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     input_striding.push_back(summarizeInputStrides(tt));
     std::vector<at::ShapeSymbol> shape_vec = *tt.symbolic_sizes().sizes();
@@ -214,7 +213,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
 
 static void moveConstantTensorsOutOfSubgraph(
     Node* tensorexpr_graph_node,
-    std::shared_ptr<Graph> tensorexpr_graph) {
+    const std::shared_ptr<Graph>& tensorexpr_graph) {
   auto parent = tensorexpr_graph_node->owningGraph();
 
   auto env = [&](Value* v) {
@@ -518,7 +517,7 @@ static Operation StaticRuntimeCopyOuts(const Node* node) {
   };
 }
 
-RegisterOperators SRCopyOuts({
+static RegisterOperators SRCopyOuts({
     torch::jit::Operator(
         prim::StaticRuntimeCopyOuts,
         StaticRuntimeCopyOuts,
@@ -530,7 +529,7 @@ RegisterOperators SRCopyOuts({
 // and also the that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
-RegisterOperators reg_guard({
+static RegisterOperators reg_guard({
     Operator(
         "prim::TensorExprDynamicGuard(...) -> bool",
         [](const Node* node) -> Operation {
@@ -586,7 +585,7 @@ RegisterOperators reg_guard({
               } else {
                 // use index for set if it exists, otherwise extend the vector
                 // of sym shapes by 1
-                int64_t sym_dim_index;
+                size_t sym_dim_index = 0;
                 if (sym_dim_flat_index.count(value)) {
                   sym_dim_index = sym_dim_flat_index[value];
                 } else {
@@ -596,7 +595,8 @@ RegisterOperators reg_guard({
                 }
                 // TODO: potential optimization - if there is a Symbolic
                 // Sym with only one use we dont need to test anything
-                flattened_input_dims.push_back(sym_dim_index);
+                flattened_input_dims.push_back(
+                    static_cast<int64_t>(sym_dim_index));
               }
             }
           }
@@ -680,7 +680,7 @@ RegisterOperators reg_guard({
                 flattened_stride_offset += num_dims;
               }
               for (const auto dim_index : c10::irange(num_dims)) {
-                const int64_t dim_value =
+                const auto dim_value =
                     flattened_input_dims[dim_index + flattened_dim_offset];
                 const int64_t tensor_dim = sizes[dim_index];
                 if (dim_value >= 0) {
@@ -736,12 +736,11 @@ static Operation createTensorExprDynamicGroup(const Node* node) {
   };
 }
 
-RegisterOperators TensorExprDynamicOp({
+static RegisterOperators TensorExprDynamicOp({
     torch::jit::Operator(
         prim::TensorExprDynamicGroup,
         createTensorExprDynamicGroup,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

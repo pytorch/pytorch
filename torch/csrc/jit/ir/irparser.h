@@ -1,21 +1,19 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 struct Value;
 
 // \brief Parse IR from \p STR constructing the corresponding IR in\ GRAPH.
 // if parse_tensor_constants is true will construct empty tensors
-// for Tensor constants with random or unitialized contents, otherwise will
+// for Tensor constants with random or uninitialized contents, otherwise will
 // throw
 TORCH_API void parseIR(
     const std::string& str,
@@ -27,7 +25,7 @@ TORCH_API void parseIR(
  * \p VMAP is filled with String to Value pairs allowing to index Values in the
  * newly created graph by their name in the original IR string.
  * if parse_tensor_constants is true will construct empty tensors
- * for Tensor constants with random or unitialized contents, otherwise will
+ * for Tensor constants with random or uninitialized contents, otherwise will
  * throw
  */
 TORCH_API void parseIR(
@@ -36,5 +34,4 @@ TORCH_API void parseIR(
     std::unordered_map<std::string, Value*>& vmap,
     bool parse_tensor_constants = false);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

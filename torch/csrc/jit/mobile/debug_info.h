@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 /*
  * MobileDebugTable:
  * Deserializes debug_pkl and callstack_map records from PT model's zip archive
@@ -15,7 +14,7 @@ namespace jit {
  * exception of BackendRuntimeException should raised using debug handles.
  * getSourceDebugString method is responsible for translating debug
  * handles to correspond debug information.
- * This debug informatin includes stack trace of model level source code and
+ * This debug information includes stack trace of model level source code and
  * module hierarchy where the exception occurred.
  */
 class MobileDebugTable {
@@ -53,5 +52,4 @@ class MobileDebugTable {
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptr_map_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

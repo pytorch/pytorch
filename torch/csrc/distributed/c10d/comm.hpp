@@ -10,7 +10,7 @@ namespace c10d {
 
 // Broadcast many tensors to all processes in the process group.
 TORCH_API void broadcast_coalesced(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank = 0);
@@ -25,14 +25,16 @@ class TORCH_API GradBucket {
       std::vector<size_t> offsets,
       std::vector<size_t> lengths,
       std::vector<c10::IntArrayRef> sizes_vec,
-      std::vector<at::Tensor> parameters)
+      std::vector<at::Tensor> parameters,
+      std::optional<at::Tensor> sparse_grad_indices)
       : index_(index),
         bucket_count_(bucket_count),
         buffer_(std::move(tensor)),
         offsets_(std::move(offsets)),
         lengths_(std::move(lengths)),
         sizes_vec_(std::move(sizes_vec)),
-        parameters_(std::move(parameters)) {}
+        parameters_(std::move(parameters)),
+        sparse_grad_indices_(std::move(sparse_grad_indices)) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -65,9 +67,14 @@ class TORCH_API GradBucket {
     return parameters_;
   }
 
-  // Returns whther this bucket is the last bucket to allreduce in an iteration.
+  // Returns whether this bucket is the last bucket to allreduce in an
+  // iteration.
   bool isLast() const {
     return index_ == bucket_count_ - 1;
+  }
+
+  std::optional<at::Tensor>& getSparseGradIndices() {
+    return sparse_grad_indices_;
   }
 
  private:
@@ -79,8 +86,14 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+
   // Model parameters for this bucket.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::vector<at::Tensor> parameters_;
+
+  // Predefined sparse indices for this bucket (only used for sparse tensors).
+  // The gradients will be updated to have indices with these tensor values
+  std::optional<at::Tensor> sparse_grad_indices_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
@@ -100,8 +113,7 @@ class TORCH_API CommHookInterface {
   // Returns the resulting tensor once the communication hook result is
   // ready. The resulting tensor will then be copied to the grads of
   // individual parameters.
-  virtual at::Tensor parseHookResult(
-      const c10::IValue& result) = 0;
+  virtual at::Tensor parseHookResult(const c10::IValue& result) = 0;
 };
 
 namespace detail {

@@ -7,10 +7,9 @@ import tempfile
 import torch
 import torch.distributed as c10d
 import torch.multiprocessing as mp
-from torch.testing._internal.common_distributed import \
-    MultiProcessTestCase
-from torch.testing._internal.common_utils import load_tests,\
-    NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import load_tests, run_tests
+
 
 # Torch distributed.nn is not available in windows
 # check #42095, it errors on import.
@@ -25,11 +24,7 @@ except ImportError:
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests', file=sys.stderr)
-    sys.exit(0)
-
-if NO_MULTIPROCESSING_SPAWN:
-    print('spawn not available, skipping tests', file=sys.stderr)
+    print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -40,14 +35,14 @@ class AbstractProcessGroupShareTensorTest:
         ws = self.world_size
         # file store will delete the test file on destruction
         file = tempfile.NamedTemporaryFile(delete=False)
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         c2p = ctx.Queue(2)
         p2c = ctx.Queue(2)
         ps = []
         for i in range(ws):
             p = ctx.Process(
-                target=f,
-                args=(i, file.name, shared_tensors, ws, init_pg, c2p, p2c))
+                target=f, args=(i, file.name, shared_tensors, ws, init_pg, c2p, p2c)
+            )
 
             p.start()
             ps.append(p)
@@ -57,9 +52,7 @@ class AbstractProcessGroupShareTensorTest:
             self.assertEqual(
                 expected,
                 result,
-                msg=(
-                    "Expect rank {} to receive tensor {} but got {}."
-                ).format(pid, expected, result)
+                msg=f"Expect rank {pid} to receive tensor {expected} but got {result}.",
             )
 
         for _ in range(ws):
@@ -72,7 +65,8 @@ class AbstractProcessGroupShareTensorTest:
     # spawn mode. See https://bugs.python.org/issue33884.
     @classmethod
     def _test_broadcast_process(
-            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
+        cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c
+    ):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.broadcast(xs).wait()
@@ -81,7 +75,8 @@ class AbstractProcessGroupShareTensorTest:
 
     @classmethod
     def _test_allreduce_process(
-            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
+        cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c
+    ):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
@@ -90,7 +85,8 @@ class AbstractProcessGroupShareTensorTest:
 
     @classmethod
     def _test_allgather_process(
-            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
+        cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c
+    ):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         ys = [[torch.zeros_like(xs[0]) for i in range(world_size)]]
@@ -250,3 +246,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         z.backward()
         x_s = ((self.rank + 1) * torch.ones(int(row), 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
+
+
+if __name__ == "__main__":
+    run_tests()

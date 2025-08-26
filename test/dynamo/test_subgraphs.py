@@ -1,14 +1,12 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
 from torch._dynamo.testing import unsupported
 from torch._dynamo.utils import ifdynstaticdefault
+
 
 globalmod = torch.nn.ReLU()
 
@@ -26,7 +24,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         correct1 = fn(v1, v2)
         correct2 = fn(v2, v1)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         r1 = opt_fn(v1, v2)
         r2 = opt_fn(v2, v1)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
@@ -286,7 +284,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         correct1 = fn(v1, v2, t)
         correct2 = fn(v1, v2, f)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         r1 = opt_fn(v1, v2, t)
         r2 = opt_fn(v1, v2, f)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
@@ -312,7 +310,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        self._common(fn, 2, ifdynstaticdefault(4, 5))
+        self._common(fn, 2, 4)
 
     def test_restore_range(self):
         def fn(a, b):
@@ -327,7 +325,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifdynstaticdefault(4, 1))
+        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -344,7 +342,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             tmp = [a + 1, b + 2, a + b]
             x = a
             x = unsupported(x, x)
-            for i in range(3):
+            for _ in range(3):
                 x += tmp.pop(-1)
             return x
 
@@ -356,7 +354,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return a[b.size(0) - 1]
 
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         for i in range(3, 12):
             opt_fn(torch.randn(i), torch.randn(i))
         # just one graph
@@ -368,10 +366,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         start = 2
         end = 12
-        steps = end - start
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
@@ -386,7 +383,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, x), fn(x, x))
@@ -399,19 +396,16 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(opt_fn(x, x), fn(x, x))
-        # NB: This COULD validly be 2, but we don't test disjointness in the
+        # NB: This COULD validly be 2, but we don't test disjointedness in the
         # guards for when x and y didn't duck size together, so we end up
         # with a generic graph that also works when x and y happen to duck
         # size together.
-        if config.assume_static_by_default:
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 2)
 
         torch._dynamo.reset()
         cnt_dynamic.frame_count = 0
@@ -428,7 +422,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         x = torch.randn(0)
         y = torch.randn(2)
         self.assertEqual(opt_fn(y), fn(y))
@@ -444,7 +438,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x / (a + b)
             return x
 
-        self._common(fn, 1, 6)
+        self._common(fn, 1, 5)  # item gets DCE'd
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
@@ -474,15 +468,15 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         t = torch.Tensor([True])
         f = torch.Tensor([False])
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         for a in (t, f):
             for b in (t, f):
                 for c in (t, f):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 12)
-        self.assertEqual(cnt.op_count, 16)
+        self.assertEqual(cnt.frame_count, 7)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):
@@ -497,7 +491,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self._common(fn, 2, 9)
         torch._dynamo.reset()
         with torch.no_grad():
-            self._common(fn, 2, 9)
+            self._common(fn, 2, 5)
 
     def test_resume_with_no_grad2(self):
         def fn(a, b):
@@ -526,7 +520,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 4
             return x
 
-        self._common(fn, 2, 19)
+        self._common(fn, 2, 11)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):
@@ -560,16 +554,15 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         v1 = torch.randn(10)
         v2, it2 = fn(v1)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         v3, it3 = opt_fn(v1)
-        v4, it4 = opt_fn(v1)
+        v4, _ = opt_fn(v1)
         self.assertEqual(v2.tolist(), v3.tolist())
         self.assertEqual(v2.tolist(), v4.tolist())
         self.assertEqual(list(it2), list(it3))
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 6)
 
-    @unittest.skip("not working yet")
     def test_tuple_iterator_mutate(self):
         def fn(x, it):
             x = x + next(it)
@@ -581,7 +574,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         v1 = torch.randn(10)
         it1 = iter(tuple(range(10)))
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(opt_fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
         self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])
 
@@ -593,7 +586,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdynstaticdefault(2, 7))
+        self._common(fn, 1, ifdynstaticdefault(2, 3))
 
 
 if __name__ == "__main__":

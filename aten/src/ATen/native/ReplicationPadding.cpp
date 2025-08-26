@@ -20,13 +20,12 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(replication_pad1d) (
   const Tensor& input, IntArrayRef paddingSize  // no out argument!
 ) {
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
 
   int64_t dimw = 1;
   int64_t dimslices = 0;
@@ -87,6 +86,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
 TORCH_META_FUNC(replication_pad2d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
+  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
   int64_t pad_t = paddingSize[2];
@@ -126,6 +126,7 @@ TORCH_META_FUNC(replication_pad2d) (
 TORCH_META_FUNC(replication_pad3d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
+  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int64_t pleft = paddingSize[0];
   int64_t pright = paddingSize[1];
   int64_t ptop = paddingSize[2];
@@ -170,9 +171,9 @@ TORCH_META_FUNC(replication_pad3d) (
   }
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -228,17 +229,20 @@ void replication_pad3d_backward_out_cpu_template(
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
   int pback = paddingSize[5];
+  int dimc = 0;
   int dimw = 3;
   int dimh = 2;
   int dimd = 1;
 
   if (input.dim() == 5) {
+    dimc++;
     dimw++;
     dimh++;
     dimd++;
   }
 
   /* sizes */
+  int64_t ichannel = input.size(dimc);
   int64_t idepth = input.size(dimd);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
@@ -248,6 +252,9 @@ void replication_pad3d_backward_out_cpu_template(
 
   at::native::padding::check_valid_input<3>(input, paddingSize);
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput width unexpected. Expected: ", ichannel, ", Got: ",
+      gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));
@@ -287,6 +294,9 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
 TORCH_IMPL_FUNC(replication_pad2d_out_cpu) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   replication_pad2d_kernel(kCPU, output, input, paddingSize);
 }
 
@@ -295,7 +305,7 @@ Tensor& replication_pad2d_backward_out_cpu(const Tensor& gradOutput,
     IntArrayRef paddingSize,
     Tensor& gradInput)
 {
-  gradInput.resize_as_(input);
+  gradInput.resize_as_(input, input.suggest_memory_format());
   gradInput.zero_();
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -307,7 +317,7 @@ Tensor replication_pad2d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gradInput = at::zeros_like(input, input.suggest_memory_format());
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -316,6 +326,9 @@ Tensor replication_pad2d_backward_cpu(
 TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   replication_pad3d_kernel(kCPU, output, input, paddingSize);
 }
 
@@ -324,7 +337,7 @@ Tensor& replication_pad3d_backward_out_cpu(const Tensor& gradOutput,
     IntArrayRef paddingSize,
     Tensor& gradInput)
 {
-  gradInput.resize_as_(input);
+  gradInput.resize_as_(input, input.suggest_memory_format());
   gradInput.zero_();
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -336,7 +349,7 @@ Tensor replication_pad3d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gradInput = at::zeros_like(input, input.suggest_memory_format());
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -349,5 +362,4 @@ DEFINE_DISPATCH(replication_pad2d_backward_kernel);
 DEFINE_DISPATCH(replication_pad3d_kernel);
 DEFINE_DISPATCH(replication_pad3d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

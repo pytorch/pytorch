@@ -5,7 +5,7 @@
  * https://github.com/python/cpython/blob/2.7/Objects/structseq.c
  *
  * The purpose of this file is to overwrite the default behavior
- * of repr of structseq to provide better printting for returned
+ * of repr of structseq to provide better printing for returned
  * structseq objects from operators, aka torch.return_types.*
  *
  * For more information on copyright of CPython, see:
@@ -18,8 +18,7 @@
 
 #include <structmember.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 // NOTE: The built-in repr method from PyStructSequence was updated in
 // https://github.com/python/cpython/commit/c70ab02df2894c34da2223fc3798c0404b41fd79
@@ -72,5 +71,4 @@ PyObject* returned_structseq_repr(PyStructSequence* obj) {
   return PyUnicode_FromString(ss.str().c_str());
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

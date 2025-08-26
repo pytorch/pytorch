@@ -1,8 +1,9 @@
+# mypy: ignore-errors
+
 import re
 import sys
 import time
 from functools import partial, wraps
-from typing import Tuple
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -69,7 +70,7 @@ def dist_init(
                 rpc.constants.DEFAULT_SHUTDOWN_TIMEOUT = 60
 
             rpc.init_rpc(
-                name="worker%d" % self.rank,
+                name=f"worker{self.rank:d}",
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
@@ -101,7 +102,7 @@ def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
     """
     while True:
         try:
-            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            rpc.rpc_sync(f"worker{rank}", noop, args=())
             time.sleep(0.1)
         except Exception as e:
             if re.search(pattern=expected_error_regex, string=str(e)):
@@ -129,13 +130,12 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
         time.sleep(0.1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
-                    num_pending_futures, num_pending_users
-                )
+                f"Timed out waiting to flush pending futures and users, "
+                f"had {num_pending_futures} pending futures and {num_pending_users} pending users"
             )
 
 
-def get_num_owners_and_forks() -> Tuple[str, str]:
+def get_num_owners_and_forks() -> tuple[str, str]:
     """
     Retrieves number of OwnerRRefs and forks on this node from
     _rref_context_get_debug_info.
@@ -165,13 +165,8 @@ def wait_until_owners_and_forks_on_rank(
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    timeout,
-                    num_owners,
-                    num_forks,
-                    num_owners_on_rank,
-                    num_forks_on_rank,
-                )
+                f"Timed out waiting {timeout} sec for {num_owners} owners and {num_forks} forks on rank,"
+                f" had {num_owners_on_rank} owners and {num_forks_on_rank} forks"
             )
 
 
@@ -187,7 +182,7 @@ def initialize_pg(init_method, rank: int, world_size: int) -> None:
 
 
 def worker_name(rank: int) -> str:
-    return "worker{}".format(rank)
+    return f"worker{rank}"
 
 
 def get_function_event(function_events, partial_event_name):
@@ -200,5 +195,5 @@ def get_function_event(function_events, partial_event_name):
     function_events: function_events returned by the profiler.
     event_name (str): partial key that the event was profiled with.
     """
-    event = [event for event in function_events if partial_event_name in event.name][0]
+    event = [event for event in function_events if partial_event_name in event.name][0]  # noqa: RUF015
     return event

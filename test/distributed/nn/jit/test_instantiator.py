@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: distributed"]
 
-import pathlib
 import sys
-from typing import Tuple
+from pathlib import Path
 
 import torch
-from torch import Tensor, nn
 import torch.distributed as dist
+from torch import nn, Tensor
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.distributed.nn.jit import instantiator
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @torch.jit.interface
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[Tensor, int, str]:
+    ) -> tuple[Tensor, int, str]:
         pass
 
 
@@ -45,7 +45,7 @@ class TestInstantiator(TestCase):
         self.assertEqual(return_type_str, "Tuple[Tensor, int, str]")
 
     def test_instantiate_scripted_remote_module_template(self):
-        dir_path = pathlib.Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
+        dir_path = Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
 
         # Cleanup.
         file_paths = dir_path.glob(f"{instantiator._FILE_PREFIX}*.py")
@@ -69,7 +69,7 @@ class TestInstantiator(TestCase):
         self.assertEqual(num_files_after, 1)
 
     def test_instantiate_non_scripted_remote_module_template(self):
-        dir_path = pathlib.Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
+        dir_path = Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
 
         # Cleanup.
         file_paths = dir_path.glob(f"{instantiator._FILE_PREFIX}*.py")

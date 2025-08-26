@@ -6,12 +6,13 @@ import csv
 import sys
 from collections import defaultdict
 
+
 assert len(sys.argv) == 3
 
 RESULTS = defaultdict(dict)
 
 for side, f in zip(["static", "dynamic"], sys.argv[1:]):
-    with open(f, "r") as f:
+    with open(f) as f:
         reader = csv.DictReader(f)
         for row in reader:
             RESULTS[(row["bench"], row["name"])][side] = row

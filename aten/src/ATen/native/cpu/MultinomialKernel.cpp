@@ -19,11 +19,12 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-void multinomial_with_replacement_apply(
+typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -35,7 +36,7 @@ void multinomial_with_replacement_apply(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options());
 
-  const scalar_t* const self_ptr = self.data_ptr<scalar_t>();
+  const scalar_t* const self_ptr = self.const_data_ptr<scalar_t>();
   scalar_t* const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 
@@ -50,10 +51,8 @@ void multinomial_with_replacement_apply(
   for (const auto i : c10::irange(n_dist)) {
     /* Get normalized cumulative distribution from prob distribution */
     scalar_t sum = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    scalar_t val;
     for (const auto j : c10::irange(n_categories)) {
-      val = self_ptr[i * self_stride_0 + j * self_stride_1];
+      scalar_t val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(
           val >= 0,
           "invalid multinomial distribution (encountering probability entry < 0)");
@@ -91,27 +90,21 @@ void multinomial_with_replacement_apply(
       double uniform_sample = uniform(gen);
       /* Do a binary search for the slot in which the prob falls
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int mid_pointer;
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-      scalar_t cum_prob;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int sample_idx;
+      int64_t left_pointer = 0;
+      int64_t right_pointer = n_categories;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-        cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        scalar_t cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
         } else {
           right_pointer = mid_pointer;
         }
       }
-      sample_idx = left_pointer;
+      auto sample_idx = left_pointer;
 
       /* store in result tensor (will be incremented for lua compat by wrapper)
        */
@@ -121,12 +114,13 @@ void multinomial_with_replacement_apply(
   }
 }
 
-template <>
-void multinomial_with_replacement_apply<BFloat16>(
+template <typename scalar_t>
+typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -138,7 +132,7 @@ void multinomial_with_replacement_apply<BFloat16>(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options().dtype(kFloat));
 
-  const BFloat16* const self_ptr = self.data_ptr<BFloat16>();
+  const scalar_t* const self_ptr = self.const_data_ptr<scalar_t>();
   float* const cum_dist_ptr = cum_dist.data_ptr<float>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 
@@ -153,10 +147,8 @@ void multinomial_with_replacement_apply<BFloat16>(
   for (const auto i : c10::irange(n_dist)) {
     /* Get normalized cumulative distribution from prob distribution */
     float sum = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    float val;
     for (const auto j : c10::irange(n_categories)) {
-      val = self_ptr[i * self_stride_0 + j * self_stride_1];
+      float val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(
           val >= 0,
           "invalid multinomial distribution (encountering probability entry < 0)");
@@ -194,27 +186,21 @@ void multinomial_with_replacement_apply<BFloat16>(
       double uniform_sample = uniform(gen);
       /* Do a binary search for the slot in which the prob falls
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int mid_pointer;
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-      float cum_prob;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int sample_idx;
+      int64_t left_pointer = 0;
+      int64_t right_pointer = n_categories;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-        cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        float cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
         } else {
           right_pointer = mid_pointer;
         }
       }
-      sample_idx = left_pointer;
+      auto sample_idx = left_pointer;
 
       /* store in result tensor (will be incremented for lua compat by wrapper)
        */
@@ -228,7 +214,7 @@ static void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> gen) {
+    std::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "multinomial", [&] {
         multinomial_with_replacement_apply<scalar_t>(
@@ -239,5 +225,5 @@ static void multinomial_with_replacement_kernel_impl(
 
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
-    &multinomial_with_replacement_kernel_impl);
+    &multinomial_with_replacement_kernel_impl)
 } // namespace at::native

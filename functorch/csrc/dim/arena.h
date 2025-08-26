@@ -8,7 +8,7 @@
 #include <ATen/ATen.h>
 #include "minpybind.h"
 
-#ifdef _WIN32
+#if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
 // https://stackoverflow.com/questions/355967/how-to-use-msvc-intrinsics-to-get-the-equivalent-of-this-gcc-code
 inline unsigned int __builtin_clz(unsigned int x) {
@@ -55,13 +55,13 @@ struct Slice {
     T& operator[](int i) const {
         return begin_[i];
     }
-    c10::optional<int> index(const T& value) {
+    std::optional<int> index(const T& value) {
         for (int i : enumerate()) {
             if (begin_[i] == value) {
                 return i;
             }
         }
-        return c10::nullopt;
+        return std::nullopt;
     }
     bool contains(const T& value) {
         return index(value).has_value();

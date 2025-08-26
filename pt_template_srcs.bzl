@@ -131,6 +131,8 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
+        "autograd/generated/ViewFuncs.cpp": ["autograd/generated/ViewFuncs.cpp"],
+        "autograd/generated/ViewFuncs.h": ["autograd/generated/ViewFuncs.h"],
     }
 
     if is_arvr_mode():
@@ -146,6 +148,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_linalg_functions.cpp": ["autograd/generated/python_linalg_functions.cpp"],
             "autograd/generated/python_nested_functions.cpp": ["autograd/generated/python_nested_functions.cpp"],
             "autograd/generated/python_nn_functions.cpp": ["autograd/generated/python_nn_functions.cpp"],
+            "autograd/generated/python_return_types.h": ["autograd/generated/python_return_types.h"],
             "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
             "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
             "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],
@@ -207,7 +210,7 @@ def get_metal_registration_files_outs():
 
 # There is a really weird issue with the arvr windows builds where
 # the custom op files are breaking them. See https://fburl.com/za87443c
-# The hack is just to not build them for that platform and pray they arent needed.
+# The hack is just to not build them for that platform and pray they aren't needed.
 def get_metal_registration_files_outs_windows():
     outs = {}
     for file_path in METAL_SOURCE_LIST:

@@ -3,21 +3,16 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/code_template.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
-#include <torch/csrc/utils/memory.h>
+#include <optional>
 
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
@@ -46,29 +41,14 @@ constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
-intptr_t run(const std::string& cmd);
-
-static bool programExists(const std::string& program) {
-  std::stringstream ss;
-  c10::printQuotedString(ss, program);
-  at::jit::TemplateEnv env;
-  env.s("program", ss.str());
-  std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
-  return (run(cmd.c_str()) == 0);
-#else
-  return (system(cmd.c_str()) == 0);
-#endif
-}
-
-#ifdef _MSC_VER
-c10::optional<std::wstring> exec(const std::wstring& cmd) {
+static std::optional<std::wstring> exec(const std::wstring& cmd) {
   std::array<wchar_t, 128> buffer;
   std::wstring result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
       _wpopen(cmd.c_str(), L"r"), _pclose);
   if (!pipe) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   while (fgetws(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
          nullptr) {
@@ -82,10 +62,10 @@ inline std::wstring& rtrim(std::wstring& s, const wchar_t* t = L" \t\n\r\f\v") {
   return s;
 }
 
-void activate() {
+static void activate() {
   wchar_t* root = nullptr;
   std::wstring cmd;
-  c10::optional<std::wstring> exec_out;
+  std::optional<std::wstring> exec_out;
   std::wstring path;
   std::wstring vcruntime_plat;
   std::wstring envvars;
@@ -149,9 +129,9 @@ void activate() {
   }
 }
 
-intptr_t run(const std::string& cmd) {
+static intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  wchar_t* comspec = _wgetenv(L"COMSPEC");
+  const wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
     comspec = L"C:\\Windows\\System32\\cmd.exe";
   }
@@ -174,14 +154,27 @@ intptr_t run(const std::string& cmd) {
 }
 #endif
 
+static bool programExists(const std::string& program) {
+  std::stringstream ss;
+  c10::printQuotedString(ss, program);
+  at::jit::TemplateEnv env;
+  env.s("program", ss.str());
+  std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
+  return (system(cmd.c_str()) == 0);
+#endif
+}
+
 // A single compiler config is accessed through getConfig() (below)
 // Controls compilation options and may be updated based on the result
 // of compilation attempts.
 struct CompilerConfig {
   CompilerConfig() {
-    const char* cxx_env = getenv("CXX");
-    if (cxx_env != nullptr) {
-      cxx = cxx_env;
+    const auto cxx_env = c10::utils::get_env("CXX");
+    if (cxx_env) {
+      cxx = cxx_env.value();
     }
 
 #ifdef _MSC_VER
@@ -333,7 +326,7 @@ FusedKernelCPU::FusedKernelCPU(
   runCompiler(cpp_file.name(), so_file.name());
   if (debugFuser() >= 2)
     disas(so_file.name());
-  so_lib = make_unique<at::DynamicLibrary>(so_file.name().c_str());
+  so_lib = std::make_unique<at::DynamicLibrary>(so_file.name().c_str());
 #pragma GCC diagnostic ignored "-Wpedantic"
   kernel =
       reinterpret_cast<void (*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));
@@ -359,8 +352,5 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+static RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
+} // namespace torch::jit::fuser::cpu

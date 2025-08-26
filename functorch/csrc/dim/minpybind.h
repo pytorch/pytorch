@@ -8,7 +8,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <utility>
-#include <iostream>
+#include <ostream>
 #include <memory>
 
 #define PY_BEGIN try {
@@ -385,16 +385,8 @@ bool is_int(handle h) {
     return PyLong_Check(h.ptr());
 }
 
-bool is_float(handle h) {
-    return PyFloat_Check(h.ptr());
-}
-
 bool is_none(handle h) {
     return h.ptr() == Py_None;
-}
-
-bool is_bool(handle h) {
-    return PyBool_Check(h.ptr());
 }
 
 Py_ssize_t to_int(handle h) {
@@ -403,18 +395,6 @@ Py_ssize_t to_int(handle h) {
         throw mpy::exception_set();
     }
     return r;
-}
-
-double to_float(handle h) {
-    double r = PyFloat_AsDouble(h.ptr());
-    if (PyErr_Occurred()) {
-        throw mpy::exception_set();
-    }
-    return r;
-}
-
-bool to_bool_unsafe(handle h) {
-    return h.ptr() == Py_True;
 }
 
 bool to_bool(handle h) {
@@ -622,7 +602,7 @@ struct vector_args {
             _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
 #else
             _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
-            std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
+            auto buf = std::make_unique<PyObject*[]>(names.size());
             _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
             throw exception_set();

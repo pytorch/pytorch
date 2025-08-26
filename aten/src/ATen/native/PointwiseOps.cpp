@@ -3,7 +3,6 @@
 #include <ATen/native/PointwiseOps.h>
 
 #include <ATen/core/Tensor.h>
-#include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -13,15 +12,22 @@
 #include <ATen/ops/addcmul_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(addcmul)
 (const Tensor& self,
  const Tensor& tensor1,
  const Tensor& tensor2,
  const Scalar& value) {
-  build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
+  build(TensorIteratorConfig()
+      .allow_cpu_scalars(true)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .add_owned_output(maybe_get_output())
+      .add_owned_const_input(self)
+      .add_owned_const_input(tensor1)
+      .add_owned_const_input(tensor2));
 }
 
 TORCH_META_FUNC(addcdiv)
@@ -45,8 +51,8 @@ TORCH_META_FUNC(addcdiv)
   build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
 }
 
-} // namespace meta
-namespace native {
+} // namespace at::meta
+namespace at::native {
 
 TORCH_IMPL_FUNC(addcmul_out)
 (const Tensor& self,
@@ -69,5 +75,4 @@ TORCH_IMPL_FUNC(addcdiv_out)
 DEFINE_DISPATCH(addcmul_stub);
 DEFINE_DISPATCH(addcdiv_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -6,14 +6,17 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
     branches-ignore:
       - nightly
+  push:
+    tags:
+      # TODO: Remove me later
+      -  ciflow/inductor-cu126/*
   workflow_dispatch:
 
 jobs:
   bc_linter:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
       - name: Run BC Lint Action

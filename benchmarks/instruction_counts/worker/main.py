@@ -15,15 +15,16 @@ The life of a worker is very simple:
 Because this file only expects to run in a child context, error handling means
 plumbing failures up to the caller, not raising in this process.
 """
+
 import argparse
 import dataclasses
 import io
 import os
 import pickle
+import sys
 import timeit
 import traceback
-from typing import Any, Tuple, Union, TYPE_CHECKING
-import sys
+from typing import Any, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -31,7 +32,9 @@ if TYPE_CHECKING:
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
     from torch.utils.benchmark.utils.timer import Language, Timer
-    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
+    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
+        CallgrindStats,
+    )
 
 else:
     from torch.utils.benchmark import CallgrindStats, Language, Timer
@@ -67,6 +70,7 @@ class WorkerTimerArgs:
     controlling workers. `Timer` is not pickleable, so instead the main process
     will pass `WorkerTimerArgs` instances to workers for processing.
     """
+
     stmt: str
     setup: str = "pass"
     global_setup: str = ""
@@ -77,8 +81,8 @@ class WorkerTimerArgs:
 @dataclasses.dataclass(frozen=True)
 class WorkerOutput:
     # Only return values to reduce communication between main process and workers.
-    wall_times: Tuple[float, ...]
-    instructions: Tuple[int, ...]
+    wall_times: tuple[float, ...]
+    instructions: tuple[int, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -127,12 +131,12 @@ class WorkerUnpickler(pickle.Unpickler):
 # == Execution ================================================================
 # =============================================================================
 
+
 def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
     timer = Timer(
         stmt=timer_args.stmt,
         setup=timer_args.setup or "pass",
         global_setup=timer_args.global_setup,
-
         # Prevent NotImplementedError on GPU builds and C++ snippets.
         timer=timeit.default_timer,
         num_threads=timer_args.num_threads,
@@ -141,7 +145,7 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
 
     m = timer.blocked_autorange(min_run_time=MIN_RUN_TIME)
 
-    stats: Tuple[CallgrindStats, ...] = timer.collect_callgrind(
+    stats: tuple[CallgrindStats, ...] = timer.collect_callgrind(
         number=CALLGRIND_NUMBER,
         collect_baseline=False,
         repeats=CALLGRIND_REPEATS,
@@ -150,7 +154,7 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
 
     return WorkerOutput(
         wall_times=tuple(m.times),
-        instructions=tuple(s.counts(denoise=True) for s in stats)
+        instructions=tuple(s.counts(denoise=True) for s in stats),
     )
 
 
@@ -166,7 +170,7 @@ def main(communication_file: str) -> None:
         # Runner process sent SIGINT.
         sys.exit()
 
-    except BaseException:
+    except BaseException:  # noqa: B036
         trace_f = io.StringIO()
         traceback.print_exc(file=trace_f)
         result = WorkerFailure(failure_trace=trace_f.getvalue())
@@ -181,8 +185,8 @@ def main(communication_file: str) -> None:
         pickle.dump(result, f)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--communication-file', '--communication_file', type=str)
+    parser.add_argument("--communication-file", "--communication_file", type=str)
     communication_file = parser.parse_args().communication_file
     main(communication_file)

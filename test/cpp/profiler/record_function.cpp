@@ -144,7 +144,9 @@ TEST(RecordFunctionTest, CallOrder) {
 #undef REGISTER_CALLBACK
 
   RECORD_FUNCTION("Outer", {});
-  { RECORD_FUNCTION("Inner", {}); }
+  {
+    RECORD_FUNCTION("Inner", {});
+  }
 
   at::clearCallbacks();
   ASSERT_FALSE(at::hasCallbacks());
@@ -207,7 +209,7 @@ TEST(RecordFunctionTest, Sampling) {
   std::vector<int> expected_counts;
   int running_count = 0;
   for (const auto i : c10::irange(outcomes.size())) {
-    for (const auto j : c10::irange(outcomes[i])) {
+    for ([[maybe_unused]] const auto j : c10::irange(outcomes[i])) {
       expected_counts.push_back(running_count);
     }
     expected_counts.push_back(++running_count);
@@ -255,12 +257,6 @@ TEST(RecordFunctionTest, MultipleCallbacks) {
   static std::array<int, 4> counts_from_rec_fn;
   counts_from_rec_fn.fill(0);
 
-  auto start_callback_0 =
-      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-    ++counts_from_rec_fn[0];
-    return nullptr;
-  };
-
   auto end_callback = [](const at::RecordFunction& fn, at::ObserverContext*) {};
 
 #define REGISTER_CALLBACK(register_fn, index)                   \
@@ -289,7 +285,7 @@ TEST(RecordFunctionTest, MultipleCallbacks) {
     next_call[i] = sample(probabilities[i]);
   }
 
-  for (const auto i : c10::irange(50)) {
+  for ([[maybe_unused]] const auto i : c10::irange(50)) {
     RECORD_FUNCTION("Test", {});
     for (const auto j : c10::irange(next_call.size())) {
       if (!(--next_call[j])) {
@@ -299,6 +295,34 @@ TEST(RecordFunctionTest, MultipleCallbacks) {
       EXPECT_EQ(counts[j], counts_from_rec_fn[j]);
     }
   }
+
+  at::clearCallbacks();
+  ASSERT_FALSE(at::hasCallbacks());
+}
+
+// Test that KwargsOnly callbacks are run in USER_SCOPE.
+TEST(RecordFunctionTest, KwargsOnly) {
+  at::clearCallbacks();
+  ASSERT_FALSE(at::hasCallbacks());
+  static const std::unordered_map<std::string, c10::IValue> myMap = {
+      {"a", 1}, {"b", 2.5}};
+
+#define REGISTER_CALLBACK()                                          \
+  at::addThreadLocalCallback(                                        \
+      at::RecordFunctionCallback(                                    \
+          [](const at::RecordFunction& fn)                           \
+              -> std::unique_ptr<at::ObserverContext> {              \
+            EXPECT_EQ(myMap, fn.kwinputs());                         \
+            return nullptr;                                          \
+          },                                                         \
+          [](const at::RecordFunction& fn, at::ObserverContext*) {}) \
+          .needsInputs(true)                                         \
+          .scopes({at::RecordScope::USER_SCOPE}))
+
+  REGISTER_CALLBACK();
+#undef REGISTER_CALLBACK
+
+  RECORD_USER_SCOPE_WITH_KWARGS_ONLY("Test", &myMap);
 
   at::clearCallbacks();
   ASSERT_FALSE(at::hasCallbacks());

@@ -15,7 +15,7 @@ from typing import Optional
 from torch.distributed.elastic.utils.log_level import get_log_level
 
 
-def get_logger(name: Optional[str] = None):
+def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
@@ -32,10 +32,10 @@ def get_logger(name: Optional[str] = None):
     return _setup_logger(name or _derive_module_name(depth=2))
 
 
-def _setup_logger(name: Optional[str] = None):
-    log = logging.getLogger(name)
-    log.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
-    return log
+def _setup_logger(name: Optional[str] = None) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
+    return logger
 
 
 def _derive_module_name(depth: int = 1) -> Optional[str]:

@@ -1,21 +1,16 @@
+# mypy: allow-untyped-defs
 import copy
-from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import (
-    ProcessGroup,
-)
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch.distributed._shard.sharding_spec._internals import (
-    get_split_size,
-    get_chunked_dim_size,
-)
-from torch.distributed.nn.functional import (
-    all_to_all,
-    all_to_all_single,
-)
+from torch._C._distributed_c10d import ProcessGroup
 from torch.distributed._shard.metadata import ShardMetadata
+from torch.distributed._shard.sharding_spec._internals import (
+    get_chunked_dim_size,
+    get_split_size,
+)
+from torch.distributed.nn.functional import all_to_all, all_to_all_single
 
 from .shard import Shard
 
@@ -41,14 +36,14 @@ def get_idx_from_placements(placements, current_rank) -> int:
     for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
         if current_rank == placement.rank():  # type: ignore[union-attr]
             return idx
-    raise RuntimeError('current_rank not in the placement.')
+    raise RuntimeError("current_rank not in the placement.")
 
 
 def build_reshard_metadata(
     st_size: torch.Size,
     sharding_spec: shard_spec.ShardingSpec,
     world_size: int,
-) -> Tuple[List[ShardMetadata], List[int]]:
+) -> tuple[list[ShardMetadata], list[int]]:
     """
     Based the given sharding spec, we calculate the offset and local shard size.
     We then build a ShardMetadata on top of the calculation result.
@@ -90,7 +85,7 @@ def reshuffle_local_shard(
     sharding_spec: shard_spec.ShardingSpec,
     resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
-) -> Tuple[List[Shard], List[ShardMetadata]]:
+) -> tuple[list[Shard], list[ShardMetadata]]:
     """
     Reshuffle the local shard directly when the reshard dim is same as the original
     sharding dim. Logically we do this in two step:
@@ -137,7 +132,9 @@ def reshuffle_local_shard(
     local_shard = local_shard.transpose(0, reshard_dim).contiguous()
     gathered_input_size = list(local_shard.size())
     gathered_input_size[0] = sharded_dim_size
-    gathered_input = torch.empty(gathered_input_size, device=local_shard.device, dtype=local_shard.dtype)
+    gathered_input = torch.empty(
+        gathered_input_size, device=local_shard.device, dtype=local_shard.dtype
+    )
     # all2all.
     local_shard = all_to_all_single(
         gathered_input,
@@ -157,7 +154,7 @@ def reshard_local_shard(
     sharding_spec: shard_spec.ShardingSpec,
     resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
-) -> Tuple[List[Shard], List[ShardMetadata]]:
+) -> tuple[list[Shard], list[ShardMetadata]]:
     """
     Reshard a sharded tensor given the ``resharding_spec``. When the reshard dim is
     different from the original sharding dim, we need to do two steps logically:
@@ -193,14 +190,14 @@ def reshard_local_shard(
     )
 
     # Compute expected size
-    input_split_sizes = []
-    for metadata in shards_metadata:
-        input_split_sizes.append(metadata.shard_sizes[reshard_dim])
+    input_split_sizes = [
+        metadata.shard_sizes[reshard_dim] for metadata in shards_metadata
+    ]
     rearrange_input = any(ranks[i] > ranks[i + 1] for i in range(len(ranks) - 1))
 
     if rearrange_input:
         # Need to re-arrange reshard_dim of local_tensor before all2all.
-        indices: List[int] = []
+        indices: list[int] = []
         for metadata in shards_metadata:
             offset_start_idx = metadata.shard_offsets[reshard_dim]
             split_size = metadata.shard_sizes[reshard_dim]
@@ -222,9 +219,7 @@ def reshard_local_shard(
         output_tensor_size = list(st_size)
         output_tensor_size[current_sharding_dim] = sharded_dim_size
         output_tensor_size[reshard_dim] = input_split_sizes[current_rank]
-        output_tensor_list[
-            placement.rank()
-        ] = torch.empty(  # type: ignore[union-attr, index]
+        output_tensor_list[placement.rank()] = torch.empty(  # type: ignore[union-attr, index]
             output_tensor_size, device=local_tensor.device, dtype=local_tensor.dtype
         )
         indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]

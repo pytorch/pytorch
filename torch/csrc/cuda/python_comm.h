@@ -1,11 +1,8 @@
 #pragma once
 
-namespace torch {
-namespace cuda {
-namespace python {
+#include <torch/csrc/utils/pythoncapi_compat.h>
+namespace torch::cuda::python {
 
 void initCommMethods(PyObject* module);
 
-}
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::python

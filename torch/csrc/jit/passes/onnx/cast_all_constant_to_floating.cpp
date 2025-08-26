@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
 }
@@ -15,7 +14,7 @@ using namespace ::c10::onnx;
 // many constant operators would have already been removed in the export before
 // this step. On the other hand if cast is inserted in symbolic, subsequent node
 // conversion will break if it depends on certain inputs being constant.
-void CastAllConstantToFloating(Block* block) {
+static void CastAllConstantToFloating(Block* block) {
   auto graph = block->owningGraph();
   auto it = block->nodes().begin();
   while (it != block->nodes().end()) {
@@ -31,8 +30,7 @@ void CastAllConstantToFloating(Block* block) {
       auto val_type = TensorType::create(val);
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
           dtype != at::ScalarType::Half) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int to_type;
+        int to_type = 0;
         switch (val.scalar_type()) {
           case at::ScalarType::Byte:
           case at::ScalarType::Char:
@@ -71,5 +69,4 @@ void CastAllConstantToFloating(Block* block) {
 void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph) {
   CastAllConstantToFloating(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

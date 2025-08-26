@@ -3,7 +3,7 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <bitset>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 constexpr size_t default_bitset_size = 64;
 
@@ -17,7 +17,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->is_immutable())) {
+  if (wrapper && wrapper->level() == cur_level && !(wrapper->is_immutable())) {
     return;
   }
   TORCH_CHECK(false,
@@ -32,12 +32,19 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!tensor.defined()) {
     return tensor;
   }
+  // TensorWrapper creation may call dispatcher ops (e.g. aten.sym_storage_offset).
+  // We need to ensure that they pass through the functorch stack properly.
+  // In order to do that, we want to call those dispatcher ops at the next layer,
+  // hence we disable DynamicLayerFrontMode so the call to the op automatically
+  // goes to DynamicLayerBackMode which will then send it to the next layer.
+  c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
   }
-  TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
-  if (wrapper->level().value() == current_level) {
+  auto level = wrapper->level();
+  TORCH_INTERNAL_ASSERT(level.has_value() && level <= current_level, "escaped?");
+  if (level == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
@@ -67,7 +74,7 @@ static void autogradBasedTransformProcess(
     return materializeGradWrappers(tensor, current_level);
   };
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()), maybeTransformGradWrappers);
 
   setup_dispatch_key_tls(transform_type, {});
   op.callBoxed(stack);
@@ -78,8 +85,8 @@ static void autogradBasedTransformSendToNext(
     torch::jit::Stack* stack,
     const Interpreter& interpreter,
     TransformType transform_type,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
     bool grad_special_case) {
   auto current_level = interpreter.level();
   if (transform_type == TransformType::Grad) {
@@ -107,9 +114,6 @@ static void autogradBasedTransformSendToNext(
     if (!tensor.defined()) {
       return tensor;
     }
-    // if (c10::show_dispatch_trace_enabled()) {
-    //   std::cout << "wrap " << current_level << std::endl;
-    // }
     return makeTensorWrapper(tensor, interpreter, is_immutable);
   };
 
@@ -127,7 +131,7 @@ static void autogradBasedTransformSendToNext(
   auto args_size = op.schema().arguments().size();
   const auto ret_size = op.schema().returns().size();
   // Step 1
-  auto front = stack->size() - args_size;
+  auto front = static_cast<int64_t>(stack->size()) - args_size;
   for (const auto arg_idx : c10::irange(0, args_size)) {
     stack->push_back((*stack)[front + arg_idx]);
   }
@@ -145,7 +149,7 @@ static void autogradBasedTransformSendToNext(
         // if the input is immutable, we find if it aliases anything, noting that
         // args are in reverse order on stack, so the last arg is at the top of the stack
         const auto relative_pos = idx - (stack->size() - args_size);
-        const auto aliased_out = findAliasedOutput(op.schema(), relative_pos);
+        const auto aliased_out = findAliasedOutput(op.schema(), static_cast<int64_t>(relative_pos));
         if (aliased_out.has_value()) {
           outputs_aliasing_immutable.flip(*aliased_out); // each output aliases at most one input, so we can only hit this once
         }
@@ -154,14 +158,14 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 2
-  foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - args_size), static_cast<int64_t>(stack->size()), unwrap);
 
   // See NOTE [grad and vjp interaction with no_grad]
-  optional<c10::AutoGradMode> grad_guard;
+  std::optional<c10::AutoGradMode> grad_guard;
   if (transform_type == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
     grad_guard.emplace(*prev_grad_mode);
   }
-  optional<c10::AutoFwGradMode> fw_grad_guard;
+  std::optional<c10::AutoFwGradMode> fw_grad_guard;
   if (transform_type == TransformType::Jvp &&
       prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
     fw_grad_guard.emplace(*prev_fwd_grad_mode);
@@ -177,7 +181,7 @@ static void autogradBasedTransformSendToNext(
   op.callBoxed(stack);
 
   // Step 4
-  foreachTensorInplaceWithFlag(*stack, stack->size() - ret_size, stack->size(), outputs_aliasing_immutable, wrap);
+  foreachTensorInplaceWithFlag(*stack, static_cast<int64_t>(stack->size() - ret_size), static_cast<int64_t>(stack->size()), outputs_aliasing_immutable, wrap);
 
   // Step 5
   auto args_front = stack->size() - args_size - ret_size;
@@ -194,7 +198,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 6
-  stack->erase(stack->end() - (args_size + ret_size), stack->end() - ret_size);
+  stack->erase(stack->end() - std::ptrdiff_t(args_size + ret_size), stack->end() - std::ptrdiff_t(ret_size));
 }
 
 void GradInterpreterPtr::processImpl(
@@ -211,7 +215,7 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
       op, stack, *base_,
       TransformType::Grad,
       prevGradMode(),
-      nullopt,
+      std::nullopt,
       grad_special_case);
 }
 
@@ -228,9 +232,9 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
   autogradBasedTransformSendToNext(
       op, stack, *base_,
       TransformType::Jvp,
-      nullopt,
+      std::nullopt,
       prevFwdGradMode(),
       grad_special_case);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch

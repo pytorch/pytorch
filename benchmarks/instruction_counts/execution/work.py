@@ -1,4 +1,7 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
+
+# mypy: ignore-errors
+
 import dataclasses
 import json
 import os
@@ -6,13 +9,20 @@ import pickle
 import signal
 import subprocess
 import time
-from typing import List, Optional, Union, TYPE_CHECKING
 import uuid
+from typing import Optional, TYPE_CHECKING, Union
 
 from core.api import AutoLabels
 from core.types import Label
 from core.utils import get_temp_dir
-from worker.main import WORKER_PATH, WorkerFailure, WorkerOutput, WorkerTimerArgs, WorkerUnpickler
+from worker.main import (
+    WORKER_PATH,
+    WorkerFailure,
+    WorkerOutput,
+    WorkerTimerArgs,
+    WorkerUnpickler,
+)
+
 
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]
@@ -32,6 +42,7 @@ SHELL = "/bin/bash"
 @dataclasses.dataclass(frozen=True)
 class WorkOrder:
     """Spec to schedule work with the benchmark runner."""
+
     label: Label
     autolabels: AutoLabels
     timer_args: WorkerTimerArgs
@@ -43,15 +54,18 @@ class WorkOrder:
         return id(self)
 
     def __str__(self) -> str:
-        return json.dumps({
-            "label": self.label,
-            "autolabels": self.autolabels.as_dict,
-            "num_threads": self.timer_args.num_threads,
-        })
+        return json.dumps(
+            {
+                "label": self.label,
+                "autolabels": self.autolabels.as_dict,
+                "num_threads": self.timer_args.num_threads,
+            }
+        )
 
 
 class _BenchmarkProcess:
     """Wraps subprocess.Popen for a given WorkOrder."""
+
     _work_order: WorkOrder
     _cpu_list: Optional[str]
     _proc: PopenType
@@ -84,24 +98,30 @@ class _BenchmarkProcess:
 
     @property
     def cmd(self) -> str:
-        cmd: List[str] = []
+        cmd: list[str] = []
         if self._work_order.source_cmd is not None:
             cmd.extend([self._work_order.source_cmd, "&&"])
 
         cmd.append(_ENV)
 
         if self._cpu_list is not None:
-            cmd.extend([
-                f"GOMP_CPU_AFFINITY={self._cpu_list}",
-                "taskset",
-                "--cpu-list",
-                self._cpu_list
-            ])
+            cmd.extend(
+                [
+                    f"GOMP_CPU_AFFINITY={self._cpu_list}",
+                    "taskset",
+                    "--cpu-list",
+                    self._cpu_list,
+                ]
+            )
 
-        cmd.extend([
-            _PYTHON, WORKER_PATH,
-            "--communication-file", self._communication_file,
-        ])
+        cmd.extend(
+            [
+                _PYTHON,
+                WORKER_PATH,
+                "--communication-file",
+                self._communication_file,
+            ]
+        )
         return " ".join(cmd)
 
     @property
@@ -150,8 +170,7 @@ class _BenchmarkProcess:
             # ideal, but we don't have a better way to determine what to keep.
             proc_stdout = self._proc.stdout
             assert proc_stdout is not None
-            result = WorkerFailure(
-                failure_trace=proc_stdout.read().decode("utf-8"))
+            result = WorkerFailure(failure_trace=proc_stdout.read().decode("utf-8"))
 
         self._result = result
         self._end_time = time.time()
@@ -164,6 +183,7 @@ class InProgress:
     """Used by the benchmark runner to track outstanding jobs.
     This class handles bookkeeping and timeout + retry logic.
     """
+
     _proc: _BenchmarkProcess
     _timeouts: int = 0
 
@@ -201,7 +221,8 @@ class InProgress:
         if self._timeouts < max_attempts:
             print(
                 f"\nTimeout: {self._work_order.label}, {self._work_order.autolabels} "
-                f"(Attempt {self._timeouts} / {max_attempts})")
+                f"(Attempt {self._timeouts} / {max_attempts})"
+            )
             self._proc.interrupt()
             self._proc = self._proc.clone()
             return False

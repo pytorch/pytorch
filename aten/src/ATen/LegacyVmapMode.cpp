@@ -1,9 +1,8 @@
 #include <ATen/LegacyVmapMode.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
-thread_local int64_t VmapMode_current_vmap_level = 0;
+thread_local static int64_t VmapMode_current_vmap_level = 0;
 
 int64_t VmapMode::current_vmap_level() {
   return VmapMode_current_vmap_level;
@@ -24,5 +23,4 @@ int64_t VmapMode::decrement_nesting() {
   }
   return VmapMode_current_vmap_level;
 }
-} // namespace impl
-} // namespace at
+} // namespace at::impl

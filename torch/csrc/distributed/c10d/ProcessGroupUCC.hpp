@@ -119,7 +119,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
         OpType opType,
         uint64_t seq,
         const char* prof_title,
-        const c10::optional<std::vector<at::Tensor>>& inputs,
+        const std::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
         : Work(-1, opType, prof_title, inputs), logger_(logger), seq_(seq) {}
     ~WorkUCC();
@@ -232,6 +232,11 @@ class TORCH_API ProcessGroupUCC : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
   c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
@@ -279,9 +284,11 @@ class TORCH_API ProcessGroupUCC : public Backend {
   uint32_t comm_id;
   ucc_team_h team{nullptr};
   ucc_ee_h cuda_ee{nullptr};
+  ucc_ee_h cuda_ee_p2p[2]{nullptr, nullptr};
 
 #ifdef USE_CUDA
   std::unique_ptr<at::cuda::CUDAStream> stream = nullptr;
+  std::unique_ptr<at::cuda::CUDAStream> stream_p2p[2] = {nullptr, nullptr};
   event_pool_t ep;
 #endif
   c10::intrusive_ptr<ProcessGroupUCCLogger> logger;

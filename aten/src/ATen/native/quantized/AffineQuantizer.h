@@ -5,44 +5,43 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-Tensor& quantize_tensor_per_tensor_affine(
+TORCH_API Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     double scale,
     int64_t zero_point);
-Tensor& quantize_tensor_per_channel_affine(
+TORCH_API Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 
-Tensor& quantize_tensor_per_channel_float_qparams(
+TORCH_API Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
-Tensor& dequantize_tensor_per_tensor_affine(
+TORCH_API Tensor& dequantize_tensor_per_tensor_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     double scale,
     int64_t zero_point);
-Tensor& dequantize_tensor_per_channel_affine(
+TORCH_API Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
-Tensor& dequantize_tensor_per_channel_float_qparams(
+TORCH_API Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
 using quantize_tensor_per_tensor_affine_fn =
@@ -87,31 +86,31 @@ using dequantize_tensor_per_tensor_affine_sub_byte_fn =
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,
-    quantize_tensor_per_tensor_affine_stub);
+    quantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_affine_fn,
-    quantize_tensor_per_channel_affine_stub);
+    quantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_float_qparams_fn,
-    quantize_tensor_per_channel_float_qparams_stub);
+    quantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_fn,
-    dequantize_tensor_per_tensor_affine_stub);
+    dequantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_affine_fn,
-    dequantize_tensor_per_channel_affine_stub);
+    dequantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_fn,
-    dequantize_tensor_per_channel_float_qparams_stub);
+    dequantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_fn,
-    quantize_tensor_per_tensor_affine_sub_byte_stub);
+    quantize_tensor_per_tensor_affine_sub_byte_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_fn,
-    dequantize_tensor_per_tensor_affine_sub_byte_stub);
+    dequantize_tensor_per_tensor_affine_sub_byte_stub)
 
 template <typename T>
 TORCH_API Tensor quantize_tensor(
@@ -126,5 +125,4 @@ TORCH_API Tensor dequantize_tensor(
     double scale,
     int64_t zero_point);
 
-} // namespace native
 } // namespace at

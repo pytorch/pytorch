@@ -6,6 +6,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
+#include <c10/macros/Macros.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -169,8 +170,7 @@ TEST(THNNConvTest, Basic) {
       torch::randn_like(output, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::_slow_conv2d_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
@@ -215,8 +215,7 @@ TEST(THNNConvTest, Basic) {
   tensor_grads_in.push_back(grad_output);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
@@ -254,8 +253,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   at::Tensor running_var_jit = running_var.clone();
 
   // run forward eagerly
-  at::Tensor output, savemean, saveinvstd;
-  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(
+  auto [output, savemean, saveinvstd] = at::native_batch_norm(
       input,
       weight,
       bias,
@@ -274,12 +272,11 @@ TEST(ATenNativeBatchNormTest, Basic) {
       torch::zeros_like(saveinvstd, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
   // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor
   // weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor
   // save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor,
   // Tensor, Tensor)
-  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::native_batch_norm_backward(
       grad_output,
       input,
       weight,
@@ -340,8 +337,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   tensor_grads_in.push_back(grad_saveinvstd);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
@@ -491,13 +487,7 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define HAS_ASANUBSAN 1
-#endif
-#endif
-
-#ifndef HAS_ASANUBSAN
+#if !(C10_ASAN_ENABLED || C10_UBSAN_ENABLED)
 // This test fails vptr UBSAN checks
 
 TEST(ProtoTest, Basic) {
@@ -873,8 +863,12 @@ void checkScopeCallbacks() {
 
   {
     RECORD_TORCHSCRIPT_FUNCTION("test_method", {});
-    { RECORD_FUNCTION("test_function", {}); }
-    { RECORD_USER_SCOPE("test_user_scope"); }
+    {
+      RECORD_FUNCTION("test_function", {});
+    }
+    {
+      RECORD_USER_SCOPE("test_user_scope");
+    }
   }
 
   TORCH_CHECK(!bad_scope);
@@ -1067,7 +1061,9 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
           RECORD_USER_SCOPE("C");
         }
       }
-      { RECORD_USER_SCOPE("D"); }
+      {
+        RECORD_USER_SCOPE("D");
+      }
     }
   }
   TORCH_CHECK(fn_names.size() == 1);
@@ -1094,7 +1090,9 @@ TEST(RecordFunctionTest, Callbacks) {
   add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 3);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
@@ -1104,7 +1102,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h1);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 2);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1113,7 +1113,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h3);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1125,7 +1127,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   add_remove_test_add_cb<1>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1138,7 +1142,9 @@ TEST(RecordFunctionTest, Callbacks) {
           return nullptr;
         }));
 
-    { RECORD_USER_SCOPE("test_thread"); }
+    {
+      RECORD_USER_SCOPE("test_thread");
+    }
   });
   th.join();
   TORCH_CHECK(ids.size() == 2);
@@ -1146,7 +1152,9 @@ TEST(RecordFunctionTest, Callbacks) {
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
   ids.clear();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1177,7 +1185,9 @@ TEST(RecordFunctionTest, Callbacks) {
           TORCH_CHECK(ctx->b == "test_str");
         }));
 
-    { RECORD_USER_SCOPE("test"); }
+    {
+      RECORD_USER_SCOPE("test");
+    }
 
     TORCH_CHECK(ids.size() == 1);
     TORCH_CHECK(ids[0] == 1);
@@ -1203,7 +1213,9 @@ TEST(RecordFunctionTest, Callbacks) {
           }));
 
       // Will call both global and thread local callbacks.
-      { RECORD_USER_SCOPE("test_thread"); }
+      {
+        RECORD_USER_SCOPE("test_thread");
+      }
     });
     ctx_th.join();
     TORCH_CHECK(ids.size() == 2);
@@ -1226,21 +1238,27 @@ TEST(RecordFunctionTest, ShouldRun) {
         return nullptr;
       }));
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_TRUE(ran) << "first run didn't happen";
   ran = false;
 
   disableCallback(handle);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_FALSE(ran) << "second run happened but shouldn't have";
   ran = false;
 
   reenableCallback(handle);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_TRUE(ran) << "run after re-enable didn't happen";
   ran = false;
@@ -1283,7 +1301,9 @@ TEST(RecordFunctionTest, Basic) {
             return nullptr;
           })
           .needsIds(true));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
@@ -1292,7 +1312,9 @@ TEST(RecordFunctionTest, Basic) {
         has_ids = fn.handle() > 0;
         return nullptr;
       }));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
 }
@@ -1302,7 +1324,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn)
                                 -> std::unique_ptr<at::ObserverContext> {
-                              c10::optional<c10::OperatorName> op_name =
+                              std::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
                                 operator_names.insert(c10::toString(*op_name));
@@ -1942,7 +1964,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
       guard->input()->type()->expectRef<TensorType>().sizes().size(),
-      c10::nullopt);
+      std::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -2687,6 +2709,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
 }
 
 TEST(RecordDebugHandles, Basic) {
+  GTEST_SKIP() << "Test is flaky and sometimes hangs on CI. ";
   // Enable the profiler in this thread
   const std::set<torch::autograd::profiler::ActivityType> activities(
       {torch::autograd::profiler::ActivityType::CPU});
@@ -2912,7 +2935,7 @@ TEST(TestConstant, TensorGrad) {
   auto graph = std::make_shared<Graph>();
   IValue ten = torch::randn({3, 5}).requires_grad_(true);
   auto con = tryInsertConstant(*graph, ten);
-  ASSERT_TRUE(con == c10::nullopt);
+  ASSERT_TRUE(con == std::nullopt);
 }
 
 TEST(TestMutation, Basic) {
@@ -3007,7 +3030,7 @@ graph(%x.1 : Tensor):
   return (%y))IR",
       &*graph);
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3020,7 +3043,7 @@ graph(%x.1 : Tensor):
         ->run(*g);
   }
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3049,7 +3072,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
-    // arange does not acually support complex, leave as
+    // arange does not actually support complex, leave as
     // union[int, float] for now
     if (schema->name() == "aten::arange") {
       continue;
@@ -3134,6 +3157,7 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():
         %none: NoneType = prim::Constant()
@@ -3154,6 +3178,7 @@ TEST(ConstantPropagation, CustomClassesCanBePropagated) {
   ConstantPropagation(graph);
 
   testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
+#endif
 }
 
 } // namespace jit

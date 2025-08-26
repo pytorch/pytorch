@@ -66,7 +66,7 @@ during the rendezvous process. Should a process crash (or lose network
 connectivity, etc), between joining the rendezvous and it being completed, then
 a re-rendezvous with remaining healthy nodes will happen automatically.
 
-A node can also fail *after* it has completed (or *has been observered* by other
+A node can also fail *after* it has completed (or *has been observed* by other
 nodes to have completed) the rendezvous - this scenario will be handled by the
 Torch Distributed Elastic ``train_loop`` instead (where it will also trigger a
 re-rendezvous).
@@ -120,30 +120,44 @@ of the following implementations that come with PyTorch:
      backend = C10dRendezvousBackend(store, "my_run_id")
 
      rdzv_handler = DynamicRendezvousHandler.from_backend(
-         run_id="my_run_id",
-         store=store,
-         backend=backend,
-         min_nodes=2,
-         max_nodes=4
+         run_id="my_run_id", store=store, backend=backend, min_nodes=2, max_nodes=4
      )
 """
 
-from .api import *  # noqa: F403
-from .registry import _register_default_handlers
+from .api import (
+    rendezvous_handler_registry,
+    RendezvousClosedError,
+    RendezvousConnectionError,
+    RendezvousError,
+    RendezvousGracefulExitError,
+    RendezvousHandler,
+    RendezvousHandlerCreator,
+    RendezvousHandlerRegistry,
+    RendezvousInfo,
+    RendezvousParameters,
+    RendezvousStateError,
+    RendezvousStoreInfo,
+    RendezvousTimeoutError,
+)
+from .registry import _register_default_handlers, _register_out_of_tree_handlers
 
 
 _register_default_handlers()
+_register_out_of_tree_handlers()
 
 
 __all__ = [
     "RendezvousClosedError",
     "RendezvousConnectionError",
     "RendezvousError",
+    "RendezvousGracefulExitError",
     "RendezvousHandler",
     "RendezvousHandlerCreator",
     "RendezvousHandlerRegistry",
+    "RendezvousInfo",
     "RendezvousParameters",
     "RendezvousStateError",
+    "RendezvousStoreInfo",
     "RendezvousTimeoutError",
     "rendezvous_handler_registry",
 ]

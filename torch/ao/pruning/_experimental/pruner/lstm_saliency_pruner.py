@@ -1,7 +1,11 @@
-from typing import cast
+from typing import Any, cast
 
 import torch
-from .base_structured_sparsifier import BaseStructuredSparsifier, FakeStructuredSparsity
+from torch import nn
+
+from .base_structured_sparsifier import BaseStructuredSparsifier
+from .parametrization import FakeStructuredSparsity
+
 
 class LSTMSaliencyPruner(BaseStructuredSparsifier):
     """
@@ -22,7 +26,7 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
     This applies to both weight_ih_l{k} and weight_hh_l{k}.
     """
 
-    def update_mask(self, module, tensor_name, **kwargs):
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Any) -> None:
         weights = getattr(module, tensor_name)
 
         for p in getattr(module.parametrizations, tensor_name):
@@ -31,7 +35,9 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
 
                 # select weights based on magnitude
                 if weights.dim() <= 1:
-                    raise Exception("Structured pruning can only be applied to a 2+dim weight tensor!")
+                    raise Exception(  # noqa: TRY002
+                        "Structured pruning can only be applied to a 2+dim weight tensor!"
+                    )
                 # take norm over all but first dim
                 dims = tuple(range(1, weights.dim()))
                 saliency = weights.norm(dim=dims, p=1)

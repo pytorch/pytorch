@@ -8,12 +8,13 @@
 # Kernels are ordered (see `sort_index`), and when dispatching,
 # we select the first kernel in the list that supports the inputs
 
+import argparse
 import collections
 import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar
-import argparse
+from typing import Optional, TypeVar
+
 
 DTYPES = {
     "f32": "float",
@@ -47,10 +48,10 @@ KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
 
 @dataclass(order=True)
 class FwdKernel:
-    sort_index: Tuple[int, ...] = field(init=False, repr=False)
+    sort_index: tuple[int, ...] = field(init=False, repr=False)
     aligned: bool
     dtype: str
-    sm_range: Tuple[int, int]
+    sm_range: tuple[int, int]
     q: int
     k: int
     max_k: int
@@ -113,8 +114,8 @@ class FwdKernel:
         )
 
     @classmethod
-    def get_all(cls) -> List["FwdKernel"]:
-        kernels: List[FwdKernel] = []
+    def get_all(cls) -> list["FwdKernel"]:
+        kernels: list[FwdKernel] = []
         for aligned, dtype, (sm, sm_max) in itertools.product(
             [True, False], DTYPES.keys(), zip(SM, SM[1:])
         ):
@@ -144,8 +145,8 @@ class FwdKernel:
 
 @dataclass(order=True)
 class BwdKernel:
-    sort_index: Tuple[int, ...] = field(init=False, repr=False)
-    sm_range: Tuple[int, int]
+    sort_index: tuple[int, ...] = field(init=False, repr=False)
+    sm_range: tuple[int, int]
     dtype: str
     aligned: bool
     apply_dropout: bool
@@ -222,8 +223,8 @@ class BwdKernel:
         )
 
     @classmethod
-    def get_all(cls) -> List["BwdKernel"]:
-        kernels: List[BwdKernel] = []
+    def get_all(cls) -> list["BwdKernel"]:
+        kernels: list[BwdKernel] = []
         for aligned, dtype, (sm, sm_max), apply_dropout, max_k in itertools.product(
             [True, False],
             DTYPES.keys(),
@@ -303,7 +304,11 @@ T = TypeVar("T", FwdKernel, BwdKernel)
 
 
 def write_decl_impl(
-    kernels: List[T], family_name: str, impl_file: str, autogen_dir: Path, disable_def: str = None
+    kernels: list[T],
+    family_name: str,
+    impl_file: str,
+    autogen_dir: Path,
+    disable_def: Optional[str] = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -317,8 +322,8 @@ def write_decl_impl(
 
     kernels.sort()
 
-    implfile_to_kernels: Dict[str, List[T]] = collections.defaultdict(list)
-    cat_to_kernels: Dict[Tuple[str, int, int], List[T]] = collections.defaultdict(list)
+    implfile_to_kernels: dict[str, list[T]] = collections.defaultdict(list)
+    cat_to_kernels: dict[tuple[str, int, int], list[T]] = collections.defaultdict(list)
 
     dispatch_all = ""
     declarations = cpp_file_header + "#pragma once\n"
@@ -347,7 +352,7 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same<DT, {DTYPES[cat_dt]}>::value && {cat_sm} <= cc && cc < {cat_sm_max}) {{
+    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc < {cat_sm_max}) {{
         {dispatch_category_fn}(cb, cc);
     }}"""
 
@@ -382,22 +387,28 @@ def main(output_dir: Optional[str]) -> None:
         FwdKernel.get_all(),
         "cutlassF",
         impl_file="<ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>",
-        autogen_dir=output_dir
+        autogen_dir=output_dir,
     )
     write_decl_impl(
         BwdKernel.get_all(),
         "cutlassB",
         impl_file="<ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>",
-        autogen_dir=output_dir
+        autogen_dir=output_dir,
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog='generate_kernels',
-        description='Generate the mem-eff kernels template instantiations')
+        prog="generate_kernels",
+        description="Generate the mem-eff kernels template instantiations",
+    )
     # Set an optional output directory
-    parser.add_argument('-o', '--output_dir', required=False, help="Where to generate the kernels "
-                        " will default to <ATen/native/transformers/cuda/mem_eff_attention/kernels/> ")
+    parser.add_argument(
+        "-o",
+        "--output_dir",
+        required=False,
+        help="Where to generate the kernels "
+        " will default to <ATen/native/transformers/cuda/mem_eff_attention/kernels/> ",
+    )
     args = parser.parse_args()
     main(args.output_dir)

@@ -1,9 +1,8 @@
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
-thread_local std::atomic<bool> hermeticPyObjectState{false};
+thread_local static std::atomic<bool> hermeticPyObjectState{false};
 
 std::atomic<bool> HermeticPyObjectTLS::haveState_{false};
 
@@ -19,5 +18,4 @@ void HermeticPyObjectTLS::init_state() {
   haveState_ = true;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

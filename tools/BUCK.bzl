@@ -1,5 +1,5 @@
 # @lint-ignore-every FBCODEBZLADDLOADS
-load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("@fbsource//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
 # shared by internal and OSS BUCK
 def define_tools_targets(
@@ -26,7 +26,6 @@ def define_tools_targets(
 
     python_library(
         name = "jit",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob([
             "jit/*.py",
             "jit/templates/*",
@@ -110,10 +109,7 @@ def define_tools_targets(
 
     python_library(
         name = "autograd",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
-        srcs = glob(
-            ["autograd/*.py"],
-        ),
+        srcs = glob(["autograd/*.py"]),
         base_module = "tools",
         resources = [
             "autograd/deprecated.yaml",
@@ -124,6 +120,8 @@ def define_tools_targets(
             "autograd/templates/TraceType.cpp",
             "autograd/templates/VariableType.cpp",
             "autograd/templates/VariableType.h",
+            "autograd/templates/ViewFuncs.cpp",
+            "autograd/templates/ViewFuncs.h",
             "autograd/templates/annotated_fn_args.py.in",
             "autograd/templates/python_enum_tag.cpp",
             "autograd/templates/python_fft_functions.cpp",
@@ -132,6 +130,7 @@ def define_tools_targets(
             "autograd/templates/python_linalg_functions.cpp",
             "autograd/templates/python_nested_functions.cpp",
             "autograd/templates/python_nn_functions.cpp",
+            "autograd/templates/python_return_types.h",
             "autograd/templates/python_return_types.cpp",
             "autograd/templates/python_sparse_functions.cpp",
             "autograd/templates/python_special_functions.cpp",
@@ -286,20 +285,5 @@ def define_tools_targets(
         deps = [
             torchgen_deps,
             ":autograd",
-        ],
-    )
-
-    python_test(
-        name = "test_torchgen_executorch",
-        srcs = [
-            "test/test_executorch_gen.py",
-            "test/test_executorch_signatures.py",
-            "test/test_executorch_types.py",
-            "test/test_executorch_unboxing.py",
-        ],
-        contacts = contacts,
-        visibility = ["PUBLIC"],
-        deps = [
-            torchgen_deps,
         ],
     )

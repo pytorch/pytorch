@@ -1,3 +1,5 @@
+#include <ATen/Functions.h>
+#include <aten/src/ATen/TensorOperators.h>
 #include <gtest/gtest.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -20,21 +22,21 @@ TEST(RunTimeTest, LoadAndForward) {
 
   //  sequence.ptl source code:
   //  class A(torch.nn.Module):
-  //    def __init__(self):
+  //    def __init__(self) -> None:
   //      super().__init__()
   //
   //    def forward(self, x):
   //      return x + 1
   //
   //  class B(torch.nn.Module):
-  //    def __init__(self):
+  //    def __init__(self) -> None:
   //      super().__init__()
   //
   //    def forward(self, x):
   //      return x + 2
   //
   //  class C(torch.nn.Module):
-  //    def __init__(self):
+  //    def __init__(self) -> None:
   //      super().__init__()
   //      self.A0 = A()
   //      self.B0 = B()
@@ -104,7 +106,7 @@ TEST(RunTimeTest, DelegateException) {
    * inputs.emplace_back(torch::rand({2, 4}));
    * inputs.emplace_back(torch::rand({13, 9}));
    * Run with inputs and expect exception
-   * Erro stack trace will look like this:
+   * Error stack trace will look like this:
    * Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
    * Traceback of TorchScript (most recent call last):
    *  File "<string>", line 3, in FunctionName_UNKNOWN

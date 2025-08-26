@@ -1,31 +1,34 @@
+# mypy: allow-untyped-defs
 import math
 import warnings
-from numbers import Number
-from typing import Union
+from typing import Optional, Union
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
+from torch.distributions.utils import lazy_property
+from torch.types import _Number, _size, Number
 
 
-__all__ = ['Wishart']
+__all__ = ["Wishart"]
 
 _log_2 = math.log(2)
 
 
-def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
+def _mvdigamma(x: Tensor, p: int) -> Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
     return torch.digamma(
         x.unsqueeze(-1)
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
-def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
+
+def _clamp_above_eps(x: Tensor) -> Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
+
 
 class Wishart(ExponentialFamily):
     r"""
@@ -36,7 +39,7 @@ class Wishart(ExponentialFamily):
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
@@ -60,31 +63,46 @@ class Wishart(ExponentialFamily):
     [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
-    arg_constraints = {
-        'covariance_matrix': constraints.positive_definite,
-        'precision_matrix': constraints.positive_definite,
-        'scale_tril': constraints.lower_cholesky,
-        'df': constraints.greater_than(0),
-    }
+
     support = constraints.positive_definite
     has_rsample = True
     _mean_carrier_measure = 0
 
-    def __init__(self,
-                 df: Union[torch.Tensor, Number],
-                 covariance_matrix: torch.Tensor = None,
-                 precision_matrix: torch.Tensor = None,
-                 scale_tril: torch.Tensor = None,
-                 validate_args=None):
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
-            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+    @property
+    def arg_constraints(self):
+        return {
+            "covariance_matrix": constraints.positive_definite,
+            "precision_matrix": constraints.positive_definite,
+            "scale_tril": constraints.lower_cholesky,
+            "df": constraints.greater_than(self.event_shape[-1] - 1),
+        }
 
-        param = next(p for p in (covariance_matrix, precision_matrix, scale_tril) if p is not None)
+    def __init__(
+        self,
+        df: Union[Tensor, Number],
+        covariance_matrix: Optional[Tensor] = None,
+        precision_matrix: Optional[Tensor] = None,
+        scale_tril: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
+        assert (covariance_matrix is not None) + (scale_tril is not None) + (
+            precision_matrix is not None
+        ) == 1, (
+            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        )
+
+        param = next(
+            p
+            for p in (covariance_matrix, precision_matrix, scale_tril)
+            if p is not None
+        )
 
         if param.dim() < 2:
-            raise ValueError("scale_tril must be at least two-dimensional, with optional leading batch dimensions")
+            raise ValueError(
+                "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
+            )
 
-        if isinstance(df, Number):
+        if isinstance(df, _Number):
             batch_shape = torch.Size(param.shape[:-2])
             self.df = torch.tensor(df, dtype=param.dtype, device=param.device)
         else:
@@ -93,7 +111,9 @@ class Wishart(ExponentialFamily):
         event_shape = param.shape[-2:]
 
         if self.df.le(event_shape[-1] - 1).any():
-            raise ValueError(f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1]-1}.")
+            raise ValueError(
+                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
+            )
 
         if scale_tril is not None:
             self.scale_tril = param.expand(batch_shape + (-1, -1))
@@ -102,9 +122,10 @@ class Wishart(ExponentialFamily):
         elif precision_matrix is not None:
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
-        self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
-            warnings.warn("Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.")
+            warnings.warn(
+                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."
+            )
 
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
@@ -137,11 +158,11 @@ class Wishart(ExponentialFamily):
 
         new._batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
-        if 'covariance_matrix' in self.__dict__:
+        if "covariance_matrix" in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
-        if 'scale_tril' in self.__dict__:
+        if "scale_tril" in self.__dict__:
             new.scale_tril = self.scale_tril.expand(cov_shape)
-        if 'precision_matrix' in self.__dict__:
+        if "precision_matrix" in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
 
         # Chi2 distribution is needed for Bartlett decomposition sampling
@@ -161,43 +182,46 @@ class Wishart(ExponentialFamily):
         return new
 
     @lazy_property
-    def scale_tril(self):
+    def scale_tril(self) -> Tensor:
         return self._unbroadcasted_scale_tril.expand(
-            self._batch_shape + self._event_shape)
+            self._batch_shape + self._event_shape
+        )
 
     @lazy_property
-    def covariance_matrix(self):
+    def covariance_matrix(self) -> Tensor:
         return (
-            self._unbroadcasted_scale_tril @ self._unbroadcasted_scale_tril.transpose(-2, -1)
+            self._unbroadcasted_scale_tril
+            @ self._unbroadcasted_scale_tril.transpose(-2, -1)
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
-    def precision_matrix(self):
+    def precision_matrix(self) -> Tensor:
         identity = torch.eye(
             self._event_shape[-1],
             device=self._unbroadcasted_scale_tril.device,
             dtype=self._unbroadcasted_scale_tril.dtype,
         )
-        return torch.cholesky_solve(
-            identity, self._unbroadcasted_scale_tril
-        ).expand(self._batch_shape + self._event_shape)
+        return torch.cholesky_solve(identity, self._unbroadcasted_scale_tril).expand(
+            self._batch_shape + self._event_shape
+        )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         factor = self.df - self.covariance_matrix.shape[-1] - 1
         factor[factor <= 0] = nan
         return factor.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
-
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return self.df.view(self._batch_shape + (1, 1)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
+        return self.df.view(self._batch_shape + (1, 1)) * (
+            V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V)
+        )
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
@@ -216,7 +240,9 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
+    def rsample(
+        self, sample_shape: _size = torch.Size(), max_try_correction=None
+    ) -> Tensor:
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
@@ -272,32 +298,45 @@ class Wishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
-            - nu * (p * _log_2 / 2 + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
+            -nu
+            * (
+                p * _log_2 / 2
+                + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1)
+                .log()
+                .sum(-1)
+            )
             - torch.mvlgamma(nu / 2, p=p)
             + (nu - p - 1) / 2 * torch.linalg.slogdet(value).logabsdet
-            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
+            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril)
+            .diagonal(dim1=-2, dim2=-1)
+            .sum(dim=-1)
+            / 2
         )
 
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            (p + 1) * (p * _log_2 / 2 + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
+            (p + 1)
+            * (
+                p * _log_2 / 2
+                + self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1)
+                .log()
+                .sum(-1)
+            )
             + torch.mvlgamma(nu / 2, p=p)
             - (nu - p - 1) / 2 * _mvdigamma(nu / 2, p=p)
             + nu * p / 2
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        return - self.precision_matrix / 2, (nu - p - 1) / 2
+        return -self.precision_matrix / 2, (nu - p - 1) / 2
 
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
-        return (
-            (y + (p + 1) / 2) * (- torch.linalg.slogdet(- 2 * x).logabsdet + _log_2 * p)
-            + torch.mvlgamma(y + (p + 1) / 2, p=p)
-        )
+        return (y + (p + 1) / 2) * (
+            -torch.linalg.slogdet(-2 * x).logabsdet + _log_2 * p
+        ) + torch.mvlgamma(y + (p + 1) / 2, p=p)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -7,14 +9,10 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Set
+from typing import NamedTuple
 
 
 IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -25,15 +23,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def as_posix(name: str) -> str:
@@ -42,7 +40,7 @@ def as_posix(name: str) -> str:
 
 # fmt: off
 # https://www.flake8rules.com/
-DOCUMENTED_IN_FLAKE8RULES: Set[str] = {
+DOCUMENTED_IN_FLAKE8RULES: set[str] = {
     "E101", "E111", "E112", "E113", "E114", "E115", "E116", "E117",
     "E121", "E122", "E123", "E124", "E125", "E126", "E127", "E128", "E129",
     "E131", "E133",
@@ -78,14 +76,14 @@ DOCUMENTED_IN_FLAKE8RULES: Set[str] = {
 }
 
 # https://pypi.org/project/flake8-comprehensions/#rules
-DOCUMENTED_IN_FLAKE8COMPREHENSIONS: Set[str] = {
+DOCUMENTED_IN_FLAKE8COMPREHENSIONS: set[str] = {
     "C400", "C401", "C402", "C403", "C404", "C405", "C406", "C407", "C408", "C409",
     "C410",
-    "C411", "C412", "C413", "C413", "C414", "C415", "C416",
+    "C411", "C412", "C413", "C414", "C415", "C416",
 }
 
 # https://github.com/PyCQA/flake8-bugbear#list-of-warnings
-DOCUMENTED_IN_BUGBEAR: Set[str] = {
+DOCUMENTED_IN_BUGBEAR: set[str] = {
     "B001", "B002", "B003", "B004", "B005", "B006", "B007", "B008", "B009", "B010",
     "B011", "B012", "B013", "B014", "B015",
     "B301", "B302", "B303", "B304", "B305", "B306",
@@ -98,7 +96,7 @@ DOCUMENTED_IN_BUGBEAR: Set[str] = {
 # stdin:3:6: T484 Name 'foo' is not defined
 # stdin:3:-100: W605 invalid escape sequence '\/'
 # stdin:3:1: E302 expected 2 blank lines, found 1
-RESULTS_RE: Pattern[str] = re.compile(
+RESULTS_RE: re.Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -113,7 +111,8 @@ RESULTS_RE: Pattern[str] = re.compile(
 
 def _test_results_re() -> None:
     """
-    >>> def t(s): return RESULTS_RE.search(s).groupdict()
+    >>> def t(s):
+    ...     return RESULTS_RE.search(s).groupdict()
 
     >>> t(r"file.py:80:1: E302 expected 2 blank lines, found 1")
     ... # doctest: +NORMALIZE_WHITESPACE
@@ -130,14 +129,13 @@ def _test_results_re() -> None:
     {'file': 'file.py', 'line': '8', 'column': '-10', 'code': 'W605',
      'message': "invalid escape sequence '/'"}
     """
-    pass
 
 
 def _run_command(
-    args: List[str],
+    args: list[str],
     *,
-    extra_env: Optional[Dict[str, str]],
-) -> "subprocess.CompletedProcess[str]":
+    extra_env: dict[str, str] | None,
+) -> subprocess.CompletedProcess[str]:
     logging.debug(
         "$ %s",
         " ".join(
@@ -158,11 +156,11 @@ def _run_command(
 
 
 def run_command(
-    args: List[str],
+    args: list[str],
     *,
-    extra_env: Optional[Dict[str, str]],
+    extra_env: dict[str, str] | None,
     retries: int,
-) -> "subprocess.CompletedProcess[str]":
+) -> subprocess.CompletedProcess[str]:
     remaining_retries = retries
     while True:
         try:
@@ -243,11 +241,11 @@ def get_issue_documentation_url(code: str) -> str:
 
 
 def check_files(
-    filenames: List[str],
-    flake8_plugins_path: Optional[str],
-    severities: Dict[str, LintSeverity],
+    filenames: list[str],
+    flake8_plugins_path: str | None,
+    severities: dict[str, LintSeverity],
     retries: int,
-) -> List[LintMessage]:
+) -> list[LintMessage]:
     try:
         proc = run_command(
             [sys.executable, "-mflake8", "--exit-zero"] + filenames,
@@ -289,10 +287,7 @@ def check_files(
         LintMessage(
             path=match["file"],
             name=match["code"],
-            description="{}\nSee {}".format(
-                match["message"],
-                get_issue_documentation_url(match["code"]),
-            ),
+            description=f"{match['message']}\nSee {get_issue_documentation_url(match['code'])}",
             line=int(match["line"]),
             char=int(match["column"])
             if match["column"] is not None and not match["column"].startswith("-")
@@ -354,7 +349,7 @@ def main() -> None:
         else os.path.realpath(args.flake8_plugins_path)
     )
 
-    severities: Dict[str, LintSeverity] = {}
+    severities: dict[str, LintSeverity] = {}
     if args.severity:
         for severity in args.severity:
             parts = severity.split(":", 1)

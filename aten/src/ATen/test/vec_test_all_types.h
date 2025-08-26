@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
@@ -21,7 +22,9 @@
 #else
 #define CACHE_LINE 32
 #endif
-
+#ifndef _WIN32
+#include <ATen/native/cpu/utils.h>
+#endif
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))
@@ -53,6 +56,9 @@ CACHE_ALIGN #define
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
+#elif defined(CPU_CAPABILITY_SVE)
+#define CHECK_DEQUANT_WITH_LOW_PRECISION 1
+#define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #undef CHECK_WITH_FMA
@@ -60,6 +66,16 @@ CACHE_ALIGN #define
 #define CHECK_DEQUANT_WITH_LOW_PRECISION 1
 #undef CHECK_WITH_FMA
 #endif
+
+template <typename scalar_t>
+struct OpMathType {
+  using type = scalar_t;
+};
+template <>
+struct OpMathType<c10::Half> {
+  using type = float;
+};
+
 
 template<typename T>
 using Complex = typename c10::complex<T>;
@@ -192,34 +208,34 @@ constexpr size_t size(T(&)[N]) {
 }
 
 template <typename Filter, typename T>
-typename std::enable_if_t<std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t<std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& val) {}
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second) { }
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second, T& third) {  }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& val) {
     return filter(val);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second) {
     return filter(first, second);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second, T& third) {
     return filter(first, second, third);
 }
@@ -268,38 +284,30 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
-    return std::isnan(x) && std::isnan(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
+bool check_both_nan([[maybe_unused]] T x, [[maybe_unused]] T y) {
+    if constexpr (std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>) {
+        return std::isnan(x) && std::isnan(y);
+    }
     return false;
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
-    return std::isinf(x) && std::isinf(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
+bool check_both_inf(T x, T y) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::isinf(x) && std::isinf(y);
+    }
     return false;
 }
 
 template<typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
+std::enable_if_t<!std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
     return false;
 }
 
 template<typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
-    T cmax = std::is_same<T, float>::value ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
-    T cmin = std::is_same<T, float>::value ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
+std::enable_if_t<std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
+    T cmax = std::is_same_v<T, float> ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
+    T cmin = std::is_same_v<T, float> ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
     //only allow when one is inf
     bool x_inf = std::isinf(x);
     bool y_inf = std::isinf(y);
@@ -330,7 +338,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point<T>::value, bool>
+std::enable_if_t<std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -346,7 +354,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool>
+std::enable_if_t<!std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -403,13 +411,12 @@ void copy_interleave(VT(&vals)[N], VT(&interleaved)[N]) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return std::fpclassify(val) == FP_ZERO;
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return val == 0;
+bool is_zero(T val) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::fpclassify(val) == FP_ZERO;
+    } else {
+        return val == 0;
+    }
 }
 
 template <typename T>
@@ -420,7 +427,7 @@ void filter_clamp(T& f, T& s, T& t) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b) {
+std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
     // This is to make sure fmod won't cause overflow when doing the div
     if (std::abs(b) < (T)1) {
       b = b < (T)0 ? (T)-1 : T(1);
@@ -428,7 +435,7 @@ std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b)
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || at::vec::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -524,7 +531,7 @@ template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_div_ub(T& val1, T& val2) {
     //missing
-    //at least consdier zero division
+    //at least consider zero division
     auto ret = std::abs(val2);
     if (ret == 0) {
         val2 = T(1, 2);
@@ -550,7 +557,7 @@ filter_div_ub(T& val1, T& val2) {
     if (is_zero(val2)) {
         val2 = 1;
     }
-    else if (std::is_integral<T>::value && val1 == std::numeric_limits<T>::min() && val2 == -1) {
+    else if (std::is_integral_v<T> && val1 == std::numeric_limits<T>::min() && val2 == -1) {
         val2 = 1;
     }
 }
@@ -574,7 +581,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point<T>::value, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -597,10 +604,13 @@ struct ValueGen
 };
 
 template <typename T>
+using reduced_fp_to_float_t = std::conditional_t<c10::is_reduced_floating_point_v<T>, float, T>;
+
+template <typename T>
 struct ValueGen<T, true, false>
 {
     std::mt19937 gen;
-    std::normal_distribution<T> normal;
+    std::normal_distribution<reduced_fp_to_float_t<T>> normal;
     std::uniform_int_distribution<int> roundChance;
     T _start;
     T _stop;
@@ -619,7 +629,7 @@ struct ValueGen<T, true, false>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{ mean, stdev };
+        normal = std::normal_distribution<reduced_fp_to_float_t<T>>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -786,13 +796,13 @@ public:
 };
 
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return eps;
 }
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return std::abs(eps);
@@ -936,7 +946,7 @@ void test_unary(
     CACHE_ALIGN VT vals[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -949,23 +959,25 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
-                vals[k] = generator.get();
-                call_filter(filter, vals[k]);
-                //map operator
-                expected[k] = expectedFunction(vals[k]);
-            }
-            // test
-            auto input = vec_type::loadu(vals);
-            auto actual = actualFunction(input);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals[k] = generator.get();
+            call_filter(filter, vals[k]);
+            // map operator
+            expected[k] = expectedFunction(vals[k]);
+          }
+          // test
+          auto input = vec_type::loadu(vals);
+          auto actual = actualFunction(input);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
 
-        }// trial
-        //inrease Seed
+        } // trial
+        // inrease Seed
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -992,8 +1004,12 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithLeftScalar[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithRightScalar[el_count];
+    [[maybe_unused]] VT scalar0;
+    [[maybe_unused]] VT scalar1;
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1001,6 +1017,7 @@ void test_binary(
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
     uint64_t changeSeedBy = 0;
+    constexpr bool kCanUseScalar = std::is_invocable_v<Op2, VT, T> && std::is_invocable_v<Op2, T, VT>;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -1009,23 +1026,58 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                call_filter(filter, vals0[k], vals1[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k]);
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            if (k == 0) {
+              scalar0 = vals0[0];
+              scalar1 = vals1[0];
             }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto actual = actualFunction(input0, input1);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
-        }// trial
+            call_filter(filter, vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              call_filter(filter, vals0[k], scalar1);
+              call_filter(filter, scalar0, vals1[k]);
+            }
+          }
+          for (const auto k : c10::irange(el_count)) {
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              expectedWithLeftScalar[k] = expectedFunction(scalar0, vals1[k]);
+              expectedWithRightScalar[k] = expectedFunction(vals0[k], scalar1);
+            }
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto actual = actualFunction(input0, input1);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+            return;
+          }
+          if constexpr (kCanUseScalar) {
+            auto actualWithLeftScalar = actualFunction(scalar0, input1);
+            auto actualWithRightScalar = actualFunction(input0, scalar1);
+            auto vec_expectedWithLeftScalar = vec_type::loadu(expectedWithLeftScalar);
+            auto vec_expectedWithRightScalar = vec_type::loadu(expectedWithRightScalar);
+            AssertVectorized<vec_type> vecAssertWithLeftScalar(
+                testNameInfo, seed, vec_expectedWithLeftScalar, actualWithLeftScalar, scalar0, input1);
+            if (vecAssertWithLeftScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+            AssertVectorized<vec_type> vecAssertWithRightScalar(
+                testNameInfo, seed, vec_expectedWithRightScalar, actualWithRightScalar, input0, scalar1);
+            if (vecAssertWithRightScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+          }
+        } // trial
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -1039,6 +1091,68 @@ void test_binary(
             if (vecAssert.check()) return;
         }
     }
+}
+
+template<typename Op1, typename Op2, typename scalar_t, std::enable_if_t<std::is_same_v<scalar_t, c10::Float8_e4m3fn> || std::is_same_v<scalar_t, c10::Float8_e5m2>, int> =0>
+void test_binary_fp8(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+    for (const auto i : c10::irange(10)) {
+        float f_val0 = static_cast<float>(i + 0.2);
+        float f_val1 = static_cast<float>(i + 0.3);
+        scalar_t f8_0(f_val0);
+        scalar_t f8_1(f_val1);
+        at::vec::Vectorized<scalar_t> f8_vec_0(f8_0);
+        at::vec::Vectorized<scalar_t> f8_vec_1(f8_1);
+        float ref_res_scalar = ScalarFunction(f8_0, f8_1);
+        __m512 res_fp32_512;
+        at::vec::Vectorized<scalar_t> res = VecFunction(f8_vec_0, f8_vec_1);
+
+        if constexpr (std::is_same_v<scalar_t, c10::Float8_e4m3fn>) {
+            at::vec::cvtfp8e4m3_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            }
+        } else {
+            at::vec::cvtfp8e5m2_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            }
+        }
+      }
+    #endif
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e4m3(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e4m3fn>(ScalarFunction, VecFunction, is_bit_wise);
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e5m2(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e5m2>(ScalarFunction, VecFunction, is_bit_wise);
 }
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
@@ -1055,7 +1169,7 @@ void test_ternary(
     CACHE_ALIGN VT vals2[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1075,25 +1189,27 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                vals2[k] = generator2.get();
-                call_filter(filter, vals0[k], vals1[k], vals2[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
-            }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto input2 = vec_type::loadu(vals2);
-            auto actual = actualFunction(input0, input1, input2);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
-        }// trial
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            vals2[k] = generator2.get();
+            call_filter(filter, vals0[k], vals1[k], vals2[k]);
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto input2 = vec_type::loadu(vals2);
+          auto actual = actualFunction(input0, input1, input2);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1, input2);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
+        } // trial
         changeSeedBy += 1;
     }
 }
@@ -1175,7 +1291,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T y_real = y.real();
     T y_imag = y.imag();
 #if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1206,7 +1322,7 @@ template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Complex<T> x, Complex<T> y) {
 #if defined(TEST_AGAINST_DEFAULT)
     return x / y;
-#else
+#else /* defined(TEST_AGAINST_DEFAULT) */
     //re = (ac + bd)/abs_2()
     //im = (bc - ad)/abs_2()
     T x_real = x.real();
@@ -1214,22 +1330,53 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     T y_real = y.real();
     T y_imag = y.imag();
     PreventFma noFma;
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considerin swap and fma
+#if defined(CPU_CAPABILITY_ZVECTOR)
+    T abs_c = std::abs(y_real);
+    T abs_d = std::abs(y_imag);
+    T scale = 1.0 / std::max(abs_c, abs_d);
+
+    T a_sc = x_real * scale; // a/sc
+    T b_sc = x_imag * scale; // b/sc
+    T c_sc = y_real * scale; // c/sc
+    T d_sc = y_imag * scale; // d/sc
+
+    T ac_sc2 = a_sc * c_sc; // ac/sc^2
+    T bd_sc2 = b_sc * d_sc; // bd/sc^2
+
+    T neg_d_sc = -1.0 * d_sc; // -d/sc^2
+
+    T neg_ad_sc2 = a_sc * neg_d_sc; // -ad/sc^2
+    T bc_sc2 = b_sc * c_sc; // bc/sc^2
+
+    T ac_bd_sc2 = noFma.add(ac_sc2, bd_sc2); // (ac+bd)/sc^2
+    T bc_ad_sc2 = noFma.add(bc_sc2, neg_ad_sc2); // (bc-ad)/sc^2
+
+    T c2_sc2 = c_sc * c_sc; // c^2/sc^2
+    T d2_sc2 = d_sc * d_sc; // d^2/sc^2
+
+    T c2_d2_sc2 = noFma.add(c2_sc2, d2_sc2); // (c^2+d^2)/sc^2
+
+    T rr = ac_bd_sc2 / c2_d2_sc2; // (ac+bd)/(c^2+d^2)
+    T ii = bc_ad_sc2 / c2_d2_sc2; // (bc-ad)/(c^2+d^2)
+
+    return Complex<T>(rr, ii);
+#else /* defined(CPU_CAPABILITY_ZVECTOR) */
+#if defined(CPU_CAPABILITY_VSX)
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
     rr = fma(x_imag, y_imag, rr);
     ii = fma(x_real, neg_imag, ii);
     //b.abs_2
-#else
+#else /* defined(CPU_CAPABILITY_VSX) */
     T ac = x_real * y_real;
     T bd = x_imag * y_imag;
     T ad = x_real * y_imag;
     T bc = x_imag * y_real;
     T rr = noFma.add(ac, bd);
     T ii = noFma.sub(bc, ad);
-#endif
+#endif /* defined(CPU_CAPABILITY_VSX) */
     //b.abs_2()
     T abs_rr = y_real * y_real;
     T abs_ii = y_imag * y_imag;
@@ -1237,15 +1384,25 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     rr = rr / abs_2;
     ii = ii / abs_2;
     return Complex<T>(rr, ii);
-#endif
+#endif /* defined(CPU_CAPABILITY_ZVECTOR) */
+#endif /* defined(TEST_AGAINST_DEFAULT) */
 }
 
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.add(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.add(ab, op_math_t(c)));
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    PreventFma noFma;
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
 }
 
 template <typename T>
@@ -1414,11 +1571,31 @@ double getDefaultTolerance() {
     return 1.e-9;
 }
 
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> create_vec_mask(uint64_t bitmask) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  std::array<int, N * size> mask;
+  for (int n = 0; n < N; n++) {
+      for (int i = 0; i < size; i++) {
+        mask[n * size + i] = (bitmask >> i) & 1;
+      }
+  }
+  return at::vec::VecMask<T, N>::from(mask.data());
+}
+
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> generate_vec_mask(int seed) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  ValueGen<uint64_t> generator(0, (1ULL << size) - 1, seed);
+  auto bitmask = generator.get();
+  return create_vec_mask<T, N>(bitmask);
+}
+
 template<typename T>
 TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
+    if (!bitwise && std::is_floating_point_v<UVT>) {
         //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()
@@ -1446,7 +1623,7 @@ template<typename T>
 TestingCase<T> createDefaultBinaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
+    if (!bitwise && std::is_floating_point_v<UVT>) {
         //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()

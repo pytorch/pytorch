@@ -20,8 +20,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
@@ -31,7 +30,7 @@ using caffe2::serialize::ReadAdapterInterface;
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
-  c10::optional<at::Device> device;
+  std::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
 
@@ -43,7 +42,7 @@ c10::IValue readArchive(
 
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, const IValue& input) {
     return objLoaderMobile(type, input, *mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =
@@ -75,9 +74,7 @@ static uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size);
 uint64_t _get_model_bytecode_version(std::istream& in) {
   auto orig_pos = in.tellg();
   in.seekg(0, in.beg);
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   in.seekg(orig_pos, in.beg);
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
@@ -88,10 +85,8 @@ uint64_t _get_model_bytecode_version(const std::string& filename) {
 }
 
 uint64_t _get_model_bytecode_version(
-    std::shared_ptr<ReadAdapterInterface> rai) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_rai_content(rai.get());
+    const std::shared_ptr<ReadAdapterInterface>& rai) {
+  auto [data, size] = get_rai_content(rai.get());
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
 
@@ -142,7 +137,7 @@ uint64_t _get_model_bytecode_version(
 
 /********************** Operator Version **********************/
 
-uint64_t _get_model_operator_version(
+static uint64_t _get_model_operator_version(
     PyTorchStreamReader& reader); // Forward Declare
 
 uint64_t _get_model_operator_version(std::istream& in) {
@@ -173,7 +168,7 @@ uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
 /********************** Operators and Info **********************/
 
 // Forward declare
-std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+static std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues);
 
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
@@ -289,10 +284,6 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::vector<IValue>& bytecode_ivalues) {
   std::unordered_set<std::string> contained_types;
-  // To avoid parsing same type twice, declare $parsed_type_names_records and
-  // use type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as
-  // the hash to record which types are parsed.
-  std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
     auto type_table_tuple =
@@ -304,7 +295,6 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
     std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
-      std::unordered_set<std::string> type_tokens;
       std::string type_name = type_definition.toStringRef();
       type_name_list.emplace_back(type_name);
     }
@@ -349,7 +339,7 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
 
 ModelCompatCheckResult is_compatible(
     RuntimeCompatibilityInfo runtime_info,
-    ModelCompatibilityInfo model_info) {
+    const ModelCompatibilityInfo& model_info) {
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
@@ -403,7 +393,7 @@ ModelCompatCheckResult is_compatible(
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
       // If the runtime op has no schema information its a false alarm and isn't
-      // actually useable
+      // actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;
@@ -448,5 +438,4 @@ ModelCompatCheckResult is_compatible(
   return result;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

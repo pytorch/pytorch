@@ -3,8 +3,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // The following class facilitates code reuse between ProcessedNodeInputWrapper
 // and ProcessedNodeOutputWrapper via CRTP
@@ -209,5 +208,4 @@ class ProcessedNodeOutputWrapper
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

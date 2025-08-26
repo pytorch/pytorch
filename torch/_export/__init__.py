@@ -1,268 +1,186 @@
+# mypy: allow-untyped-defs
+import copy
 import dataclasses
-import inspect
-import weakref
+import functools
+import io
+import json
+import logging
+import os
 import re
+import sys
+import types
+import warnings
+import weakref
+import zipfile
 from collections import OrderedDict
-from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+from contextlib import contextmanager
+from functools import lru_cache
 
-import sympy
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from unittest.mock import patch
 
 import torch
-import torch._dynamo
 import torch.fx
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from .exported_program import (
-    CallSpec,
-    ExportedProgram,
-    ExportBackwardSignature,
-    ExportGraphSignature,
-    _process_constraints,
-)
-from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
-from torch._decomp import core_aten_decompositions
-from torch._dynamo.eval_frame import Constraint
-from torch._functorch.aot_autograd import aot_export_module
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    GuardOnDataDependentSymNode,
-    ShapeEnv,
-    StrictMinMaxConstraint,
+
+from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import compile_context
+from torch._utils_internal import log_export_usage
+from torch.export._tree_utils import reorder_kwargs
+from torch.export.graph_signature import (
+    ArgumentSpec,
+    ConstantArgument,
+    ExportGraphSignature,
+    InputKind,
+    InputSpec,
+    OutputKind,
+    OutputSpec,
+    SymIntArgument,
+    SymBoolArgument,
+    SymFloatArgument,
+    TensorArgument,
 )
+from torch.fx import traceback as fx_traceback
+from torch.fx._compatibility import compatibility
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from torch._dynamo.exc import UserError, UserErrorType
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
+from .wrappers import _wrap_submodules
+from .utils import _materialize_cpp_cia_ops
 
+if TYPE_CHECKING:
+    from torch._C._aoti import AOTIModelContainerRunner
 
-
-# Note - [On Export Dynamic Dimension UX]
-#
-# After a lot of discussion, we have settled on a dynamic marking API
-# for export that meets the following constraints:
-# 1) Stateless
-# 2) Safe for numerous .export calls within a single process
-# 3) Simple to use
-# 4) Can be extended to constraints easily
-#
-# While the underlying API is still torch._dynamo.mark_dynamic, we offer a higher
-# level API that meets the constraints above.
-#
-# This API produces an object that is meant to be passed into torch._dynamo.export
-# constraints field. See docs on torch._dynamo.export for more details.
-#
-# Note - The output type and structure here is NOT BC and NOT A CONTRACT, we reserve
-# the right to change the output here at any time, and will do so as we extend the API.
-#
-# result = torch._dynamo.export(
-#     my_model,
-#     *sixtyfour_tensors,
-#     constraints=[
-#         # if you do only dynamic_dim, this is sugar for
-#         # -Inf <= dynamic_dim(blah, 0) <= Inf; we don’t otherwise
-#         # permit direct int->bool conversion
-#         dynamic_dim(blah, 0),
-#         # operator overloading because it makes it clear whether
-#         # or not you’re inclusive-exclusive range or not
-#         0 <= dynamic_dim(blah, 1) <= 100,
-#         # NB: But we actually truncate ranges to be >= 2, because of
-#         # 0/1 specialization
-#     ]
-# )
-def dynamic_dim(t: torch.Tensor, index: int):
-    if not isinstance(t, torch.Tensor):
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected tensor as input to dynamic_dim but got {type(t)}"
-        )
-
-    if t.dim() < 1:
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            "Cannot mark 0-dimension tensors to be dynamic"
-        )
-
-    if index >= t.dim():
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
-            f" but got {index}, which is out of bounds for the given tensor."
-        )
-
-    return Constraint(
-        weakref.ref(t),
-        id(t),
-        index,
-        StrictMinMaxConstraint(
-            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
-        ),
-    )
-
+log = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class ExportDynamoConfig:
     """
     Manage Export-specific configurations of Dynamo.
-    TODO add tests to make sure the flags are not outdated
     """
-    capture_scalar_outputs: bool = True
-    capture_dynamic_output_shape_ops: bool = True
-    guard_nn_modules: bool = True
-    dynamic_shapes: bool = True
-    specialize_int: bool = True
     allow_rnn: bool = True
 
 
-DECOMP_TABLE = core_aten_decompositions()
+# We only want to print this once to avoid flooding logs in workflows where aot_compile_warning
+# is called multiple times.
+@lru_cache
+def aot_compile_warning():
+    from torch._inductor import config
+
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning(
+        "torch._export.aot_compile()/torch._export.aot_load() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export())/"
+        "torch._inductor.aoti_load_package() instead.")
 
 
-def export(
+def aot_compile(
     f: Callable,
-    args: Tuple[Any],
-    constraints: Optional[List[Constraint]] = None,
+    args: tuple[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    _add_runtime_assertions=True,
-    _functionalize_runtime_assertions=False,
-) -> ExportedProgram:
+    dynamic_shapes: Optional[dict[str, Any]] = None,
+    options: Optional[dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
+    same_signature: bool = True,
+) -> Union[list[Any], str]:
     """
+    Note: this function is not stable yet
+
     Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
+    operations inside, generates executable cpp code from the program, and returns
+    the path to the generated shared library
 
     Args:
-        m: the `nn.Module` or callable to trace.
+        f: the `nn.Module` or callable to trace.
 
-        args: Tracing example inputs.
+        args: example positional inputs.
 
-        constraints: A list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+        kwargs: optional example keyword inputs.
+
+        dynamic_shapes: Should either be:
+            1) a dict from argument names of ``f`` to their dynamic shape specifications,
+            2) a tuple that specifies dynamic shape specifications for each input in original order.
+            If you are specifying dynamism on keyword args, you will need to pass them in the order that
+            is defined in the original function signature.
+
+            The dynamic shape of a tensor argument can be specified as either
+            (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+            not required to include static dimension indices in this dict, but when they are,
+            they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+            where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+            are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+            recursively specified by using mappings or sequences of contained specifications.
+
+        options: A dictionary of options to control inductor
+
+        disable_constraint_solver: Whether the dim constraint solver must be disabled.
 
     Returns:
-        An ExportedProgram containing the traced method.
+        Path to the generated shared library
     """
-    if constraints is None:
-        constraints = []
+    from torch.export._trace import _export_to_torch_ir
+    from torch._inductor.decomposition import select_decomp_table
+    from torch._inductor import config
 
-    if not isinstance(f, torch.nn.Module):
-        for parameter in inspect.signature(f).parameters.values():
-            if parameter.kind == parameter.VAR_KEYWORD:
-                raise UserError(UserErrorType.INVALID_INPUT, "Kwargs to torch.export is not supported")
+    aot_compile_warning()
 
-    with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
-        try:
-            gm_torch_level, _ = torch._dynamo.export(
-                f,
-                *args,
-                constraints=constraints,
-                assume_static_by_default=True,
-            )
+    if config.is_predispatch:
+        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
+    else:
+        # We want to export to Torch IR here to utilize the pre_grad passes in
+        # inductor, which run on Torch IR.
+        gm = _export_to_torch_ir(
+            f,
+            args,
+            kwargs,
+            dynamic_shapes,
+            disable_constraint_solver=disable_constraint_solver,
+            same_signature=same_signature,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
+        )
 
-            params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
-            for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
-                params_buffers[name] = param
+    with torch.no_grad():
+        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
-            for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
-                params_buffers[name] = buffer
+    assert isinstance(so_path, (str, list))
+    return so_path
 
-            fake_inps = []
-            for node in gm_torch_level.graph.nodes:
-                if node.op == "placeholder" and "val" in node.meta:
-                    fake_val = node.meta["val"]
-                    fake_inps.append(fake_val)
+def aot_load(so_path: str, device: str) -> Callable:
+    """
+    Loads a shared library generated by aot_compile and returns a callable
 
-            fake_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=True,
-                shape_env=ShapeEnv(
-                    assume_static_by_default=True,
-                ),
-            )
+    Args:
+        so_path: Path to the shared library
 
-            if detected_fake_mode := detect_fake_mode(fake_inps):
-                fake_mode = detected_fake_mode
+    Returns:
+        A callable
+    """
+    aot_compile_warning()
 
-            fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
+    if device == "cpu":
+        runner: AOTIModelContainerRunner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+    elif device == "cuda" or device.startswith("cuda:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+    elif device == "xpu" or device.startswith("xpu:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+    elif device == "mps" or device.startswith("mps:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
+    else:
+        raise RuntimeError("Unsupported device " + device)
 
-            # Fix the graph output signature to be tuple if scalar
-            # because aot_export expects a tuple as return type
-            return_val = f(*args)
-            flat_args, in_spec = pytree.tree_flatten(args)
-            out_spec = orig_out_spec = gm_torch_level._out_spec
-            # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple)):
-                out_spec = pytree.tree_flatten((return_val,))[1]
+    def optimized(*args, **kwargs):
+        call_spec = runner.get_call_spec()
+        in_spec = pytree.treespec_loads(call_spec[0])
+        out_spec = pytree.treespec_loads(call_spec[1])
+        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+        flat_outputs = runner.run(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, out_spec)
 
-            orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
-
-            gm_torch_level.graph._codegen = _PyTreeCodeGen(
-                _PyTreeInfo(
-                    orig_args,
-                    gm_torch_level._in_spec,
-                    out_spec,
-                )
-            )
-
-            gm_torch_level.recompile()
-            gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
-
-            export_backward_signature = ExportBackwardSignature(
-                gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
-                gradients_to_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs,
-                loss_output=graph_signature.backward_signature.loss_output
-            ) if graph_signature.backward_signature is not None else None
-
-            export_graph_signature = ExportGraphSignature(
-                parameters=graph_signature.parameters,
-                buffers=graph_signature.buffers,
-                user_inputs=graph_signature.user_inputs,
-                user_outputs=graph_signature.user_outputs,
-                inputs_to_parameters=graph_signature.inputs_to_parameters,
-                inputs_to_buffers=graph_signature.inputs_to_buffers,
-                buffers_to_mutate=graph_signature.buffers_to_mutate,
-                backward_signature=export_backward_signature
-            )
-
-            # TODO unfortunately preserving meta at graph level is not
-            # working well with aot_export. So we manually copy it.
-            # The node level meta is preserved.
-            for key, val in gm_torch_level.meta.items():
-                gm.meta[key] = val
-
-            # The unbacked symint symbols are updated in aot_export
-            # so we serialize them here instead of inside dynamo
-            gm.meta["inline_constraints"] = {
-                k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
-                if re.match(r"^[if]\d+$", str(k))
-            }
-
-            range_constraints, equality_constraints = _process_constraints(
-                gm,
-                export_graph_signature,
-                flat_args,
-            )
-            assert orig_out_spec is not None
-            exported_program = ExportedProgram(
-                gm,
-                gm.graph,
-                export_graph_signature,
-                CallSpec(in_spec, orig_out_spec),
-                params_buffers,
-                range_constraints,
-                equality_constraints,
-            )
-
-            if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions(
-                    functionalize=_functionalize_runtime_assertions,
-                )
-
-            return exported_program.transform(_ReplaceSymSizeOpPass())
-
-        except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
-        except GuardOnDataDependentSymNode as e:
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using constrain_as_*(). {str(e)}")
+    return optimized

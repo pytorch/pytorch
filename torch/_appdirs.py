@@ -41,9 +41,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 See <https://github.com/ActiveState/appdirs> for details and usage.
 """
 # Dev Notes:
-# - MSDN on where to store app data files:
-#   http://support.microsoft.com/default.aspx?scid=kb;en-us;310294#XSLTH3194121123120121120120
-# - Mac OS X: http://developer.apple.com/documentation/MacOSX/Conceptual/BPFileSystem/index.html
+# - Windows "Known Folders": https://learn.microsoft.com/en-us/windows/win32/shell/csidl
+# - macOS File System Programming Guide: https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/Introduction/Introduction.html
 # - XDG spec for Un*x: https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 __version__ = "1.4.4"
@@ -52,6 +51,7 @@ __version_info__ = tuple(int(segment) for segment in __version__.split("."))
 
 import os
 import sys
+
 
 unicode = str
 
@@ -514,7 +514,7 @@ def _get_win_folder_from_registry(csidl_name):
         _winreg.HKEY_CURRENT_USER,
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
     )
-    dir, type = _winreg.QueryValueEx(key, shell_folder_name)
+    dir, _type = _winreg.QueryValueEx(key, shell_folder_name)
     return dir
 
 
@@ -643,24 +643,24 @@ if __name__ == "__main__":
         "site_config_dir",
     )
 
-    print("-- app dirs %s --" % __version__)
+    print(f"-- app dirs {__version__} --")
 
     print("-- app dirs (with optional 'version')")
     dirs = AppDirs(appname, appauthor, version="1.0")
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (without optional 'version')")
     dirs = AppDirs(appname, appauthor)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (without optional 'appauthor')")
     dirs = AppDirs(appname)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (with disabled 'appauthor')")
     dirs = AppDirs(appname, appauthor=False)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")

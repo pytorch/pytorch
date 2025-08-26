@@ -19,8 +19,7 @@
 #include <ATen/ops/zero_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor& fill_out(Tensor& self, const Scalar& value) {
@@ -40,7 +39,7 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
 static Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
   at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
   out = out.to(self.device()).to(self.suggest_memory_format());
-  // Trust the `copy_` to handle the quantization and the boundary chacks.
+  // Trust the `copy_` to handle the quantization and the boundary checks.
   self.copy_(out);
   return self;
 }
@@ -55,7 +54,17 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  return fill_out(self, value.item());
+  if (self.device() != value.device()){
+    return fill_out(self, value.item());
+  }
+  // Check if value is a view of self and if it is we clone
+  // it to avoid overwriting self prematurely
+  if(self.is_alias_of(value)) {
+    self.copy_(value.clone());
+  } else{
+    self.copy_(value);
+  }
+  return self;
 }
 
 Tensor& fill_quantized_(Tensor& self, const Tensor& value) {
@@ -95,7 +104,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
     int64_t dim1 = height;
     for (const auto i : c10::irange(1, nDims)) {
       if (self.size(i) != dim1) {
-        AT_ERROR("all dimensions of input must be of equal length");
+        TORCH_CHECK(false, "all dimensions of input must be of equal length");
       }
     }
   }
@@ -136,7 +145,7 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   if (nullptr == ptr) {
     return self.fill_(0);
   }
-  int64_t size_bytes = nelements * self.dtype().itemsize();
+  auto size_bytes = nelements * self.dtype().itemsize();
   if (size_bytes > 0) {
     std::memset(ptr, 0, size_bytes);
   }
@@ -157,5 +166,4 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

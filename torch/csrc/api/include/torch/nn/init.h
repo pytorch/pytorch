@@ -5,10 +5,10 @@
 #include <torch/types.h>
 
 namespace torch {
-namespace nn {
-namespace init {
 
-using NonlinearityType = c10::variant<
+namespace nn::init {
+
+using NonlinearityType = std::variant<
     enumtype::kLinear,
     enumtype::kConv1D,
     enumtype::kConv2D,
@@ -21,13 +21,11 @@ using NonlinearityType = c10::variant<
     enumtype::kReLU,
     enumtype::kLeakyReLU>;
 
-using FanModeType = c10::variant<enumtype::kFanIn, enumtype::kFanOut>;
+using FanModeType = std::variant<enumtype::kFanIn, enumtype::kFanOut>;
 
-} // namespace init
-} // namespace nn
+} // namespace nn::init
 
-namespace nn {
-namespace init {
+namespace nn::init {
 
 /// Return the recommended gain value for the given nonlinearity function.
 TORCH_API double calculate_gain(
@@ -119,6 +117,6 @@ TORCH_API Tensor zeros_(Tensor tensor);
 TORCH_API std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
     const Tensor& tensor);
 
-} // namespace init
-} // namespace nn
+} // namespace nn::init
+
 } // namespace torch

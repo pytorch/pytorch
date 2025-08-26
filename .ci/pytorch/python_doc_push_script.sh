@@ -7,7 +7,7 @@ source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
-set -ex
+set -ex -o pipefail
 
 # for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
 # the order of operations goes:
@@ -26,8 +26,8 @@ echo "error: python_doc_push_script.sh: version (arg2) not specified"
 fi
 
 # Argument 1: Where to copy the built documentation to
-# (pytorch.github.io/$install_path)
-install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
+# (pytorch_docs/$install_path)
+install_path="${1:-${DOCS_INSTALL_PATH:-${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
 echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
@@ -63,13 +63,13 @@ build_docs () {
     echo "(tried to echo the WARNINGS above the ==== line)"
     echo =========================
   fi
-  set -ex
+  set -ex -o pipefail
   return $code
 }
 
 
-git clone https://github.com/pytorch/pytorch.github.io -b "$branch" --depth 1
-pushd pytorch.github.io
+git clone https://github.com/pytorch/docs pytorch_docs -b "$branch" --depth 1
+pushd pytorch_docs
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
@@ -85,9 +85,8 @@ pushd docs
 
 # Build the docs
 if [ "$is_main_doc" = true ]; then
-  if ! build_docs html; then
-    exit $?
-  fi
+  build_docs html || exit $?
+
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
@@ -106,13 +105,12 @@ if [ "$is_main_doc" = true ]; then
     echo undocumented objects found:
     cat build/coverage/python.txt
     echo "Make sure you've updated relevant .rsts in docs/source!"
+    echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"
     exit 1
   fi
 else
   # skip coverage, format for stable or tags
-  if ! build_docs html-stable; then
-    exit $?
-  fi
+  build_docs html-stable || exit $?
 fi
 
 # Move them into the docs repo
@@ -120,12 +118,6 @@ popd
 popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
-
-# Prevent Google from indexing $install_path/_modules. This folder contains
-# generated source files.
-# NB: the following only works on gnu sed. The sed shipped with mac os is different.
-# One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
-find "$install_path/_modules" -name "*.html" -print0 | xargs -0 sed -i '/<head>/a \ \ <meta name="robots" content="noindex">'
 
 git add "$install_path" || true
 git status
