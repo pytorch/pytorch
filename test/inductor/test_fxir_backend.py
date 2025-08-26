@@ -21,6 +21,7 @@ from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
+from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
@@ -151,7 +152,7 @@ class FxirTestCase(InductorTestCase):
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
-        num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
+        num_extern = self._count_ops(gm, extern_kernels.addmm)
         self.assertEqual(num_extern, 1)
 
     def test_fallback(self):

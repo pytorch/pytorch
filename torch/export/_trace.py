@@ -384,9 +384,7 @@ def _get_param_buffer_mapping(
     param_lookup: dict[int, str] = {}
     buffer_lookup: dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        if param_lookup.get(id(param)) is None:
-            # we only want to keep the first occurrence of a parameter to guarantee parity of original and traced module.
-            param_lookup[id(param)] = name
+        param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup[id(buffer)] = name
 

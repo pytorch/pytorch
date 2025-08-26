@@ -14,9 +14,6 @@ if TYPE_CHECKING:
     from tokenize import TokenInfo
 
 
-_OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}
-
-
 @total_ordering
 @dc.dataclass
 class Block:
@@ -71,20 +68,11 @@ class Block:
 
     @property
     def start_line(self) -> int:
-        """The line number for the def or class statement"""
-        return self.tokens[self.begin].start[0]
+        return self.tokens[max(self.indent, self.index)].start[0]
 
     @property
     def end_line(self) -> int:
-        if 0 <= self.dedent < len(self.tokens):
-            return self.tokens[self.dedent].start[0] - 1
-        else:
-            return self.tokens[-1].start[0]
-            # Only happens in one case so far: a file whose last line was
-            #
-            #    def function(): ...
-            #
-            # and the dedent correctly pointed to one past the end of self.tokens
+        return self.tokens[max(self.dedent, self.index)].start[0]
 
     @property
     def line_count(self) -> int:
@@ -111,7 +99,9 @@ class Block:
 
     @cached_property
     def is_override(self) -> bool:
-        return not self.is_class and bool(_OVERRIDES.intersection(self.decorators))
+        return not self.is_class and any(
+            d.rpartition(".")[2] == "override" for d in self.decorators
+        )
 
     DATA_FIELDS = (
         "category",
@@ -159,9 +149,9 @@ def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
     def decorators() -> Iterator[str]:
         rev = reversed(range(block_start))
         newlines = (i for i in rev if tokens[i].type == token.NEWLINE)
-        it = iter(itertools.chain(newlines, [-1]))
-        # The -1 accounts for the very first line in the file
+        newlines = itertools.chain(newlines, [-1])  # To account for the first line
 
+        it = iter(newlines)
         end = next(it, -1)  # Like itertools.pairwise in Python 3.10
         for begin in it:
             for i in range(begin + 1, end):

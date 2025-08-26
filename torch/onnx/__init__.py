@@ -166,10 +166,7 @@ def export(
         output_names: names to assign to the output nodes of the graph, in order.
         opset_version: The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. You should set ``opset_version`` according to the supported opset versions
-            of the runtime backend or compiler you want to run the exported model with.
-            Leave as default (``None``) to use the recommended version, or refer to
-            the ONNX operators documentation for more information.
+            to target. Must be >= 7.
         dynamic_axes:
 
             By default the exported model will have the shapes of all input and output tensors

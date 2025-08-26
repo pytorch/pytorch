@@ -87,7 +87,8 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
         if self._approved_mutator():
-            name = self.root_graph.register_buffer(buffer, set_name=set_name)
+            name = self.qualify_name(f"buf{len(self.buffers)}")
+            self.buffers.append(buffer)
             return name
         else:
             raise SubgraphLoweringException(

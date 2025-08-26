@@ -1148,9 +1148,6 @@ def define_buck_targets(
             "--replace",
             "@AT_KLEIDIAI_ENABLED@",
             "0",
-            "--replace",
-            "@AT_USE_EIGEN_SPARSE@",
-            "0",
         ]),
         outs = {
             "Config.h": ["Config.h"],
