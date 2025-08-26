@@ -31,6 +31,8 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
+} // namespace c10d
+
 namespace c10d {
 
 at::Tensor& shm_all_reduce_(
@@ -140,25 +142,6 @@ std::vector<at::Tensor> all_reduce_coalesced(
       outputs, std::move(reduce_op), std::move(group_name));
 }
 
-std::vector<at::Tensor> all_gather_into_tensor_coalesced(
-    std::vector<at::Tensor> inputs,
-    int64_t group_size,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string group_name) {
-  std::vector<at::Tensor> outputs;
-  outputs.reserve(inputs.size());
-  for (const auto& tensor : inputs) {
-    TORCH_CHECK(tensor.is_contiguous());
-    outputs.push_back(allocate_all_gather_output(tensor, group_size));
-  }
-
-  auto group = c10d::resolve_process_group(group_name);
-  auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
-  for (const auto& tensor : outputs) {
-    c10d::register_work(tensor, work);
-  }
-  return outputs;
-}
 
 at::Tensor allocate_all_gather_output(
   const at::Tensor& input,
@@ -173,6 +156,26 @@ if (output_size.size() == 0) {
 return at::empty(
     output_size,
     at::TensorOptions().dtype(input.dtype()).device(input.device()));
+}
+
+std::vector<at::Tensor> all_gather_into_tensor_coalesced(
+  std::vector<at::Tensor> inputs,
+  int64_t group_size,
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  std::string group_name) {
+std::vector<at::Tensor> outputs;
+outputs.reserve(inputs.size());
+for (const auto& tensor : inputs) {
+  TORCH_CHECK(tensor.is_contiguous());
+  outputs.push_back(allocate_all_gather_output(tensor, group_size));
+}
+
+auto group = c10d::resolve_process_group(group_name);
+auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
+for (const auto& tensor : outputs) {
+  c10d::register_work(tensor, work);
+}
+return outputs;
 }
 
 at::Tensor allocate_reduce_scatter_output(
@@ -319,13 +322,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
       "shm_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::shm_all_reduce),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::shm_all_reduce),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "shm_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::shm_all_reduce_),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::shm_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
