@@ -334,11 +334,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
       }
       handles_.at(i) = HandleT{handle, std::nullopt};
     }
-    mapHandles(begin, end);
-    setAccess(device_, begin, end);
-    for (auto p : peers_) {
-      setAccess(p, begin, end);
-    }
+    mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
   }
 
@@ -456,11 +452,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
         segment->handles_.emplace_back(HandleT{handle, std::nullopt});
       }
     }
-    segment->mapHandles(0, header.num_handles);
-    segment->setAccess(device_, 0, header.num_handles);
-    for (auto p : peers_) {
-      segment->setAccess(p, 0, header.num_handles);
-    }
+    segment->mapAndSetAccess(0, header.num_handles);
     return segment;
   }
 
