@@ -1344,12 +1344,7 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 
-# SAC support for triton ops:
-# - in eager mode, triton ops are not dispatchable, and so it is ignored by SAC,
-#   i.e., always recomputed.
-# - in compile, although we wrap triton kernels into HOPs, allowing us to intercept
-#   them, we still recompute rather than save, so that compile maintains the
-#   invariant of using less memory than eager.
+# Adds SAC support for triton ops
 redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
 redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
 
