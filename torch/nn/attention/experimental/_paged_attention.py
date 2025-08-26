@@ -196,6 +196,7 @@ class PagedAttention:
         self,
         block_mask: BlockMask,
         batch_idx: Optional[torch.Tensor] = None,
+        kv_len: Optional[Union[int, torch.Tensor]] = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -259,7 +260,6 @@ class PagedAttention:
                 .to(torch.int32)
             )
 
-        kv_len = block_mask.seq_lengths[1] if block_mask.seq_lengths else None
         new_mask_mod = self.get_mask_mod(block_mask.mask_mod, kv_len)
 
         seq_lengths = (block_mask.seq_lengths[0], self.n_pages * self.page_size)
