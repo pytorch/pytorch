@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 using torch::stable::Tensor;
 
@@ -48,6 +49,44 @@ inline Tensor narrow(Tensor& self, int64_t dim, int64_t start, int64_t length) {
 
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_narrow(self.get(), dim, start, length, &ret0));
+  return Tensor(ret0);
+}
+
+// We expect this to be a stable version of the new_empty op that takes in
+// only dtype information.
+inline Tensor new_empty(
+    const Tensor& self,
+    std::vector<int64_t> size,
+    std::optional<c10::ScalarType> dtype = std::nullopt) {
+  int32_t device_type;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
+
+  int32_t device_index;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_index(self.get(), &device_index));
+
+  int32_t target_dtype;
+  if (dtype.has_value()) {
+    target_dtype = to<int32_t>(from(dtype.value()));
+  } else {
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(self.get(), &target_dtype));
+  }
+
+  int32_t layout;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(self.get(), &layout));
+
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      &target_dtype,
+      &layout,
+      &device_type,
+      device_index,
+      nullptr, // pin_memory (nullptr for default)
+      &ret0));
+
   return Tensor(ret0);
 }
 
