@@ -1256,9 +1256,9 @@ class TritonOverrides(OpOverrides):
                 - This shows up when matmul operand is broadcasted with torch.expand/repeat.
                 - e.g., torch.rand((16,)).expand(16,16) @ B
 
-            e.g., shape (Y,1,R) -> tl.reshape(var, (Y,R))
-            e.g., shape (1,X,R) -> tl.trans(tl.reshape(var, (X,R)))
-            e.g., shape (1,X,1) -> tl.broadcast_to(tl.trans(tl.reshape(var, (X,1))), (R,X))
+            e.g., (Y,1,R), (Y,R) -> tl.reshape(var, (Y,R))
+            e.g., (1,X,R), (R,X) -> tl.trans(tl.reshape(var, (X,R)))
+            e.g., (1,X,1), (R,X) -> tl.broadcast_to(tl.trans(tl.reshape(var, (X,1))), (R,X))
 
             TODO : eventually we want to remove this function when lazy broadcasting arrives
             """
