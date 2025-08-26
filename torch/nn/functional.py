@@ -2883,16 +2883,6 @@ def instance_norm(
     )
 
 
-    if has_torch_function_variadic(input, weight, bias):
-        return handle_torch_function(
-            layer_norm,
-            (input, weight, bias),
-            input,
-            normalized_shape,
-            weight=weight,
-            bias=bias,
-            eps=eps,
-        )
 def layer_norm(
     input: Tensor,
     normalized_shape: list[int],
@@ -2904,6 +2894,17 @@ def layer_norm(
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            layer_norm,
+            (input, weight, bias),
+            input,
+            normalized_shape,
+            weight=weight,
+            bias=bias,
+            eps=eps,
+        )
+
     return torch.layer_norm(
         input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
     )
@@ -5286,6 +5287,7 @@ def triplet_margin_loss(
     )
 
 
+@_wrap_torch_function_variadic
 def triplet_margin_with_distance_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -5300,21 +5302,6 @@ def triplet_margin_with_distance_loss(
 
     See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
     """
-    if has_torch_function_variadic(anchor, positive, negative):
-        return handle_torch_function(
-            triplet_margin_loss,
-            (anchor, positive, negative),
-            anchor,
-            positive,
-            negative,
-            margin=margin,
-            p=p,
-            eps=eps,
-            swap=swap,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if torch.jit.is_scripting():
         raise NotImplementedError(
             "F.triplet_margin_with_distance_loss does not support JIT scripting: "
