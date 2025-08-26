@@ -149,7 +149,6 @@ class PagedAttention:
             raise RuntimeError("val must not require gradient")
 
         B, H, S, K_D = k_val.shape
-        self.seq_len = S
         V_D = v_val.shape[3]
         if B != batch_idx.shape[0]:
             raise RuntimeError(
@@ -262,7 +261,8 @@ class PagedAttention:
                 .to(torch.int32)
             )
 
-        new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
+        kv_len = block_mask.seq_lengths[1] if block_mask.seq_lengths else None
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod, kv_len)
 
         seq_lengths = (block_mask.seq_lengths[0], self.n_pages * self.page_size)
         return BlockMask.from_kv_blocks(
@@ -276,7 +276,9 @@ class PagedAttention:
         )
 
     def get_mask_mod(
-        self, mask_mod: Optional[_mask_mod_signature]
+        self,
+        mask_mod: Optional[_mask_mod_signature],
+        kv_len: Optional[Union[int, torch.Tensor]] = None,
     ) -> _mask_mod_signature:
         """
         Converts a mask_mod based on mapping from the physical block index to the logical
@@ -284,6 +286,7 @@ class PagedAttention:
 
         Args:
             mask_mod (_mask_mod_signature): mask_mod based on the logical block index.
+            kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
         """
         if mask_mod is None:
             mask_mod = noop_mask
@@ -300,7 +303,7 @@ class PagedAttention:
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
 
             live_block = logical_block_idx >= 0
-            within_upper_bound = logical_kv_idx < self.seq_len
+            within_upper_bound = logical_kv_idx < kv_len if kv_len is not None else True
             within_lower_bound = logical_kv_idx >= 0
             is_valid = live_block & within_upper_bound & within_lower_bound
 
