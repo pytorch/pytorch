@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import typing
-from collections.abc import Generator
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
