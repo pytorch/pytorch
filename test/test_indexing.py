@@ -2037,7 +2037,9 @@ class TestIndexing(TestCase):
         src = torch.full([1, 3], 2, dtype=torch.int64, device=device)
         alpha = 1.5
         x.index_add_(0, index, src, alpha=alpha)
-        self.assertEqual(x, torch.tensor([[3, 3, 3], [1, 1, 1]], dtype=torch.int64, device=device))
+        self.assertEqual(
+            x, torch.tensor([[3, 3, 3], [1, 1, 1]], dtype=torch.int64, device=device)
+        )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @expectedFailureMPS
