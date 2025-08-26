@@ -458,6 +458,7 @@ def iter_issue_timeline_until_comment(
     *for a 'commented' event*. Stops as soon as the target comment is encountered.
     """
     page = 1
+
     while page <= max_pages:
         url = (
             f"https://api.github.com/repos/{org}/{repo}/issues/{issue_number}/timeline"
@@ -485,7 +486,14 @@ def iter_issue_timeline_until_comment(
         if len(batch) < 100:
             return
         page += 1
-    # If we got here without finding the comment, we just streamed everything we could
+
+    # If we got here without finding the comment, then we either hit a bug or some github PR has a _really_
+    # long timeline.
+    # The max # of pages on any PR on pytorch/pytorch that found at the time of this change was 41 pages.
+    raise RuntimeError(
+        f"Could not find a merge commit in the first {max_pages} pages of the timeline at url {url}."
+        f"This is most likely a bug, please report it to the @pytorch/pytorch-dev-infra team."
+    )
 
 
 def sha_from_committed_event(ev: dict[str, Any]) -> Optional[str]:
@@ -512,18 +520,18 @@ def reconstruct_head_before_comment(
     found_any_event = False
 
     try:
-        for ev in iter_issue_timeline_until_comment(
+        for event in iter_issue_timeline_until_comment(
             org, repo, pr_number, issue_comment_id
         ):
-            etype = ev.get("event")
+            etype = event.get("event")
             if etype == "committed":
-                sha = sha_from_committed_event(ev)
+                sha = sha_from_committed_event(event)
                 if sha:
                     head = sha
                     found_any_event = True
                     print(f"Timeline: Found committed event with SHA {sha}")
             elif etype == "head_ref_force_pushed":
-                sha = sha_from_force_push_after(ev)
+                sha = sha_from_force_push_after(event)
                 if sha:
                     head = sha
                     found_any_event = True
