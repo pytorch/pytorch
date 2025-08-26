@@ -27,7 +27,7 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx._symbolic_trace import is_fx_symbolic_tracing
 from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
@@ -158,7 +158,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if not is_fx_tracing() and (
+        if not is_fx_symbolic_tracing() and (
             torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter
         ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
@@ -595,7 +595,7 @@ class UnflattenedModule(torch.nn.Module):
         )
         flat_args = [x[1] for x in flat_args_with_path]
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return flat_args
 
         if in_spec != signature.in_spec:
@@ -651,7 +651,7 @@ class UnflattenedModule(torch.nn.Module):
         )(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return_val = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
             )
