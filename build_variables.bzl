@@ -634,6 +634,7 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/SubgraphRewriter.cpp",
     "torch/nativert/graph/passes/pass_manager/GraphPasses.cpp",
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
+    "torch/nativert/kernels/KernelHandlerRegistry.cpp",
 ]
 
 torch_mobile_tracer_sources = [
