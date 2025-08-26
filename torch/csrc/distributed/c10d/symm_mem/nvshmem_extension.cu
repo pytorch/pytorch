@@ -111,7 +111,7 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
 }
 
 void nvshmem_put(at::Tensor& tensor, int64_t peer) {
-  // TODO: T233502753 T233502752 support non-contiguous tensors
+  // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
   // TODO: rendezvous should remember the group name
