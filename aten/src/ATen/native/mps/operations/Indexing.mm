@@ -528,11 +528,11 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     for (const auto i : c10::irange(dim)) {
       indices.emplace_back();
     }
-    const Tensor index_ = (index.dim() == 0) ? index.view(1).to(at::kLong) : index.to(at::kLong);
+    const auto&& index_ = (index.dim() == 0) ? index.view(1).to(at::kLong) : index.to(at::kLong);
     indices.emplace_back(index_);
-    const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
-    const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
-    const Tensor alpha_ = at::scalar_tensor(alpha, source_.options());
+    const auto&& result_ = (result.dim() == 0) ? result.view(1) : result;
+    const auto&& source_ = (source.dim() == 0) ? source.view(1) : source;
+    const auto&& alpha_ = at::scalar_tensor(alpha, source_.options());
     result_.index_put_(indices, source_.mul(alpha_), true);
     return;
   }
