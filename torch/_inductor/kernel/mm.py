@@ -888,6 +888,16 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
+        # TODO(coconutruben): combine this with the main flow of addmm through
+        # a subgraph or something as inp vs inp_expanded causes some slight numeric
+        # differences
+        choices += V.choices.get_mm_configs(
+            MMKernelInputs([inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)),
+            aten_layout,
+            [aten_addmm],
+            name,
+        )
+        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
     if use_aten_gemm_kernels():
         choices += V.choices.get_mm_configs(
