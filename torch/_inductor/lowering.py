@@ -352,7 +352,7 @@ def transform_args(
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
 
-        def _is_cpu_scalar(x: TensorBox) -> TensorBox:
+        def _is_copy_cpu_scalar(x: TensorBox) -> TensorBox:
             size = x.get_size()
             cur_device = x.get_device()
             if (
@@ -367,10 +367,10 @@ def transform_args(
             return x
 
         for i in args_indices:
-            args[i] = _is_cpu_scalar(args[i])
+            args[i] = _is_copy_cpu_scalar(args[i])
 
         for k in kwargs_indices:
-            kwargs[k] = _is_cpu_scalar(kwargs[k])
+            kwargs[k] = _is_copy_cpu_scalar(kwargs[k])
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
