@@ -13,12 +13,11 @@
 #define _NVSHMEM_MIN_SM_ARCH 700
 
 // Some NVSHMEM device APIs do not compile on older SM archs
-#if defined(__CUDA_ARCH__) && ( \
-    (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || \
-    (defined(_NVSHMEM_SKIP_SM_110) && (__CUDA_ARCH__ == 1100)) \
-)
-// Only include host APIs. See nvshmem.h for details.
-#define NVSHMEM_HOSTLIB_ONLY
+#if defined(__CUDA_ARCH__)
+#  if (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || \
+      (defined(_NVSHMEM_SKIP_SM_110) && (__CUDA_ARCH__ == 1100))
+#   define NVSHMEM_HOSTLIB_ONLY // Only include host APIs. See nvshmem.h for details.
+#  endif
 #endif  // Must be done before nvshmem.h is included
 
 #include <nvshmem.h>
