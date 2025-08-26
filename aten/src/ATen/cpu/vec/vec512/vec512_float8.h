@@ -97,7 +97,7 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
 static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   // cvt 16x32 from fp32 to fp8 e4m3
   const __m512i sign_mask = _mm512_set1_epi32(0x80000000);
-  const __m512i fp32_inf = _mm512_set1_epi32(UINT32_C(255) << 23)
+  const __m512i fp32_inf = _mm512_set1_epi32(UINT32_C(255) << 23);
   const __m512i fp8_inf = _mm512_set1_epi32(UINT32_C(1087) << 20);
   const __m512i denorm_thresh = _mm512_set1_epi32(UINT32_C(121) << 23);
   const __m512i denorm_mask = _mm512_set1_epi32(UINT32_C(141) << 23);
