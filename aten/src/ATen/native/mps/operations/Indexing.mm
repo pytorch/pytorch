@@ -532,7 +532,8 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     indices.emplace_back(index_);
     const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
     const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
-    result_.index_put_(indices, source_.mul(alpha), true);
+    const Tensor alpha_ = at::scalar_tensor(alpha, source_.options());
+    result_.index_put_(indices, source_.mul(alpha_), true);
     return;
   }
 
