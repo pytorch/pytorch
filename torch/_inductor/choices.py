@@ -33,9 +33,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -143,6 +143,36 @@ class InductorChoices:
             choices += list(choice_gen)
         return choices
 
+    def _can_try_flexible_layout(
+        self, adjusted_choices: list[KernelTemplateChoice], max_autotune: bool
+    ) -> bool:
+        """
+        Check if we can try flexible layout for a given kernel template choice.
+
+        Args:
+            ktc: KernelTemplateChoice object
+            max_autotune: Whether to use max autotune
+
+        Returns:
+            True if we can try flexible layout, False otherwise
+        """
+        if not max_autotune:
+            # no danger of using other backends than ATEN
+            return True
+        # Since the following backends are not using get_mm_configs yet through the singular call,
+        # we don't know if they are a valid choice or not. Instead, just skip the optimization
+        # defensively.
+        # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
+        if _use_autotune_backend("CUTLASS"):
+            return False
+        if _use_autotune_backend("CK") or _use_autotune_backend("CKTILE"):
+            return False
+        if _use_autotune_backend("CPP"):
+            return False
+        return all(
+            isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
+        )
+
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -217,21 +247,8 @@ class InductorChoices:
             kwarg_overrides,
             max_autotune,
         )
-
         # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
-        if (
-            all(
-                isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
-            )
-        ) and not (
-            _use_autotune_backend("CUTLASS"),
-            _use_autotune_backend("CK"),
-            _use_autotune_backend("CKTILE"),
-            _use_autotune_backend("CPP"),
-            # do not run this optimization if we're using CPP,CK,CUTLASS as those paths do not go through
-            # here yet, so we don't know if this is safe to do.
-            # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
-        ):
+        if self._can_try_flexible_layout(adjusted_choices, max_autotune):
             for ktc in adjusted_choices:
                 if isinstance(ktc.layout, FixedLayout):
                     ktc.layout = FlexibleLayout(
