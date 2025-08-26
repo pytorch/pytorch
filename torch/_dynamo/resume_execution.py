@@ -311,9 +311,7 @@ class ContinueExecutionCache:
         stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
         argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
         null_idxes: tuple[int, ...],
-        # mainly used to ensure distinct code objects per stack trace,
-        # which prevents excessive recompilation of inner frames
-        nested_code_objs: tuple[types.CodeType],
+        has_nested: bool,
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -334,7 +332,7 @@ class ContinueExecutionCache:
                 stack_ctx_vars,
                 argnames_ctx_vars,
                 null_idxes,
-                nested_code_objs,
+                has_nested,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -468,7 +466,7 @@ class ContinueExecutionCache:
                     )
 
             # Call nested resume function
-            if nested_code_objs:
+            if has_nested:
                 prefix.extend(
                     [
                         # set up __nested_resume_fns[-1] call

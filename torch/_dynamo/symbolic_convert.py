@@ -2571,7 +2571,7 @@ class InstructionTranslatorBase(
 
         # build the resume function for each frame
         resume_names = []
-        resume_codes: list[types.CodeType] = []
+        resume_codes = []
         for i, meta in enumerate(all_stack_locals_metadata):
             cur_tx = txes[i]
             if cur_tx is self:
@@ -2660,7 +2660,7 @@ class InstructionTranslatorBase(
                 tuple(meta.stack_ctx_args),
                 tuple(meta.locals_ctx_args),
                 tuple(meta.stack_null_idxes),
-                tuple(resume_codes),
+                self is not cur_tx,
             )
             resume_codes.append(new_code)
 
