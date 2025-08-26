@@ -204,6 +204,9 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
       int64_t storage_offset) override {
+    auto peer_ptr = pai_->buffers_[rank];
+    TORCH_CHECK(peer_ptr != nullptr,
+        "Cannot get buffer across nodes, my rank: ", get_rank(), ", peer: ", rank);
     // TODO: deduplicate
     const size_t numel = std::accumulate(
         sizes.begin(),
@@ -219,8 +222,25 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         " bytes) exceeds the allocated size (",
         allocation_->buffer_size,
         " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(pai_->buffers_[rank]) +
+    auto data_ptr = reinterpret_cast<uint8_t*>(peer_ptr) +
         storage_offset * element_size;
+    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
+    auto options = at::TensorOptions().dtype(dtype).device(device);
+    return at::for_blob(data_ptr, sizes)
+        .options(options)
+        .target_device(device)
+        .make_tensor();
+  }
+
+  at::Tensor get_remote_tensor(
+      int peer,
+      c10::IntArrayRef sizes,
+      c10::ScalarType dtype) override {
+    auto peer_ptr = pai_->buffers_[peer];
+    TORCH_CHECK(peer_ptr != nullptr,
+        "Cannot get peer tensor across nodes, my rank: ", get_rank(), ", peer: ", peer);
+    // Peer tensor's offset is the same as my offset
+    auto data_ptr = reinterpret_cast<uint8_t*>(peer_ptr) + offset_;
     auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
     auto options = at::TensorOptions().dtype(dtype).device(device);
     return at::for_blob(data_ptr, sizes)

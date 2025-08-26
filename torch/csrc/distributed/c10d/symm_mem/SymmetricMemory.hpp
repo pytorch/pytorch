@@ -83,6 +83,13 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual int* get_rank_to_global_rank_dev() {
     TORCH_CHECK(false, "NYI");
   }
+
+  virtual at::Tensor get_remote_tensor(
+      int peer,
+      c10::IntArrayRef sizes,
+      c10::ScalarType dtype) {
+    TORCH_CHECK(false, "NYI");
+  }
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
