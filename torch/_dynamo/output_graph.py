@@ -77,9 +77,13 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
+    create_binary_slice,
     create_call_function,
+    create_dup_top,
     create_instruction,
     create_load_const,
+    create_rot_n,
+    create_swap,
     Instruction,
     unique_id,
 )
@@ -146,7 +150,7 @@ from .variables.builder import (
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.lists import BaseListVariable
-from .variables.misc import CellVariable, NullVariable
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -348,6 +352,10 @@ class StackLocalsMetadata:
     Stores metadata for a frame's stack and locals for the purposes of building resume functions
     """
 
+    num_stack: int = 0  # number of stack elements, minus removed NULLs
+    locals_names: dict[str, int] = dc_field(
+        default_factory=dict
+    )  # order of locals codegen'd to the stack
     stack_null_idxes: list[int] = dc_field(default_factory=list)
     locals_null_keys: list[str] = dc_field(default_factory=list)
     stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
@@ -587,6 +595,9 @@ class OutputGraph(OutputGraphGuardsState):
         self.saved_tensors_hooks_subgraph_names: Optional[list[str]] = (
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
+
+        # mangled alias -> module fqn name
+        self.import_sources: dict[str, str] = {}
 
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
@@ -1183,7 +1194,7 @@ class OutputGraph(OutputGraphGuardsState):
 
     def _get_stack_values_to_restore(
         self, tx: "InstructionTranslatorBase", stack_pops: int
-    ) -> tuple[list[VariableTracker], list[str], StackLocalsMetadata]:
+    ) -> tuple[list[VariableTracker], StackLocalsMetadata]:
         """
         Gets the stack + locals values belonging to tx that need to be restored.
 
@@ -1195,7 +1206,6 @@ class OutputGraph(OutputGraphGuardsState):
 
         Returns:
             - stack_values: stack and locals values that need to be restored
-            - restore_vars: names of locals corresponding to the locals part of `stack_values`
             - meta: locations of NULLs and ContextWrappingVariables in the stack/locals
                 (ignores the top `stack_pops` values on the stack)
         """
@@ -1224,9 +1234,10 @@ class OutputGraph(OutputGraphGuardsState):
                 meta.stack_ctx_args.append((len(stack_values) - 1, target_values))
                 meta.stack_ctx_idxes_orig.append(i)
 
-        # Add all the local vars to the "stack" so restore at the end
-        restore_vars: list[str] = []
-        val_to_names: dict[VariableTracker, list[str]] = {}
+        meta.num_stack = len(stack_values)
+
+        cell_and_freevars = set(tx.cellvars() + tx.freevars())
+
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1241,12 +1252,20 @@ class OutputGraph(OutputGraphGuardsState):
             # This will in turn result in spurious variables showing up in the graph.
             # This was very tricky to debug. For an example, dump the graph at call_user_compiler
             # while running test_subgraphs.py
-            if isinstance(v.source, LocalSource) and v.source.local_name == k:
-                continue  # no need to restore initial state
-            if isinstance(v, CellVariable) and v.local_name == k:
-                continue  # no need to restore initial state
+            # Do not include top-frame unmodified locals here - otherwise, the compiled graph may
+            # erroneously include them as part of the return. We manually codegen them afterward.
+            if (
+                isinstance(v.source, LocalSource)
+                and v.source.local_name == k
+                and tx is self.root_tx
+            ):
+                continue
+            # Do not load cell/free vars
+            if k in cell_and_freevars:
+                continue
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
+                # NOTE: do not use isinstance, since it realizes lazy VT's
                 # Continuation function will load the NULL for v.
                 if type.__instancecheck__(NullVariable, v):
                     meta.locals_null_keys.append(k)
@@ -1254,19 +1273,15 @@ class OutputGraph(OutputGraphGuardsState):
             else:
                 # A variable should never be NULL in < 3.12
                 assert not type.__instancecheck__(NullVariable, v)
+            meta.locals_names[k] = len(meta.locals_names)
             if isinstance(v, ContextWrappingVariable):
                 target_values = (
                     () if v.target_values is None else tuple(v.target_values)
                 )
                 meta.locals_ctx_args.append((k, target_values))
-            if v not in val_to_names:
-                val_to_names[v] = []
-            val_to_names[v].append(k)
-        for v in val_to_names.keys():
-            restore_vars.extend(val_to_names[v])
-            stack_values.extend([v] * len(val_to_names[v]))
+            stack_values.append(v)
 
-        return stack_values, restore_vars, meta
+        return stack_values, meta
 
     def compile_subgraph(
         self,
@@ -1292,9 +1307,9 @@ class OutputGraph(OutputGraphGuardsState):
 
         assert self.root_tx is not None
 
-        # FIXME temporary assert to make sure we're not accidentally compiling nested graph breaks
-        # before we're done the full implementation
-        assert self.root_tx is tx
+        if not config.nested_graph_breaks:
+            # expect to only compile 1 frame
+            assert self.root_tx is tx
 
         # bytecode tracing has finished. Pop the context manager for dynamo_timed
         self.mark_bytecode_tracing_stop()
@@ -1308,19 +1323,42 @@ class OutputGraph(OutputGraphGuardsState):
         # prefix instructions (Python 3.11+)
         prefix_insts: list[Instruction] = []
         if sys.version_info >= (3, 11):
-            for inst in tx.prefix_insts:
-                if inst.opname == "MAKE_CELL":
-                    prefix_insts.append(
-                        create_instruction("MAKE_CELL", argval=inst.argval)
-                    )
-                elif inst.opname == "COPY_FREE_VARS":
+            for inst in self.root_tx.prefix_insts:
+                if inst.opname == "COPY_FREE_VARS":
                     prefix_insts.append(
                         create_instruction(
-                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
+                            "COPY_FREE_VARS",
+                            arg=len(self.root_tx.code_options["co_freevars"]),
                         )
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
+
+        # stack values and restore vars for each frame are pushed in reverse order
+        # i.e. last element corresponds to root frame (1),
+        # first element corresponds to current frame (N)
+        all_stack_values = []
+        all_stack_locals_metas = []
+        cur_tx: Optional[InstructionTranslatorBase] = tx
+        while cur_tx is not None:
+            # this should have been checked by the caller
+            assert all(block.can_restore() for block in cur_tx.block_stack)
+
+            stack_values, meta = self._get_stack_values_to_restore(
+                cur_tx, stack_pops if cur_tx is tx else 0
+            )
+            all_stack_values.append(stack_values)
+            all_stack_locals_metas.append(meta)
+
+            # Exit from all context manager variables to make sure global state is restored
+            for block in reversed(cur_tx.block_stack):
+                block.exit(cur_tx, is_graph_break=reason.graph_break)
+
+            cur_tx = cur_tx.parent
+
+        # "Garbage collect the heap".
+        self.side_effects.prune_dead_object_new(tx)
+
         self.add_output_instructions(prefix_insts)
 
         assert not (self.pregraph_bytecode and self.export), (
@@ -1333,31 +1371,7 @@ class OutputGraph(OutputGraphGuardsState):
         )
         self.add_output_instructions(alias_insts)
 
-        # Exit from all context manager variables to make sure global state is restored
-        for block in reversed(self.root_tx.block_stack):
-            block.exit(self.root_tx, is_graph_break=reason.graph_break)
-
         self.cleanup_graph()
-
-        # stack values and restore vars for each frame are pushed in reverse order
-        # i.e. last element corresponds to root frame, first element corresponds to current frame
-        all_stack_values = []
-        all_restore_vars = []
-        all_stack_locals_metas = []
-        cur_tx: Optional[InstructionTranslatorBase] = tx
-        while True:
-            assert cur_tx is not None
-            # this should have been checked by the caller
-            assert all(block.can_restore() for block in cur_tx.block_stack)
-            stack_values, restore_vars, meta = self._get_stack_values_to_restore(
-                cur_tx, stack_pops
-            )
-            all_stack_values.append(stack_values)
-            all_restore_vars.append(restore_vars)
-            all_stack_locals_metas.append(meta)
-            if cur_tx is self.root_tx:
-                break
-            cur_tx = tx.parent
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1393,13 +1407,30 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.add_output_instructions(random_calls_instructions)
 
-        # call compiled fx graph
-        graph_output_var = None
+        # Codegen stack convention before the unsupported instruction
+        # NOTE: in these comment blocks, "locals" EXCLUDE free and cell vars.
+        # NOTE: stack and locals must be codegen'd BEFORE the unsupported instruction, since the latter
+        # can arbitrarily mutate the former.
+        # [
+        #   frame N locals,
+        #   frame N-1 stack + locals,
+        #   ...,
+        #   frame 1 stack + locals,
+        # ], frame N stack
+
+        # see symbolic_convert.py for
+        # codegen stack convention after the unsupported instruction
+        # NOTE: cells are loaded into continuation functions directly
+
+        # this determines the order that values are codegen'd to the stack
+        stack_values_flat = [val for vals in all_stack_values for val in vals]
         stored_graph_output_var = False
-        root_stack_values = all_stack_values[-1]
+        graph_output_var = None
+
+        # call compiled fx graph and codegen all values - stack and locals
         if (
-            self.root_tx is tx
-            and root_stack_values
+            self.root_tx is tx  # single frame
+            and stack_values_flat
             and all(
                 not isinstance(
                     v,
@@ -1410,10 +1441,10 @@ class OutputGraph(OutputGraphGuardsState):
                     ),
                 )
                 and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
-                for v in root_stack_values
+                for v in stack_values_flat
             )
-            and all(isinstance(x, TensorVariable) for x in root_stack_values)
-            and len(set(root_stack_values)) == len(root_stack_values)
+            and all(isinstance(x, TensorVariable) for x in stack_values_flat)
+            and len(set(stack_values_flat)) == len(stack_values_flat)
             and self.side_effects.is_empty()
             and not tx.debug_locals
             and not self.backward_state
@@ -1422,17 +1453,19 @@ class OutputGraph(OutputGraphGuardsState):
         ):
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(
-                    tx, list(reversed(root_stack_values)), root
-                )
-                + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
+                [
+                    # load in reverse since UNPACK_SEQUENCE will reverse
+                    *self.compile_and_call_fx_graph(
+                        tx, list(reversed(stack_values_flat)), root
+                    ),
+                    create_instruction("UNPACK_SEQUENCE", arg=len(stack_values_flat)),
+                ]
             )
+            # function output will be moved to the correct places below
         else:
             graph_output_var = self.new_var("graph_out")
-            # load stack values in a flat manner for now - will likely change later.
-            stack_values_flat = [
-                val for vals in reversed(all_stack_values) for val in vals
-            ]
+            # load stack values in a flat manner - we will codegen bytecode to place them correctly
+            # according to our convention above
             pass1 = PyCodegen(
                 self.root_tx,
                 root,
@@ -1476,21 +1509,109 @@ class OutputGraph(OutputGraphGuardsState):
                 self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # restore all the live local vars of the root
-        local_restore_cg = PyCodegen(
-            self.root_tx, overridden_sources=overridden_sources
-        )
-        # TODO this local restoration should be removed when fully implementing nested graph breaks
+        # store all stack and locals for each frame
+        # current state of the stack:
+        # *(frame N stack), *(frame N locals),
+        # ...,
+        # *(frame 1 stack), *(frame 1 locals)
+
         self.add_output_instructions(
             [
-                local_restore_cg.create_store(var)
-                for var in reversed(all_restore_vars[-1])
+                create_instruction(
+                    "BUILD_LIST",
+                    arg=len(stack_values_flat) - all_stack_locals_metas[0].num_stack,
+                ),
             ]
         )
 
+        # current state of the stack:
+        # *(frame N stack), [
+        #     *(frame N locals),
+        #     *(frame N-1 stack), *(frame N-1 locals),
+        #     ...
+        #     *(frame 1 stack), *(frame 1 locals),
+        # ]
+        # iterate current frame (N) to root frame (1)
+        # sliding window over frame stack/locals
+        start_idx = 0
+        end_idx = 0
+        for i, meta in enumerate(all_stack_locals_metas):
+            # do not pack frame N's stack into the value list
+            n_vals = len(meta.locals_names)
+            if i != 0:
+                n_vals += meta.num_stack
+            if n_vals == 0:
+                self.add_output_instructions(
+                    [
+                        create_instruction("BUILD_LIST", arg=0),
+                        *create_swap(2),
+                    ]
+                )
+                # [], stack_values_flat
+            else:
+                end_idx += n_vals
+                self.add_output_instructions(
+                    [
+                        create_dup_top(),
+                        *create_binary_slice(start_idx, end_idx),
+                        *create_swap(2),
+                    ]
+                )
+                start_idx += n_vals
+                # stack_values_flat[x:y], stack_values_flat
+
+            # add root frame's unmodified locals here
+            if i == len(all_stack_locals_metas) - 1:
+                root_cg = PyCodegen(self.root_tx)
+                unmodified_locals_names: dict[str, int] = {}
+                for k, v in self.root_tx.symbolic_locals.items():
+                    if isinstance(v.source, LocalSource) and v.source.local_name == k:
+                        root_cg.append_output(root_cg.create_load(k))
+                        unmodified_locals_names[k] = len(meta.locals_names) + len(
+                            unmodified_locals_names
+                        )
+                self.add_output_instructions(
+                    root_cg.get_instructions()
+                    + [
+                        create_instruction(
+                            "BUILD_LIST", arg=len(unmodified_locals_names)
+                        ),
+                        # arg=2 because we already swapped the locals list back
+                        create_instruction("LIST_EXTEND", arg=2),
+                    ]
+                )
+                meta.locals_names.update(unmodified_locals_names)
+
+            # *(frame N stack), metas[0] stack + locals, ..., metas[i] stack + locals, stack_values_flat
+
+        # current state of the stack:
+        # *(frame N stack)
+        # frame N locals,
+        # frame N-1 stack, frame N-1 locals,
+        # ...
+        # frame 1 stack, frame 1 locals,
+        # stack_values_flat
+        #
+
+        self.add_output_instructions(
+            [
+                create_instruction("POP_TOP"),
+                create_instruction("BUILD_LIST", arg=len(all_stack_locals_metas)),
+                *create_rot_n(all_stack_locals_metas[0].num_stack + 1),
+            ]
+        )
+
+        # final state of the stack before running the unsupported bytecode:
+        # [
+        #   [frame N locals],
+        #   [frame N-1 stack + locals],
+        #   ...,
+        #   [frame 1 stack + locals],
+        # ], *(frame N stack)
+
         if graph_output_var and stored_graph_output_var:
             self.add_output_instructions(
-                [local_restore_cg.create_delete(graph_output_var)]
+                [create_instruction("DELETE_FAST", argval=graph_output_var)]
             )
 
         if self.export:
@@ -1785,6 +1906,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
+            gm.meta["backend_id"] = name
 
             graph_code_log.debug(
                 "%s",
