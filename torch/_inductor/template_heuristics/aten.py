@@ -94,7 +94,7 @@ class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
         op_name: str,
         max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
-        if inductor_config.max_autotune or inductor_config.max_autotune_gemm:
+        if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
             # NOTE: this preserves the original logic that if there is not max-autotune
             # then we skip bias_addmm
             return
