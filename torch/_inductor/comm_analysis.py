@@ -1,6 +1,8 @@
 import functools
+import logging
 import math
 from enum import IntEnum
+from typing import Optional
 
 import sympy
 
@@ -9,6 +11,9 @@ import torch
 from . import ir
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 class NCCL_COLL(IntEnum):
@@ -240,28 +245,39 @@ def _get_collective_fn_kwargs(snode, tensor_arg_from_layout):  # type: ignore[no
     raise AssertionError(f"Unsupported collective:{name}")
 
 
-def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float:  # type: ignore[no-untyped-def]
-    kernel = snode.node
-    assert kernel is not None
+def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  # type: ignore[no-untyped-def]
+    try:
+        kernel = snode.node
+        assert kernel is not None
 
-    from torch.distributed.distributed_c10d import _resolve_process_group
+        from torch.distributed.distributed_c10d import _resolve_process_group
 
-    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
-    pg = _resolve_process_group(pg_name)
-    rank: int = torch.distributed.get_rank(pg)
-    # TODO(ivankobzarev): Figure out how we can use time estimations,
-    # without cuda allocations.
-    device = torch.device(f"cuda:{rank}")
+        pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+        pg = _resolve_process_group(pg_name)
+        rank: int = torch.distributed.get_rank(pg)
+        # TODO(ivankobzarev): Figure out how we can use time estimations,
+        # without cuda allocations.
+        device = torch.device(f"cuda:{rank}")
 
-    fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
+        fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
 
-    with torch.distributed._time_estimator(group=pg, device=device) as time_estimator:
-        w = fn(**kwargs)
-        torch.ops._c10d_functional.wait_tensor.default(w)
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
+            w = fn(**kwargs)
+            torch.ops._c10d_functional.wait_tensor.default(w)
 
-    est_time_us = time_estimator.estimated_time
-    est_time_ns = est_time_us * 1e3
-    return est_time_ns
+        est_time_us = time_estimator.estimated_time
+        # -1000 constant is NCCL return in case of error during estimations.
+        # Observed it for all_to_all estimations.
+        if est_time_us < 0:
+            return None
+        est_time_ns = est_time_us * 1e3
+        return est_time_ns
+    except Exception as e:
+        # NCCL estimator can fail
+        log.info(e)
+        return None
 
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
