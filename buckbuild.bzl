@@ -824,13 +824,9 @@ def get_pt_operator_registry_dict(
         apple_sdks = kwargs.get("apple_sdks"),
     )
 
-    # Extract existing linker_flags from kwargs and combine with default flags
-    existing_linker_flags = kwargs.pop("linker_flags", [])
-    combined_linker_flags = get_no_as_needed_linker_flag() + existing_linker_flags
-
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = combined_linker_flags,
+        linker_flags = get_no_as_needed_linker_flag(),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",

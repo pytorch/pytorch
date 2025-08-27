@@ -388,10 +388,8 @@ class Op:
         self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
     ):
         self.profiling_name = event["profiling_name"]
-        comm_lib_backend, name = self.profiling_name.split(":")
-        assert comm_lib_backend in ["nccl", "xccl"], (
-            f"name formatting error? {comm_lib_backend} != 'nccl' or 'xccl'"
-        )
+        nccl, name = self.profiling_name.split(":")
+        assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None

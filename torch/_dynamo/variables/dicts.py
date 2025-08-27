@@ -286,13 +286,19 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
-    def len(self) -> int:
-        return sum(
-            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
+    def len(self):
+        return len(
+            [
+                x
+                for x in self.items.values()
+                if not isinstance(x, variables.DeletedVariable)
+            ]
         )
 
-    def has_new_items(self) -> bool:
-        return self.should_reconstruct_all or any(
+    def has_new_items(self):
+        if self.should_reconstruct_all:
+            return True
+        return any(
             self.is_new_item(self.original_items.get(key.vt), value)
             for key, value in self.items.items()
         )
