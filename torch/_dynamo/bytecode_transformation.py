@@ -1206,7 +1206,6 @@ def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> Non
                 create_instruction("NOP", argval="GRAPH_BREAK_IF_LEAF"),
                 create_instruction(inst.opname, argval=inst.argval),
             ]
-            # breakpoint()
             new_insts.extend(overwrite_instruction(inst, replace_insts))
         else:
             new_insts.append(inst)
