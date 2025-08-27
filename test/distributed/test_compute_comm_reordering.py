@@ -78,6 +78,10 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
 
 
 @requires_accelerator_dist_backend()
+@unittest.skipIf(
+    torch._inductor.config.triton.enable_native_matmul, 
+    "native matmul is fused with surrounding ops"
+)
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
