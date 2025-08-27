@@ -359,6 +359,7 @@ def transform_args(
                 cur_device is not None
                 and cur_device.type == "cpu"
                 and cur_device != device
+                and isinstance(x.data, ir.ReinterpretView)
                 and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
             ):
                 return TensorBox(
