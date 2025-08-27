@@ -657,13 +657,13 @@ class AutogradFunctionVariable(VariableTracker):
     def call_apply(self, tx: "InstructionTranslator", args, kwargs):
         requires_grad = False
 
-        def visit(vt):
+        def visit(node):
             nonlocal requires_grad
-            if isinstance(vt, variables.TensorVariable):
-                if vt.requires_grad is not False:
+            if isinstance(node, variables.TensorVariable):
+                if node.requires_grad is not False:
                     requires_grad = True
-            if isinstance(vt, variables.NNModuleVariable):
-                if vt.is_training(tx):
+            if isinstance(node, variables.NNModuleVariable):
+                if node.is_training(tx):
                     requires_grad = True
 
         VariableTracker.visit(visit, (args, kwargs))
