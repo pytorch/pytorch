@@ -1021,6 +1021,11 @@ except ImportError:
 from torch import _C as _C
 
 
+# In the case of CPU-only build or cuda device unavailable,
+# we patch the cuda device guard to use NoOpDeviceGuardImpl.
+# This enables us to trace over cuda kernels under FakeTensorMode.
+_C._ensureCUDADeviceGuardSet()
+
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
