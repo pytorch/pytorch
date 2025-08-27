@@ -3407,7 +3407,9 @@ def add_feedback_saver(
     cache = get_algorithm_selector_cache()
     cache.add_feedback_saver(fn)
 
-def clear_feedback_saver():
+
+def clear_feedback_savers():
+    """Clear all feedback saver functions."""
     cache = get_algorithm_selector_cache()
     cache.clear_feedback_savers()
 
