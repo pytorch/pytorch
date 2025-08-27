@@ -3,13 +3,13 @@ from pathlib import Path
 
 
 def check_if_rocm() -> bool:
+    if os.environ.get("USE_ROCM"):
+        return True
     if os.path.exists("/opt/rocm"):
         return True
     if os.environ.get("ROCM_PATH") is not None:
         return True
-    # Only used for Windows builds
-    if os.environ.get("USE_ROCM"):
-        return True
+    
     return False
 
 
