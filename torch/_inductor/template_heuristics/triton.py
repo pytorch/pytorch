@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor.template_heuristics.addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
 
@@ -1261,6 +1262,9 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
     ]
     _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
 
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        return True
+
     def _get_config_generator(
         self,
     ) -> partial[Generator[TritonConfig, None, None]]:
@@ -1273,27 +1277,6 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             return self.get_exhaustive_mm_configs()
         else:
             return self.get_mm_configs()
-
-    def get_extra_kwargs(
-        self,
-        kernel_inputs: KernelInputs,
-        layout: Layout,
-        op_name: str,
-    ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
-        if op_name in ["addmm", "baddbmm"]:
-            alpha = kernel_inputs.get_scalar("alpha")
-            beta = kernel_inputs.get_scalar("beta")
-            from ..kernel.mm_common import addmm_epilogue
-
-            kwargs.update(
-                dict(
-                    epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-                    epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
-                    prefix_args=1,
-                )
-            )
-        return kwargs
 
     def get_template_configs(
         self,
@@ -1311,7 +1294,8 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
-
+        if not self._valid(kernel_inputs):
+            return
         # Extract M, N, K from kernel_inputs
         m, n, k = kernel_inputs.mnk_symbolic()
 
@@ -1405,19 +1389,11 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         self.should_scale_configs = False
 
 
-# TMA-specific mixin for TMA templates
-class TMAConfigMixin(MMTemplateConfigMixin):
+class TMAWorkspaceMixin(MMTemplateConfigMixin):
     """
-    TMA-specific mixin that uses persistent configs and adds TMA options.
-    This inherits from MMTemplateConfigMixin and overrides config generation.
+    Small mixin to ensure that the workspace arg is correct for TMA
+    and TMA specific filtering can happen.
     """
-
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        TMA specific filtering, as num_warps=2 not safe for TMA
-        """
-        configs = [c for c in configs if c.num_warps != 2]
-        return super()._filter_configs(configs)
 
     def get_extra_kwargs(
         self,
@@ -1432,6 +1408,21 @@ class TMAConfigMixin(MMTemplateConfigMixin):
         )
         return kwargs
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        TMA specific filtering, as num_warps=2 not safe for TMA
+        """
+        configs = [c for c in configs if c.num_warps != 2]
+        return super()._filter_configs(configs)
+
+
+# TMA-specific mixin for TMA templates
+class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
+    """
+    TMA-specific mixin that uses persistent configs and adds TMA options.
+    This inherits from MMTemplateConfigMixin and overrides config generation.
+    """
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -1441,26 +1432,10 @@ class TMAConfigMixin(MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
-            kernel_inputs, layout, op_name
-        ):
-            # Add TMA-specific options (moved from mm_common.persistent_mm_options)
-            input_nodes = kernel_inputs.nodes()
-            self._add_tma_options(template_kwargs, input_nodes)
-            yield template_kwargs
-
-    def _add_tma_options(
-        self, template_kwargs: dict[str, Any], input_nodes: list[Any]
-    ) -> None:
-        """
-        Add TMA-specific options to template kwargs.
-        Moved from mm_common.persistent_mm_options and mm_common.tma_options.
-        """
-        # For TMA templates, we need the actual matrix tensors
-        mat1 = input_nodes[-2]
-        mat2 = input_nodes[-1]
-
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "TMATemplateConfigMixin requires MMKernelInputs"
+        )
+        mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
             "B_ROW_MAJOR": not mat2.layout.is_transposed(),
@@ -1468,52 +1443,20 @@ class TMAConfigMixin(MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
-        template_kwargs.update(tma_opts)
+        # Get base template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            yield {**template_kwargs, **tma_opts}
 
 
-# Scaled MM-specific mixin for scaled MM templates (non-TMA)
-class ScaledMMConfigMixin(MMTemplateConfigMixin):
+# Scaled MM-specific mixin for scaled MM templates
+class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     """
-    Scaled MM-specific mixin that uses scaled configs and adds scaled MM options.
-    This is for non-TMA scaled MM templates only.
-    This inherits from MMTemplateConfigMixin and overrides config generation.
+    This is a base that handles the common case for ScaledMM
+
+    The TMA and non-TMA should build on top of this
     """
-
-    def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        """
-        override hook to enable checks for ScaledMM that are not valid for TMA version
-        """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for ScaledMMConfigMixin"
-        )
-        _, _, k = kernel_inputs.mnk_symbolic()
-        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
-            # Triton crashes however uncommon for real workloads
-            return False
-
-        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
-        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
-            return False
-        return True
-
-    def get_extra_kwargs(
-        self,
-        kernel_inputs: KernelInputs,
-        layout: Layout,
-        op_name: str,
-    ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
-        from ..kernel.mm_common import scale_mm_epilogue
-
-        kwargs.update(
-            dict(
-                suffix_args=kernel_inputs.count - 2,
-                epilogue_fn=scale_mm_epilogue(),
-                epilogue_fn_hash="scale_mm_epilogue",
-            )
-        )
-        return kwargs
 
     def get_template_configs(
         self,
@@ -1579,23 +1522,8 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             yield template_kwargs
 
 
-# Scaled TMA-specific mixin for scaled MM templates with TMA
-class ScaledTMAConfigMixin(ScaledMMConfigMixin):
-    """
-    Scaled TMA-specific mixin that extends ScaledMMConfigMixin with TMA functionality.
-    This is for scaled MM templates that use device TMA.
-    This inherits from ScaledMMConfigMixin and adds TMA-specific options.
-    """
-
-    def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        return True
-
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        TMA specific filtering, as num_warps=2 not safe for TMA
-        """
-        configs = [c for c in configs if c.num_warps != 2]
-        return super()._filter_configs(configs)
+class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
+    """Mixing for scaled mm with the regular mm template"""
 
     def get_extra_kwargs(
         self,
@@ -1603,18 +1531,39 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
         layout: Layout,
         op_name: str,
     ) -> dict[str, Any]:
-        # NOTE: reimplementation of the above, if we end up with more TMA-specific kwargs
-        # consider making a common base
         kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
-        # The TMA version does not need the epilogue stuff
-        kwargs.pop("suffix_args", None)
-        kwargs.pop("epilogue_fn", None)
-        kwargs.pop("epilogue_fn_hash", None)
-        kwargs["workspace_arg"] = get_tma_workspace_arg(
-            num_tma_descriptors=2,
-            device=kernel_inputs.device(),
+        from ..kernel.mm_common import scale_mm_epilogue
+
+        return {
+            **kwargs,
+            "suffix_args": kernel_inputs.count - 2,
+            "epilogue_fn": scale_mm_epilogue(),
+            "epilogue_fn_hash": "scale_mm_epilogue",
+        }
+
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
         )
-        return kwargs
+        _, _, k = kernel_inputs.mnk_symbolic()
+        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+            # Triton crashes however uncommon for real workloads
+            return False
+
+        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
+            return False
+        return True
+
+
+# Scaled TMA-specific mixin for scaled MM templates with TMA
+class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
+    """
+    Scaled TMA-specific mixin that extends BaseScaledMMConfigMixin with TMA functionality.
+    This is for scaled MM templates that use device TMA.
+    This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
+    """
 
     def get_template_configs(
         self,
@@ -1648,6 +1597,18 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA"""
 
 
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "mm", "cuda", register=torch.version.hip is None, op_name="addmm"
+)
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "bmm", "cuda", register=torch.version.hip is None, op_name="baddbmm"
+)
+class CUDAAddMMTemplateConfigHeuristic(AddMMConfigMixin, CUDAMMTemplateConfigHeuristic):
+    """Addmm specific mixin for CUDA"""
+
+
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic("mm-ah", "cuda", register=torch.version.hip is None)
@@ -1665,13 +1626,25 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
 @register_template_heuristic(
     "mm_persistent_tma", "cuda", register=torch.version.hip is None
 )
-class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
+class CUDAPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, CUDAConfigHeuristic
+):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
         super().__init__()
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "mm_persistent_tma", "cuda", register=torch.version.hip is None, op_name="addmm"
+)
+class CUDAAddmmPersistentTMATemplateConfigHeuristic(
+    AddMMConfigMixin, CUDAPersistentTMATemplateConfigHeuristic
+):
+    """Addmm specific mixin for CUDA"""
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
@@ -1838,6 +1811,12 @@ class CPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
     """Standard MM template heuristic for CPU"""
 
 
+@register_template_heuristic("mm", "cpu", op_name="addmm")
+@register_template_heuristic("bmm", "cpu", op_name="baddbmm")
+class CPUAddmmTemplateConfigHeuristic(AddMMConfigMixin, CPUMMTemplateConfigHeuristic):
+    """Addmm specific mixin for CPU"""
+
+
 @register_template_heuristic("mm", "cpu", op_name="scaled_mm")
 class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic):
     """Scaled MM template heuristic for CPU (non-TMA)"""
@@ -1894,6 +1873,12 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
 
+@register_template_heuristic("mm", "xpu", op_name="addmm")
+@register_template_heuristic("bmm", "xpu", op_name="baddbmm")
+class XPUAddmmTemplateConfigHeuristic(AddMMConfigMixin, XPUMMTemplateConfigHeuristic):
+    """Addmm specific mixin for XPU"""
+
+
 @register_template_heuristic("mm", "xpu", op_name="scaled_mm")
 class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic):
     """Scaled MM template heuristic for XPU (non-TMA)"""
@@ -1948,6 +1933,12 @@ class XPUMMPlusMMTemplateConfigHeuristic(
 @register_template_heuristic("bmm", "mtia")
 class MTIAMMTemplateConfigHeuristic(MMTemplateConfigMixin, MTIAConfigHeuristic):
     """Standard MM template heuristic for MTIA"""
+
+
+@register_template_heuristic("mm", "mtia", op_name="addmm")
+@register_template_heuristic("bmm", "mtia", op_name="baddbmm")
+class MTIAAddMMTemplateConfigHeuristic(AddMMConfigMixin, MTIAMMTemplateConfigHeuristic):
+    """Addmm specific mixin for MTIA"""
 
 
 @register_template_heuristic("mm", "mtia", op_name="scaled_mm")
