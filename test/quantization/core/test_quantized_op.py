@@ -166,8 +166,7 @@ def _quantize_fp8e4m3(t: torch.Tensor, channelwise: bool, scale: Optional[torch.
         scale = scale or t.abs().max().reshape([1]) / quant_max
         scale = torch.max(scale, eps) if isinstance(scale, torch.Tensor) else max(scale, eps.item())
         qt = t / scale
-    # Clamp to avoid NaN. Convert in two steps to align with fp32 -> fp16 -> fp8
-    qt = qt.clamp(-448, 448).half().to(torch.float8_e4m3fn)
+    qt = qt.to(torch.float8_e4m3fn)
     return qt, scale
 
 def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
@@ -4733,7 +4732,7 @@ class TestQuantizedLinear(TestCase):
         use_bias_list = [True, False]
         weight_quant_per_channel_list = [True, False]
         output_dtype_list = [None, torch.float32, torch.bfloat16]
-        y_scale, y_zp = 0.3, 0
+        y_scale, y_zp = 0.07, 0
         input_dim_list = [2, 3]
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
@@ -4831,7 +4830,6 @@ class TestQuantizedLinear(TestCase):
 
                 self.assertEqual(x.dim(), qy.dim())
                 self.assertEqual(y_ref.float(), qy.float())
-                assert not torch.isnan(qy).any()
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -7885,7 +7883,7 @@ class TestQuantizedConv(TestCase):
         strides=(),
         pads=(),
         dilations=(),
-        Y_scale=0.002,
+        Y_scale=0.02,
         use_bias=True,
         post_op=PointwisePostOp(),
         use_channelwise=True,
@@ -7962,7 +7960,9 @@ class TestQuantizedConv(TestCase):
 
         # Quantize reference results for comparison
         if qconv_output_dtype is None:
-            result_ref = _quantize_fp8e4m3(result_ref, False, Y_scale)[0]
+            Y_scale_t = torch.Tensor([Y_scale]).to(device)
+            # Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+            result_ref = result_ref.div(Y_scale_t).half().to(torch.float8_e4m3fn)
         else:
             result_ref = result_ref.to(qconv_output_dtype)
 
@@ -8039,8 +8039,7 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
-        self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
-        assert not torch.isnan(result).any()
+        assert torch.allclose(result.float(), result_ref.float(), atol=1e-6)
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
         # nd = 1,2,3 -> conv1d/2d/3d
@@ -8155,7 +8154,6 @@ class TestQuantizedConv(TestCase):
     @skipIfNoONEDNN
     def test_qconv3d_fp8(self):
         pointwise_post_op = PointwisePostOp()
-        torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
 

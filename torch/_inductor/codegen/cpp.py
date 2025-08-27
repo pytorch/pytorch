@@ -5158,19 +5158,11 @@ class CppScheduling(BaseScheduling):
                         ):
                             continue
                         # Local Buffer is a view of global buffer
-                        local_buffer_stride: list[int] = []
-                        stride = global_buffer_layout.stride[-1]
-                        local_buffer_size = get_call_ranges(scheduler_node)[
-                            size_offset:
-                        ]
-                        for sz in reversed(local_buffer_size):
-                            local_buffer_stride.insert(0, stride)
-                            stride *= sz
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
-                            local_buffer_size,
-                            local_buffer_stride,
+                            global_buffer_layout.size[size_offset:],
+                            global_buffer_layout.stride[size_offset:],
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):

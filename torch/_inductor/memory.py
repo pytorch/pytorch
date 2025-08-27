@@ -88,20 +88,13 @@ def get_freeable_input_buf(
         collections.defaultdict(OrderedSet)
     )
     dep_name_to_size: dict[str, int] = dict()
-
     for node in nodes:
         for dep in node.read_writes.reads:
-            if dep.name in graph_inputs:
-                dep_name = dep.name
-                # Subgraphs have a prefix for the name, cleanup the prefix
-                # before checking for known strings.
-                if V.graph.name:
-                    dep_name = dep_name.removeprefix(V.graph.name + "_")
-                if not dep_name.startswith(
-                    ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
-                ):
-                    dep_name_to_succ_nodes[dep.name].add(node)
-                    dep_name_to_size[dep.name] = _dep_size_hint(dep)
+            if dep.name in graph_inputs and not dep.name.startswith(
+                ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
+            ):
+                dep_name_to_succ_nodes[dep.name].add(node)
+                dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = dict()
@@ -286,11 +279,6 @@ def assign_memory_planning_info_for_scheduler_nodes(
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
         succ_nodes = node_to_succ_nodes[node]
-        pred_nodes = node_to_pred_nodes[node]
-
-        # make sure we do not make node a successor or predecessor of itself
-        succ_nodes.discard(node)
-        pred_nodes.discard(node)
 
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
@@ -689,7 +677,6 @@ def validate_graph_acyclic(nodes: list[BaseSchedulerNode]) -> None:
         path.append(node)
 
         for pred_node in node.mpi_node.pred_nodes:
-            assert pred_node != node
             dfs_visit(pred_node)
 
         path.pop()
