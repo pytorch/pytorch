@@ -203,6 +203,9 @@ class _DisableUpdateTensorTracker(threading.local):
 _disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
 
 
+_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT: dict[int, torch.fx.Node] = {}
+
+
 def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
     """
     Returns current state of disabling update tensor tracker.
@@ -1903,6 +1906,25 @@ class _ModuleStackTracer(PythonKeyTracer):
         self, root: Union[Module, Callable], concrete_args: Optional[dict[str, object]]
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
+
+        # NOTE [export non-strict fake tensor leak detection]
+        # In non-strict export, we don't have dynamo's side effect
+        # tracking logic which makes some cases hard to detect.
+        # In general, our detecting strategy is:
+        #  (1) We do gc.collect() before export and get the alive fake tensors
+        #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT)
+        #  (3) We query gc again to get alive fake tensors
+        #  (4) We take the delta between (1) and (3)
+        #  (5) Filter out fake tensors that are:
+        #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
+        #      (2) Associated with gm.meta
+        #  (6) Do ID match with the proxies
+
+        global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
+        _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
+
+        for key, val in self.tensor_tracker.items():
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
