@@ -1244,6 +1244,21 @@ class TestMPS(TestCaseMPS):
             torch.nn.functional.linear(torch.rand(size, device='cpu'),
                                        torch.rand(size, device='mps'))
 
+    def test_linear_non_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161640
+        # Slice tensors to force non-contiguity
+        large_weight = torch.randn(12, 8, device='mps')
+        weight_sliced = large_weight[::2, ::1]
+        weight_contiguous_equiv = weight_sliced.contiguous()
+        input_s = torch.randn(2, 8, device='mps')
+        result_sliced = torch.nn.functional.linear(input_s, weight_sliced)
+        result_contig = torch.nn.functional.linear(input_s, weight_contiguous_equiv)
+        input_cpu = input_s.cpu()
+        weight_sliced_cpu = weight_sliced.cpu()
+        result_sliced_cpu = torch.nn.functional.linear(input_cpu, weight_sliced_cpu)
+        self.assertEqual(result_contig, result_sliced, atol=1e-5, rtol=1e-5)
+        self.assertEqual(result_sliced.to("cpu"), result_sliced_cpu, atol=1e-5, rtol=1e-5)
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
