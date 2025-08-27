@@ -80,7 +80,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyObject* closure;
   TORCH_CHECK(false, "Python 3.15+ not supported");
 #else
-  PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
+  PyObject* closure = FUNC(frame)->func_closure;
 #endif
   for (int i = 0; i < co->co_nfreevars; i++) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));

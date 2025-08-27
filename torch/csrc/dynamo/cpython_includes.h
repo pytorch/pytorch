@@ -66,9 +66,9 @@ extern "C" {
 #if IS_PYTHON_3_14_PLUS
 #define FUNC(x) ((PyFunctionObject*)PyStackRef_AsPyObjectBorrow((x)->f_funcobj))
 #elif IS_PYTHON_3_12_PLUS
-#define FUNC(x) ((x)->f_funcobj)
+#define FUNC(x) ((PyFunctionObject*)(x)->f_funcobj)
 #else
-#define FUNC(x) ((x)->f_func)
+#define FUNC(x) ((PyFunctionObject*)(x)->f_func)
 #endif
 
 #ifdef __cplusplus
