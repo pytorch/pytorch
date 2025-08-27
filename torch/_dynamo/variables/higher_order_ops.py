@@ -77,8 +77,19 @@ def raise_hard_error_if_graph_break(reason):
             try:
                 return fn(*args, **kwargs)
             except (Unsupported, ObservedException) as e:
-                msg = " Scroll up to find out what causes the graph break."
-                raise UncapturedHigherOrderOpError(reason + msg) from e
+                import sys
+
+                if isinstance(e, Unsupported):
+                    exc = UncapturedHigherOrderOpError(
+                        f"{reason} Got {e.msg}", e.real_stack
+                    )
+                else:
+                    msg = e.msg if hasattr(e, "msg") else type(e)
+                    real_stack = e.real_stack if hasattr(e, "real_stack") else None
+                    exc = UncapturedHigherOrderOpError(
+                        f"{reason} Got {msg}", real_stack
+                    )
+                raise exc.with_traceback(sys.exc_info()[2]) from None
 
         return graph_break_as_hard_error
 
@@ -938,7 +949,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
+            source=AttrSource(self.source, "__call__"),
         ).call_function(tx, args, kwargs)
 
 
@@ -3415,7 +3426,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
-    "map": MapHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,

@@ -1890,6 +1890,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @skip_on_cpu
+    def test_dynamic_divisibility_guards(self, device, dtype):
+        """Test guards for divisible/non-divisible shape transitions"""
+        if device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
+
+        def score_mod(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def test_shape(S, backend):
+            """Test a single shape configuration"""
+            block_mask = create_block_mask(noop_mask, 1, 1, S, S, device=device)
+            sdpa_partial = create_attention(score_mod, block_mask=block_mask)
+
+            tensors = [
+                torch.randn(
+                    2, 4, S, 64, dtype=dtype, device=device, requires_grad=False
+                )
+                for _ in range(3)
+            ]
+
+            compiled_sdpa = torch.compile(sdpa_partial, backend=backend)
+            out, code = run_and_get_code(compiled_sdpa, *tensors)
+
+            # Check divisibility flag
+            is_divisible = S % 128 == 0
+            expected_flag = f"IS_DIVISIBLE : tl.constexpr = {is_divisible}"
+            self.assertIn(
+                expected_flag, str(code), f"S={S} should have {expected_flag}"
+            )
+
+            self.assertEqual(out.shape, (2, 4, S, 64))
+            return out, code
+
+        torch._dynamo.reset()
+        backend = CompileCounterWithBackend("inductor")
+
+        # Test divisible and non-divisible shapes
+        test_shapes = [256, 255, 383, 384]
+        _ = [test_shape(S, backend) for S in test_shapes]
+
+    @supported_platform
     def test_multiple_score_mod_calls(self, device):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=device)
         keys = [
@@ -4290,6 +4334,40 @@ class GraphModule(torch.nn.Module):
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
 
+    @largeTensorTest("38GB", "cuda")  # emperically
+    @skip_on_cpu
+    def test_int64_indexing_large_stride(self, device):
+        B = 1
+        H = 64
+        S = 2**20
+        D = 64
+        dtype = torch.float16
+
+        def _simple_causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        BLOCK_M = 1024
+        BLOCK_N = 1024
+
+        block_mask = torch.compile(create_block_mask)(
+            _simple_causal, B, H, S, S, device=device, BLOCK_SIZE=(BLOCK_M, BLOCK_N)
+        )
+
+        q = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+
+        # Test forward and backward pass
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        loss = out.sum()
+        loss.backward()
+
+        # Basic correctness checks, doing full comapre consumes too much memory :/
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertTrue(q.grad is not None)
+        self.assertTrue(k.grad is not None)
+        self.assertTrue(v.grad is not None)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
@@ -5952,6 +6030,56 @@ class TestLearnableBiases(InductorTestCase):
                 "grad_bias2",
             ],
         )
+
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+    )
+    @torch.compile
+    def test_learnable_bias_global_compiled(self, device, params):
+        batch_size = 1
+        num_heads = 1
+        seq_len = 128
+        head_dim = 16
+        d_model = num_heads * head_dim
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+
+        out_proj = nn.Linear(d_model, d_model, device=device)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        bias = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+            requires_grad=True,
+        )
+
+        def bias_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, q_idx, kv_idx]
+
+        out = flex_attention(
+            query=query,
+            key=key,
+            value=value,
+            score_mod=bias_mod,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+
+        attn_output = out_proj(out)
+        random_target = torch.randn(batch_size, seq_len, d_model, device=device)
+        loss = torch.nn.functional.mse_loss(attn_output, random_target)
+        loss.backward()
+
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
 
     @skip_on_cpu
     @common_utils.parametrize(
