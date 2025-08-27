@@ -76,9 +76,11 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
         alpha = kernel_inputs.get_scalar("alpha")
         beta = kernel_inputs.get_scalar("beta")
-        kwargs["alpha"] = alpha
-        kwargs["beta"] = beta
-        return kwargs
+        return {
+            **kwargs,
+            "alpha": alpha,
+            "beta": beta,
+        }
 
 
 @register_template_heuristic(aten_bias_addmm.uid, "cuda", op_name="addmm")
@@ -92,7 +94,7 @@ class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
         layout: Layout,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
-        if inductor_config.max_autotune or inductor_config.max_autotune_gemm:
+        if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
             # NOTE: this preserves the original logic that if there is not max-autotune
             # then we skip bias_addmm
             return
