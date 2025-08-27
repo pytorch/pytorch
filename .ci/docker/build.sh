@@ -116,7 +116,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     VISION=yes
     KATEX=yes
