@@ -2693,16 +2693,6 @@
   ],
   "GB0269": [
     {
-      "Gb_type": "Forced graph break on leaf function",
-      "Context": "",
-      "Explanation": "Forced graph break for nested graph break testing purposes",
-      "Hints": [
-        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
-      ]
-    }
-  ],
-  "GB0270": [
-    {
       "Gb_type": "unimplemented builtin op vars() with no arguments",
       "Context": "vars: {self} {args}",
       "Explanation": "Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
@@ -2711,7 +2701,7 @@
       ]
     }
   ],
-  "GB0271": [
+  "GB0270": [
     {
       "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
       "Context": "str(self.value)",
