@@ -332,7 +332,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // which requires the input tensor addresses to be aligned to a
   // 16 Byte boundary.
 
-  const bool isContig = stride_size == 1;
+  constexpr bool isContig = stride_size == 1;
   bool isAligned = true;
   constexpr int alignment = 16;
 
@@ -416,6 +416,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_alignedK_contig
       isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+      isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
 #endif
 
       if (stride_size > 1) {
