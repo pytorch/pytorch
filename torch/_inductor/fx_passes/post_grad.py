@@ -1560,6 +1560,7 @@ def native_matmul_pass(graph: torch.fx.Graph):
         extra_check=native_matmul_extra_check,
     )
     def addmm_to_mm_and_add(match: Match, inp, mat1, mat2, beta, alpha):
+        # constant propagation does not work well, so manually simplify it.
         def repl(inp, x1, x2, beta, alpha):
             if beta == 1 and alpha == 1:
                 return inp + x1 @ x2
@@ -1571,6 +1572,31 @@ def native_matmul_pass(graph: torch.fx.Graph):
                 return beta * inp + alpha * (x1 @ x2)
 
         match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
+
+    @register_graph_pattern(
+        CallFunction(
+            aten.baddbmm, 
+            KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2"),
+            beta = KeywordArg("beta"), alpha = KeywordArg("alpha")
+        ),
+        pass_dict=graph_pass[0],
+        extra_check=native_matmul_extra_check,
+    )
+    def baddbmm_to_bmm_and_badd(match: Match, inp, mat1, mat2, beta, alpha):
+        # constant propagation does not work well, so manually simplify it.
+        def repl(inp, x1, x2, beta, alpha):
+            if beta == 1 and alpha == 1:
+                return inp + x1 @ x2
+            elif beta == 1 and alpha != 1:
+                return inp + alpha * (x1 @ x2)
+            elif beta != 1 and alpha == 1:
+                return beta * inp + x1 @ x2
+            else:
+                return beta * inp + alpha * (x1 @ x2)
+
+        match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
+
+
 
     @register_lowering_pattern(
         CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
