@@ -215,7 +215,6 @@ def preprocess_test_in(
         "torchaudio",
         "xformers",
         "mamba_ssm",
-        "pybind11",
     ] + additional_package_to_move
     # Read current requirements
     target_path = Path(target_file)
