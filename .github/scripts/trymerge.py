@@ -794,20 +794,24 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def last_commit_sha(self) -> str:
+    def last_commit_sha(self, default: Optional[str] = None) -> str:
         # for commits, the oid is the sha
-        return str(self.last_commit().get("oid", ""))
+
+        if default is None:
+            return str(self.last_commit()["oid"])
+
+        return str(self.last_commit().get("oid", default))
 
     def get_merge_base(self) -> str:
         if self.merge_base:
             return self.merge_base
 
-        last_commit_oid = self.last_commit_sha()
+        last_commit_sha = self.last_commit_sha()
         # NB: We could use self.base_ref() here for regular PR, however, that doesn't
         # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
         # so let's just use main instead
         self.merge_base = gh_fetch_merge_base(
-            self.org, self.project, last_commit_oid, self.default_branch()
+            self.org, self.project, last_commit_sha, self.default_branch()
         )
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
@@ -1295,7 +1299,7 @@ class GitHubPR:
                 broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
                 flaky_checks=ignorable_checks.get("FLAKY", []),
                 unstable_checks=ignorable_checks.get("UNSTABLE", []),
-                last_commit_sha=self.last_commit_sha(),
+                last_commit_sha=self.last_commit_sha(default=""),
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
@@ -1372,8 +1376,9 @@ class GitHubPR:
         repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
 
         # Did the PR change since we started the merge?
+        pulled_sha = repo.show_ref(pr_branch_name)
         latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
-        if commit_to_merge != latest_pr_status.last_commit_sha():
+        if pulled_sha != latest_pr_status.last_commit_sha() or pulled_sha != commit_to_merge:
             raise RuntimeError(
                 "PR has been updated since CI checks last passed. Please rerun the merge command."
             )
@@ -2574,7 +2579,7 @@ def main() -> None:
                 broken_trunk_checks=[],
                 flaky_checks=[],
                 unstable_checks=[],
-                last_commit_sha=pr.last_commit_sha(),
+                last_commit_sha=pr.last_commit_sha(default=""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
                 skip_mandatory_checks=args.force,
