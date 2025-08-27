@@ -693,7 +693,7 @@ PrivatePoolState::PrivatePoolState(
   }
 }
 
-cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
+cudaError_t allocPrimitive(void** ptr, size_t size, AllocParamsT& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
@@ -784,9 +784,9 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
       // any potential exceptions in the cudaMallocMaybeCapturing function.
       auto sg = c10::make_scope_exit([&]() { lock.lock(); });
       lock.unlock();
-      cudaMallocMaybeCapturing(&ptr, p);
+      cudaMallocMaybeCapturing(ptr, p);
     } else {
-      cudaMallocMaybeCapturing(&ptr, p);
+      cudaMallocMaybeCapturing(ptr, p);
     }
     if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
       TORCH_CHECK(lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
@@ -1009,7 +1009,9 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     }
   }
 
-  void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
+  void freeBlocksAllocatedToPool(
+      PrivatePoolT* private_pool,
+      RestoreResult& rr) {
     auto pool_blocks = get_private_pool_head_blocks(private_pool);
 
     std::vector<Block*> head_blocks;
@@ -1057,7 +1059,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     Block* last_block = block;
 
     TORCH_INTERNAL_ASSERT(block->pool);
-    BlockPool& pool = *block->pool;
+    BlockPoolT& pool = *block->pool;
     const auto segment_len = segment.blocks.size();
 
     // allocate all blocks in the segment
@@ -1208,7 +1210,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     auto pool = graph_pools.find(pps.owner_id);
     TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
 
-    PrivatePool* private_pool = pool->second.get();
+    PrivatePoolT* private_pool = pool->second.get();
 
     freeBlocksAllocatedToPool(private_pool, rr);
 
@@ -1310,7 +1312,13 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
         });
 
     record_trace(
-        TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, mempool_id, nullptr);
+        TraceEntry::SNAPSHOT,
+        0,
+        total_active,
+        c10::cuda::getDefaultCUDAStream(),
+        0,
+        mempool_id,
+        nullptr);
     return result;
   }
 
