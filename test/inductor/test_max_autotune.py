@@ -2103,9 +2103,9 @@ class TestMaxAutotuneRemoteCache(TestCase):
                 choices.get_mm_configs(kernel_inputs, output_layout, "mm", "mm")
             )
 
-            for config in configs:
-                self.assertIn("ALLOW_TF32", config)
-                self.assertEqual(config["ALLOW_TF32"], True)
+            for cfg in configs:
+                self.assertIn("ALLOW_TF32", cfg)
+                self.assertEqual(cfg["ALLOW_TF32"], True)
 
 
 class _TestTritonTemplateCaller(TritonTemplateCaller):
