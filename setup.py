@@ -1461,7 +1461,9 @@ def configure_extension_build() -> tuple[
 
     # Adding extra requirements for ROCm builds
     if IS_ROCM:
-        extra_install_requires.append(f"rocm-composable-kernel {get_ck_dependency_string()}")
+        extra_install_requires.append(
+            f"rocm-composable-kernel {get_ck_dependency_string()}"
+        )
 
     # Cross-compile for M1
     if IS_DARWIN:
