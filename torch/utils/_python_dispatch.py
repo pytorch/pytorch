@@ -155,7 +155,7 @@ class TorchDispatchMode:
             f(x)
 
         The above example will not log anything if
-        ``LoggingMode.ignore_compile_internals`` is True.
+        ``LoggingMode.ignore_compile_internals()`` is True.
         torch.compile will fuse sin() and cos() into a single operation
         and this TorchDispatchMode will not be passed sin and cos.
 

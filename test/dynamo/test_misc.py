@@ -279,8 +279,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             foo(x)
 
         self.assertEqual(len(_checksums), 2)
-        # If you are getting "3" here, then that means the .abs().sum()
-        # are being compiled instead of the contents of g(x).
+        # The correct result here is 1: Dynamo should capture the `g` frame.
         self.assertEqual(counters["frames"]["total"], 1)
         self.assertEqual(counters["frames"]["ok"], 1)
 
