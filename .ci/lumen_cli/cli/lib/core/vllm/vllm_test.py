@@ -1,3 +1,4 @@
+from ast import Tuple
 import logging
 import os
 import re
@@ -7,7 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
@@ -19,8 +20,11 @@ from cli.lib.common.pip_helper import (
     run_python,
 )
 from cli.lib.common.utils import run_command, working_directory
-from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library
-
+from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library, write_gh_step_summary
+from cli.lib.common.gh_summary import (
+    summarize_content_from_file,
+    summarize_wheels,
+    gh_summary_path)
 
 logger = logging.getLogger(__name__)
 
@@ -91,33 +95,60 @@ class VllmTestRunner(BaseRunner):
         logger.info("Display VllmTestParameters %s", params)
         self._set_envs(params)
 
-        clone_vllm(dst=self.work_directory)
+        vllm_commit = clone_vllm(dst=self.work_directory)
         with working_directory(self.work_directory):
             remove_dir(Path("vllm"))
             self._install_wheels(params)
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
         check_versions()
+        return vllm_commit
 
     def run(self):
         """
         main function to run vllm test
         """
-        self.prepare()
-        with working_directory(self.work_directory):
-            if self.test_type == TestInpuType.TEST_PLAN:
-                if self.num_shards > 1:
-                    run_test_plan(
-                        self.test_plan,
-                        "vllm",
-                        sample_vllm_test_library(),
-                        self.shard_id,
-                        self.num_shards,
-                    )
+        vllm_commit = self.prepare()
+        try:
+            with working_directory(self.work_directory):
+                if self.test_type == TestInpuType.TEST_PLAN:
+                    if self.num_shards > 1:
+                        run_test_plan(
+                            self.test_plan,
+                            "vllm",
+                            sample_vllm_test_library(),
+                            self.shard_id,
+                            self.num_shards,
+                        )
+                    else:
+                        run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
                 else:
-                    run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
-            else:
-                raise ValueError(f"Unknown test type {self.test_type}")
+                    raise ValueError(f"Unknown test type {self.test_type}")
+        finally:
+            self.vllm_test_gh_summary(vllm_commit,)
+
+    def vllm_test_gh_summary(self, vllm_commit:str, failure_tests: List[Any] = []):
+        if not gh_summary_path():
+            return logger.info("Skipping, not detect GH Summary env var....")
+        logger.info("Generate GH Summary ...")
+
+        vllm_sha_url = f"[{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
+        write_gh_step_summary(
+            f"""
+            ## Build vllm against Pytorch CI
+            **Vllm Commit**: `{vllm_sha_url}`
+            """
+        )
+        torch_sha = os.getenv("GITHUB_SHA")
+        if torch_sha:  # only can grab this in github action
+            torch_sha_url = (
+                f"[{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
+            )
+            write_gh_step_summary(
+                f"""
+             **Pytorch Commit**: `{torch_sha_url}`
+             """
+            )
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
