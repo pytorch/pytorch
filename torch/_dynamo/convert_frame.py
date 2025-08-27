@@ -524,6 +524,8 @@ class ConvertFrameBox:
 
 
 def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
+    if config.debug_force_graph_break_on_leaf_return:
+        return False
     if tx is None:
         return _get_error_on_graph_break()
     return tx.error_on_graph_break
