@@ -14,7 +14,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from ..virtualized import V
-
+from . import custom_philox_rand
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -105,6 +105,25 @@ def replace_random(
     if generator is not None:
         return
 
+    mode = {
+        aten.rand: "rand",
+        aten.randn: "randn",
+    }[
+        match.output_node().target.overloadpacket  # type: ignore[union-attr]
+    ]  # type: ignore[union-attr]
+    device = get_device(device)
+    # For uniform rand (e.g., used by dropout), call our custom Triton op directly
+    
+    if mode == "rand":
+        def replacement(size):
+            # dtype: keep caller's dtype if provided, else default fp32
+            use_dtype = dtype if dtype is not None else torch.float32
+            return torch.ops.my_triton_op.philox_rand(size, device, use_dtype)
+
+        match.replace_by_example(replacement, [size])
+        return
+
+    # Fallback (e.g., randn) keeps existing inductor behavior
     def replacement(size):
         result = inductor_prims.random(
             size, inductor_prims.seed(device), mode, **default_kwargs(device)
@@ -113,13 +132,6 @@ def replace_random(
             result = result.to(dtype)
         return result
 
-    mode = {
-        aten.rand: "rand",
-        aten.randn: "randn",
-    }[
-        match.output_node().target.overloadpacket  # type: ignore[union-attr]
-    ]  # type: ignore[union-attr]
-    device = get_device(device)
     match.replace_by_example(replacement, [size])
 
 
