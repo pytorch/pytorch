@@ -33,12 +33,13 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     TRITON_HAS_CPU,
 )
-from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
 
 
 if HAS_GPU:
     import triton
     import triton.language as tl
+
+    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
 
 
 @requires_gpu()
