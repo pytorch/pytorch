@@ -4340,7 +4340,7 @@ class GraphModule(torch.nn.Module):
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
 
-    @largeTensorTest("38GB", "cuda")  # emperically
+    @largeTensorTest("38GB", "cuda")  # empirically
     @skip_on_cpu
     @unittest.skipIf(IS_FBCODE, "Skip large tensor test in fbcode")
     def test_int64_indexing_large_stride(self, device):
@@ -4369,7 +4369,7 @@ class GraphModule(torch.nn.Module):
         loss = out.sum()
         loss.backward()
 
-        # Basic correctness checks, doing full comapre consumes too much memory :/
+        # Basic correctness checks, doing full compare consumes too much memory :/
         self.assertEqual(out.shape, (B, H, S, D))
         self.assertTrue(q.grad is not None)
         self.assertTrue(k.grad is not None)
