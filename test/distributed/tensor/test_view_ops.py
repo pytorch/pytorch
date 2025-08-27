@@ -243,6 +243,41 @@ class TestViewOps(DTensorTestBase):
             shard.view(-1)
 
     @with_comms
+    def test_flatten_adjacent(self):
+        mesh_shape = (dist.get_world_size() // 2, 2)
+        device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
+        )
+
+        # Special case where flattening 2 sharded dims can be supported without communication
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0), Shard(1)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            # TODO should also test view
+            flat_dtensor = dtensor.reshape(-1)
+        self.assertEqual(flat_dtensor.placements, [Shard(0), Shard(0)])
+        self.assertEqual(comm_mode.get_total_counts(), 0, "Expected no redistribution.")
+
+    @with_comms
+    def test_flatten_size_1(self):
+        mesh_shape = (dist.get_world_size() // 2, 2)
+        device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
+        )
+
+        # Special case where flattening 2 sharded dims can work locally
+        tensor = torch.randn((8, 2))
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0), Shard(1)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            flat_dtensor = dtensor.reshape(-1)
+        self.assertEqual(flat_dtensor.placements, [Shard(0), Shard(1)])
+        self.assertEqual(comm_mode.get_total_counts(), 0, "Expected no redistribution.")
+
+    @with_comms
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)
         self.device_mesh = init_device_mesh(
