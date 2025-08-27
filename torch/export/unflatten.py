@@ -134,6 +134,11 @@ class _SubmoduleBase:
     _ty: Optional[str]
 
     def type_name(self) -> Optional[str]:
+        """
+        Subclass of this class - InterpreterModule, InterpreterModuleDispatcher, represents
+        corresponding model in eager model. To get this type information for those modules
+        in eager model we need to use this method.
+        """
         return self._ty
 
 
