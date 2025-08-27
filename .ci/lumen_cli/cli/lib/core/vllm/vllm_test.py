@@ -20,11 +20,18 @@ from cli.lib.common.pip_helper import (
     run_python,
 )
 from cli.lib.common.utils import run_command, working_directory
-from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library, write_gh_step_summary
+from cli.lib.core.vllm.lib import (
+    clone_vllm,
+    run_test_plan,
+    sample_vllm_test_library,
+    write_gh_step_summary,
+)
 from cli.lib.common.gh_summary import (
     summarize_content_from_file,
+    summarize_failures_by_test_command,
     summarize_wheels,
-    gh_summary_path)
+    gh_summary_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +116,11 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         vllm_commit = self.prepare()
+
+        test_summary_path = (
+            Path("tmp_pytest_report").resolve().mkdir(parents=True, exist_ok=True)
+        )
+        test_summary_result = []
         try:
             with working_directory(self.work_directory):
                 if self.test_type == TestInpuType.TEST_PLAN:
@@ -119,15 +131,17 @@ class VllmTestRunner(BaseRunner):
                             sample_vllm_test_library(),
                             self.shard_id,
                             self.num_shards,
+                            test_summary_path=test_summary_path,
+                            test_summary_result=test_summary_result,
                         )
-                    else:
-                        run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
                 else:
                     raise ValueError(f"Unknown test type {self.test_type}")
         finally:
-            self.vllm_test_gh_summary(vllm_commit,)
+            self.vllm_test_gh_summary(vllm_commit, test_summary_result)
 
-    def vllm_test_gh_summary(self, vllm_commit:str, failure_tests: List[Any] = []):
+    def vllm_test_gh_summary(
+        self, vllm_commit: str, test_summary_results: list[tuple[str, str]]
+    ):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
@@ -146,9 +160,10 @@ class VllmTestRunner(BaseRunner):
             )
             write_gh_step_summary(
                 f"""
-             **Pytorch Commit**: `{torch_sha_url}`
-             """
+                **Pytorch Commit**: `{torch_sha_url}`
+                """
             )
+            summarize_failures_by_test_command(test_summary_results)
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)

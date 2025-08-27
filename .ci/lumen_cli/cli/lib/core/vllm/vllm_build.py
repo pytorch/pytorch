@@ -210,8 +210,14 @@ class VllmBuildRunner(BaseRunner):
              """
             )
         vllm_artifact_dir = inputs.output_dir / "wheels"
-        summarize_content_from_file(vllm_artifact_dir, "build_summary.txt", title="Vllm build env pip package summary")
-        summarize_wheels(inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts")
+        summarize_content_from_file(
+            vllm_artifact_dir,
+            "build_summary.txt",
+            title="Vllm build env pip package summary",
+        )
+        summarize_wheels(
+            inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts"
+        )
         summarize_wheels(vllm_artifact_dir, max_depth=3, title="Vllm Wheels Artifacts")
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
