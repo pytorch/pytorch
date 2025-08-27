@@ -13,8 +13,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FP8,
     tf32_off,
 )
 from torch.testing._internal.common_utils import (
@@ -280,8 +278,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "Scaled mm requires bf16 support")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Scaled mm requires fp8 support")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
