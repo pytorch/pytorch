@@ -28,6 +28,11 @@ class SampleModelTwoInputs(torch.nn.Module):
         return (y, z)
 
 
+class SampleModelReduction(torch.nn.Module):
+    def forward(self, x):
+        return x.sum()
+
+
 class SampleModelForDynamicShapes(torch.nn.Module):
     def forward(self, x, b):
         return x.relu(), b.sigmoid()
@@ -65,12 +70,25 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         assert onnx_program is not None
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
+        return onnx_program
 
     def test_args_normalization_with_no_kwargs(self):
         self.assert_export(
             SampleModelTwoInputs(),
             (torch.randn(1, 1, 2), torch.randn(1, 1, 2)),
         )
+
+    def test_lower_opset_support(self):
+        # First test that opset 18 (torchlib opset works)
+        onnx_program = self.assert_export(
+            SampleModelReduction(), (torch.randn(1, 1, 2),), opset_version=18
+        )
+        self.assertEqual(onnx_program.model.opset_imports[""], 18)
+
+        onnx_program = self.assert_export(
+            SampleModelReduction(), (torch.randn(1, 1, 2),), opset_version=16
+        )
+        self.assertEqual(onnx_program.model.opset_imports[""], 16)
 
     def test_symbolic_argument_user_input_is_supported_by_report_and_call(self):
         class constant_plus_tensor_inputs(torch.nn.Module):
