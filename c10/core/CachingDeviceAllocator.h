@@ -415,8 +415,8 @@ struct BlockPool {
   BlockPool(bool small, PrivatePool<BlockT>* private_pool = nullptr)
       : blocks(BlockComparatorSize<BlockT>()),
         unmapped(BlockComparatorAddress<BlockT>()),
-        is_small_(small),
-        owner_PrivatePool_(private_pool) {}
+        is_small(small),
+        owner_PrivatePool(private_pool) {}
 
   // Add a Block into blocks set with updating gc counter.
   std::pair<
@@ -428,15 +428,11 @@ struct BlockPool {
   }
 
   MempoolId_t owner_MempoolId() const {
-    if (owner_PrivatePool_) {
-      return owner_PrivatePool_->id();
+    if (owner_PrivatePool) {
+      return owner_PrivatePool->id();
     } else {
       return {0, 0};
     }
-  }
-
-  bool is_small() const {
-    return is_small_;
   }
 
   // Returns the statistic types tracked by this BlockPool based on its size
@@ -445,7 +441,7 @@ struct BlockPool {
     StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        is_small_ ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+        is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
     return stat_types;
   }
 
@@ -453,14 +449,16 @@ struct BlockPool {
   // insert block directly into this set. Use `insert_into_blocks` instead to
   // ensure proper handling by the garbage collection mechanism.
   std::set<BlockT*, BlockComparatorSize<BlockT>> blocks{};
+
   // Unmapped but reusable blocks to support expandable segments.
   std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped{};
 
- private:
   // Indicates whether this pool manages small or large blocks.
-  bool is_small_;
+  bool is_small;
+
   // Pointer to the PrivatePool that owns this BlockPool, if any.
-  PrivatePool<BlockT>* owner_PrivatePool_;
+  PrivatePool<BlockT>* owner_PrivatePool;
+
   // Counter for the number of get_free_blocks made. This is used to track gc.
   size_t get_free_blocks_call_count{0};
 };
