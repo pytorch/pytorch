@@ -177,7 +177,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
 RUN cat torch_build_versions.txt
-
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
 #################### BASE BUILD IMAGE ####################

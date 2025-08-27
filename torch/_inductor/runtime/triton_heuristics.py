@@ -753,6 +753,25 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
+
+        # Simulate JIT Hook call
+        if (
+            torch._inductor.config.run_jit_post_compile_hook
+            and knobs
+            and getattr(knobs.runtime, "jit_post_compile_hook", None)
+        ):
+            try:
+                knobs.runtime.jit_post_compile_hook(
+                    key=getattr(self.fn, "cache_key", self.kernel_hash or str(self.fn)),
+                    repr=getattr(self.fn, "src", None),
+                    fn=self.fn,
+                    compile=binary,
+                    is_manual_warmup=False,
+                    already_compiled=True,
+                )
+            except Exception:
+                log.exception("jit_post_compile_hook failed")
+
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
@@ -2512,7 +2531,7 @@ def _reduction_configs(
                 register_intensive=register_intensive,
             )
 
-    def make_outer_config():
+    def outer_config_opt():
         # Default to 64 for vectorized loads
         max_x_block, x_block = 256, 64
         load_factor = inductor_meta.get("num_load", 0)
@@ -2565,12 +2584,15 @@ def _reduction_configs(
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
+
+    outer_config = make_config(64, 8, register_intensive=register_intensive)
+    if not torch.version.hip:
+        outer_config = outer_config_opt()
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:
         pass

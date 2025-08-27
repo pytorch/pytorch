@@ -62,6 +62,7 @@ struct TORCH_API ExperimentalConfig {
       bool disable_external_correlation = false,
       bool profile_all_threads = false,
       bool capture_overload_names = false,
+      bool record_python_gc_info = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
   explicit operator bool() const;
@@ -101,6 +102,12 @@ struct TORCH_API ExperimentalConfig {
   /* controls whether overload names are queried from an ATen
    * function schema and stored in the profile  */
   bool capture_overload_names;
+
+  /*
+   * Controls whether or not python gc info is recorded. This is used to
+   * determine if gc collect is slowing down your profile.
+   */
+  bool record_python_gc_info;
 
   /*
    * A custom_profiler_config option is introduced to allow custom backends

@@ -30,7 +30,7 @@ jobs:
     name: Test check_binary.sh for Linux CUDA
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
-      runner: linux.4xlarge.nvidia.gpu
+      runner: linux.g4dn.4xlarge.nvidia.gpu
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
       script: |

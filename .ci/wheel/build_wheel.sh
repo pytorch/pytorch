@@ -128,7 +128,7 @@ export MACOSX_DEPLOYMENT_TARGET=10.15
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 SETUPTOOLS_PINNED_VERSION="==70.1.0"
-PYYAML_PINNED_VERSION="=5.3"
+PYYAML_PINNED_VERSION="==5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=true
@@ -137,7 +137,7 @@ case $desired_python in
         echo "Using 3.14 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
         desired_python="3.14.0rc1"
@@ -147,7 +147,7 @@ case $desired_python in
         echo "Using 3.14t deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
         desired_python="3.14.0rc1"
         RENAME_WHEEL=false
@@ -156,7 +156,7 @@ case $desired_python in
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
         desired_python="3.13"
@@ -166,35 +166,35 @@ case $desired_python in
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
         echo "Using 3.12 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.11)
         echo "Using 3.11 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.9)
         echo "Using 3.9 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     *)
         echo "Using default deps"
-        NUMPY_PINNED_VERSION="=1.11.3"
+        NUMPY_PINNED_VERSION="==1.11.3"
         ;;
 esac
 
@@ -203,8 +203,13 @@ tmp_env_name="wheel_py$python_nodot"
 conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
 source activate "$tmp_env_name"
 
-retry pip install -r "${pytorch_rootdir}/requirements-build.txt"
-pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
+PINNED_PACKAGES=(
+    "setuptools${SETUPTOOLS_PINNED_VERSION}"
+    "pyyaml${PYYAML_PINNED_VERSION}"
+    "numpy${NUMPY_PINNED_VERSION}"
+)
+retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements-build.txt"
+pip install requests ninja typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 

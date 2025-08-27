@@ -1814,7 +1814,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)
         example_value = torch.nn.Parameter(
-            tx.output.example_value_from_input_node(data.as_proxy().node)
+            tx.output.example_value_from_input_node(data.as_proxy().node),
+            requires_grad=requires_grad,
         )
         result = VariableTracker.build(tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
