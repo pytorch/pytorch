@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import Any
 
 from cli.lib.common.git_helper import clone_external_repo
