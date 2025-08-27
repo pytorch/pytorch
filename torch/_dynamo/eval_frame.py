@@ -36,6 +36,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -739,7 +740,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.wrap_top_frame or (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -758,13 +761,13 @@ class _TorchDynamoContext:
             callback = self.callback  # type: ignore[assignment]
 
         is_jit_tracing = torch._C._is_tracing
-        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
-                if is_fx_tracing():
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -1219,7 +1222,8 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
+        error_on_graph_break=nopython
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1760,6 +1764,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
