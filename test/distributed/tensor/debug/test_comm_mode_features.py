@@ -11,7 +11,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfHpu
+from torch.testing._internal.common_utils import run_tests, skipIfHpu, TEST_XPU, xfailIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -221,6 +221,7 @@ class TestCommModeFeatures(DTensorTestBase):
 
     @skipIfHpu
     @skip_unless_torch_gpu
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1555
     @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
