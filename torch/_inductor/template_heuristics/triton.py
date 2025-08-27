@@ -1458,7 +1458,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         }
         # Get base template configs from superclass
         for template_kwargs in super().get_template_configs(
-            kernel_inputs, layout, op_name
+            kernel_inputs, layout, op_name, max_autotune
         ):
             yield {**template_kwargs, **tma_opts}
 
