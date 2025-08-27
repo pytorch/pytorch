@@ -18,6 +18,7 @@ import re
 import shutil
 import statistics
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import time
@@ -108,7 +109,7 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -1729,7 +1730,8 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        can_use_tma(*matrices, add_guards=add_guards)
+        all(len(m.get_size()) == 2 for m in matrices)
+        and can_use_tma(*matrices, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 
@@ -3152,15 +3154,16 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
 
 
 def get_current_backend() -> str:
+    """Get the codegen backend for the current graph, or throw."""
     from torch._inductor.virtualized import V
 
-    device_str = V.graph.get_current_device_or_throw().type
-    if device_str == "cpu":
-        return config.cpu_backend
-    elif device_str == "mps":
-        return "mps"
-    else:
-        return config.cuda_backend
+    device: torch.device = V.graph.get_current_device_or_throw()
+    device_interface: type[DeviceInterface] = get_interface_for_device(device.type)
+
+    device_inductor_backend: Optional[str] = device_interface.inductor_backend()
+    if device_inductor_backend is None:
+        raise ValueError(f"Couldn't get an Inductor backend for device {device.type}")
+    return device_inductor_backend
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -3531,3 +3534,30 @@ def maybe_log_cudagraph_partition(
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)
+
+
+def python_subprocess_env() -> dict[str, str]:
+    """
+    Get a base environment for running Python subprocesses.
+    """
+
+    env = {
+        # Inherit the environment of the current process.
+        **os.environ,
+        # Set the PYTHONPATH so the subprocess can find torch.
+        "PYTHONPATH": os.environ.get(
+            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+        ),
+    }
+
+    # Set PYTHONHOME for internal builds, to account for builds that bundle the
+    # runtime.  Otherwise they will use the libraries and headers from the
+    # platform runtime instead.
+    #
+    # This can't be done for external builds.  The process can be run from a
+    # venv and that won't include Python headers.  The process needs to be able
+    # to search for and find the platform runtime.
+    if config.is_fbcode():
+        env["PYTHONHOME"] = sysconfig.get_path("data")
+
+    return env

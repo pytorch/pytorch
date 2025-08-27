@@ -2656,7 +2656,6 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
-    @unittest.expectedFailure  # cuDNN currently doesn't support this on SM100+/fails graph validation
     def test_cudnn_attention_d256_heuristic(self, device):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -2667,18 +2666,24 @@ class TestSDPACudaOnly(NNTestCase):
         v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION], set_priority=True):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-            actual.backward(torch.randn_like(actual))
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous().to(torch.float32),
-                key.contiguous().to(torch.float32),
-                value.contiguous().to(torch.float32),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
+        def test():
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION], set_priority=True):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+                actual.backward(torch.randn_like(actual))
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                math_ref = torch.nn.functional.scaled_dot_product_attention(
+                    query.contiguous().to(torch.float32),
+                    key.contiguous().to(torch.float32),
+                    value.contiguous().to(torch.float32),
+                    attn_mask=None, dropout_p=0.0, is_causal=False)
+            self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+        if torch.cuda.get_device_capability() in [(9, 0)]:
+            test()
+        else:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                test()
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
@@ -4118,9 +4123,6 @@ class TestSDPACudaOnly(NNTestCase):
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
     Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
-
-    Note that as SDPBackend.OVERRIDEABLE is not managed by sdpa_kernel so that
-    math ref has to be called explicitly via torch.ops.aten._scaled_dot_product_attention_math.
     """
 
     @parametrize("type", ["dense"])
@@ -4146,7 +4148,6 @@ class TestSDPAXpuOnly(NNTestCase):
         v_shape = SdpaShape(batch, num_heads, 2, head_dim_v)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
@@ -4184,7 +4185,6 @@ class TestSDPAXpuOnly(NNTestCase):
         v_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)
 
@@ -4254,18 +4254,6 @@ class TestSDPAXpuOnly(NNTestCase):
         for permute_order in permute_orders:
             test_attention(list(permute_order) + [3])
 
-    def test_backends_flash_fallback_to_overrideable(self, device):
-        dtype = torch.bfloat16
-        q_shape = SdpaShape(1, 1, 8, 16)
-        kv_shape = SdpaShape(1, 1, 12, 16)
-        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
-        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
-        q, k, v = make_q(), make_kv(), make_kv()
-        warning_str = "Flash Attention is not supported on XPU, falling back to overrideable kernel."
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, warning_str):
-                _ = F.scaled_dot_product_attention(q, k, v)
-
     def test_backends_set_to_math(self, device):
         dtype = torch.bfloat16
         q_shape = SdpaShape(1, 1, 8, 16)
@@ -4277,6 +4265,17 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertTrue(torch._C._get_math_sdp_enabled())
             self.assertFalse(torch._C._get_overrideable_sdp_enabled())
             _ = F.scaled_dot_product_attention(q, k, v)
+
+    def test_default_priority_order(self, device):
+        # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
+        # For xpu backend, we need to make sure that overrideable > math > flash
+        from torch.nn.attention import _cur_sdpa_kernel_backends
+        default_priority = _cur_sdpa_kernel_backends(with_priority=True)
+        flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
+        overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
+        math_index = default_priority.index(SDPBackend.MATH)
+        self.assertTrue(overrideable_index < math_index < flash_index,
+                        f"Expected overrideable < math < flash, got {overrideable_index}, {math_index}, {flash_index}")
 
     def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
         dtype = torch.bfloat16
