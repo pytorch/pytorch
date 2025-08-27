@@ -158,6 +158,19 @@ def _embedding_dense_backward(
     )
 
 
+# TODO: for now, inductor doesn't handle asserts
+# because the condition is symbol -> tensor in the graph.
+@register_decomposition([aten._assert_async.msg])
+def assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
+    return
+
+
+# Following `assert_async_msg_decomp` and implement as non-op.
+@register_decomposition([aten._functional_assert_async.msg])
+def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
+    return
+
+
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(
     symbol: torch.SymInt,
