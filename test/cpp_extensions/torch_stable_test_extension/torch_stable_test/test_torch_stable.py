@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import (
 
 if not IS_WINDOWS:
 
-    class TestLibtorchAgnostic(TestCase):
+    class TestTorchStable(TestCase):
         def test_setup_fails(self):
             with self.assertRaisesRegex(RuntimeError, "build failed for cpp extension"):
                 install_cpp_extension(extension_root=Path(__file__).parent.parent)
