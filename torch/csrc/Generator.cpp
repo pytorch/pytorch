@@ -11,7 +11,6 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/detail/XPUHooksInterface.h>
-#include <c10/core/impl/GeneratorRegistry.h>
 
 #include <structmember.h>
 #include <utility>
@@ -55,15 +54,10 @@ static PyObject* THPGenerator_pynew(
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
-  } else if (device_type == at::kCUDA) {
+  } else {
     self->cdata = globalContext()
                       .getAcceleratorHooksInterface(device_type)
                       .getNewGenerator(device.index());
-  } else if (c10::impl::hasGenerator(device_type)) {
-    self->cdata = at::Generator(c10::impl::makeGenerator(device));
-  } else {
-    throw std::runtime_error("No generator available for device type: " +
-                             c10::toString(device_type));
   }
 
   return (PyObject*)self.release();
