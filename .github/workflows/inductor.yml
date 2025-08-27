@@ -53,7 +53,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      sync-tag: inductor-build
       test-matrix: |
         { include: [
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
@@ -83,7 +82,6 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      sync-tag: inductor-cpu-build
       test-matrix: |
         { include: [
           { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
