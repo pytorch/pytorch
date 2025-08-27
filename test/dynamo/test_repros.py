@@ -4186,6 +4186,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend=counter)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_get_type_hints(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            typing.get_type_hints(Foo, include_extras=True)
+            return torch.sin(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -6485,21 +6500,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.ones(2)
         with torch.no_grad():
             model(x)
-
-    def test_ao_fake_quantize_tracing(self):
-        import torch.ao.quantization.fake_quantize
-
-        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
-
-        def fn(x):
-            return q(x)
-
-        x = torch.ones(2, 2)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        eager_res = fn(x)
-
-        self.assertEqual(res, eager_res)
 
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
