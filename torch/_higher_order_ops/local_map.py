@@ -165,19 +165,17 @@ def create_hop_fw_bw(
         )
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
-        if "custom" not in new_fw_gm.meta:
-            new_fw_gm.meta["custom"] = {}
-        if "custom" not in new_bw_gm.meta:
-            new_bw_gm.meta["custom"] = {}
-        local_map_kwargs = fw_gm.meta["custom"]["local_map_kwargs"]  # type: ignore[attr-defined]
+        local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
 
-        new_fw_gm.meta["custom"]["local_map_kwargs"] = local_map_kwargs
-        # TODO: hold up, this flipping might be confusing af
-        new_bw_gm.meta["custom"]["local_map_kwargs"] = {
-            # Okay because Autoparallel assumes same sharding between param and grads
-            "in_placements": local_map_kwargs["out_placements"],
-            "out_placements": local_map_kwargs["in_placements"],
-        }
+        new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
+        new_bw_gm.meta["local_map_kwargs"] = local_map_kwargs
+        # Okay because Autoparallel assumes same sharding between param and grads
+        new_bw_gm.meta["local_map_kwargs"]["in_placements"] = local_map_kwargs[
+            "out_placements"
+        ]
+        new_bw_gm.meta["local_map_kwargs"]["out_placements"] = local_map_kwargs[
+            "in_placements"
+        ]
 
         return new_fw_gm, new_bw_gm, num_fw_outputs
 
@@ -270,13 +268,11 @@ def proxy_mode_key_common(
     )
 
     # extract local_map args, post-dispatch operates on GraphModules
-    assert gm.meta["custom"]["local_map_kwargs"]
-    local_map_kwargs = gm.meta["custom"]["local_map_kwargs"]
+    assert gm.meta["local_map_kwargs"]
+    local_map_kwargs = gm.meta["local_map_kwargs"]
 
     # propagate local_map args to the call_function node
-    if "custom" not in out_proxy.node.meta:
-        out_proxy.node.meta["custom"] = {}
-    out_proxy.node.meta["custom"]["local_map_kwargs"] = local_map_kwargs
+    out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

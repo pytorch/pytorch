@@ -3452,9 +3452,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     @classmethod
     def should_wrap_in_hop(cls, value):
         if not torch.distributed.is_available():
-            return True
+            return False
 
         from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
+
+        # check is important to avoid subclass dispatch
+        if type(value) != type(_local_map_wrapped):
+            return False
 
         return value == _local_map_wrapped and cls._enabled
 
@@ -3503,9 +3507,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
-        if "custom" not in body_gmod.meta:
-            body_gmod.meta["custom"] = {}
-        body_gmod.meta["custom"]["local_map_kwargs"] = {
+        body_gmod.meta["local_map_kwargs"] = {
             "out_placements": out_placements.value,
             "in_placements": in_placements.value,
             "redistribute_inputs": redistribute_inputs.value,
