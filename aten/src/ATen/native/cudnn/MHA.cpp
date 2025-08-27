@@ -179,7 +179,7 @@ bool use_ragged_in_dense(
     TORCH_WARN_ONCE(
         "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
         "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
-        "Falling back to regualr dense case, which may trigger excessive recompilation.");
+        "Falling back to regular dense case, which may trigger excessive recompilation.");
   }
   return all_bshd;
 }
@@ -765,7 +765,7 @@ auto build_graph_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1194,7 +1194,7 @@ auto build_graph_backward_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1371,7 +1371,7 @@ void run_cudnn_SDP_fprop(
   cudnnHandle_t handle = getCudnnHandle();
 
   // NB: The key initialization will round up sequence length, stride data etc.
-  // if use_ragged_in_dense is enabled (to allow multiple sequence lenghths to
+  // if use_ragged_in_dense is enabled (to allow multiple sequence lengths to
   // reuse the same cached value/graph)
   auto key = MHACacheKeyWrapper(
       b,
@@ -1815,7 +1815,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   TORCH_CHECK(
       !attn_bias.has_value(),
-      "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+      "attn_bias not yet supported with cuDNN Attention and NestedTensor");
 
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
