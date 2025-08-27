@@ -915,12 +915,12 @@ class GitHubPR:
                     sha = sha_from_committed_event(event)
                     if sha:
                         head = sha
-                        print(f"Timeline: Found committed event with SHA {sha}")
+                        print(f"Timeline: Found commit event for SHA {sha}")
                 elif etype == "head_ref_force_pushed":
                     sha = sha_from_force_push_after(event)
                     if sha:
                         head = sha
-                        print(f"Timeline: Found force push event with SHA {sha}")
+                        print(f"Timeline: Found force push event for SHA {sha}")
                 elif etype == "commented":
                     if event.get("id") == comment_id:
                         print(f"Timeline: Found final comment with sha {sha}")
