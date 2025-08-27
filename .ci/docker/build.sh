@@ -151,8 +151,8 @@ case "$tag" in
     VISION=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     VISION=yes
     TRITON=yes
@@ -204,7 +204,7 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
-    # TODO (huydhn): Upgrade this to 3.12
+    # TODO (huydhn): Upgrade this to Python >= 3.10
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
@@ -213,8 +213,8 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     CLANG_VERSION=12
     VISION=yes
@@ -225,8 +225,8 @@ case "$tag" in
     CLANG_VERSION=18
     VISION=yes
     ;;
-  pytorch-linux-jammy-py3.9-gcc11)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-gcc11)
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
