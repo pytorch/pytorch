@@ -1,5 +1,6 @@
 #pragma once
 
+// See https://github.com/pytorch/pytorch/issues/161660
 // This compile flag is intended to be passed in to CppExtensions that rely on
 // the stable ABI via the `extra_compile_args` argument. This is a stopgap
 // solution to ensure that non-stable libtorch APIs are not used in the extension.
