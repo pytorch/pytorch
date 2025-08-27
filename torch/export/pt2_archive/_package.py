@@ -11,7 +11,18 @@ from typing_extensions import TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.serde.serialize import deserialize, serialize, SerializedArtifact
+from torch._export.serde import schema
+from torch._export.serde.serialize import (
+    _dict_to_dataclass,
+    deserialize_device,
+    deserialize_scalar_type,
+    deserialize_size,
+    deserialize_storage_offset,
+    deserialize_stride,
+    ExportedProgramDeserializer,
+    serialize,
+    SerializedArtifact,
+)
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
@@ -26,13 +37,16 @@ from torch.export.pt2_archive.constants import (
     ARCHIVE_FORMAT_VALUE,
     ARCHIVE_VERSION_PATH,
     ARCHIVE_VERSION_VALUE,
+    CONSTANTS_CONFIG_FILENAME_FORMAT,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
     SAMPLE_INPUTS_FILENAME_FORMAT,
+    TENSOR_CONSTANT_FILENAME_PREFIX,
     WEIGHT_FILENAME_PREFIX,
+    WEIGHTS_CONFIG_FILENAME_FORMAT,
     WEIGHTS_DIR,
 )
 from torch.types import FileLike
@@ -486,6 +500,175 @@ class PT2ArchiveContents:
     extra_files: dict[str, Any]
 
 
+def _create_flat_tensor_from_bytes(
+    tensor_bytes: bytes,
+    tensor_meta: schema.TensorMeta,
+) -> torch.Tensor:
+    """
+    Create a flat tensor from raw bytes with dtype, device and requires_grad.
+    It will be re-strided based on size, stride, and storage_offset later.
+    """
+    dtype = deserialize_scalar_type(tensor_meta.dtype)
+    size = deserialize_size(tensor_meta.sizes)
+    device = deserialize_device(tensor_meta.device)
+
+    if len(tensor_bytes) != 0:
+        tensor = torch.frombuffer(
+            tensor_bytes, dtype=dtype, requires_grad=tensor_meta.requires_grad
+        ).to(device)
+    else:
+        # cannot call torch.frombuffer() on empty bytes
+        logger.warning(
+            "Cannot call torch.frombuffer() on empty bytes. "
+            "Creating a tensor with zeros as workaround."
+        )
+        tensor = torch.zeros(size, dtype=dtype, device=device)
+
+    return tensor
+
+
+def _build_file_map(
+    archive_reader: PT2ArchiveReader,
+    config: schema.PayloadConfig,
+    base_dir: str,
+) -> dict[str, torch.Tensor]:
+    """
+    Build a map from file path to the payload in flat tensor format.
+    """
+    file_map: dict[str, torch.Tensor] = {}
+    for payload_meta in config.config.values():
+        # skip pickled objects
+        if payload_meta.use_pickle:
+            continue
+        # skip files that already exist in the map
+        if payload_meta.path_name in file_map:
+            continue
+
+        tensor_bytes = archive_reader.read_bytes(
+            os.path.join(base_dir, payload_meta.path_name)
+        )
+        assert payload_meta.tensor_meta is not None
+        tensor = _create_flat_tensor_from_bytes(tensor_bytes, payload_meta.tensor_meta)
+        file_map[payload_meta.path_name] = tensor
+
+    return file_map
+
+
+def _load_payload_config(
+    archive_reader: PT2ArchiveReader,
+    config_file: str,
+) -> schema.PayloadConfig:
+    """
+    Load and parse a payload config from the archive.
+    """
+    return _dict_to_dataclass(
+        schema.PayloadConfig,
+        json.loads(archive_reader.read_string(config_file)),
+    )
+
+
+def _load_state_dict(
+    archive_reader: PT2ArchiveReader,
+    model_name: str,
+) -> Union[dict[str, torch.Tensor], bytes]:
+    legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
+    if legacy_weights_file in archive_reader.get_file_names():
+        return archive_reader.read_bytes(legacy_weights_file)
+    else:
+        weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        assert weights_config_file in archive_reader.get_file_names(), (
+            f"{weights_config_file} not found in PT2 archive"
+        )
+        weights_config = _load_payload_config(archive_reader, weights_config_file)
+        # construct the mapping from file name (e.g. weight_0) to flat weight payload
+        state_dict_file_map = _build_file_map(
+            archive_reader, weights_config, WEIGHTS_DIR
+        )
+        # chain the mapping weight FQN -> weight file name -> strided weight payload
+        # so that the aliasing of weights is preserved
+        state_dict: dict[str, torch.Tensor] = {}
+        for weight_fqn, payload_meta in weights_config.config.items():
+            if payload_meta.use_pickle:
+                weight_bytes = archive_reader.read_bytes(
+                    os.path.join(WEIGHTS_DIR, payload_meta.path_name)
+                )
+                state_dict[weight_fqn] = torch.load(
+                    io.BytesIO(weight_bytes), weights_only=False
+                )
+            else:
+                tensor_meta = payload_meta.tensor_meta
+                assert tensor_meta is not None
+                weight_tensor = torch.as_strided(
+                    input=state_dict_file_map[payload_meta.path_name],
+                    size=deserialize_size(tensor_meta.sizes),
+                    stride=deserialize_stride(tensor_meta.strides),
+                    storage_offset=deserialize_storage_offset(
+                        tensor_meta.storage_offset
+                    ),
+                )
+                if payload_meta.is_param:
+                    state_dict[weight_fqn] = torch.nn.Parameter(weight_tensor)
+                else:
+                    state_dict[weight_fqn] = weight_tensor
+
+        return state_dict
+
+
+def _load_constants(
+    archive_reader: PT2ArchiveReader,
+    model_name: str,
+) -> Union[dict[str, torch.Tensor], bytes]:
+    legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
+    if legacy_constants_file in archive_reader.get_file_names():
+        return archive_reader.read_bytes(legacy_constants_file)
+    else:
+        constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        assert constants_config_file in archive_reader.get_file_names(), (
+            f"{constants_config_file} not found in PT2 archive"
+        )
+        constants_config = _load_payload_config(archive_reader, constants_config_file)
+        # construct the mapping from file name (e.g. constant_0) to constant payload
+        constant_file_map = _build_file_map(
+            archive_reader, constants_config, CONSTANTS_DIR
+        )
+        # chain the mapping constant FQN -> constant file name -> strided constant payload
+        # so that the aliasing of constants is preserved
+        constants: dict[str, torch.Tensor] = {}
+        for constant_fqn, payload_meta in constants_config.config.items():
+            path_name = payload_meta.path_name
+            if path_name.startswith(TENSOR_CONSTANT_FILENAME_PREFIX):
+                if payload_meta.use_pickle:
+                    constant_bytes = archive_reader.read_bytes(
+                        os.path.join(CONSTANTS_DIR, path_name)
+                    )
+                    constants[constant_fqn] = torch.load(
+                        io.BytesIO(constant_bytes), weights_only=False
+                    )
+                else:
+                    tensor_meta = payload_meta.tensor_meta
+                    assert tensor_meta is not None
+                    constant_tensor = torch.as_strided(
+                        input=constant_file_map[path_name],
+                        size=deserialize_size(tensor_meta.sizes),
+                        stride=deserialize_stride(tensor_meta.strides),
+                        storage_offset=deserialize_storage_offset(
+                            tensor_meta.storage_offset
+                        ),
+                    )
+                    constants[constant_fqn] = constant_tensor
+
+            elif path_name.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
+                constant_bytes = archive_reader.read_bytes(
+                    os.path.join(CONSTANTS_DIR, path_name)
+                )
+                constants[constant_fqn] = torch._C._pickle_load_obj(constant_bytes)
+
+            else:
+                raise RuntimeError(f"Unsupported constant type: {path_name}")
+
+        return constants
+
+
 def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
@@ -503,24 +686,25 @@ def _load_exported_programs(
             len(prefix) : -len(suffix)
         ]  # given "models/foo.json" we can now get "foo"
 
-        weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
-        constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
         sample_inputs_file = SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name)
-
-        serialized_exported_program = archive_reader.read_bytes(file)
-        serialized_weights = archive_reader.read_bytes(weights_file)
-        serialized_constants = archive_reader.read_bytes(constants_file)
         serialized_sample_inputs = archive_reader.read_bytes(sample_inputs_file)
 
-        artifact: SerializedArtifact = SerializedArtifact(
+        from torch._export.serde.serialize import _bytes_to_dataclass
+
+        exported_program_bytes = archive_reader.read_bytes(file)
+        serialized_exported_program = _bytes_to_dataclass(
+            schema.ExportedProgram, exported_program_bytes
+        )
+        state_dict = _load_state_dict(archive_reader, model_name)
+        constants = _load_constants(archive_reader, model_name)
+
+        ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
-            serialized_weights,
-            serialized_constants,
+            state_dict,
+            constants,
             serialized_sample_inputs,
         )
 
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
         exported_programs[model_name] = ep
 
     return exported_programs
