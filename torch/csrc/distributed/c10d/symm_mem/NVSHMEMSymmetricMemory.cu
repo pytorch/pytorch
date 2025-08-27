@@ -21,7 +21,7 @@
 namespace c10d {
 namespace symmetric_memory {
 
-/* Start of CUDASymmetricMemory implementation */
+/* Start of NVSHMEMSymmetricMemory implementation */
 
 static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
 
@@ -132,17 +132,6 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   friend class NVSHMEMSymmetricMemory;
 };
 
-static inline size_t nbytes_of(
-    c10::IntArrayRef sizes,
-    c10::ScalarType dtype) {
-  const auto numel = std::accumulate(
-      sizes.begin(),
-      sizes.end(),
-      static_cast<size_t>(1),
-      std::multiplies<size_t>());
-  return numel * c10::elementSize(dtype);
-}
-
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
@@ -210,63 +199,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return offset_;
   }
 
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override {
-    // storage_offset is in element, convert to byte
-    const auto offset_bytes = storage_offset * c10::elementSize(dtype);
-    return _get_buffer_at_byte_offset(rank, sizes, dtype, offset_bytes);
-  }
-
-  at::Tensor get_remote_tensor(
-      int peer,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype) override {
-    return _get_buffer_at_byte_offset(peer, sizes, dtype, offset_);
-  }
-
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    // If the dtype is unspecified, default it to UInt32, as it
-    // is the most common type for signaling purposes.
-    if (!dtype.has_value()) {
-      dtype = c10::ScalarType::UInt32;
-    }
-
-    // If the shape is unspecified, treat the signal pad as a 1d tensor.
-    const auto element_size = c10::elementSize(*dtype);
-    std::vector<int64_t> shape;
-    if (!sizes.empty()) {
-      shape = sizes.vec();
-    } else {
-      shape.push_back(signal_pad_size / element_size);
-    }
-
-    const auto pad_bytes = nbytes_of(shape, *dtype);
-    const auto offset_bytes = storage_offset * element_size;
-    const auto req_size = offset_bytes + pad_bytes;
-    TORCH_CHECK(
-        req_size <= signal_pad_size,
-        "NVSHMEMSymmetricMemory::get_signal_pad: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        signal_pad_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(pai_->signal_pads_[rank]) + offset_bytes;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(*dtype).device(device);
-    return at::for_blob(data_ptr, shape)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
   void barrier(int channel, size_t timeout_ms) override {
     // TODO
   }
@@ -287,6 +219,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->world_size_;
   }
 
+  c10::Device get_device() override {
+    return c10::Device(c10::DeviceType::CUDA, device_idx_);
+  }
+
   const std::vector<int>& get_rank_to_global_rank() override {
     return pai_->rank_to_global_rank_;
   };
@@ -294,34 +230,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int* get_rank_to_global_rank_dev() override {
     return pai_->rank_to_global_rank_dev_;
   };
-
- private:
-  at::Tensor _get_buffer_at_byte_offset(
-      int peer,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      size_t offset_bytes) {
-    TORCH_CHECK(peer >= 0 && peer < get_world_size(), "Invalid peer rank: ", peer);
-    auto peer_ptr = pai_->buffers_[peer];
-    TORCH_CHECK(peer_ptr != nullptr,
-        "Cannot get buffer across nodes, my rank: ", get_rank(), ", peer: ", peer);
-    const size_t tensor_bytes = nbytes_of(sizes, dtype);
-    const auto req_size = offset_bytes + tensor_bytes;
-    TORCH_CHECK(
-        req_size <= allocation_->buffer_size,
-        "NVSHMEMSymmetricMemory::get_buffer: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        allocation_->buffer_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(peer_ptr) + offset_bytes;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(dtype).device(device);
-    return at::for_blob(data_ptr, sizes)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
 
  private:
   std::shared_ptr<NVSHMEMAllocation> allocation_;
