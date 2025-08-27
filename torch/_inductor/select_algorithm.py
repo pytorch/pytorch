@@ -1145,11 +1145,9 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: (
-                self.record_input_dependent_tracked_event()(fn)
-                if record_input_dependent_tracked_event
-                else fn
-            )
+            fn.__name__: self.record_input_dependent_tracked_event()(fn)
+            if record_input_dependent_tracked_event
+            else fn
             for fn in [
                 self.def_kernel,
                 self.size,
