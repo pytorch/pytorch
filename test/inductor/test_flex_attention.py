@@ -48,6 +48,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
 )
+from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
@@ -2925,6 +2926,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
 
+        if torch.version.hip and mode == "paged_attention":
+            raise self.skipTest(
+                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
+            )
+
         dtype = torch.float32
         # Setup
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
@@ -4333,6 +4339,41 @@ class GraphModule(torch.nn.Module):
         finally:
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
+
+    @largeTensorTest("38GB", "cuda")  # emperically
+    @skip_on_cpu
+    @unittest.skipIf(IS_FBCODE, "Skip large tensor test in fbcode")
+    def test_int64_indexing_large_stride(self, device):
+        B = 1
+        H = 64
+        S = 2**20
+        D = 64
+        dtype = torch.float16
+
+        def _simple_causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        BLOCK_M = 1024
+        BLOCK_N = 1024
+
+        block_mask = torch.compile(create_block_mask)(
+            _simple_causal, B, H, S, S, device=device, BLOCK_SIZE=(BLOCK_M, BLOCK_N)
+        )
+
+        q = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+
+        # Test forward and backward pass
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        loss = out.sum()
+        loss.backward()
+
+        # Basic correctness checks, doing full comapre consumes too much memory :/
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertTrue(q.grad is not None)
+        self.assertTrue(k.grad is not None)
+        self.assertTrue(v.grad is not None)
 
 
 class TestBlockMask(InductorTestCase):
@@ -5996,6 +6037,56 @@ class TestLearnableBiases(InductorTestCase):
                 "grad_bias2",
             ],
         )
+
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+    )
+    @torch.compile
+    def test_learnable_bias_global_compiled(self, device, params):
+        batch_size = 1
+        num_heads = 1
+        seq_len = 128
+        head_dim = 16
+        d_model = num_heads * head_dim
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+
+        out_proj = nn.Linear(d_model, d_model, device=device)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        bias = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+            requires_grad=True,
+        )
+
+        def bias_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, q_idx, kv_idx]
+
+        out = flex_attention(
+            query=query,
+            key=key,
+            value=value,
+            score_mod=bias_mod,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+
+        attn_output = out_proj(out)
+        random_target = torch.randn(batch_size, seq_len, d_model, device=device)
+        loss = torch.nn.functional.mse_loss(attn_output, random_target)
+        loss.backward()
+
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
 
     @skip_on_cpu
     @common_utils.parametrize(

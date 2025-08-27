@@ -340,7 +340,8 @@ class ContinueExecutionCache:
         ) -> None:
             meta.instructions = copy.deepcopy(instructions)
 
-            args = [f"___stack{i}" for i in range(nstack)]
+            args = ["__nested_frame_values"]
+            args += [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
@@ -368,11 +369,7 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [
-                    v
-                    for v in code_options["co_varnames"]
-                    if v not in args and v not in freevars
-                ]
+                + [v for v in code_options["co_varnames"] if v not in args]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
@@ -502,7 +499,7 @@ class ContinueExecutionCache:
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
-        new_code = transform_code_object(code, update)
+        new_code, _ = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 

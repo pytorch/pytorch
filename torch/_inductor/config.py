@@ -389,6 +389,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -540,6 +550,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -1166,6 +1181,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
     )
 
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
+    )
+
 
 class triton:
     """
@@ -1363,6 +1383,7 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
+    inject_log1p_bug_TESTING_ONLY: Optional[str] = None
 
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
