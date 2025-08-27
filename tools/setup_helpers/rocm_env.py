@@ -49,10 +49,18 @@ def get_ck_dependency_string() -> str:
     Returns:
         str: The formatted dependency string for use in install_requires.
     """
-    prefix = " @ git+"
-    repo_address = "https://github.com/ROCm/composable_kernel.git"
-    commit_pin = "@" + read_ck_pin()
     # The dependency doesn't get resolved without version number in the end
     # Since we use commit hash for versioning it will always be 1.0.0
     egg_name = "#egg=rocm-composable-kernel"
-    return prefix + repo_address + commit_pin + egg_name
+
+    if user_provided_ck_dir := os.getenv("TORCHINDUCTOR_CK_DIR"):
+        if not os.path.exists(user_provided_ck_dir):
+            raise AssertionError(
+                f"user provided Composable Kernel directory {user_provided_ck_dir} doesn't exist"
+            )
+        return f"@ git+file://{user_provided_ck_dir}{egg_name}"
+
+    prefix = " @ git+"
+    repo_address = "https://github.com/ROCm/composable_kernel.git"
+    commit_pin = f"@{read_ck_pin()}"
+    return f"{prefix}{repo_address}{commit_pin}{egg_name}"
