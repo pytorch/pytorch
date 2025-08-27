@@ -891,8 +891,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # TODO(coconutruben): combine this with the main flow of addmm through
         # a subgraph or something as inp vs inp_expanded causes some slight numeric
         # differences
+        kernel_inputs = MMKernelInputs(
+            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        )
         choices += V.choices.get_mm_configs(
-            MMKernelInputs([inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)),
+            kernel_inputs,
             aten_layout,
             [aten_addmm],
             name,
@@ -1105,7 +1108,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        scaled_mm_kwargs = {"USE_FAST_ACCUM": use_fast_accum}
+        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
@@ -1115,7 +1118,7 @@ def tuned_scaled_mm(
                 layout,
                 [scaled_mm_device_tma_template],
                 name,
-                kwarg_overrides={scaled_mm_device_tma_template.uid: scaled_mm_kwargs},
+                kwarg_overrides={scaled_mm_device_tma_template.uid: overriders},
             )
 
         # Get template choices using the new unified function
@@ -1124,7 +1127,7 @@ def tuned_scaled_mm(
             layout,
             [mm_template],
             name,
-            kwarg_overrides={mm_template.uid: scaled_mm_kwargs},
+            kwarg_overrides={mm_template.uid: overriders},
         )
 
     if (
