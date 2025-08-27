@@ -1169,27 +1169,20 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-        symmetric(bool): a bool that indicates if this pool is symmetrical
-            across ranks. This is False by default.
+
     """
 
     def __init__(
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
-        symmetric: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom, symmetric)
+        super().__init__(allocator, True, use_on_oom)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
-
-    @property
-    def is_symmetric(self) -> bool:
-        r"""Returns whether this pool is used for NCCL's symmetric memory."""
-        return super().is_symmetric
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
