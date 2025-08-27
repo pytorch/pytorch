@@ -309,7 +309,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                                 f"During torch.export, following tensors were leaked at {module_prefix}{k}: {leaked_values} "
                                 f"Such attributes must be registered as buffers using the `register_buffer` "
                                 f"API and must be initialized at model.__init__ "
-                                f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer). "
+                                f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer). "  # noqa: 950
                                 f"Alternatively, consider using `torch.export.export(strict=True)` to export the model."
                             )
 

@@ -1852,11 +1852,8 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
 
-def _is_bogus_const_name(name: str):
+def _is_invalid_const_name(name: str):
     splitted_names = name.split(".")
-    if len(splitted_names) < 1:
-        return True
-
     return splitted_names[-1].startswith("lifted_tensor")
 
 
@@ -2040,7 +2037,7 @@ def emit_bogus_const_warning(constants, gs, gm):
     for const, val in constants.items():
         if isinstance(
             val, torch._subclasses.fake_tensor.FakeTensor
-        ) and _is_bogus_const_name(const):
+        ) and _is_invalid_const_name(const):
             bogus_constants.add(const)
 
     if len(bogus_constants) == 0:
@@ -2060,14 +2057,14 @@ def emit_bogus_const_warning(constants, gs, gm):
         for user in placeholder_node.users:
             if user.meta.get("stack_trace", None) is not None:
                 dependencies.append(user.meta["stack_trace"])
-        if len(dependencies) > 0:
-            warnings.warn(
+        if len(placeholder_node.users) > 0:
+            raise RuntimeError(
                 f"We found a fake tensor in the exported program constant's list. "
                 f"This typically means our tracing system encountered an op that "
                 f"we can't trace through. For the potential source, you can refer to "
                 f"following model attribute: {name}. We found following stacktrace might "
                 f"be helpful: \n\n"
-                f"{dependencies} \n\n"
+                f"{dependencies if dependencies else '<unknown>'} \n\n"
                 f"Please file an issue on github if you need further help.\n"
             )
 

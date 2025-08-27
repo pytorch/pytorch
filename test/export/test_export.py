@@ -4428,11 +4428,13 @@ def forward(self, x):
                 out = self.fc2(out)
                 return out
 
-        with self.assertWarnsRegex(
-            UserWarning,
+        with self.assertRaisesRegex(
+            RuntimeError,
             "cached = self.cache_layer\(x\)",
         ):
-            _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
+            # Intentionally using training IR here because it will crash in inference IR
+            # anyways.
+            _ = torch.export.export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
