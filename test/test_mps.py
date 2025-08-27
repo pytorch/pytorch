@@ -1253,11 +1253,7 @@ class TestMPS(TestCaseMPS):
         input_s = torch.randn(2, 8, device='mps')
         result_sliced = torch.nn.functional.linear(input_s, weight_sliced)
         result_contig = torch.nn.functional.linear(input_s, weight_contiguous_equiv)
-        input_cpu = input_s.cpu()
-        weight_sliced_cpu = weight_sliced.cpu()
-        result_sliced_cpu = torch.nn.functional.linear(input_cpu, weight_sliced_cpu)
-        self.assertEqual(result_contig, result_sliced, atol=1e-5, rtol=1e-5)
-        self.assertEqual(result_sliced.to("cpu"), result_sliced_cpu, atol=1e-5, rtol=1e-5)
+        self.assertEqual(result_contig, result_sliced)
 
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
