@@ -15822,6 +15822,8 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # https://github.com/intel/torch-xpu-ops/issues/1962
+               DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view', device_type='xpu', dtypes=(torch.float64,)),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
