@@ -1585,17 +1585,19 @@ class Tensor(torch._C.TensorBase):
               If any two dimensions have the same stride, swapping these dimensions won't
               change how data is accessed, leading to multiple correct dimension orders.
             """
+            from torch.fx.experimental.symbolic_shapes import guard_or_false
 
             sizes = tensor.size()
             strides = tensor.stride()
 
             # Check if there are any duplicate strides
             has_duplicate_strides = any(
-                earlier == later for earlier, later in zip(strides, strides[1:])
+                guard_or_false(earlier == later)
+                for earlier, later in zip(strides, strides[1:])
             )
 
             # Check if there are any singleton dimensions
-            has_singleton_dims = any(size == 1 for size in sizes)
+            has_singleton_dims = any(guard_or_false(size == 1) for size in sizes)
 
             return has_duplicate_strides or has_singleton_dims
 
@@ -1615,7 +1617,14 @@ class Tensor(torch._C.TensorBase):
 
         import torch._prims_common as utils
 
-        return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
+        out_perm, raise_ambiguity = (
+            utils.compute_elementwise_output_logical_to_physical_perm(
+                self, ambiguity_check=ambiguity_check
+            )
+        )
+        if raise_ambiguity:
+            raise RuntimeError("The tensor does not have unique dim order.")
+        return tuple(out_perm)
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
