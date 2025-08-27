@@ -19,9 +19,7 @@ struct GridSamplerOffsets {
 static GridSamplerOffsets find_grid_sampler_offsets(
     constant int32_t* output_sizes,
     constant int32_t* output_strides,
-    constant int32_t* input_sizes,
     constant int32_t* input_strides,
-    constant int32_t* grid_sizes,
     constant int32_t* grid_strides,
     int32_t sampler_dims,
     uint tid) {
@@ -278,16 +276,13 @@ kernel void grid_sampler(
   auto output_strides = params.output_strides.data();
   auto input_sizes = params.input_sizes.data();
   auto input_strides = params.input_strides.data();
-  auto grid_sizes = params.grid_sizes.data();
   auto grid_strides = params.grid_strides.data();
   auto sampler_dims = params.sampler_dims;
 
   auto offsets = find_grid_sampler_offsets(
       output_sizes,
       output_strides,
-      input_sizes,
       input_strides,
-      grid_sizes,
       grid_strides,
       sampler_dims,
       tid);
