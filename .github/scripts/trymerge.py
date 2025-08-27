@@ -1378,7 +1378,10 @@ class GitHubPR:
         # Did the PR change since we started the merge?
         pulled_sha = repo.show_ref(pr_branch_name)
         latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
-        if pulled_sha != latest_pr_status.last_commit_sha() or pulled_sha != commit_to_merge:
+        if (
+            pulled_sha != latest_pr_status.last_commit_sha()
+            or pulled_sha != commit_to_merge
+        ):
             raise RuntimeError(
                 "PR has been updated since CI checks last passed. Please rerun the merge command."
             )
