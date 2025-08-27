@@ -1754,6 +1754,25 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         out = f(MyTuple(a, b))
         self.assertTrue(same(a + 1, out))
 
+    def test_namedtuple_subclass_dynamic_attributes(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class MyNamedTupleSubclass(MyNamedTuple):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(tup):
+            c = torch.tensor(4.0)
+            tup.c = c  # Add dynamic attribute
+            return tup
+
+        extended_tup = MyNamedTupleSubclass(a=torch.tensor([2.0]), b=torch.tensor(1.0))
+        result = f(extended_tup)
+        self.assertTrue(hasattr(result, "c"))
+        self.assertEqual(result.c, torch.tensor(4.0))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
