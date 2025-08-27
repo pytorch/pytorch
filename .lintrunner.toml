@@ -1163,6 +1163,7 @@ exclude_patterns = [
     # as necessary
     # NOTE: remove the patterns in the order they are listed
     'aten/src/ATen/[a-mA-M]*/**',
+    'test/**',
 ]
 init_command = [
     'python3',
