@@ -155,18 +155,17 @@ def dp_knapsack_sliding_hirschberg(
 def dp_knapsack_recurse(
     memory_indices, quantized_max_memory, quantized_memory, runtimes
 ):
-    if quantized_max_memory <= 0:
-        return [], memory_indices
-
+    if len(memory_indices) == 0:
+        return [], []
     if len(memory_indices) == 1:
-        if quantized_memory[memory_indices[0]] <= quantized_max_memory:
+        if quantized_memory[memory_indices[0]] <= quantized_max_memory and runtimes[memory_indices[0]] > 0.0:
             return memory_indices, []
         else:
             return [], memory_indices
 
     memory_split = len(memory_indices) // 2
-    left_part_memory = memory_indices[:memory_split]
-    right_part_memory = memory_indices[memory_split:]
+    left_part_memory = memory_indices[memory_split:]
+    right_part_memory = memory_indices[:memory_split]
 
     # sliding window: for each memory budget, compute dp profile for a half using only a previous one
     prev_dp_profile = torch.zeros(
