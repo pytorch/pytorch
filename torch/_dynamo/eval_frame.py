@@ -113,7 +113,7 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.package import CompilePackage, DynamoCaptureOutput
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
     from torch.fx.node import Argument, Node, Target
@@ -1082,6 +1082,89 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
+# Make dynamo graph to have same input/output spec as user code
+def argument_names(
+    f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
+) -> list[str]:
+    def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
+        # Get a list of Parameter objects from the Signature object
+        params = list(sig.parameters.values())
+        # Separate positional arguments, keyword-only arguments and varargs/varkw
+        args = [
+            p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwonlyargs = [
+            p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        varargs = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
+            None,
+        )
+        varkw = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
+            None,
+        )
+        # Get default values for positional arguments and keyword-only arguments
+        defaults = tuple(
+            p.default
+            for p in params
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and p.default is not inspect.Parameter.empty
+        )
+        kwonlydefaults = {
+            p.name: p.default
+            for p in params
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        # Get annotations for parameters and return value
+        annotations = {}
+        if sig.return_annotation:
+            annotations = {"return": sig.return_annotation}
+        for parameter in params:
+            annotations[parameter.name] = parameter.annotation
+        # Return a FullArgSpec object with the extracted attributes
+        return inspect.FullArgSpec(
+            args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+        )
+
+    fullargspec = signature_to_fullargspec(f_sig)
+
+    # 1. Map `args` 1-to-1 to positional arguments in original signature.
+    input_strs = fullargspec.args[: len(args)]
+
+    if len(args) > len(fullargspec.args):
+        # 2. If there are more arguments left in `args`, they map to varargs in original
+        # signature. Assign names as {varargs}_0, {varargs}_1, ...
+        assert fullargspec.varargs is not None, "More arguments than expected"
+        input_strs += [
+            f"{fullargspec.varargs}_{i}" for i in range(0, len(args) - len(input_strs))
+        ]
+    elif len(args) < len(fullargspec.args):
+        # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+        # it implies these are arguments either with default values, or provided in
+        # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+        # export them as part of the function signature. The latter will be handled
+        # in the next step.
+        for unprovided_arg in fullargspec.args[
+            len(args) : -len(fullargspec.defaults or [])
+        ]:
+            assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+    # 4. Keyword arguments provided in `kwargs`.
+    input_strs += list(kwargs.keys())
+
+    # 5. Keyword-only arguments with default values if not provided are not exported
+    # as part of the function signature.
+    for kwonly_arg in fullargspec.kwonlyargs:
+        kwonlydefaults = fullargspec.kwonlydefaults or {}
+        assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
+            f"Missing keyword only argument {kwonly_arg}"
+        )
+
+    return input_strs
+
+
 def check_if_dynamo_supported() -> None:
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
@@ -1590,91 +1673,6 @@ def rewrite_signature(
         flat_args_dynamic_dims,
         fake_mode,
     ).transform()
-
-    # Make dynamo graph to have same input/output spec as user code
-    def argument_names(
-        f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
-    ) -> list[str]:
-        def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
-            # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
-            # Separate positional arguments, keyword-only arguments and varargs/varkw
-            args = [
-                p.name
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            ]
-            kwonlyargs = [
-                p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
-            ]
-            varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
-                None,
-            )
-            varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
-                None,
-            )
-            # Get default values for positional arguments and keyword-only arguments
-            defaults = tuple(
-                p.default
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-                and p.default is not inspect.Parameter.empty
-            )
-            kwonlydefaults = {
-                p.name: p.default
-                for p in params
-                if p.kind == inspect.Parameter.KEYWORD_ONLY
-                and p.default is not inspect.Parameter.empty
-            }
-            # Get annotations for parameters and return value
-            annotations = {}
-            if sig.return_annotation:
-                annotations = {"return": sig.return_annotation}
-            for parameter in params:
-                annotations[parameter.name] = parameter.annotation
-            # Return a FullArgSpec object with the extracted attributes
-            return inspect.FullArgSpec(
-                args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
-            )
-
-        fullargspec = signature_to_fullargspec(f_sig)
-
-        # 1. Map `args` 1-to-1 to positional arguments in original signature.
-        input_strs = fullargspec.args[: len(args)]
-
-        if len(args) > len(fullargspec.args):
-            # 2. If there are more arguments left in `args`, they map to varargs in original
-            # signature. Assign names as {varargs}_0, {varargs}_1, ...
-            assert fullargspec.varargs is not None, "More arguments than expected"
-            input_strs += [
-                f"{fullargspec.varargs}_{i}"
-                for i in range(0, len(args) - len(input_strs))
-            ]
-        elif len(args) < len(fullargspec.args):
-            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
-            # it implies these are arguments either with default values, or provided in
-            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
-            # export them as part of the function signature. The latter will be handled
-            # in the next step.
-            for unprovided_arg in fullargspec.args[
-                len(args) : -len(fullargspec.defaults or [])
-            ]:
-                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
-
-        # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
-
-        # 5. Keyword-only arguments with default values if not provided are not exported
-        # as part of the function signature.
-        for kwonly_arg in fullargspec.kwonlyargs:
-            kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
-
-        return input_strs
 
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
@@ -2288,3 +2286,83 @@ def skip_code(code: types.CodeType) -> None:
     set_code_exec_strategy(
         code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
+
+
+@dataclass
+class BackendInput:
+    graph_module: torch.fx.GraphModule
+    example_inputs: tuple[Any, ...]
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+
+
+@dataclass
+class CaptureOutput:
+    """
+    Core data structure that contains the all the information dynamo generates
+    from fullgraph=True. Ideally, this is should be the "return" type if dynamo
+    has a standard API to return compilation artifacts.
+    """
+
+    dynamo_artifacts: DynamoCaptureOutput
+    backend_inputs: dict[str, BackendInput]
+
+
+def fullgraph_capture(model: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    A helper function which wraps a model and returns a callable like optimize().
+    The callable can be called with normal inputs like torch.compile()-ed functions
+    and user can dump dynamo compilation artifacts through `get_artifacts()` call.
+
+    The CaptureOutput is separated into two parts:
+    1. Dynamo specific information from DynamoCaptureOutput, which includes:
+        - guards
+        - generated bytecode
+        - python source information
+    2. Backend specific information (indexed by unique backend id) such as:
+        - fx graph
+        - example inputs
+
+    Example:
+        def fn(*args):
+            ...
+
+        compiled_fn = fullgraph_capture(fn)
+        compiled_fn(args)
+        compiled_fn(another_args)
+        artifacts = compiled_fn.get_artifacts()
+    """
+    from torch._dynamo.package import CompilePackage
+
+    package = CompilePackage(model)
+
+    backend_inputs: dict[str, BackendInput] = {}
+
+    def _backend(
+        gm: torch.fx.GraphModule, example_inputs: tuple[Any, ...]
+    ) -> torch.fx.GraphModule:
+        from torch._guards import TracingContext
+
+        fake_mode = TracingContext.get().fake_mode
+        assert fake_mode is not None
+        backend_id = gm._backend_id
+        assert isinstance(backend_id, str)
+        backend_inputs[backend_id] = BackendInput(gm, example_inputs, fake_mode)
+        return gm
+
+    # TODO For now we use eval_frame to give us the frame. This is can be simplified to
+    #      a manual frame creation helper.
+    optimized_model = optimize(nopython=True, backend=_backend, package=package)(model)
+
+    @functools.wraps(model)
+    def capture_context(*args: Any, **kwargs: Any) -> Any:
+        return optimized_model(*args, **kwargs)
+
+    def get_artifacts() -> CaptureOutput:
+        cache_entry = package.cache_entry()
+        assert len(cache_entry.codes) == 1
+        return CaptureOutput(
+            dynamo_artifacts=cache_entry.codes[0], backend_inputs=backend_inputs
+        )
+
+    capture_context.get_artifacts = get_artifacts  # type: ignore[attr-defined]
+    return capture_context

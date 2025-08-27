@@ -355,6 +355,24 @@ class StackLocalsMetadata:
     locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
 
 
+# TODO we should expand this to make it work for atribtrary in/out
+@dataclass
+class ExportMetaData:
+    # maps graph input index to its' source which is later
+    # used in export to map to correct user input. In its' flat form,
+    # just looks like GetItem(base=LocalSource("foo", idx=0))
+    graph_input_idx_to_local_source: dict[int, Source] = dc_field(default_factory=dict)
+    # maps user output idx to what type of output it is. There are 3 options:
+    # 1) graph out
+    # 2) user input
+    # 3) constants
+    output_return_type: dict[str, tuple] = dc_field(default_factory=dict)
+    # output spec of the traced function
+    out_spec: Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec] = (
+        torch.utils._pytree._LEAF_SPEC
+    )
+
+
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
     # f_globals["__builtins__"] can be a dict or a module. This is an
     # implementation detail -
@@ -590,6 +608,8 @@ class OutputGraph(OutputGraphGuardsState):
 
         # mangled alias -> module fqn name
         self.import_sources: dict[str, str] = {}
+
+        self.export_metadata = ExportMetaData()
 
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
@@ -1462,6 +1482,51 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
 
+            if (
+                torch._dynamo.config.log_graph_in_out_metadata
+                and root_stack_values
+                and len(root_stack_values) == 1
+            ):
+                vt = root_stack_values[0]
+                if (
+                    isinstance(vt, torch._dynamo.variables.NamedTupleVariable)
+                    and vt.tuple_cls is torch._dynamo.export.ExportTracerOutput
+                ):
+                    flat_returns = vt.items[0]
+                    out_spec = vt.items[1]
+                    assert isinstance(
+                        flat_returns, torch._dynamo.variables.ListVariable
+                    )
+
+                    vt_to_graph_out_idx = {}
+                    for _, val in pass2.graph_outputs.items():
+                        vt_to_graph_out_idx[val.variable] = val.index
+
+                    for idx, vt in enumerate(flat_returns.items):
+                        if vt in vt_to_graph_out_idx:
+                            self.export_metadata.output_return_type[idx] = (
+                                "graph_out",
+                                vt_to_graph_out_idx[vt],
+                            )
+                        elif (
+                            vt.source is not None
+                            and (source := vt.source.base)
+                            and source.is_input
+                        ):
+                            self.export_metadata.output_return_type[idx] = (
+                                "input",
+                                vt.source,
+                            )
+                        elif isinstance(vt, torch._dynamo.variables.ConstantVariable):
+                            self.export_metadata.output_return_type[idx] = (
+                                "constant",
+                                vt.as_python_constant(),
+                            )
+                        else:
+                            assert f"Encountered unrecognized type {vt} at output {idx}"
+
+                    self.export_metadata.out_spec = out_spec.as_python_constant()
+
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -1788,7 +1853,6 @@ class OutputGraph(OutputGraphGuardsState):
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
-            gm.meta["backend_id"] = name
 
             graph_code_log.debug(
                 "%s",
@@ -1917,6 +1981,10 @@ class OutputGraph(OutputGraphGuardsState):
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
+
+            for idx, arg in enumerate(self.graphargs):
+                self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
+
             cg.make_call_generated_code(name)
             return cg.get_instructions()
 
