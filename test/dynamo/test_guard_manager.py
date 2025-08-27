@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import functools
+import inspect
 import unittest
 import weakref
 
@@ -880,8 +882,9 @@ num_guards_executed=0)
             counter += 1
 
         class Bar:
-            x = 4
-            y = torch.randn(4)
+            def __init__(self):
+                self.x = 4
+                self.y = torch.randn(4)
 
         bar = Bar()
 
@@ -930,7 +933,7 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
 
             # Check types of foo.x
             foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
-            self.assertTrue(foo_x_mgr.is_guarded_value_dict())
+            self.assertTrue(issubclass(foo_x_mgr.get_type_of_guarded_value(), dict))
 
             # Check types of foo.x["a"]
             foo_x_a_source = DictGetItemSource(foo_x_source, "a")
@@ -945,12 +948,14 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             # Check types of foo.z
             foo_z_source = AttrSource(foo_source, "z")
             foo_z_mgr = builder.get_guard_manager_from_source(foo_z_source)
-            self.assertTrue(foo_z_mgr.is_guarded_value_empty_dict())
+            self.assertTrue(issubclass(foo_z_mgr.get_type_of_guarded_value(), dict))
 
             # Check types of mod
             mod_source = LocalSource("mod")
             mod_mgr = builder.get_guard_manager_from_source(mod_source)
-            self.assertTrue(mod_mgr.is_guarded_value_nn_module())
+            self.assertTrue(
+                issubclass(mod_mgr.get_type_of_guarded_value(), torch.nn.Module)
+            )
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
@@ -1005,6 +1010,12 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from torch._dynamo.source import AttrSource, LocalSource
 
             foo_source = LocalSource("foo")
+            foo_mgr = builder.get_guard_manager_from_source(foo_source)
+            for accessor in foo_mgr.get_accessors():
+                if isinstance(accessor, GetAttrGuardAccessor):
+                    self.assertTrue(
+                        accessor.get_attr_name() in ("a", "b", "c", "d", "e")
+                    )
 
             # Check types of foo.a
             foo_a_source = AttrSource(foo_source, "a")
@@ -1141,21 +1152,32 @@ class TagSafetyChecks(RecursiveDictTagTests):
 
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
+            c = 2
+
             def __init__(self):
                 super().__init__()
                 self.a = 4
 
+            def check(self, x):
+                return True
+
             def forward(self, x):
-                return x + self.a
+                inspect.signature(self.check).parameters.items()
+                return x + self.a + self.c
 
         foo = Foo()
 
-        class Baz(torch.nn.Module):
+        class Env(metaclass=abc.ABCMeta):  # noqa: B024
+            pass
+
+        class Baz(torch.nn.Module, Env):
             def __init__(self):
                 super().__init__()
                 self.foo = foo
 
             def forward(self, x):
+                if "Foo" in str(type(self).__mro__):
+                    x = torch.sin(x)
                 return self.foo(x)
 
         baz = Baz()
@@ -1170,7 +1192,6 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from utils import install_guard_manager_testing_hook
 
         def hook(guard_wrapper, f_locals, builder):
-            from torch._C._dynamo.guards import GetGenericDictGuardAccessor
             from torch._dynamo.source import LocalSource
 
             baz_source = LocalSource("baz")
@@ -1180,26 +1201,44 @@ class TagSafetyChecks(RecursiveDictTagTests):
             self.assertTrue(baz_mgr.is_tag_safe())
             self.assertTrue(baz_mgr.is_tag_safe_root())
 
-            # Check tagness of baz.__dict__
-            self.assertTrue(len(baz_mgr.get_accessors()) == 1)
-            dunder_dict_accessor = baz_mgr.get_accessors()[0]
-            self.assertTrue(
-                isinstance(dunder_dict_accessor, GetGenericDictGuardAccessor)
-            )
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
 
-            dunder_dict_mgr = baz_mgr.get_child_managers()[0]
-            self.assertTrue(dunder_dict_mgr.is_tag_safe())
-            self.assertFalse(dunder_dict_mgr.is_tag_safe_root())
+    def test_nn_module_tag_overridden_getattr_safe(self):
+        class Baz(torch.nn.Module, metaclass=abc.ABCMeta):
+            def __init__(self):
+                super().__init__()
+                self.norm = 2
 
-            # Check tagness of baz.__dict__["_modules"]
-            modules_mgr = dunder_dict_mgr.get_child_managers()[0]
-            self.assertTrue(modules_mgr.is_tag_safe())
-            self.assertFalse(modules_mgr.is_tag_safe_root())
+            def __getattr__(self, key):
+                if key == "a":
+                    return 5
+                return super().__getattr__(key)
 
-            # Check tagness of baz.__dict__["_modules"]["foo"]
-            modules_foo_mgr = modules_mgr.get_child_managers()[0]
-            self.assertTrue(modules_foo_mgr.is_tag_safe())
-            self.assertFalse(modules_foo_mgr.is_tag_safe_root())
+            def forward(self, x):
+                return x + self.a + self.norm
+
+        baz = Baz()
+
+        def fn(x):
+            x = x + baz(x)
+            return x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            baz_source = LocalSource("baz")
+
+            # Check tagness of baz
+            baz_mgr = builder.get_guard_manager_from_source(baz_source)
+            self.assertTrue(baz_mgr.is_tag_safe())
+            self.assertTrue(baz_mgr.is_tag_safe_root())
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):

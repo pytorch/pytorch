@@ -147,7 +147,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd_aot(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset);
 
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
 // CK implementation
 TORCH_API
 std::tuple<
@@ -295,7 +295,7 @@ mha_fwd(
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     const int non_null_window_left = window_size_left.value_or(-1);
@@ -368,7 +368,7 @@ mha_varlen_fwd(
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
@@ -441,9 +441,10 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
     const bool deterministic,
     const at::Tensor philox_seed,
     const at::Tensor philox_offset) {
+
+#if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
-#if defined(USE_CK_FLASH_ATTENTION)
     std::optional<at::Tensor> non_null_dbias = std::nullopt;
     const int non_null_window_left = window_size_left.value_or(-1);
     const int non_null_window_right = window_size_right.value_or(-1);
@@ -474,10 +475,8 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
                              philox_offset);
     // for FA return [dQ, dV, dK, dSoftmax]
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue), std::move(dSoftmax));
-#else
-    TORCH_WARN_ONCE("Warning! You have opted to use CK flash attention backend in a build that was not compiled using USE_CK_FLASH_ATTENTION=1. Please set this variable and try again. Defaulting to use aotriton backend...");
-#endif
   }
+#endif
   return mha_bwd_aot(
       dout,
       q,
@@ -530,7 +529,7 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd
     const bool deterministic,
     const at::Tensor philox_seed,
     const at::Tensor philox_offset) {
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     std::optional<at::Tensor> non_null_dbias = std::nullopt;

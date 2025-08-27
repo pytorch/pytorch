@@ -599,6 +599,7 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/graph/GraphUtils.cpp",
     "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
@@ -630,6 +631,10 @@ libtorch_nativert_sources = [
     "torch/nativert/kernels/NativeKernels.cpp",
     "torch/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
     "torch/nativert/kernels/GeneratedNativeStaticDispatchKernels.cpp",
+    "torch/nativert/graph/passes/SubgraphRewriter.cpp",
+    "torch/nativert/graph/passes/pass_manager/GraphPasses.cpp",
+    "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
+    "torch/nativert/kernels/KernelHandlerRegistry.cpp",
 ]
 
 torch_mobile_tracer_sources = [

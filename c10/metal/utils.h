@@ -24,14 +24,12 @@ struct vectypes<half> {
   using type2 = half2;
 };
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct vectypes<bfloat> {
   using type4 = bfloat4;
   using type3 = bfloat3;
   using type2 = bfloat2;
 };
-#endif
 
 template <>
 struct vectypes<short> {
@@ -79,12 +77,10 @@ struct OpMathType<uchar> {
   using type = int;
 };
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct OpMathType<bfloat> {
   using type = float;
 };
-#endif
 
 // Type promotion structure for higher precision accumulation
 template <typename T>
@@ -98,13 +94,11 @@ struct AccumulationType<half> {
   using type = float;
 };
 
-#if __METAL_VERSION__ >= 310
 // Specialization for bfloat - promote to float for accumulation
 template <>
 struct AccumulationType<bfloat> {
   using type = float;
 };
-#endif
 
 } // namespace detail
 
@@ -130,7 +124,6 @@ min(T a, U b) {
   return ::metal::min(a, static_cast<T>(b));
 }
 
-#if __METAL_VERSION__ >= 310
 template <>
 inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
@@ -142,7 +135,6 @@ inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
-#endif
 
 template <typename T>
 using vec2type_t = typename detail::vectypes<T>::type2;

@@ -362,14 +362,6 @@ function(torch_compile_options libname)
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
-    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
-      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
-      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
-      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
-    endif()
-
-
-
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}

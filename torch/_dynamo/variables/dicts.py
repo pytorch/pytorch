@@ -91,6 +91,8 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif isinstance(x, variables.FrozenDataClassVariable):
+        return all(is_hashable(e) for e in x.fields.values())
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
         and not was_instancecheck_override(x.value)
@@ -118,6 +120,7 @@ def is_hashable(x):
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
                 variables.WeakRefVariable,
+                variables.TorchHigherOrderOperatorVariable,
             ),
         )
 
@@ -169,6 +172,14 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.FrozenDataClassVariable):
+                Hashable = ConstDictVariable._HashableTracker
+                fields_values = {
+                    k: Hashable(v).underlying_value for k, v in self.vt.fields.items()
+                }
+                return variables.FrozenDataClassVariable.HashWrapper(
+                    self.vt.python_type(), fields_values
+                )
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):
@@ -275,19 +286,13 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
-    def len(self):
-        return len(
-            [
-                x
-                for x in self.items.values()
-                if not isinstance(x, variables.DeletedVariable)
-            ]
+    def len(self) -> int:
+        return sum(
+            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
         )
 
-    def has_new_items(self):
-        if self.should_reconstruct_all:
-            return True
-        return any(
+    def has_new_items(self) -> bool:
+        return self.should_reconstruct_all or any(
             self.is_new_item(self.original_items.get(key.vt), value)
             for key, value in self.items.items()
         )
