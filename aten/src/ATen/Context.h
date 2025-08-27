@@ -132,6 +132,8 @@ class TORCH_API Context {
   static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
+  static bool ckSupported();
+  static bool hasEigenSparse();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -161,6 +163,12 @@ class TORCH_API Context {
   }
   static bool hasROCM() {
     return detail::getCUDAHooks().hasROCM();
+  }
+  static bool hasCKSDPA() {
+    return detail::getCUDAHooks().hasCKSDPA();
+  }
+  static bool hasCKGEMM() {
+    return detail::getCUDAHooks().hasCKGEMM();
   }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
@@ -252,7 +260,7 @@ class TORCH_API Context {
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
-  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  at::ROCmFABackend getROCmFAPreferredBackend();
   void setROCmFAPreferredBackend(at::ROCmFABackend);
 
   // Note [Enabling Deterministic Operations]
@@ -606,6 +614,10 @@ inline bool hasKleidiAI() {
 
 inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
+}
+
+inline bool hasEigenSparse() {
+  return globalContext().hasEigenSparse();
 }
 
 inline bool hasMAGMA() {

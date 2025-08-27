@@ -28,7 +28,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -909,10 +908,6 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
-    # TODO(FFFrog): Will remove this later when windows/macos are supported.
-    if not IS_LINUX:
-        return 0
-
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
@@ -1555,7 +1550,7 @@ def get_selected_tests(options) -> list[str]:
     if options.einops:
         selected_tests = list(
             filter(
-                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
                 selected_tests,
             )
         )
@@ -1582,6 +1577,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise

@@ -22,7 +22,7 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -32,6 +32,10 @@ from .bytecode_analysis import (
     stacksize_analysis,
 )
 from .utils import is_safe_constant
+
+
+if TYPE_CHECKING:
+    from .output_graph import DynamoTracerOutput
 
 
 @dataclass_slots
@@ -242,9 +246,21 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ensure desired rotate function exists
+    # ROT_N does not exist in Python <= 3.9, but we can simulate it
     if sys.version_info < (3, 10) and n >= 5:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.10")
+        """
+        0 1 2 3 4
+        [0 1 2 3 4]
+        4 3 2 1 0
+        4 [3 2 1 0]
+        4 0 1 2 3
+        """
+        return [
+            create_instruction("BUILD_TUPLE", arg=n),
+            create_instruction("UNPACK_SEQUENCE", arg=n),
+            create_instruction("BUILD_TUPLE", arg=n - 1),
+            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+        ]
 
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
@@ -424,6 +440,10 @@ def create_swap(n: int) -> list[Instruction]:
     # in Python < 3.11, SWAP is a macro that expands to multiple instructions
     if n == 1:
         return []
+    elif n == 2:
+        return [create_instruction("ROT_TWO")]
+    elif n == 3:
+        return [create_instruction("ROT_THREE"), create_instruction("ROT_TWO")]
     """
     e.g. swap "a" and "b" in this stack:
     0 a 1 2 3 b
@@ -457,6 +477,38 @@ def create_swap(n: int) -> list[Instruction]:
         *create_call_method(0),
         create_instruction("POP_TOP"),
         create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+    ]
+
+
+def create_binary_slice(
+    start: Optional[int], end: Optional[int], store: bool = False
+) -> list[Instruction]:
+    """
+    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    """
+    if sys.version_info >= (3, 12):
+        inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction(inst_name),
+        ]
+    else:
+        inst_name = "STORE_SUBSCR" if store else "BINARY_SUBSCR"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction("BUILD_SLICE", arg=2),
+            create_instruction(inst_name),
+        ]
+
+
+def create_reverse(n: int) -> list[Instruction]:
+    # Reverse the top n values on the stack
+    # UNPACK_SEQUENCE reverses the sequence
+    return [
+        create_instruction("BUILD_TUPLE", arg=n),
+        create_instruction("UNPACK_SEQUENCE", arg=n),
     ]
 
 
@@ -1255,7 +1307,7 @@ def debug_bytes(*args: bytes) -> str:
 
 def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
-    dode = transform_code_object(code, lambda x, y: None, safe=True)
+    dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
@@ -1448,18 +1500,22 @@ def get_code_keys() -> list[str]:
 
 def transform_code_object(
     code: types.CodeType,
-    transformations: Callable[[list[Instruction], dict[str, Any]], Any],
+    transformations: Callable[
+        [list[Instruction], dict[str, Any]], Optional["DynamoTracerOutput"]
+    ],
     safe: bool = False,
-) -> types.CodeType:
+) -> tuple[types.CodeType, Optional["DynamoTracerOutput"]]:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code, safe)
+    # propagate line nums again for added instructions
     propagate_line_nums(instructions)
 
-    transformations(instructions, code_options)
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    tracer_output = transformations(instructions, code_options)
+    _, bytecode = clean_and_assemble_instructions(instructions, keys, code_options)
+    return bytecode, tracer_output
 
 
 def clean_and_assemble_instructions(
@@ -1561,6 +1617,8 @@ def _cached_cleaned_instructions(
     code: types.CodeType, safe: bool = False
 ) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    # propagate now in case we remove some instructions
+    propagate_line_nums(instructions)
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
         populate_kw_names_argval(instructions, code.co_consts)
