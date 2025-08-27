@@ -42,7 +42,7 @@ def get_ck_dependency_string() -> str:
     The returned string is in the format:
         " @ git+<repo_url>@<commit_hash>#egg=rocm-composable-kernel"
     where:
-        - <repo_url> is the GitHub repository URL for ROCm Composable Kernel
+        - <repo_url> is the URL for ROCm Composable Kernel
         - <commit_hash> is read from the commit pin file
         - "#egg=rocm-composable-kernel" specifies the package name for setuptools
 
