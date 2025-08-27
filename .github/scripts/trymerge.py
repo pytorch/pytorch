@@ -1359,8 +1359,8 @@ class GitHubPR:
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
 
-        # It's okay to skip the commit SHA check for ghstack PRs since folks who
-        # author them have write access to the repo anyways.
+        # It's okay to skip the commit SHA check for ghstack PRs since
+        # authoring requires write access to the repo.
         if self.is_ghstack_pr():
             return self.merge_ghstack_into(
                 repo,
