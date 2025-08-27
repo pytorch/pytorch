@@ -163,13 +163,22 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
-      MPSGraphTensor* weightTensor = nil;
-      // Should have shape of mean
-      if (has_weight)
-        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight_opt.value()), new_mean_shape);
+      MPSGraphTensor* weightPlaceholderTensor = nil;
+      MPSGraphTensor* biasPlaceholderTensor = nil;
+      MPSGraphTensor* weightTensor = nil; // tensor used in ops (may be casted to input dtype)
       MPSGraphTensor* biasTensor = nil;
-      if (has_bias)
-        biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()), new_mean_shape);
+      // Should have shape of mean
+      if (has_weight) {
+        weightPlaceholderTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight_opt.value()), new_mean_shape);
+        // cast placeholder -> compute tensor with input dtype to ensure broadcast compatibility
+        weightTensor = [mpsGraph castTensor:weightPlaceholderTensor toType:input_mps_dtype name:nil];
+      }
+      if (has_bias) {
+        biasPlaceholderTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()), new_mean_shape);
+        biasTensor = [mpsGraph castTensor:biasPlaceholderTensor toType:input_mps_dtype name:nil];
+      }
       MPSGraphTensor* runningMeanTensor = nil;
       MPSGraphTensor* runningVarTensor = nil;
       if (has_running_mean) {
@@ -269,6 +278,16 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
         varTensor = saveVarTensor;
       }
 
+      if (saveMeanTensor) {
+        saveMeanTensor = [mpsGraph castTensor:saveMeanTensor toType:input_mps_dtype name:nil];
+      }
+      if (saveVarTensor) {
+        saveVarTensor = [mpsGraph castTensor:saveVarTensor toType:input_mps_dtype name:nil];
+      }
+      if (varTensor) {
+        varTensor = [mpsGraph castTensor:varTensor toType:input_mps_dtype name:nil];
+      }
+
       // Compute output of batch norm
       MPSGraphTensor* outputTensor = [mpsGraph normalizationWithTensor:inputTensor
                                                             meanTensor:saveMeanTensor
@@ -293,8 +312,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->biasTensor_ = biasTensor;
+      newCachedGraph->weightTensor_ = weightPlaceholderTensor ? weightPlaceholderTensor : weightTensor;
+      newCachedGraph->biasTensor_ = biasPlaceholderTensor ? biasPlaceholderTensor : biasTensor;
       newCachedGraph->runningMeanTensor_ = runningMeanTensor;
       newCachedGraph->runningVarTensor_ = runningVarTensor;
       newCachedGraph->outputTensor_ = outputTensor;
