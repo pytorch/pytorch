@@ -1364,7 +1364,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(out, out_compiled)
         self.assertEqual(input.grad, input_compiled.grad)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     def test_autocast_flash_attention(self, device):
         def fn(primals_1, primals_2, primals_3):

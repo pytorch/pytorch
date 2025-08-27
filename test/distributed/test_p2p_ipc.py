@@ -34,7 +34,6 @@ class P2PIpcTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_p2p_ipc(self) -> None:
         """
         Test that cross-process P2P access works, by reducing a tensor,

@@ -11,7 +11,6 @@ from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
-    skipIfRocm,
 )
 
 
@@ -63,7 +62,6 @@ class CupyAsTensorTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_cupy_as_tensor(self) -> None:
         """
         Test that torch.as_tensor works for cupy array interface
