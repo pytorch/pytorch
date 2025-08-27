@@ -1194,9 +1194,9 @@ class TestTimelineFunctions(TestCase):
         event_no_sha = {"event": "head_ref_force_pushed"}
         self.assertIsNone(sha_from_force_push_after(event_no_sha))
 
-    @mock.patch("trymerge.gh_fetch_url")
+    @mock.patch("trymerge.gh_fetch_json_list")
     def test_iter_issue_timeline_until_comment(
-        self, mock_gh_fetch_url: Any, *args: Any
+        self, mock_gh_fetch_json_list: Any, *args: Any
     ) -> None:
         """Test timeline iteration until target comment"""
         # Mock timeline data based on actual GitHub API format
@@ -1206,23 +1206,25 @@ class TestTimelineFunctions(TestCase):
             {"event": "commented", "id": 200, "body": "target comment"},
             {"event": "commented", "id": 300, "body": "after target"},
         ]
-        mock_gh_fetch_url.return_value = timeline_data
+        mock_gh_fetch_json_list.return_value = timeline_data
 
         # Test iteration stops at target comment
         events = list(iter_issue_timeline_until_comment("pytorch", "pytorch", 123, 200))
-        self.assertEqual(len(events), 2)  # Should stop before target comment
+        self.assertEqual(len(events), 3)  # Should stop at target comment
         self.assertEqual(events[0]["event"], "commented")
         self.assertEqual(events[0]["id"], 100)
         self.assertEqual(events[1]["event"], "committed")
         self.assertEqual(events[1]["sha"], "fb21ce932ded6670c918804a0d9151b773770a7c")
+        self.assertEqual(events[2]["event"], "commented")
+        self.assertEqual(events[2]["id"], 200)
 
-    @mock.patch("trymerge.gh_fetch_url")
+    @mock.patch("trymerge.gh_fetch_json_list")
     def test_iter_issue_timeline_until_comment_not_found(
-        self, mock_gh_fetch_url: Any, *args: Any
+        self, mock_gh_fetch_json_list: Any, *args: Any
     ) -> None:
         """Test timeline iteration when target comment is not found"""
         # Mock empty timeline
-        mock_gh_fetch_url.return_value = []
+        mock_gh_fetch_json_list.return_value = []
 
         events = list(iter_issue_timeline_until_comment("pytorch", "pytorch", 123, 999))
         self.assertEqual(len(events), 0)

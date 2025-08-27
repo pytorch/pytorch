@@ -454,8 +454,8 @@ def iter_issue_timeline_until_comment(
     org: str, repo: str, issue_number: int, target_comment_id: int, max_pages: int = 200
 ) -> Any:
     """
-    Yield timeline entries in order until (and excluding) the entry whose id == target_comment_id
-    *for a 'commented' event*. Stops as soon as the target comment is encountered.
+    Yield timeline entries in order until (and including) the entry whose id == target_comment_id
+    for a 'commented' event. Stops once the target comment is encountered.
     """
     page = 1
 
@@ -463,25 +463,17 @@ def iter_issue_timeline_until_comment(
         url = (
             f"https://api.github.com/repos/{org}/{repo}/issues/{issue_number}/timeline"
         )
-        headers = {
-            "Accept": "application/vnd.github+json, application/vnd.github.mockingbird-preview+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
         params = {"per_page": 100, "page": page}
 
-        # Build URL with parameters
-        if params:
-            param_str = "&".join(f"{k}={v}" for k, v in params.items())
-            url = f"{url}?{param_str}"
-
-        batch = gh_fetch_url(url, headers=headers)
+        batch = gh_fetch_json_list(url, params)
 
         if not batch:
             return
         for ev in batch:
-            # The target is the *issue comment* row with event == "commented" and id == issue_comment_id
+            # The target is the issue comment row with event == "commented" and id == issue_comment_id
             if ev.get("event") == "commented" and ev.get("id") == target_comment_id:
-                return  # stop BEFORE yielding this comment
+                yield ev  # nothing in the timeline after this matters, so stop early
+                return
             yield ev
         if len(batch) < 100:
             return
@@ -804,7 +796,7 @@ class GitHubPR:
 
     def last_commit_sha(self) -> str:
         # for commits, the oid is the sha
-        return self.last_commit().get("oid", "")
+        return str(self.last_commit().get("oid", ""))
 
     def get_merge_base(self) -> str:
         if self.merge_base:
