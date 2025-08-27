@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 // >>> VmapInterpreterPtr(&interpreter).batchSize()
 //
 // Finally, Interpreter::process switches on the type of the interpreter
-// and calls one of {Transform}Intepreter::processImpl under the hood.
+// and calls one of {Transform}Interpreter::processImpl under the hood.
 // Same for Interpreter::sendToNextInterpreter :)
 
 struct VmapInterpreterMeta {

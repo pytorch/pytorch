@@ -202,7 +202,7 @@ partition create_sdpa_graph_partition(
   // For optional additive mask
   std::optional<op> mask_add;
 
-  // For optional implicite causal mask
+  // For optional implicit causal mask
   std::optional<op> mask_gen_idx_row;
   std::optional<logical_tensor> mask_row_idx;
   std::optional<op> mask_gen_idx_col;
@@ -370,8 +370,8 @@ void gpu_float_sdpa(
   };
 
   // OneDNN doesn't support fp32 ukernel for implicit causal mask,
-  // and the reference implementation is worse than aten math + explict causal
-  // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
+  // and the reference implementation is worse than aten math + explicit causal
+  // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
   if (is_causal && query.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();

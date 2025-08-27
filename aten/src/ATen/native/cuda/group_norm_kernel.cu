@@ -460,7 +460,7 @@ __global__ void GammaBetaBackwardCUDAKernel2(
     }
   }
 
-  // Do warp reduce for the 2st 16 cols in the tile.
+  // Do warp reduce for the 2nd 16 cols in the tile.
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);

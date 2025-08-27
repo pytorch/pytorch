@@ -162,6 +162,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+        # Used when we materialize class.__dict__ to a MappingProxyObject. In
+        # this case, we don't want to allow mutation in the class because there
+        # is no way to reflect it in the created MappingProxyVariable.
+        self.ban_mutation = False
 
     def as_python_constant(self):
         return self.value
@@ -448,6 +452,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 args[1:],
+            )
+        elif name == "__setattr__" and self.ban_mutation:
+            unimplemented_v2(
+                gb_type="Class attribute mutation when the __dict__ was already materialized",
+                context=str(self.value),
+                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                hints=graph_break_hints.SUPPORTABLE,
             )
         return super().call_method(tx, name, args, kwargs)
 
