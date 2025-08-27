@@ -364,13 +364,16 @@ class LazyGroupNorm(LazyModuleMixin, GroupNorm):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         if not self.has_uninitialized_params() and self.num_channels != 0:
             super().reset_parameters()
 
 
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         """
-        Infers ``in_features`` based on ``input`` and initializes parameters.
+        Infers ``num_channels`` based on ``input`` and initializes parameters.
         """
         if self.has_uninitialized_params():
             self.num_channels = input.shape[1]
