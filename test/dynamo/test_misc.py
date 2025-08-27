@@ -229,60 +229,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    def test_torch_dispatch_ignore_compile_internals(self):
-        counters.clear()
-        from torch.utils._python_dispatch import TorchDispatchMode
-
-        @torch.library.custom_op("mylib::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            return x.clone()
-
-        def checksum(x):
-            return x.abs().sum()
-
-        _checksums = []
-
-        class ChecksumFoo(TorchDispatchMode):
-            @classmethod
-            def ignore_compile_internals(cls):
-                return True
-
-            def __init__(self) -> None:
-                super().__init__()
-
-            def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs or {}
-
-                if func is torch.ops.mylib.foo.default:
-                    # Do some compute, smoketest to see if there's a bad interaction
-                    _checksums.append(args[0].abs().sum())
-
-                return func(*args, **kwargs)
-
-        backend_count = 0
-
-        def backend(gm, args):
-            global backend_count
-            backend_count += 1
-            return gm
-
-        # test e2e, with Inductor, as smoketest.
-        @torch.compile(fullgraph=True, backend="inductor")
-        def g(x):
-            return 2 * x.sin().cos()
-
-        x = torch.randn(3)
-
-        with ChecksumFoo():
-            foo(x)
-            g(x)
-            foo(x)
-
-        self.assertEqual(len(_checksums), 2)
-        # The correct result here is 1: Dynamo should capture the `g` frame.
-        self.assertEqual(counters["frames"]["total"], 1)
-        self.assertEqual(counters["frames"]["ok"], 1)
-
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()

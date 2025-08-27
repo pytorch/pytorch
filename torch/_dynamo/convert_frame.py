@@ -73,7 +73,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
-    _get_current_dispatch_mode_stack,
+    is_in_any_mode_without_ignore_compile_internals,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -1632,18 +1632,7 @@ class ConvertFrameProtocol(typing.Protocol):
 
 
 def should_skip_due_to_torch_dispatch_mode() -> bool:
-    # fast check
-    if not is_in_torch_dispatch_mode(include_infra_modes=False):
-        return False
-
-    mode_stack = _get_current_dispatch_mode_stack()
-    for mode in mode_stack:
-        if mode.ignore_compile_internals():
-            continue
-        if mode.is_infra_mode():
-            continue
-        return True
-    return False
+    return is_in_any_mode_without_ignore_compile_internals()
 
 
 class CatchErrorsWrapper:
