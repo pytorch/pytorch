@@ -22,9 +22,10 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
+from . import config
 from .bytecode_analysis import (
     get_indexof,
     propagate_line_nums,
@@ -32,6 +33,10 @@ from .bytecode_analysis import (
     stacksize_analysis,
 )
 from .utils import is_safe_constant
+
+
+if TYPE_CHECKING:
+    from .output_graph import DynamoTracerOutput
 
 
 @dataclass_slots
@@ -242,9 +247,21 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ensure desired rotate function exists
+    # ROT_N does not exist in Python <= 3.9, but we can simulate it
     if sys.version_info < (3, 10) and n >= 5:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.10")
+        """
+        0 1 2 3 4
+        [0 1 2 3 4]
+        4 3 2 1 0
+        4 [3 2 1 0]
+        4 0 1 2 3
+        """
+        return [
+            create_instruction("BUILD_TUPLE", arg=n),
+            create_instruction("UNPACK_SEQUENCE", arg=n),
+            create_instruction("BUILD_TUPLE", arg=n - 1),
+            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+        ]
 
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
@@ -424,6 +441,10 @@ def create_swap(n: int) -> list[Instruction]:
     # in Python < 3.11, SWAP is a macro that expands to multiple instructions
     if n == 1:
         return []
+    elif n == 2:
+        return [create_instruction("ROT_TWO")]
+    elif n == 3:
+        return [create_instruction("ROT_THREE"), create_instruction("ROT_TWO")]
     """
     e.g. swap "a" and "b" in this stack:
     0 a 1 2 3 b
@@ -457,6 +478,38 @@ def create_swap(n: int) -> list[Instruction]:
         *create_call_method(0),
         create_instruction("POP_TOP"),
         create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+    ]
+
+
+def create_binary_slice(
+    start: Optional[int], end: Optional[int], store: bool = False
+) -> list[Instruction]:
+    """
+    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    """
+    if sys.version_info >= (3, 12):
+        inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction(inst_name),
+        ]
+    else:
+        inst_name = "STORE_SUBSCR" if store else "BINARY_SUBSCR"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction("BUILD_SLICE", arg=2),
+            create_instruction(inst_name),
+        ]
+
+
+def create_reverse(n: int) -> list[Instruction]:
+    # Reverse the top n values on the stack
+    # UNPACK_SEQUENCE reverses the sequence
+    return [
+        create_instruction("BUILD_TUPLE", arg=n),
+        create_instruction("UNPACK_SEQUENCE", arg=n),
     ]
 
 
@@ -1148,6 +1201,50 @@ def remove_fused_load_store(instructions: list[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+# adds GRAPH_BREAK_IF_LEAF (not a real instruction) before RETURN_* instructions
+# for testing purposes
+def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        if "RETURN" in inst.opname:
+            replace_insts = [
+                create_instruction("NOP", argval="GRAPH_BREAK_IF_LEAF"),
+                create_instruction(inst.opname, argval=inst.argval),
+            ]
+            # breakpoint()
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
+    instructions[:] = new_insts
+
+
+def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> None:
+    new_insts = []
+    for inst, next_inst in zip(instructions, instructions[1:]):
+        if (
+            inst.opname == "NOP"
+            and inst.argval == "GRAPH_BREAK_IF_LEAF"
+            and next_inst.opname.startswith("RETURN")
+        ):
+            # remove this instruction and update all other instructions' jump targets
+            for i in range(len(instructions)):
+                if instructions[i].target is inst:
+                    instructions[i].target = next_inst
+                if instructions[i].exn_tab_entry:
+                    # linter is mistakenly complaining that None has no attribute "..."
+                    # but this codepath only runs if instructions[i] is not None
+                    if instructions[i].exn_tab_entry.start is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.start = next_inst  # type: ignore[union-attr]
+                    if instructions[i].exn_tab_entry.end is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.end = next_inst  # type: ignore[union-attr]
+                    if instructions[i].exn_tab_entry.target is inst:  # type: ignore[union-attr]
+                        instructions[i].exn_tab_entry.target = next_inst  # type: ignore[union-attr]
+        else:
+            new_insts.append(inst)
+    new_insts.append(instructions[-1])
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: list[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or ()) + (code.co_freevars or ())
@@ -1255,7 +1352,7 @@ def debug_bytes(*args: bytes) -> str:
 
 def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
-    dode = transform_code_object(code, lambda x, y: None, safe=True)
+    dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
@@ -1448,9 +1545,11 @@ def get_code_keys() -> list[str]:
 
 def transform_code_object(
     code: types.CodeType,
-    transformations: Callable[[list[Instruction], dict[str, Any]], Any],
+    transformations: Callable[
+        [list[Instruction], dict[str, Any]], Optional["DynamoTracerOutput"]
+    ],
     safe: bool = False,
-) -> types.CodeType:
+) -> tuple[types.CodeType, Optional["DynamoTracerOutput"]]:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1459,13 +1558,15 @@ def transform_code_object(
     # propagate line nums again for added instructions
     propagate_line_nums(instructions)
 
-    transformations(instructions, code_options)
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    tracer_output = transformations(instructions, code_options)
+    _, bytecode = clean_and_assemble_instructions(instructions, keys, code_options)
+    return bytecode, tracer_output
 
 
 def clean_and_assemble_instructions(
     instructions: list[Instruction], keys: list[str], code_options: dict[str, Any]
 ) -> tuple[list[Instruction], types.CodeType]:
+    remove_graph_break_if_leaf_instructions(instructions)
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)
 
@@ -1581,6 +1682,8 @@ def _cached_cleaned_instructions(
                 remove_binary_store_slice(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
+        if config.debug_force_graph_break_on_leaf_return:
+            add_graph_break_if_leaf_instructions(instructions)
     if sys.version_info >= (3, 11):
         update_offsets(instructions)
         devirtualize_jumps(instructions)

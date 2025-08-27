@@ -168,13 +168,13 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang12-onnx)
-    ANACONDA_PYTHON_VERSION=3.9
+    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     VISION=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     VISION=yes
     TRITON=yes
@@ -234,8 +234,8 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     CLANG_VERSION=12
     VISION=yes
@@ -246,8 +246,8 @@ case "$tag" in
     CLANG_VERSION=18
     VISION=yes
     ;;
-  pytorch-linux-jammy-py3.9-gcc11)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-gcc11)
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
@@ -288,7 +288,6 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
@@ -299,7 +298,6 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
