@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 
 from setuptools import find_packages, setup
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 
 ROOT_DIR = Path(__file__).parent
@@ -36,16 +36,10 @@ def get_extension():
         "cxx": ["-fdiagnostics-color=always", "-DTORCH_STABLE_ONLY"],
     }
 
-    extension = CppExtension
-    # allow including <cuda_runtime.h>
-    if torch.cuda.is_available():
-        extra_compile_args["cxx"].append("-DUSE_CUDA")
-        extension = CUDAExtension
-
     sources = list(CSRC_DIR.glob("**/*.cpp"))
 
     return [
-        extension(
+        CppExtension(
             "torch_stable_test._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
