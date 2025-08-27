@@ -4,7 +4,6 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
 from cli.lib.common.envs_helper import (
@@ -21,7 +20,14 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
-from cli.lib.core.vllm.lib import clone_vllm
+from cli.lib.core.vllm.lib import clone_vllm, write_gh_step_summary
+from cli.lib.common.gh_summary import (
+    summarize_content_from_file,
+    summarize_wheels,
+    gh_summary_path,
+)
+import torch
+from torch import torch_version
 
 
 logger = logging.getLogger(__name__)
@@ -155,23 +161,58 @@ class VllmBuildRunner(BaseRunner):
         logger.info("Running vllm build with inputs: %s", inputs)
         vllm_commit = clone_vllm()
 
+        vllm_sha_url = f"${vllm_commit}](https://github.com/vllm-project/vllm/commit/${vllm_commit})"
+        write_gh_step_summary(
+            f"""
+            ## Commit Info
+            - **Vllm Commit**: `{vllm_sha_url}`
+            - **Torch Version**: `{torch_version}`
+            """
+        )
+
         self.cp_dockerfile_if_exist(inputs)
 
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
 
         # make sure the output dir to store the build artifacts exist
-        ensure_dir_exists(inputs.output_dir)
+        ensure_dir_exists(Path(inputs.output_dir))
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
-        run_command(cmd, cwd="vllm", env=os.environ.copy())
 
-    def write_step_summary(self, vllm_commit: str):
-       vllm_sha_url =f"${vllm_commit}](https://github.com/vllm-project/vllm/commit/${vllm_commit})"
-       md = []
+        try:
+            run_command(cmd, cwd="vllm", env=os.environ.copy())
+        finally:
+            self.genearte_vllm_build_summary(vllm_commit, inputs)
 
-       write_gh_step_summary()
+    def genearte_vllm_build_summary(
+        self, vllm_commit: str, inputs: VllmBuildParameters
+    ):
+        if not gh_summary_path():
+            return logger.info("Skipping, not detect GH Summary env var....")
+        logger.info("Generate GH Summary ...")
+        vllm_sha_url = f"[{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
+        write_gh_step_summary(
+            f"""
+            ## Build vllm against Pytorch CI
+            **Vllm Commit**: `{vllm_sha_url}`
+            """
+        )
+        torch_sha = os.getenv("GITHUB_SHA")
+        if torch_sha:  # only can grab this in github action
+            torch_sha_url = (
+                f"[{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
+            )
+            write_gh_step_summary(
+                f"""
+             **Pytorch Commit**: `{torch_sha_url}`
+             """
+            )
+        vllm_artifact_dir = inputs.output_dir / "wheels"
+        summarize_content_from_file(vllm_artifact_dir, "build_summary.txt", title="Vllm build package summary")
+        summarize_wheels(inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts")
+        summarize_wheels(vllm_artifact_dir, max_depth=3, title="Vllm Wheels Artifacts")
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:

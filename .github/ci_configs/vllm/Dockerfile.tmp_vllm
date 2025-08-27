@@ -176,6 +176,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
+
 RUN cat torch_build_versions.txt
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
@@ -376,6 +377,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm\|^flashinfer' > build_summary.txt
 ################### VLLM INSTALLED IMAGE ####################
 
 
@@ -433,4 +435,5 @@ FROM scratch as export-wheels
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
+COPY --from=vllm-base /workspace/build_summary.txt /wheels/build_summary.txt
 COPY --from=vllm-base /workspace/wheels/flashinfer /wheels/flashinfer-python
