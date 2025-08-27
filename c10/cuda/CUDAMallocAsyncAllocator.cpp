@@ -428,8 +428,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   // just set up for later calls to init per-device pools based
   // on the current device each later call sees.
   void init(int dev_count) override {
-    static bool called = [](int dev_count) {
-      ;
+    static bool called = [this](int dev_count) {
       // Are there external guarantees init will be called before
       // any of the allocator's other functions?
       // std::lock_guard<std::mutex> lk(general_mutex);
@@ -438,6 +437,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       dummy_unifying_free_streams.resize(dev_count);
       pytorch_used_bytes.resize(dev_count);
       pytorch_memory_limits.resize(dev_count);
+      CUDAAllocator::init(dev_count);
       return true;
     }(dev_count);
     (void)called;

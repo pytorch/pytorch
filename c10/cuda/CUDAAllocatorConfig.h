@@ -56,6 +56,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_release_lock_on_cudamalloc;
   }
 
+  static double per_process_memory_fraction() {
+    return instance().m_per_process_memory_fraction;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -124,7 +128,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
         // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
         "release_lock_on_hipmalloc",
         "pinned_use_hip_host_register",
-        "pinned_num_register_threads"};
+        "pinned_num_register_threads",
+        "per_process_memory_fraction",
+    };
     return keys;
   }
 
@@ -165,6 +171,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedNumRegisterThreads(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parsePerProcessMemoryFraction(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type
@@ -177,6 +186,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_use_async_allocator{false};
   std::atomic<bool> m_is_allocator_loaded{false};
+  std::atomic<double> m_per_process_memory_fraction{1.0};
 };
 
 // Keep this for backwards compatibility

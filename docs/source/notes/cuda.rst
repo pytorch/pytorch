@@ -491,6 +491,12 @@ underlying allocation patterns produced by your code.
 Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. attention::
+
+    PYTORCH_CUDA_ALLOC_CONF has been renamed to PYTORCH_ALLOC_CONF.
+    The old name is still supported for backwards compatibility but
+    using the new name should be preferred.
+
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
@@ -607,6 +613,10 @@ Available options:
 * `pinned_use_background_threads` option is a boolean flag to enable background thread
   for processing events. This avoids any slow path associated with querying/processing of
   events in the fast allocation path. This feature is disabled by default.
+
+* `per_process_memory_fraction` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
 
 .. note::
 

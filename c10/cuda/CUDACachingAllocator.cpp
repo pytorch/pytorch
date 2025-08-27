@@ -3497,6 +3497,8 @@ class NativeCachingAllocator : public CUDAAllocator {
         device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
       }
     }
+
+    CUDAAllocator::init(device_count);
   }
 
   bool initialized() override {
@@ -4124,9 +4126,7 @@ struct BackendStaticInitializer {
 // HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
 // initialization, and doing so there may introduce static initialization
 // order (SIOF) issues.
-#define HIP_MASQUERADING_AS_CUDA \
-  "cud"                          \
-  "a"
+#define HIP_MASQUERADING_AS_CUDA "cuda"
     at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
 #undef HIP_MASQUERADING_AS_CUDA
