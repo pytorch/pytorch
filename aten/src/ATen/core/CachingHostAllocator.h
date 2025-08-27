@@ -57,7 +57,7 @@ struct TORCH_API HostStats {
   // COUNT: number of allocated segments from host memory allocation.
   Stat segment;
 
-  // SUM: bytes allocated by this memory alocator. Note that active bytes
+  // SUM: bytes allocated by this memory allocator. Note that active bytes
   // can be extracted by looking at current bytes allocated
   Stat allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
@@ -412,7 +412,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetAccumulatedStats() {
-    // Reseting accumulated memory stats requires concurrently holding both the
+    // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
@@ -437,7 +437,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetPeakStats() {
-    // Reseting peak memory stats requires concurrently holding both the
+    // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
