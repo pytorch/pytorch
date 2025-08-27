@@ -1128,6 +1128,7 @@ class NamedTupleVariable(TupleVariable):
                 or attr in self.fields()
             ):
                 raise_observed_exception(AttributeError, tx)
+            # Subclass of namedtuple type can have dynamic attributes
             from .base import AttributeMutationExisting
             self.mutation_type = AttributeMutationExisting()
             tx.output.side_effects.mutation(self)
