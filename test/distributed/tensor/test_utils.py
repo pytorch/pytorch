@@ -272,6 +272,23 @@ class UtilTest(DTensorTestBase):
                 )
 
     @with_comms
+    def test_regression_double_shard_offset(self):
+        # Repro for GitHub issue #161368, unit test should pass after fix
+        mesh = init_device_mesh(self.device_type, (2, 4))  # uneven 2D mesh
+        global_tensor = torch.arange(2)
+        placements = [Shard(0), Shard(0)]
+        dtensor = distribute_tensor(global_tensor, mesh, placements)
+
+        local_size, global_offset = compute_local_shape_and_global_offset(
+            global_tensor.size(), mesh, placements
+        )
+
+        # Expect correct slicing (no bogus offsets like before)
+        dim = self._compute_start_end_offsets(global_offset, local_size, 1)
+        d0s, d0e = dim[0]
+        self.assertEqual(dtensor.to_local(), global_tensor[d0s:d0e])
+
+    @with_comms
     def test_fsdp_tp_meta_compute(self):
         # FSDP + TP sharding
         tp_size = 2
