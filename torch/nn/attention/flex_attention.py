@@ -1263,7 +1263,12 @@ def create_nested_block_mask(
 
 
 def _apply_kernel_options(
-    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    return_lse: bool,
+    kernel_options,
+    return_max_scores: bool = False,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
@@ -1273,6 +1278,12 @@ def _apply_kernel_options(
     # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
     kernel_options.setdefault("WRITE_DQ", True)
 
+    any_inputs_on_cpu_device = (
+        query.device.type == "cpu"
+        or key.device.type == "cpu"
+        or value.device.type == "cpu"
+    )
+
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
     kernel_options["OUTPUT_LOGSUMEXP"] = True
@@ -1281,15 +1292,18 @@ def _apply_kernel_options(
         # we always write unless in no_grad
         output_logsumexp = torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
-        any_inputs_on_cpu_device = (
-            query.device.type == "cpu"
-            or key.device.type == "cpu"
-            or value.device.type == "cpu"
-        )
         if any_inputs_on_cpu_device:
             # CPU with torch.compile now supports infernece, and will not return lse
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
+
+    # If forward kernel needs to return max is decided by this rule internally.
+    assert "OUTPUT_MAX" not in kernel_options
+    kernel_options["OUTPUT_MAX"] = return_max_scores
+    if any_inputs_on_cpu_device and return_max_scores:
+        # CPU doesn't support returning max yet
+        # TODO: support CPU for returning max
+        kernel_options["OUTPUT_MAX"] = False
 
     return kernel_options
 
@@ -1405,7 +1419,9 @@ def flex_attention(
     enable_gqa: bool = False,
     return_lse: bool = False,
     kernel_options: Optional[FlexKernelOptions] = None,
-) -> Union[Tensor, tuple[Tensor, Tensor]]:
+    *,
+    return_max_scores: bool = False,
+) -> Union[Tensor, tuple[Tensor, ...]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1443,9 +1459,12 @@ def flex_attention(
         kernel_options (Optional[FlexKernelOptions]):
             Options to control the behavior of the underlying Triton kernels.
             See :class:`FlexKernelOptions` for available options and usage examples.
+        return_max_scores (bool): Whether to return the max of attention scores (row-wise maximum) for each query. Default is False.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
+        lse (Tensor): Log-sum-exp of attention scores; shape :math:`(B, Hq, L)`. Only returned if ``return_lse=True``.
+        max_scores (Tensor): Maximum attention scores for each query; shape :math:`(B, Hq, L)`. Only returned if ``return_max_scores=True``.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -1556,6 +1575,7 @@ def flex_attention(
         value,
         return_lse,
         kernel_options,
+        return_max_scores,
     )
 
     if torch.compiler.is_dynamo_compiling():
@@ -1564,7 +1584,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        out, lse = flex_attention_hop(
+        out, lse, max_scores = flex_attention_hop(
             query,
             key,
             value,
@@ -1573,8 +1593,12 @@ def flex_attention(
             scale,
             kernel_options,  # type: ignore[union-attr]
         )
-        if return_lse:
+        if return_lse and return_max_scores:
+            return out, lse * math.log(2), max_scores * math.log(2)
+        elif return_lse:
             return out, lse * math.log(2)
+        elif return_max_scores:
+            return out, max_scores * math.log(2)
         else:
             return out
 
@@ -1620,7 +1644,7 @@ def flex_attention(
                             _flex_attention_hop_wrapper, backend=backend, fullgraph=True
                         )
 
-                    out, lse = flex_fn(
+                    out, lse, max_scores = flex_fn(
                         query,
                         key,
                         value,
@@ -1629,7 +1653,11 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-    if return_lse:
+    if return_lse and return_max_scores:
+        return out, lse * math.log(2), max_scores * math.log(2)
+    elif return_lse:
         return out, lse * math.log(2)
+    elif return_max_scores:
+        return out, max_scores * math.log(2)
     else:
         return out

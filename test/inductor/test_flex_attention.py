@@ -1891,6 +1891,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    def test_return_max(self, device):
+        dtype = torch.float32
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        out_only = flex_attention(query, key, value)
+        out_max, max_scores = flex_attention(query, key, value, return_max_scores=True)
+        out_both, lse, max_scores_both = flex_attention(
+            query, key, value, return_lse=True, return_max_scores=True
+        )
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        out_compiled, max_compiled = flex_compile(query, key, value, return_max_scores=True)
+
+        torch.testing.assert_close(out_only, out_max, atol=1e-6, rtol=1e-6)
+        torch.testing.assert_close(out_only, out_both, atol=1e-6, rtol=1e-6)
+        torch.testing.assert_close(max_scores, max_scores_both, atol=1e-6, rtol=1e-6)
+
+        # we are calculating slightly different scores so add a lil fudge
+        torch.testing.assert_close(out_max, out_compiled, atol=5e-3, rtol=5e-3)
+        torch.testing.assert_close(max_scores, max_compiled, atol=5e-3, rtol=5e-3)
+
+        B, H, L = query.shape[:3]
+        self.assertEqual(max_scores.shape, (B, H, L))
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @skip_on_cpu
