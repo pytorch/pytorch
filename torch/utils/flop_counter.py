@@ -74,12 +74,6 @@ def register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target):
-            # Want to enable registering custom kernel defs here
-            if not isinstance(target, torch._ops.OpOverloadPacket | torch._library.custom_ops.CustomOpDef):
-                raise ValueError(
-                    f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
-                    f"{target} which is of type {type(target)}")
             if target in triton_flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
             print("Registering flop formula for", target)
@@ -825,15 +819,15 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
-            return NotImplemented
-
-        # The flop counter for cond counts the upper bound of flops.
-        # For example, if a matmul is executed 2 times in true branch
-        # but only 1 time in the false branch, the flop counter will
-        # record the larger number of flops, i.e. 2 times.
-        if func is torch.ops.higher_order.cond:
-
+        # breakpoint()
+        if func is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+            # Special case - look in the triton flop registry for the kernel
+            return self.counter._count_flops(kwargs["kernel"], None, args, kwargs)
+        elif func is torch.ops.higher_order.cond:
+            # The flop counter for cond counts the upper bound of flops.
+            # For example, if a matmul is executed 2 times in true branch
+            # but only 1 time in the false branch, the flop counter will
+            # record the larger number of flops, i.e. 2 times.
             pred, true_branch, false_branch, operands = args
             # Step 1: Count flops for true branch and false branch separately
             true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
@@ -872,6 +866,8 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+        else:
+            return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
