@@ -503,6 +503,12 @@ def sha_from_committed_event(ev: dict[str, Any]) -> Optional[str]:
 
 def sha_from_force_push_after(ev: dict[str, Any]) -> Optional[str]:
     """Extract SHA from force push event in timeline"""
+    # The current GitHub API format
+    commit_id = ev.get("commit_id")
+    if commit_id:
+        return str(commit_id)
+
+    # Legacy format
     after = ev.get("after") or ev.get("after_commit") or {}
     if isinstance(after, dict):
         return after.get("sha") or after.get("oid")
@@ -536,6 +542,10 @@ def reconstruct_head_before_comment(
                     head = sha
                     found_any_event = True
                     print(f"Timeline: Found force push event with SHA {sha}")
+            elif etype == "commented":
+                if event.get("id") == issue_comment_id:
+                    print(f"Timeline: Found final comment with sha {sha}")
+                    break
             # Handle other head-changing events if needed
     except Exception as e:
         print(
