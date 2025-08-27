@@ -115,7 +115,6 @@ class LoadBalancer(ABC):
         Returns:
             The generated indices.
         """
-        pass
 
 
 class HeadTailLoadBalancer(LoadBalancer):
@@ -234,7 +233,11 @@ class PerDocumentHeadTailLoadBalancer(LoadBalancer):
 
             document_start_idx += seq_length
 
-        return torch.cat(indices)
+        indices_tensor = torch.cat(indices)
+        if restore:
+            indices_tensor = torch.argsort(indices_tensor)
+
+        return indices_tensor
 
 
 def _set_cp_global_var(name: str, value: Any) -> None:
@@ -547,9 +550,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1277,6 +1280,7 @@ def create_cp_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device_mesh: DeviceMesh,
+    lb: Optional[LoadBalancer] = None,
 ) -> BlockMask:
     """
     This API creates a special BlockMask for Context Parallel FlexAttention:
@@ -1294,6 +1298,8 @@ def create_cp_block_mask(
         Q_LEN (int): Sequence length of query (global view).
         KV_LEN (int): Sequence length of key/value (global view).
         device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+        lb (optional[:class:`LoadBalancer`]): The load-balancer used to shuffle QKV before
+            sharding. This will be used to modify the block_mask generated.
 
     Return:
         :class:`BlockMask`: the block_mask to be used in flex_attention() within the
@@ -1317,7 +1323,21 @@ def create_cp_block_mask(
         world_size: int,
         block_size: int,
         local_q_size: int,
+        qkv_shuffle_indices: Optional[torch.Tensor] = None,
     ) -> _mask_mod_signature:
+        def qkv_idx_restore(
+            b: torch.Tensor, idx_post_shuffle: torch.Tensor
+        ) -> torch.Tensor:
+            if qkv_shuffle_indices is not None:
+                if qkv_shuffle_indices.ndim == 1:  # identical across batches
+                    idx_pre_shuffle = qkv_shuffle_indices[idx_post_shuffle]
+                else:
+                    idx_pre_shuffle = qkv_shuffle_indices[b][idx_post_shuffle]
+            else:
+                idx_pre_shuffle = idx_post_shuffle
+
+            return idx_pre_shuffle
+
         def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
             # calculate local block_idx and block_offset
             local_blk_idx, local_blk_offset = (
@@ -1332,8 +1352,8 @@ def create_cp_block_mask(
         return lambda b, h, q_idx, kv_idx: mask_mod(
             b,
             h,
-            local_q_idx_to_q_idx(q_idx),
-            kv_idx,
+            qkv_idx_restore(b, local_q_idx_to_q_idx(q_idx)),
+            qkv_idx_restore(b, kv_idx),
         )
 
     cp_rank = device_mesh.get_local_rank()
@@ -1341,7 +1361,16 @@ def create_cp_block_mask(
     Q_SHARD_LEN = Q_LEN // cp_group_size
     block_size = _DEFAULT_SPARSE_BLOCK_SIZE
     block_mask = compiled_create_block_mask(
-        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        _rewrite_mask_mod(
+            mask_mod,
+            cp_rank,
+            cp_group_size,
+            block_size,
+            Q_SHARD_LEN,
+            qkv_shuffle_indices=(
+                None if lb is None else lb.generate_indices(restore=False)
+            ),
+        ),
         B,
         H,
         Q_SHARD_LEN,
@@ -1539,7 +1568,20 @@ def _context_parallel_buffers(
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
-            buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
+            if load_balance_indices.ndim == 1:
+                buffer = torch.index_select(
+                    buffer, dim=seq_dim, index=load_balance_indices
+                )
+            else:
+                # load_balance_indices has shape (batch_size, seq_length)
+                # TODO: add shape check
+                # TODO: this for-looop can be done in a smarter way
+                for i in range(load_balance_indices.size(dim=0)):
+                    # NOTE: assuming batch dim is 0
+                    buffer_batch_i = torch.index_select(
+                        buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
+                    )
+                    buffer[i] = buffer_batch_i
 
         # use DTensor to shard the buffer on sequence dimension, retain the local tensor
         sharded_buffer = distribute_tensor(
@@ -1610,7 +1652,7 @@ def context_parallel(
     seq_length = buffers[0].shape[buffer_seq_dims[0]]
     cp_world_size = mesh.size()
     # TODO: add explicit load_balance_indices for user to specify
-    if not load_balance_indices and _cp_options.enable_load_balance:
+    if load_balance_indices is None and _cp_options.enable_load_balance:
         load_balance_indices = _generate_round_robin_indices(
             seq_length=seq_length,
             cp_world_size=cp_world_size,
@@ -1655,7 +1697,7 @@ def context_parallel_unshard(
     Returns:
         list[torch.Tensor]: the unsharded buffers.
     """
-    if not restore_indices and _cp_options.enable_load_balance:
+    if restore_indices is None and _cp_options.enable_load_balance:
         device = buffers[0].device
         cp_world_size = mesh.size()
         seq_length = buffers[0].shape[seq_dims[0]] * cp_world_size
@@ -1672,9 +1714,20 @@ def context_parallel_unshard(
         unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
-            unsharded_b = torch.index_select(
-                unsharded_b, dim=dim, index=restore_indices
-            )
+            if restore_indices.ndim == 1:
+                unsharded_b = torch.index_select(
+                    unsharded_b, dim=dim, index=restore_indices
+                )
+            else:
+                # restore_indices has shape (batch_size, seq_length)
+                # TODO: add shape check
+                # TODO: this for-looop can be done in a smarter way
+                for i in range(restore_indices.size(dim=0)):
+                    # NOTE: assuming batch dim is 0
+                    unsharded_b_batch_i = torch.index_select(
+                        unsharded_b[i], dim=dim - 1, index=restore_indices[i]
+                    )
+                    unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)
     return unsharded_buffers

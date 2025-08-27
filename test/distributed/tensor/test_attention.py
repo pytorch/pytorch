@@ -4,7 +4,7 @@ import functools
 import itertools
 import random
 import unittest
-from typing import Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -22,6 +22,7 @@ from torch.distributed.tensor.experimental._attention import (
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
+    LoadBalancer,
     PerDocumentHeadTailLoadBalancer,
     set_rotate_method,
 )
@@ -98,6 +99,7 @@ class LoadBalanceTest(TestCase):
         indices_per_batch = lb.generate_indices(restore=False)
 
         print(indices_per_batch)
+        print(lb.generate_indices(restore=True))
 
 
 class RingAttentionTest(DTensorTestBase):
@@ -595,10 +597,15 @@ class RingFlexAttentionTest(DTensorTestBase):
         return 2
 
     def _test_ring_flex_attention(
-        self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
+        self,
+        *,
+        qkv_size: int,
+        B: int = 1,
+        mask_func: _mask_mod_signature = causal_mask,
+        lb: Optional[LoadBalancer] = None,
+        atol: float = 1e-6,
+        rtol: float = 1e-2,
     ) -> None:
-        enable_load_balance = True
-
         torch.cuda.manual_seed(10)
         dtype = torch.float32
         bs = B if B > 1 else 8
@@ -671,7 +678,6 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
 
         # if load-balance is enabled, reorder input tensor and produce the index tensor
-
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
         cp_block_mask = create_cp_block_mask(
             mask_func,
@@ -680,6 +686,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             Q_LEN=query_tokens,
             KV_LEN=context_tokens,
             device_mesh=device_mesh,
+            lb=lb,
         )
 
         # shard qkv on seq_dim
@@ -689,6 +696,9 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
             buffer_seq_dims=[shard_dim] * 3,
+            load_balance_indices=(
+                None if lb is None else lb.generate_indices(restore=False)
+            ),
         ):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
@@ -716,15 +726,21 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_v.requires_grad = False
 
         # unshard the output
-        cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
+        cp_out, cp_lse = context_parallel_unshard(
+            device_mesh,
+            buffers=[cp_out, cp_lse],
+            seq_dims=[2, 2],
+            restore_indices=None if lb is None else lb.generate_indices(restore=True),
+        )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_lse, expect_lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
             device_mesh,
-            [cp_q.grad, cp_k.grad, cp_v.grad],
-            [2, 2, 2],
+            buffers=[cp_q.grad, cp_k.grad, cp_v.grad],
+            seq_dims=[2, 2, 2],
+            restore_indices=None if lb is None else lb.generate_indices(restore=True),
         )
         torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
@@ -759,13 +775,6 @@ class RingFlexAttentionTest(DTensorTestBase):
     def test_ring_flex_attention_document_mask(self) -> None:
         random.seed(10)
 
-        # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
-        # compilations: 1 for single-rank flex_attention and 1 for CP flex_attention.
-        # In order to avoid the "exceeds_recompile_limit" error, we need to increase
-        # the cache_size_limit to 12 which is the total number of compilations in our
-        # test case.
-        torch._dynamo.config.cache_size_limit = 12
-
         # parameters for testing
         doc_count = 28
         enable_load_balance_list = [True, False]
@@ -776,6 +785,18 @@ class RingFlexAttentionTest(DTensorTestBase):
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
 
+        # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
+        # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
+        # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
+        # we need to increase the cache_size_limit to 12 which is the total number
+        # of compilations in our test case.
+        torch._dynamo.config.cache_size_limit = (
+            2
+            * len(enable_load_balance_list)
+            * len(batch_size_list)
+            * len(max_seq_len_list)
+        )
+
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
         # for each subtest. This can be baked into self._test_ring_flex_attention as
@@ -785,20 +806,35 @@ class RingFlexAttentionTest(DTensorTestBase):
         ):
             # initialize document mask
             lengths = [
-                generate_random_lengths(max_seq_len, doc_count)
+                (
+                    generate_random_lengths_in_chunks(
+                        max_seq_len, doc_count, chunk_size=2 * self.world_size
+                    )
+                    if enable_load_balance
+                    else generate_random_lengths(max_seq_len, doc_count)
+                )
                 for _ in range(batch_size)
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
             _cp_options.enable_load_balance = enable_load_balance
-            # generate
+
+            # generate load balancer
+            load_balancer = (
+                PerDocumentHeadTailLoadBalancer(
+                    lengths, self.world_size, torch.device(self.device_type)
+                )
+                if enable_load_balance
+                else None
+            )
 
             # construct testing function
             test_func = functools.partial(
                 self._test_ring_flex_attention,
                 qkv_size=max_seq_len,
                 B=batch_size,
+                lb=load_balancer,
                 mask_func=document_causal_mask,
                 atol=1e-6,
             )
