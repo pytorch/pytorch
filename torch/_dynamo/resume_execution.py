@@ -369,11 +369,7 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [
-                    v
-                    for v in code_options["co_varnames"]
-                    if v not in args and v not in freevars
-                ]
+                + [v for v in code_options["co_varnames"] if v not in args]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
