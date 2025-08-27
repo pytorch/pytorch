@@ -1157,7 +1157,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.to(torch.float16)
         return b.type(m.type())
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires gpu")
     @make_test
     def test_tensor_type2(a, b):
         m = a.to(device_type)
