@@ -45,7 +45,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
 
         # Checkout pinned commit
         commit = get_post_build_pinned_commit(target)
-        logger.info("Checking out pinned %s commit %s",target, commit)
+        logger.info("Checking out pinned %s commit %s", target, commit)
         r.git.checkout(commit)
 
         # Update submodules if requested
