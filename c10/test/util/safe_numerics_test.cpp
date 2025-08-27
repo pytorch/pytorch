@@ -45,10 +45,10 @@ TEST(MulOverflowsTest, Int64LargeNumbersNoOverflow) {
   const int64_t max_val = std::numeric_limits<int64_t>::max();
   const int64_t min_val = std::numeric_limits<int64_t>::min();
 
-  ASSERT_EQ(mul_overflows<int64_t>(1L << 30L, 1L << 30L), 1L << 60);
-  ASSERT_EQ(mul_overflows<int64_t>(1L << 32L, 1L << 32L), std::nullopt);
-  ASSERT_EQ(mul_overflows<int64_t>(-(1L << 30L), 1L << 30L), -(1L << 60L));
-  ASSERT_EQ(mul_overflows<int64_t>(1L << 32L, -(1L << 32L)), std::nullopt);
+  ASSERT_EQ(mul_overflows<int64_t>(1ull << 30L, 1ull << 30L), 1ull << 60);
+  ASSERT_EQ(mul_overflows<int64_t>(1ull << 32L, 1ull << 32L), std::nullopt);
+  ASSERT_EQ(mul_overflows<int64_t>(-(1ull << 30L), 1ull << 30L), -(1ull << 60L));
+  ASSERT_EQ(mul_overflows<int64_t>(1ull << 32L, -(1ull << 32L)), std::nullopt);
 
   // max_val is odd, so max_val/2 * 2 = max_val - 1
   ASSERT_EQ(mul_overflows<int64_t>(max_val / 2, 2), max_val - 1);

@@ -8,6 +8,7 @@
 #ifdef _MSC_VER
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
 #include <intrin.h>
+#include <limits>
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
@@ -31,10 +32,30 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #endif
 }
 
+C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_mul_overflow(a, b, out);
+#elif defined(_M_AMD64) && (_MSC_VER >= 1937)
+  uint64_t high{0};
+  return _mul_full_overflow_u64(a, b, out, &high);
+#elif defined(_M_AMD64)
+  uint64_t high{0};
+  *out = _umul128(a, b, &high);
+  return high; // overflow if high bits are non-zero
+#elif defined(_M_ARM64)
+  *out = a * b; // low 64 bits of the result
+  return __umulh(a, b); // overflow if high bits are non-zero
+#else
+  static_assert(false, "Not implemented");
+#endif
+}
+
 C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
-#else
+#elif defined(_M_AMD64) && (_MSC_VER >= 1937)
+  return _mul_overflow_i64(a, b, out);
+#elif defined(_M_AMD64)
   int64_t high{0};
   *out = _mul128(a, b, &high);
   // Idea: Check if int128 represented as (high, low) can
@@ -47,18 +68,40 @@ C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
   // bits equal to the sign bit. XOR'ing this with high lets
   // us compare if they are same or different.
   return (high ^ (*out >> 63));
-#endif
-}
+#elif defined(_M_ARM64)
+  // Idea: Perform an unsigned multiplication while safely
+  // casting int64_t to uint64_t and vice-versa.
+  int64_t int64_min{std::numeric_limits<int64_t>::min()}; // -2^63
+  uint64_t int64_max{std::numeric_limits<int64_t>::max()}; // 2^63 - 1
+  uint64_t abs_int64_min{int64_max + 1}; // 2^63
+  uint64_t abs_a{(a == int64_min) ? abs_int64_min : std::abs(a)};
+  uint64_t abs_b{(b == int64_min) ? abs_int64_min : std::abs(b)};
+  uint64_t unsigned_result{0};
+  if (mul_overflows(abs_a, abs_b, &unsigned_result)) {
+    return true;
+  }
 
-C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
-#if C10_HAS_BUILTIN_OVERFLOW()
-  return __builtin_mul_overflow(a, b, out);
+  bool negative{(a < 0) == (b < 0)};
+  if (!negative) {
+    if (unsigned_result > int64_max) {
+      return true;
+    }
+    *out = static_cast<int64_t>(unsigned_result);
+    return false;
+  }
+
+  // safely negate the result
+  if (unsigned_result > abs_int64_min) {
+    return true;
+  } else if (unsigned_result == abs_int64_min) {
+    *out = int64_min;
+    return false;
+  } else {
+    *out = -static_cast<int64_t>(unsigned_result);
+    return false;
+  }
 #else
-  uint64_t high{0};
-  *out = _umul128(a, b, &high);
-  // If all the high bits are 0 then the int128 can be safely
-  // converted to an int64 just by keeping the low bits
-  return static_cast<bool>(high);
+  static_assert(false, "Not implemented");
 #endif
 }
 
