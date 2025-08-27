@@ -57,9 +57,9 @@ def _use_flex_flash_attention(
         return False
     if kernel_options.get("disable_flash", False):
         return False
-    if is_trivial_graph(subgraph.graph_module, is_score_graph=True) and is_trivial_graph(
-        mask_graph.graph_module, is_score_graph=False
-    ):
+    if is_trivial_graph(
+        subgraph.graph_module, is_score_graph=True
+    ) and is_trivial_graph(mask_graph.graph_module, is_score_graph=False):
         return True
 
     return False
