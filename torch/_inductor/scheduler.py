@@ -3912,6 +3912,10 @@ class Scheduler:
         if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
             return None
 
+        # skip halide which does not support mod for index
+        if config.cpu_backend == "halide":
+            return None
+
         # only support pointwise nodes with the same reduction size
         n1_sizes, n2_sizes = node1._sizes, node2._sizes
         n1_iter_sizes, n1_reduce_sizes = n1_sizes
