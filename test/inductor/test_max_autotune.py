@@ -74,7 +74,7 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.backends.cuda.fp32_precision = "ieee"
+torch.backends.cuda.matmul.allow_tf32 = True
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -2105,7 +2105,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
 
             for config in configs:
                 self.assertIn("ALLOW_TF32", config)
-                self.assertEqual(config["ALLOW_TF32"], False)
+                self.assertEqual(config["ALLOW_TF32"], True)
 
 
 class _TestTritonTemplateCaller(TritonTemplateCaller):
