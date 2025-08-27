@@ -22,9 +22,6 @@ function install_torchbench() {
   pushd torchbench
   git checkout "$commit"
 
-  # Install TorchBench dependencies
-  pip_install -r requirements.txt
-
   # Install TorchBench models
   python install.py --continue_on_fail
 
