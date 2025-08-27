@@ -45,11 +45,11 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-rocm-py3_10:
+  linux-jammy-rocm-py3_10-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3.10-test
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
