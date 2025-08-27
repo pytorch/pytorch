@@ -414,8 +414,8 @@ sink_iterative_extra_comm_comp_overlap: float = 0.2
 # Experimental unsafe configuration that allows changing relative collectives order,
 # No guarantees for now that all the rank will do the same order of collectives,
 # which can result in collective hangs.
-reorder_iterative_unsafe_collectives_reorder: bool = True
-sink_waits_iterative_unsafe_collectives_reorder: bool = True
+reorder_iterative_unsafe_collectives_reorder: bool = False
+sink_waits_iterative_unsafe_collectives_reorder: bool = False
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used

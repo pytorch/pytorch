@@ -249,6 +249,10 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     try:
         kernel = snode.node
         assert kernel is not None
+        py_kernel_name = getattr(kernel, "python_kernel_name", "")
+        if not ("all_gather" in py_kernel_name or "reduce_scatter" in py_kernel_name):
+            # NCCL of version 2.27 sometimes unrecoverably fail for all_to_all, all_reduce
+            return None
 
         from torch.distributed.distributed_c10d import _resolve_process_group
 
@@ -260,7 +264,6 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
         device = torch.device(f"cuda:{rank}")
 
         fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
-
         with torch.distributed._time_estimator(
             group=pg, device=device
         ) as time_estimator:
