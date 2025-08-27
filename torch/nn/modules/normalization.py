@@ -5,10 +5,11 @@ from typing import Optional, Union
 import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
 from .module import Module
+from .lazy import LazyModuleMixin
 
 
 __all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
@@ -329,6 +330,60 @@ class GroupNorm(Module):
             **self.__dict__
         )
 
+class LazyGroupNorm(LazyModuleMixin, GroupNorm):
+    # inferre num_channels
+    cls_to_become = GroupNorm  # type: ignore[assignment]
+    weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
+
+    def __init__(
+        self,
+        num_groups: int,
+        eps: float = 1e-5,
+        affine: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        # affine is hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
+        # use num_groups = num_channels to pass assertion in GroupNorm
+        super().__init__(num_groups, num_groups, eps, False)
+
+        self.num_groups = num_groups
+        self.eps = eps
+        self.affine = affine
+
+        if self.affine:
+            self.weight = UninitializedParameter(**factory_kwargs)
+            self.bias = UninitializedParameter(**factory_kwargs)
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if not self.has_uninitialized_params() and self.num_channels != 0:
+            super().reset_parameters()
+
+
+    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+        """
+        Infers ``in_features`` based on ``input`` and initializes parameters.
+        """
+        if self.has_uninitialized_params():
+            self.num_channels = input.shape[1]
+
+            if self.num_channels % self.num_groups != 0:
+                raise ValueError("num_channels must be divisible by num_groups")
+
+            if self.affine:
+                assert isinstance(self.weight, UninitializedParameter)
+                assert isinstance(self.bias, UninitializedParameter)
+                self.weight.materialize((self.num_channels,))
+                self.bias.materialize((self.num_channels,))
+                self.reset_parameters()
 
 class RMSNorm(Module):
     r"""Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
