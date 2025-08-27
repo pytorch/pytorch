@@ -8,16 +8,16 @@ from typing import NamedTuple, Optional
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.distributed._tensor import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
     Replicate,
     Shard,
-)
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
@@ -259,7 +259,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         check_comms=True,
     ):
         optim.step()  # Ensure model weights are still the same after update.
-        from torch.distributed._tensor.experimental import implicit_replication
+        from torch.distributed.tensor.experimental import implicit_replication
 
         with implicit_replication():
             with CommDebugMode() as comm_mode:

@@ -91,7 +91,8 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
+    binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
@@ -154,7 +155,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       ")");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
-      "expected self and mat2 to have the same dtype, but got: ",
+      "expected mat1 and mat2 to have the same dtype, but got: ",
       self.dtype(),
       " != ",
       mat2.dtype())
@@ -219,7 +220,8 @@ Tensor& baddbmm_out(
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    Tensor binary = input.dim() < 1 ? input.unsqueeze(0) : input;
+    binary = binary.dim() < 3 ? binary.unsqueeze(0) : binary;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
@@ -466,5 +468,95 @@ Tensor _weight_int4pack_mm_xpu(
   at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
 
   return C;
+}
+
+Tensor& _int_mm_out_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    Tensor& result) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Expected self to be of dimension 2 but got ",
+      self.dim());
+  TORCH_CHECK(
+      mat2.dim() == 2,
+      "Expected mat2 to be of dimension 2 but got ",
+      mat2.dim());
+  TORCH_CHECK(
+      self.size(1) == mat2.size(0),
+      "self.size(1) needs to match mat2.size(0) but got ",
+      self.size(1),
+      " and ",
+      mat2.size(0));
+
+  TORCH_CHECK(
+      self.dtype() == at::kChar,
+      "Expected self dtype to be of type int8 but got ",
+      self.dtype());
+  TORCH_CHECK(
+      mat2.dtype() == at::kChar,
+      "Expected mat2 dtype to be of type int8 but got ",
+      mat2.dtype());
+  TORCH_CHECK(
+      result.dtype() == at::kInt,
+      "Expected result dtype to be of type kInt but got ",
+      result.dtype());
+  TORCH_CHECK(
+      result.size(0) == self.size(0),
+      "Expected result.size(0) to be ",
+      self.size(0),
+      " but got ",
+      result.size(0));
+  TORCH_CHECK(
+      result.size(1) == mat2.size(1),
+      "Expected result.size(1) to be ",
+      mat2.size(1),
+      " but got ",
+      result.size(1));
+
+  TORCH_CHECK(
+      result.dim() == 2,
+      "Expected result to be of dimension 2 but got ",
+      result.dim());
+
+  TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  Tensor bias = at::Tensor();
+  Tensor mat2_scales = at::ones({1}, mat2.options().dtype(at::kFloat));
+  Tensor mat2_zero_points = at::Tensor();
+  auto post_op_args = torch::List<std::optional<at::Scalar>>();
+
+  at::native::onednn::quantized_matmul(
+      self.contiguous(),
+      1.0,
+      0,
+      mat2.contiguous(),
+      mat2_scales,
+      mat2_zero_points,
+      bias,
+      result,
+      1.0,
+      0,
+      result.scalar_type(),
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      /*post_op_name*/ "none",
+      post_op_args,
+      /*post_op_algorithm*/ "none",
+      /*m2_trans*/ true);
+  return result;
+}
+
+Tensor _int_mm_xpu(const Tensor& self, const Tensor& mat2) {
+  Tensor result =
+      at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_xpu(self, mat2, result);
 }
 } // namespace at::native

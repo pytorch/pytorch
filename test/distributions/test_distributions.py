@@ -1805,6 +1805,29 @@ class TestDistributions(DistributionsTestCase):
         assert (vals == 0.0).sum() > 4000
         assert (vals == 1.0).sum() > 4000
 
+    def test_torch_binomial_dtype_errors(self):
+        dtypes = [torch.int, torch.long, torch.short]
+
+        for count_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=count_dtype)
+            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for count.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
+        for prob_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=torch.float)
+            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for prob.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
@@ -2558,10 +2581,10 @@ class TestDistributions(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_mixture_same_family_log_prob(self):
-        probs = torch.rand(5, 5).softmax(dim=-1)
-        loc = torch.randn(5, 5)
-        scale = torch.rand(5, 5)
+    def test_mixture_same_family_normal_log_prob(self):
+        probs = torch.rand(10, 5).softmax(dim=-1)
+        loc = torch.randn(10, 5)
+        scale = torch.rand(10, 5)
 
         def ref_log_prob(idx, x, log_prob):
             p = probs[idx].numpy()
@@ -2574,6 +2597,27 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
+            ref_log_prob,
+        )
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_binomial_log_prob(self):
+        max_count = 20
+        probs = torch.rand(10, 5).softmax(dim=-1)
+        binom_probs = torch.rand(10, 5)
+
+        def ref_log_prob(idx, x, log_prob):
+            p = probs[idx].numpy()
+            binom_p = binom_probs[idx].numpy()
+            mix = scipy.stats.multinomial(1, p)
+            comp = scipy.stats.binom(max_count, binom_p)
+            expected = scipy.special.logsumexp(comp.logpmf(x) + np.log(mix.p))
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(
+            MixtureSameFamily(
+                Categorical(probs=probs), Binomial(max_count, binom_probs)
+            ),
             ref_log_prob,
         )
 
@@ -6325,7 +6369,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("probs", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("probs", dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
@@ -6342,7 +6386,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("logits", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("logits", dist.__dict__, msg=message)
 
 
@@ -6804,6 +6848,12 @@ class TestJit(DistributionsTestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
+        if isinstance(constraint, constraints._LessThan):
+            return value - torch.rand(value.shape)
+        if isinstance(
+            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
+        ):
+            return value + torch.rand(value.shape)
         if isinstance(
             constraint,
             (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
@@ -6822,15 +6872,19 @@ class TestJit(DistributionsTestCase):
 
     def _perturb(self, Dist, keys, values, sample):
         with torch.no_grad():
-            if Dist is Uniform:
-                param = dict(zip(keys, values))
-                param["low"] = param["low"] - torch.rand(param["low"].shape)
-                param["high"] = param["high"] + torch.rand(param["high"].shape)
-                values = [param[key] for key in keys]
-            else:
+            if isinstance(Dist.arg_constraints, dict):
                 values = [
                     self._perturb_tensor(
                         value, Dist.arg_constraints.get(key, constraints.real)
+                    )
+                    for key, value in zip(keys, values)
+                ]
+            else:
+                # arg_constraints is parameter-dependent
+                dist = Dist(**dict(zip(keys, values)))
+                values = [
+                    self._perturb_tensor(
+                        value, dist.arg_constraints.get(key, constraints.real)
                     )
                     for key, value in zip(keys, values)
                 ]

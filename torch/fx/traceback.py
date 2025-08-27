@@ -1,14 +1,19 @@
 # mypy: allow-untyped-defs
 import copy
+import logging
 import traceback
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
 
+from torch._utils_internal import signpost_event
+
 from ._compatibility import compatibility
 from .graph import Graph
 from .node import Node
 
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "preserve_node_meta",
@@ -51,6 +56,8 @@ class NodeSource:
     action: list["NodeSourceAction"]
     from_node: list["NodeSource"]
     node_info: Optional["NodeInfo"]
+    _dict: Optional[dict[str, Any]]
+    _action_string: Optional[str]
 
     def __init__(
         self,
@@ -80,6 +87,10 @@ class NodeSource:
             self.node_info = None
             self.from_node = []
 
+        # cache the action string and dict representation for performance.
+        self._action_string: Optional[str] = None
+        self._dict: Optional[dict[str, Any]] = None
+
     @property
     def name(self) -> str:
         return self.node_info.name if self.node_info else ""
@@ -96,7 +107,9 @@ class NodeSource:
         return self.print_readable()
 
     def _get_action_string(self):
-        return "+".join([a.name.lower() for a in self.action])
+        if self._action_string is None:
+            self._action_string = "+".join([a.name.lower() for a in self.action])
+        return self._action_string
 
     def print_readable(self, indent=0):
         if indent > 9:
@@ -112,16 +125,92 @@ class NodeSource:
         return result
 
     def to_dict(self) -> dict:
-        # Convert the object to a dictionary
-        action_string = self._get_action_string()
-        return {
-            "name": self.name,
-            "target": self.target,
-            "graph_id": self.graph_id,
-            "pass_name": self.pass_name,
-            "action": action_string,
-            "from_node": [node.to_dict() for node in self.from_node],
-        }
+        if self._dict is None:
+            # Convert the object to a dictionary
+            action_string = self._get_action_string()
+            self._dict = {
+                "name": self.name,
+                "target": self.target,
+                "graph_id": self.graph_id,
+                "pass_name": self.pass_name,
+                "action": action_string,
+                "from_node": [node.to_dict() for node in self.from_node],
+            }
+
+        assert self._dict is not None
+        return self._dict
+
+    def __eq__(self, other: object):
+        if not isinstance(other, NodeSource):
+            return False
+        return self.to_dict() == other.to_dict()
+
+    def __hash__(self):
+        # Create a hash based on the dictionary representation
+        # We need to convert the dict to a hashable form
+        def _make_hashable(obj):
+            if isinstance(obj, dict):
+                return tuple(sorted((k, _make_hashable(v)) for k, v in obj.items()))
+            elif isinstance(obj, list):
+                return tuple(_make_hashable(item) for item in obj)
+            else:
+                return obj
+
+        return hash(_make_hashable(self.to_dict()))
+
+    @classmethod
+    def _from_dict(cls, d: Optional[dict]) -> Optional["NodeSource"]:
+        """
+        Recursively deserialize from_node metadata from dictionary data.
+        It is used to deserialize the from_node field from serialized metadata.
+        Please use constructor NodeSource(node, ...) to create a NodeSource object.
+        """
+        if d is None:
+            return None
+
+        assert isinstance(d, dict), f"Expected a dict, got {type(d)}"
+
+        # Create a NodeSource object directly without going through the constructor
+        # to avoid issues with graph ID and node creation
+        node_source = NodeSource.__new__(NodeSource)
+
+        # Reset the cached properties
+        node_source._action_string = None
+        node_source._dict = None
+
+        # Set the basic attributes
+        node_source.pass_name = d.get("pass_name", "")
+
+        # Parse action string back to NodeSourceAction enum list
+        action_str = d.get("action", "")
+        actions = []
+        if action_str:
+            for action_name in action_str.split("+"):
+                if action_name.upper() == "CREATE":
+                    actions.append(NodeSourceAction.CREATE)
+                elif action_name.upper() == "REPLACE":
+                    actions.append(NodeSourceAction.REPLACE)
+        node_source.action = actions
+
+        # Create the NodeInfo object directly
+        if "name" in d and "target" in d and "graph_id" in d:
+            node_info = NodeSource.NodeInfo(
+                d.get("name", ""), d.get("target", ""), d.get("graph_id", -1)
+            )
+            node_source.node_info = node_info
+        else:
+            node_source.node_info = None
+
+        # Recursively deserialize nested from_node
+        if d.get("from_node", None) is not None:
+            node_source.from_node = [
+                result
+                for fn in d.get("from_node", [])
+                if (result := cls._from_dict(fn)) is not None
+            ]
+        else:
+            node_source.from_node = []
+        return node_source
 
 
 @compatibility(is_backward_compatible=False)
@@ -227,12 +316,26 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     """
     Given an fx.Graph, return a json that contains the provenance information of each node.
     """
-    provenance_tracking_json = {}
-    for node in graph.nodes:
-        if node.op == "call_function":
-            provenance_tracking_json[node.name] = (
-                [source.to_dict() for source in node.meta["from_node"]]
-                if "from_node" in node.meta
-                else []
-            )
-    return provenance_tracking_json
+    try:
+        provenance_tracking_json = {}
+        for node in graph.nodes:
+            if node.op == "call_function":
+                provenance_tracking_json[node.name] = (
+                    [source.to_dict() for source in node.meta["from_node"]]
+                    if "from_node" in node.meta
+                    else []
+                )
+        return provenance_tracking_json
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "get_graph_provenance_json",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}

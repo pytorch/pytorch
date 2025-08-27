@@ -53,8 +53,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         fn_str = f"""\
 def fn():
     foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
+{str(chr(10)).join(" " * 4 + "x" + str(i) + " = 1" for i in range(1 << 9))}
+    l = [{" ".join("x" + str(i) + "," for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)
@@ -284,7 +284,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -300,7 +300,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -543,6 +543,34 @@ def fn():
             return x
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    # https://github.com/pytorch/pytorch/issues/160471
+    def test_extended_args_starts_line(self):
+        # NOTE: need to LOAD_CONST i before LOAD_FAST x
+        # in order to get an EXTENDED_ARG with starts_line set
+        lines = "\n".join(f"    x = {i} + x" for i in range(300))
+        fn_str = f"def fn(x):\n{lines}"
+        locals = {}
+        exec(fn_str, {}, locals)
+        fn = locals["fn"]
+
+        for inst in dis.get_instructions(fn):
+            if inst.opname == "EXTENDED_ARG" and inst.starts_line:
+                break
+        else:
+            self.assertTrue(
+                False, "bad test case: no EXTENDED_ARG with starts_line found"
+            )
+
+        def transformations(instructions, _):
+            for inst in instructions:
+                if inst.starts_line == 301:
+                    break
+            else:
+                self.assertTrue(False, "test failure: 301 starts_line not found")
+            return instructions
+
+        bytecode_transformation.transform_code_object(fn.__code__, transformations)
 
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):

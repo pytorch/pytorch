@@ -2,6 +2,11 @@
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
+#include <c10/util/irange.h>
+
+#include <array>
+#include <utility>
+#include <vector>
 
 namespace c10::impl {
 
@@ -15,6 +20,45 @@ namespace {
     }
   }
 #endif
+}
+
+static const std::vector<DispatchKey>& allDispatchKeysInFullSet() {
+  static const auto result = []() {
+    std::vector<DispatchKey> vec;
+    for (const auto dispatch_key: DispatchKeySet(DispatchKeySet::FULL)) {
+      vec.push_back(dispatch_key);
+    }
+    return vec;
+  }();
+  return result;
+}
+
+// Returns an array of the same size as the dispatch table, where each
+// entry is the DispatchKey that the corresponding index in the
+// dispatch table represents.
+static const auto& getDispatchTableIndexToKey() {
+  static const auto result = []() {
+    using result_type = std::array<DispatchKey, c10::num_runtime_entries>;
+    result_type arr;
+    arr.fill(DispatchKey::Undefined);
+    for (const auto dispatch_key: allDispatchKeysInFullSet()) {
+      const auto index = getDispatchTableIndexForDispatchKey(dispatch_key);
+      TORCH_INTERNAL_ASSERT(arr.at(index) == DispatchKey::Undefined);
+      arr.at(index) = dispatch_key;
+    }
+    // Self-test. Should be plenty cheap enough to just run in prod
+    // builds. We just need to make sure that we have the dispatch key
+    // for every entry in the table, and we assert in
+    // update_array_entry above that we also don't have any conflicts
+    // during computation.
+    TORCH_INTERNAL_ASSERT(getDispatchTableIndexForDispatchKey(DispatchKey::Undefined) == 0);
+    TORCH_INTERNAL_ASSERT(arr[0] == DispatchKey::Undefined);
+    for (const auto index : c10::irange(1, arr.size())) {
+      TORCH_INTERNAL_ASSERT(arr[index] != DispatchKey::Undefined, "missing dispatch key at index ", index);
+    }
+    return arr;
+  }();
+  return result;
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
@@ -31,8 +75,27 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
-  // OperatorEntry being created
-  updateDispatchTableFull_(c10::Dispatcher::singleton());
+  // OperatorEntry being created.
+
+  // We are essentially directly implementing
+  // updateDispatchTableFull_, taking into account that we know
+  // kernels_ is empty() and therefore
+  // computeDispatchTableEntryWithDebug cases 1 and 2.1 through 2.5
+  // won't do anything.
+  const auto& dispatcher = c10::Dispatcher::singleton();
+  const auto& dispatch_table_index_to_key = getDispatchTableIndexToKey();
+  for (const auto dispatch_ix: c10::irange(dispatcher.backendFallbackKernels_.size())) {
+    const auto& bfk = dispatcher.backendFallbackKernels_[dispatch_ix];
+    if (bfk.kernel.isValid()) {
+      dispatchTable_[dispatch_ix] = bfk.kernel;
+      if (bfk.kernel.isFallthrough()) {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dispatch_ix < dispatch_table_index_to_key.size());
+        dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_table_index_to_key[dispatch_ix], true);
+      }
+    } else {
+      dispatchTable_[dispatch_ix] = missingKernel().kernel;
+    }
+  }
 }
 
 namespace {
@@ -150,7 +213,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
-    if (dispatch_key != DispatchKey::Meta) {
+    // Also suppress the warning for MTIA, as MTIA achieves CPU fallback by overriding registration.
+    if (dispatch_key != DispatchKey::Meta && dispatch_key != DispatchKey::MTIA) {
       TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
@@ -251,6 +315,42 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
   return nullptr;
 }
 
+SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
+    DispatchKey k) const {
+  TORCH_CHECK(
+      !isAliasDispatchKey(k),
+      "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_CHECK(
+      dispatchTable_[dispatch_ix].isValid(),
+      "no kernel for ",
+      k,
+      " for ",
+      name_);
+
+  // Get the KernelFunction object from kernels_ to pass to SafeKernelFunction
+
+  // The KernelFunction object in dispatchTable_ is a copy of the KernelFunction
+  // in the AnnotatedKernel in kernels_. A KernelFunction is only truly
+  // deregistered when the kernel is removed from kernels_. However, the
+  // KernelFunction in dispatchTable_ might be removed before it is deregistered
+  // (when a newer kernel is registered). Therefore, here we want to return a
+  // SafeKernelFunction that is backed by the original KernelFunction in
+  // kernels_, so that we only invalidate it when the kernel is deregistered.
+  auto [annotatedKernel, _] =
+      computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
+
+  // Use findSchemaOrThrow to get OpHandle for the OperatorEntry
+  auto& dispatcher = c10::Dispatcher::singleton();
+  auto opHandle = dispatcher.findSchemaOrThrow(
+      name_.name.c_str(), name_.overload_name.c_str());
+
+  return SafeKernelFunction(
+      &annotatedKernel.kernel,
+      annotatedKernel.debug,
+      std::make_shared<OperatorHandle>(opHandle));
+}
+
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
   #if defined C10_MOBILE
     TORCH_CHECK(false, "tags are not saved for Mobile");
@@ -290,7 +390,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //   CompositExplicitAutogradNonFunctional > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
   // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
   //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
-  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
+  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overridden.
   //   This is fine and in practice CompositeExplicitAutograd and CompositeImplicitAutograd shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
 
@@ -452,7 +552,7 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
   // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   updateDispatchTable_(dispatcher, DispatchKey::Undefined);
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     updateDispatchTable_(dispatcher, k);
   }
 }
@@ -466,7 +566,7 @@ void OperatorEntry::checkInvariants() const {
   for (const auto& kv : kernels_) {
     TORCH_INTERNAL_ASSERT(!kv.second.empty(), dumpState());
   }
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
     auto idx = getDispatchTableIndexForDispatchKey(k);
     if (C10_UNLIKELY(idx == -1)) {
@@ -483,7 +583,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   str << "[";
 
   bool has_kernels = false;
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     auto iter = getDispatchTableIndexForDispatchKey(k);
     if (iter == -1 || !dispatchTable_[iter].isValid()) {
       continue;
@@ -569,7 +669,7 @@ std::string OperatorEntry::dumpComputedTable() const {
   // Need to handle Undefined separately, because its a runtime key that can't be represented
   // in a DispatchKeySet.
   std::vector<DispatchKey> runtime_keys = {DispatchKey::Undefined};
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) runtime_keys.push_back(k);
+  for (auto k : allDispatchKeysInFullSet()) runtime_keys.push_back(k);
 
   for (auto k : runtime_keys) {
     auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);

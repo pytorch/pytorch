@@ -28,11 +28,12 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       opt_device_type = at::getAccelerator(false);
     }
     if (opt_device_type.has_value()) {
-      return at::globalContext().getPinnedMemoryAllocator(
-          opt_device_type.value());
+      return at::globalContext().getPinnedMemoryAllocator(opt_device_type);
     } else {
       TORCH_CHECK(
-          false, "Need to provide pin_memory allocator to use pin memory.")
+          false,
+          "pin_memory=True requires a CUDA or other accelerator backend; "
+          "no pinned memory allocator is available on this system.")
     }
   }
 
@@ -160,10 +161,15 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
+    if (TORCH_GUARD_OR_FALSE(sizes[i].sym_eq(0))) {
       return 0;
     }
 
+    // NOTE: while this can technically return negative sizes for
+    // 0-element tensors, there's a check in TensorShape:set_storage_meta__symint
+    // that skips setting nbytes with unbacked expressions.
+    // Would probably be safer to wrap this with a max(*, 0),
+    // once our min/max symbolic reasoning improves.
     size += strides[i] * (sizes[i] - 1);
   }
   return itemsize_bytes * (storage_offset + size);

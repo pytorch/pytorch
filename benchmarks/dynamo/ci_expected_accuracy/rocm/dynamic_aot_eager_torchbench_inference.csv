@@ -166,7 +166,7 @@ hf_Longformer,pass,4
 
 
 
-hf_Reformer,pass,5
+hf_Reformer,pass,8
 
 
 
@@ -181,7 +181,7 @@ hf_T5_base,pass,0
 
 
 
-hf_T5_generate,pass,5
+hf_T5_generate,pass,11
 
 
 
@@ -389,7 +389,7 @@ vgg16,eager_two_runs_differ,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,pass,20
 
 
 

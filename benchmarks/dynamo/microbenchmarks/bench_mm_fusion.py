@@ -1,6 +1,5 @@
-# flake8: noqa
+# flake8: noqa: B902
 
-import triton
 from prettytable import PrettyTable
 
 import torch
@@ -18,7 +17,7 @@ torch.manual_seed(0)
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-class Func(object):
+class Func:
     # mm
     @torch._dynamo.optimize("inductor")
     def mm(a, b, bias):
@@ -45,7 +44,10 @@ class Func(object):
         return torch.relu(y)
 
 
-def bench(shape, layer_id, p, fusion_types=[""]):
+def bench(shape, layer_id, p, fusion_types=None):
+    torch._logging.set_logs(inductor_metrics=True)
+    if fusion_types is None:
+        fusion_types = [""]
     dtype = torch.float16
     M, K = shape[0]
     _, N = shape[1]
@@ -60,7 +62,7 @@ def bench(shape, layer_id, p, fusion_types=[""]):
     row = [layer_id]
     for fusion_type in fusion_types:
         if fusion_type == "":
-            fn_mm = getattr(Func, "mm")
+            fn_mm = Func.mm
         else:
             fn_mm = getattr(Func, f"mm_{fusion_type}")
 
@@ -87,6 +89,7 @@ def bench(shape, layer_id, p, fusion_types=[""]):
         row.extend([tflops(torch_mm_ms), tflops(triton_mm_ms)])
 
     p.add_row(row)
+    torch._logging.set_logs()
 
 
 fusion_types = ["", "add", "relu", "add_relu"]

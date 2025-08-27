@@ -46,7 +46,7 @@ exp = re.compile(r"([\w\-\_]*?)(\d+)$")
 
 def _determine_prefix(files: list[str]) -> str:
     """If the user doesn't specify a prefix, but does pass a dir full of similarly-prefixed files, we should be able to
-    infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requring the user
+    infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requiring the user
     to specify it
     """
     possible_prefixes: defaultdict[str, set[int]] = defaultdict(set)
@@ -78,9 +78,9 @@ def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
         if prefix is None:
             prefix = _determine_prefix(files)
         for f in files:
-            if f.find(prefix) != 0:
+            if (offset := f.find(prefix)) == -1:
                 continue
-            details[f] = read_dump(prefix, os.path.join(root, f))
+            details[f] = read_dump(f[:offset] + prefix, os.path.join(root, f))
             filecount += 1
             if not version:
                 version = str(details[f]["version"])

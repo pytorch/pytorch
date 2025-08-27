@@ -1,5 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
-
 import contextlib
 import itertools
 import logging
@@ -17,8 +15,20 @@ import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
+from torch.distributed.tensor import (
+    distribute_module,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
+)
+from torch.overrides import TorchFunctionMode
 
 
 __all__ = ["context_parallel", "set_rotate_method"]
@@ -39,6 +49,34 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
+def _need_scaling() -> bool:
+    if hasattr(torch.version, "hip") and torch.version.hip is not None:
+        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
+        _is_ck_supported = False
+        for arch in ["gfx942", "gfx950"]:
+            if arch in gcn_arch_name:
+                _is_ck_supported = True
+        # Check the function exists
+        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
+        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+        # Note: it is possible that CK is selected but not compiled in the binary.
+        if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
+            # Unsure about CK's behavior, keep logsumexp untouched
+            return False
+        return True
+    else:
+        return False
+
+
+class _DispatchMode(Enum):
+    MONKEY_PATCH = auto()
+    TORCH_FUNCTION = auto()
+    TORCH_DISPATCH = auto()
+
+
+_dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
+
+
 @dataclass
 class _ContextParallelOptions:
     # Whether to upcast parameters and gradients to float32 to avoid accumulation
@@ -50,6 +88,25 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
+
+
+@dataclass
+class _ContextParallelGlobalVars:
+    # The current context parallel impl requires a record of some info
+    # as global vars. This dataclass stores those variables.
+    # TODO: this var should be able to stored in CP context
+    cp_shard_dim: int = 0
+    # This variable stores the TorchFunctionMode singleton because using multiple TF
+    # instances for dispatching may trigger recompilations
+    torch_function_mode: Optional[TorchFunctionMode] = None
+
+
+_cp_global_vars = _ContextParallelGlobalVars()
+
+
+def _set_cp_global_var(name: str, value: Any) -> None:
+    """Set a global variable for context parallelism."""
+    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -183,106 +240,6 @@ class _SDPAMerger:
         return out.to(self._out_dtype), lse.to(self._lse_dtype)
 
 
-def _scaled_dot_product_ring_flash_attention(
-    mesh: DeviceMesh,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    *,
-    scale: Optional[float] = None,
-) -> tuple[torch.Tensor, ...]:
-    if return_debug_mask:
-        raise NotImplementedError("return_debug_mask is not supported yet")
-
-    seq_dim = 2
-    return _templated_ring_attention(
-        mesh,
-        seq_dim,
-        aten._scaled_dot_product_flash_attention,
-        query=query,
-        key=key,
-        value=value,
-        is_causal=is_causal,
-        dropout_p=dropout_p,
-        scale=scale,
-    )
-
-
-def _scaled_dot_product_ring_efficient_attention(
-    mesh: DeviceMesh,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
-    compute_log_sumexp: bool = True,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    *,
-    scale: Optional[float] = None,
-) -> tuple[torch.Tensor, ...]:
-    if attn_bias is not None:
-        raise NotImplementedError("attn_bias is not supported yet")
-
-    if not compute_log_sumexp:
-        # CP requires compute_log_sumexp to be True because it always merges LSE
-        compute_log_sumexp = True
-
-    seq_dim = 2
-    return _templated_ring_attention(
-        mesh,
-        seq_dim,
-        aten._scaled_dot_product_efficient_attention,
-        query=query,
-        key=key,
-        value=value,
-        is_causal=is_causal,
-        attn_bias=attn_bias,
-        dropout_p=dropout_p,
-        scale=scale,
-        compute_log_sumexp=compute_log_sumexp,
-    )
-
-
-def _scaled_dot_product_ring_cudnn_attention(
-    mesh: DeviceMesh,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
-    compute_log_sumexp: bool = True,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    *,
-    scale: Optional[float] = None,
-) -> tuple[torch.Tensor, ...]:
-    if attn_bias is not None:
-        raise NotImplementedError("attn_bias is not supported yet")
-
-    if not compute_log_sumexp:
-        # CP requires compute_log_sumexp to be True because it always merges LSE
-        compute_log_sumexp = True
-
-    seq_dim = 2
-    return _templated_ring_attention(
-        mesh,
-        seq_dim,
-        aten._scaled_dot_product_cudnn_attention,
-        query=query,
-        key=key,
-        value=value,
-        attn_bias=attn_bias,
-        compute_log_sumexp=compute_log_sumexp,
-        dropout_p=dropout_p,
-        is_causal=is_causal,
-        return_debug_mask=return_debug_mask,
-        scale=scale,
-    )
-
-
 class _AttentionOp(Protocol):
     def __call__(
         self,
@@ -325,7 +282,7 @@ class _AllToAllRotater(_RingRotater):
 
 class _AllGatherRotater(_RingRotater):
     """
-    Allgather the kv and return the only the requried kv.
+    Allgather the kv and return the only the required kv.
     Only one communication will be done.
     """
 
@@ -363,24 +320,11 @@ def _create_rotater(
     elif method == _RotateMethod.ALL_GATHER:
         return _AllGatherRotater(pg, seq_dim)
     else:
-        raise NotImplementedError(f"Unkonwn method {method}")
-
-
-def _ring_rotate(
-    block: torch.Tensor, pg: dist.ProcessGroup, send_to_next: bool
-) -> torch.Tensor:
-    block = block.contiguous()
-    size = dist.get_world_size(pg)
-    dsts = (
-        list(range(1, size)) + [0]
-        if send_to_next
-        else [size - 1] + list(range(0, size - 1))
-    )
-    return ft_c.permute_tensor(block, dsts, pg)
+        raise NotImplementedError(f"Unknown method {method}")
 
 
 def _templated_ring_attention(
-    mesh: DeviceMesh,
+    group: dist.ProcessGroup,
     seq_dim: int,
     op: _AttentionOp,
     query: torch.Tensor,
@@ -438,12 +382,12 @@ def _templated_ring_attention(
 
     First Iteration: Both ranks perform SDPA with their local qkv pairs, similar to the
     no-load-balance case. This iteration corresponds to the `if` of the
-    (`if, `elif`, `else`) in the implemementation.
+    (`if, `elif`, `else`) in the implementation.
 
     Second Iteration: Rank0 now has (q0, q3) and (k1, k2); rank1 has (q1, q2) and
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
-    `else` of the (`if`, `elif`, `else`) in the implemementation.
+    `else` of the (`if`, `elif`, `else`) in the implementation.
     For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
@@ -470,13 +414,11 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    if isinstance(mesh, dist.ProcessGroup):
-        pg: Union[dist.ProcessGroup, list[dist.ProcessGroup]] = mesh
-    else:
-        pg = mesh.get_group()
-    assert isinstance(pg, dist.ProcessGroup), "process group must be single dimension"
-    rank = dist.get_rank(pg)
-    size = dist.get_world_size(pg)
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
+    rank = dist.get_rank(group)
+    size = dist.get_world_size(group)
 
     next_kv = None
 
@@ -492,7 +434,7 @@ def _templated_ring_attention(
     out: torch.Tensor
     logsumexp: torch.Tensor
 
-    rotater = _create_rotater(pg, 2)
+    rotater = _create_rotater(group, 2)
 
     for i in range(size):
         if i > 0:
@@ -547,100 +489,15 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if _need_scaling():
+            logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
 
 
-def _sdpa_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> object:
-    # extract local tensor and sharding infos to a OpInfo
-    op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
-
-    # sharding propagation
-    # TODO: remove the context parallel strategy from the default propagation
-    # rule. Either figure out how to dynamically enable it or just don't call
-    # propagate.
-    DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
-    output_sharding = op_info.output_sharding
-    assert output_sharding is not None, "output sharding should not be None"
-    assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
-
-    if op_call == aten._scaled_dot_product_flash_attention.default:
-        local_results = _scaled_dot_product_ring_flash_attention(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_efficient_attention.default:
-        local_results = _scaled_dot_product_ring_efficient_attention(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_cudnn_attention.default:
-        local_results = _scaled_dot_product_ring_cudnn_attention(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    else:
-        raise NotImplementedError(
-            "CP only supports flash attention and memory efficient attention now."
-        )
-
-    return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
-
-
-def _sdpa_backward_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> object:
-    # Redistribute grad_output tensor to the same placement as output tensor
-    args = list(args)
-    args = tuple(args)
-
-    # extract local tensor and sharding infos to a OpInfo
-    op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
-
-    # sharding propagation
-    DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
-    output_sharding = op_info.output_sharding
-    assert output_sharding is not None, "output sharding should not be None"
-    assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
-
-    if op_call == aten._scaled_dot_product_flash_attention_backward.default:
-        local_results = _scaled_dot_product_ring_flash_attention_backward(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
-        local_results = _scaled_dot_product_ring_efficient_attention_backward(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_cudnn_attention_backward.default:
-        local_results = _scaled_dot_product_ring_cudnn_attention_backward(
-            op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    else:
-        raise NotImplementedError(f"{op_call=}")
-
-    return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
-
-
 def _templated_ring_attention_backward(
-    mesh: DeviceMesh,
+    group: dist.ProcessGroup,
     seq_dim: int,
     op: _AttentionOp,
     grad_out: torch.Tensor,
@@ -656,10 +513,8 @@ def _templated_ring_attention_backward(
     """This API implements the backward of the ring attention."""
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
-    pg = mesh.get_group()
-    assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
-    rank = dist.get_rank(pg)
-    size = dist.get_world_size(pg)
+    rank = dist.get_rank(group)
+    size = dist.get_world_size(group)
     next_kv = None
     next_grad_kv = None
     rest: list[Any]
@@ -672,8 +527,8 @@ def _templated_ring_attention_backward(
 
     key = key.contiguous()
     value = value.contiguous()
-    kv_rotater = _create_rotater(pg, 2)
-    dkv_rotater = _create_rotater(pg, 2, method=_RotateMethod.ALL_TO_ALL)
+    kv_rotater = _create_rotater(group, 2)
+    dkv_rotater = _create_rotater(group, 2, method=_RotateMethod.ALL_TO_ALL)
     for i in range(size):
         if i > 0:
             # Wait for the kv from the (cp_rank - 1) rank.
@@ -799,12 +654,118 @@ def _templated_ring_attention_backward(
     grad_query = grad_query.to(query.dtype)
     next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
-    grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
+    grad_value = next_grad_kv[grad_key.numel() :].reshape(grad_value.shape)
     return (
         grad_query,
         grad_key,
         grad_value,
         *rest,
+    )
+
+
+def _scaled_dot_product_ring_flash_attention(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    if return_debug_mask:
+        raise NotImplementedError("return_debug_mask is not supported yet")
+
+    # TODO: remove this hardcoding
+    seq_dim = 2
+    group = mesh.get_group()
+    return _templated_ring_attention(
+        group,
+        seq_dim,
+        aten._scaled_dot_product_flash_attention,
+        query=query,
+        key=key,
+        value=value,
+        is_causal=is_causal,
+        dropout_p=dropout_p,
+        scale=scale,
+    )
+
+
+def _scaled_dot_product_ring_efficient_attention(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    compute_log_sumexp: bool = True,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    if attn_bias is not None:
+        raise NotImplementedError("attn_bias is not supported yet")
+
+    if not compute_log_sumexp:
+        # CP requires compute_log_sumexp to be True because it always merges LSE
+        compute_log_sumexp = True
+
+    # TODO: remove this hardcoding
+    seq_dim = 2
+    group = mesh.get_group()
+    return _templated_ring_attention(
+        group,
+        seq_dim,
+        aten._scaled_dot_product_efficient_attention,
+        query=query,
+        key=key,
+        value=value,
+        is_causal=is_causal,
+        attn_bias=attn_bias,
+        dropout_p=dropout_p,
+        scale=scale,
+        compute_log_sumexp=compute_log_sumexp,
+    )
+
+
+def _scaled_dot_product_ring_cudnn_attention(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    compute_log_sumexp: bool = True,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    if attn_bias is not None:
+        raise NotImplementedError("attn_bias is not supported yet")
+
+    if not compute_log_sumexp:
+        # CP requires compute_log_sumexp to be True because it always merges LSE
+        compute_log_sumexp = True
+
+    # TODO: remove this hardcoding
+    seq_dim = 2
+    group = mesh.get_group()
+    return _templated_ring_attention(
+        group,
+        seq_dim,
+        aten._scaled_dot_product_cudnn_attention,
+        query=query,
+        key=key,
+        value=value,
+        attn_bias=attn_bias,
+        compute_log_sumexp=compute_log_sumexp,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        return_debug_mask=return_debug_mask,
+        scale=scale,
     )
 
 
@@ -827,9 +788,11 @@ def _scaled_dot_product_ring_flash_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
+    group = mesh.get_group()
     return _templated_ring_attention_backward(
-        mesh,
+        group,
         seq_dim,
         aten._scaled_dot_product_flash_attention_backward.default,
         grad_out=grad_out,
@@ -868,9 +831,11 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
+    group = mesh.get_group()
     return _templated_ring_attention_backward(
-        mesh,
+        group,
         seq_dim,
         aten._scaled_dot_product_efficient_attention_backward.default,
         grad_out=grad_out,
@@ -910,9 +875,11 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
+    group = mesh.get_group()
     return _templated_ring_attention_backward(
-        mesh,
+        group,
         seq_dim,
         aten._scaled_dot_product_cudnn_attention_backward.default,
         grad_out=grad_out,
@@ -935,13 +902,53 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     )
 
 
+def _sdpa_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    # extract local tensor and sharding infos to a OpInfo
+    op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    logger.debug("Dispatching op_call: %s", op_info.schema)
+
+    # sharding propagation
+    # TODO: remove the context parallel strategy from the default propagation
+    # rule. Either figure out how to dynamically enable it or just don't call
+    # propagate.
+    DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None, "output sharding should not be None"
+    assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
+
+    call_maps: dict[torch._ops.OpOverload, Callable] = {
+        aten._scaled_dot_product_flash_attention.default: _scaled_dot_product_ring_flash_attention,
+        aten._scaled_dot_product_efficient_attention.default: _scaled_dot_product_ring_efficient_attention,
+        aten._scaled_dot_product_cudnn_attention.default: _scaled_dot_product_ring_cudnn_attention,
+        aten._scaled_dot_product_flash_attention_backward.default: _scaled_dot_product_ring_flash_attention_backward,
+        aten._scaled_dot_product_efficient_attention_backward.default: _scaled_dot_product_ring_efficient_attention_backward,
+        aten._scaled_dot_product_cudnn_attention_backward.default: _scaled_dot_product_ring_cudnn_attention_backward,
+    }
+    if op_call in call_maps:
+        local_results = call_maps[op_call](
+            op_info.compute_mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
+    else:
+        raise NotImplementedError(
+            "CP only supports flash attention and memory efficient attention now."
+        )
+
+    return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
+
+
 customized_ops = {
     aten._scaled_dot_product_flash_attention.default: _sdpa_handler,
-    aten._scaled_dot_product_flash_attention_backward.default: _sdpa_backward_handler,
+    aten._scaled_dot_product_flash_attention_backward.default: _sdpa_handler,
     aten._scaled_dot_product_efficient_attention.default: _sdpa_handler,
-    aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_backward_handler,
+    aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
-    aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_backward_handler,
+    aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_handler,
 }
 
 
@@ -960,7 +967,7 @@ def _distribute_function(
     the inputs and outputs of a function. Similar to ``distribute_module``, this API
     installs hooks to the ``fn`` to convert the inputs and outputs. There are two
     major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parammeters and buffers, as a result,
+    First, a function does not have parameters and buffers, as a result,
     ``distribute_function`` itself won't convert any parameters/buffers but simply
     install the input and output hooks.  The tensor conversion will happen in the hooks.
     Another difference is an nn.Module subclass can have several instances and each
@@ -976,9 +983,9 @@ def _distribute_function(
             ``fn_module`` is ``torch.nn.functional``.
         device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
             input and output hooks to distribute the tensors.
-        input_fn (Optioinal[Callable]): the hook to distribute or convert the input
+        input_fn (Optional[Callable]): the hook to distribute or convert the input
             arguments of ``fn``.
-        output_fn (Optioinal[Callable]): the hook to distribute or convert the output
+        output_fn (Optional[Callable]): the hook to distribute or convert the output
             arguments of ``fn``.
     """
 
@@ -1033,7 +1040,7 @@ class _AttentionContextParallel(ParallelStyle):
     Applies context parallel optimizations to the attention layer.
 
     This will work for nn.MultiHeadedAttention and custom attention layers that
-    call F.scaled_dotproduct_attention with a simliar signature.
+    call F.scaled_dotproduct_attention with a similar signature.
 
     This expects the `forward` method consumes either:
 
@@ -1052,13 +1059,8 @@ class _AttentionContextParallel(ParallelStyle):
     )
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        if not isinstance(device_mesh, DeviceMesh):
-            raise ValueError(
-                f"{type(device_mesh)} is not supported by {type(self)} yet."
-            )
-
         if not device_mesh.ndim == 1:
-            raise ValueError
+            raise ValueError("CP only supports single dimension device mesh")
 
         return distribute_module(
             module,
@@ -1135,6 +1137,92 @@ class _AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
+def create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+) -> BlockMask:
+    """
+    This API creates a special BlockMask for Context Parallel FlexAttention:
+    1. This BlockMask is masking on the attention of Q shard and KV global views, by
+    mapping the local q_idx to the global q_idx before sending to mask_mod.
+    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
+    the sequence length of KV shard instead of KV global. This is to pass the shape check
+    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
+    used in flex_attention once the shape check passes.
+
+    Args:
+        mask_mod (Callable): Function to modify the mask over the global attention result.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Sequence length of query (global view).
+        KV_LEN (int): Sequence length of key/value (global view).
+        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+
+    Return:
+        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
+        context_parallel() context.
+
+    .. warning::
+        This function cannot generate correct block_mask if the BLOCK_SIZE is not
+        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
+        size is smaller than 128. Please do not use context_parallel() when the
+        FlexAttention size is small.
+    """
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
+
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        B,
+        H,
+        Q_SHARD_LEN,
+        KV_LEN,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
+    )
+    # flex_attention function checks the following shape so we need to rewrite:
+    # key.size(-2) == block_mask.seq_lengths[1]
+    seq_lengths = block_mask.seq_lengths
+    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
+    return block_mask
+
+
 @contextlib.contextmanager
 def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
@@ -1166,125 +1254,165 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
-    # TODO: provide a more robust way to replace SDPA.
-    # Currently we use monkey patch to replace scaled_dot_product_attention with the
-    # wrapped fn. This is okay if users do `import torch.nn.functional` but will not
-    # work if users do `import torch.nn.functional.scaled_dot_product_attention`.
-    _distribute_function(
-        F.scaled_dot_product_attention,
-        F,
-        mesh,
-        attention_input_fn,
-        attention_output_fn,
-    )
+    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
+        x = x.contiguous()
+        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_xs, x, mesh)
+        return torch.cat(all_xs, dim=shard_dim)
 
-    with _enable_cp_dispatcher():
-        yield
+    class DistributeFunction(TorchFunctionMode):
+        def __init__(
+            self,
+            fn: Callable,
+            device_mesh: DeviceMesh,
+            input_fn: Optional[Callable] = None,
+            output_fn: Optional[Callable] = None,
+        ):
+            self._device_mesh = device_mesh
+            self._input_fn = input_fn
+            self._output_fn = output_fn
+            self._fn = fn
 
-    _restore_function(F.scaled_dot_product_attention, F)
+        def __torch_function__(
+            self,
+            func: Callable,
+            types: Any,
+            args: tuple[Any, ...] = (),
+            kwargs: Optional[dict[str, Any]] = None,
+        ) -> Any:
+            kwargs = kwargs or {}
 
+            # special handler for flex_attention
+            if func == torch._higher_order_ops.flex_attention:
+                query, key, value, score_mod, block_mask = args[:5]
+                assert isinstance(query, torch.Tensor)
+                assert isinstance(key, torch.Tensor)
+                assert isinstance(value, torch.Tensor)
+                assert isinstance(block_mask, tuple)
 
-class _LoadBalancer(ABC):
-    @classmethod
-    @abstractmethod
-    def shard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+                global_key = ft_c.all_gather_tensor_autograd(
+                    key, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
+                global_value = ft_c.all_gather_tensor_autograd(
+                    value, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
 
-    @classmethod
-    @abstractmethod
-    def unshard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+                # shape rewrite: because torch.nn.flex_attention() checks
+                # the QKV shape against the block_mask object, we need to
+                # manually rewrite the shape info in block_mask tuple to
+                # make it compatible with q_shard, k_global, v_global
+                if block_mask[1] != global_key.size(-2):
+                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
 
+                return func(
+                    query,
+                    global_key,
+                    global_value,
+                    score_mod,
+                    block_mask,
+                    *args[5:],
+                    **kwargs,
+                )
 
-class _SequentialSharder(_LoadBalancer):
-    """
-    This load balancer chunks the buffer into cp_world_size and rank0 gets
-    0th shard, rank1 gets 1st shard, ...
-    So this doesn't have any load balancing effect when using the causal masking.
-    """
+            if func != self._fn:
+                return func(*args, **kwargs)
 
-    @classmethod
-    def shard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        assert buffer.size()[seq_dim] % mesh.size() == 0
-        return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
+            if self._input_fn is not None:
+                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
+            output = func(*args, **kwargs)
+            if self._output_fn is not None:
+                output = self._output_fn(self._device_mesh, output)
+            return output
 
-    @classmethod
-    def unshard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        buffer = buffer.contiguous()
-        all_buffers = [torch.empty_like(buffer) for _ in range(mesh.size())]
-        ft_c.all_gather_inplace(all_buffers, buffer, mesh)
-        return torch.cat(all_buffers, dim=seq_dim)
-
-
-class _RoundRobinLoadBalancer(_LoadBalancer):
-    """
-    This load balancer chunk the buffer into cp_world_size * ROUND_ROBIN_CYCLE
-    shards, and uses a round robin approach to achieve load balancing.
-    Since ROUND_ROBIN_CYCLE being 2 will achieve perfect load balancing for
-    causal masking, we assume ROUND_ROBIN_CYCLE is always 2 to simplify the
-    implementation.
-    """
-
-    ROUND_ROBIN_CYCLE = 2
-
-    @classmethod
-    def shard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
+        _distribute_function(
+            F.scaled_dot_product_attention,
+            F,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
         )
-        cp_world_size = mesh.size()
-        cp_rank = mesh.get_local_rank()
-        assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
-        chunks = buffer.chunk(cp_world_size * 2, dim=seq_dim)
-        return torch.cat(
-            (chunks[cp_rank], chunks[cp_world_size * 2 - cp_rank - 1]),
-            dim=seq_dim,
+        with _enable_cp_dispatcher():
+            yield
+        _restore_function(F.scaled_dot_product_attention, F)
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+        tf_mode = _cp_global_vars.torch_function_mode
+        if tf_mode is None:
+            tf_mode = DistributeFunction(
+                F.scaled_dot_product_attention,
+                mesh,
+                attention_input_fn,
+                attention_output_fn,
+            )
+            _set_cp_global_var("torch_function_mode", tf_mode)
+
+        with tf_mode:
+            with _enable_cp_dispatcher():
+                yield
+    else:
+        raise NotImplementedError("torch dispatch mode is not supported yet.")
+
+
+def _generate_round_robin_indices(
+    seq_length: int,
+    cp_world_size: int,
+    device: torch.device,
+    restore: bool = False,
+) -> torch.Tensor:
+    """
+    Generate round-robin load balancing indices or restore indices.
+    Args:
+        seq_length: Total sequence length
+        cp_world_size: Context parallel world size
+        device: Device to place the tensor on
+        restore: If True, generate restore indices that map round-robin reordered
+                positions back to original positions. If False, generate load
+                balance indices that reorder original positions to round-robin pattern.
+    Returns:
+        Index tensor of shape (seq_length,) with the requested mapping.
+    """
+    assert seq_length % (cp_world_size * 2) == 0
+    chunk_size = seq_length // (cp_world_size * 2)
+    all_indices = []
+
+    for cp_rank in range(cp_world_size):
+        # Generate indices for first chunk of the cp rank
+        first_chunk_start = cp_rank * chunk_size
+        first_chunk_indices = list(
+            range(first_chunk_start, first_chunk_start + chunk_size)
         )
 
-    @classmethod
-    def unshard(
-        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        # Second chunk: positions from the complementary chunk
+        second_chunk_idx = cp_world_size * 2 - cp_rank - 1
+        second_chunk_start = second_chunk_idx * chunk_size
+        second_chunk_indices = list(
+            range(second_chunk_start, second_chunk_start + chunk_size)
         )
-        buffer = buffer.contiguous()
-        cp_world_size = mesh.size()
-
-        all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
-        ft_c.all_gather_inplace(all_buffers, buffer, mesh)
-        sliced_buffers = [sb for b in all_buffers for sb in b.chunk(2, dim=seq_dim)]
-        ordered_buffers = list(sliced_buffers)
-        for i, b in enumerate(sliced_buffers):
-            if i % 2 == 0:
-                ordered_buffers[i // 2] = b
-            else:
-                ordered_buffers[cp_world_size * 2 - (i // 2) - 1] = b
-        return torch.cat(ordered_buffers, dim=seq_dim)
+        # combine the indices for this rank
+        all_indices.extend(first_chunk_indices + second_chunk_indices)
+    all_indices_tensor = torch.tensor(all_indices, dtype=torch.int, device=device)
+    if restore:
+        all_indices_tensor = torch.argsort(all_indices_tensor)
+    return all_indices_tensor
 
 
 def _context_parallel_buffers(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     buffer_seq_dims: list[int],
+    load_balance_indices: Optional[torch.Tensor] = None,
 ) -> list[torch.Tensor]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
-    sharder = (
-        _RoundRobinLoadBalancer
-        if _cp_options.enable_load_balance
-        else _SequentialSharder
-    )
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
-        new_buffers.append(sharder.shard(buffer, mesh, seq_dim))
+        if load_balance_indices is not None:
+            buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
+
+        # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+        sharded_buffer = distribute_tensor(
+            buffer, mesh, [Shard(seq_dim)], src_data_rank=None
+        ).to_local()
+        new_buffers.append(sharded_buffer)
 
     return new_buffers
 
@@ -1324,7 +1452,7 @@ def context_parallel(
             these buffers can be put in this list to avoid extra restore time.
 
     .. warning::
-        `torch.distributed._tensor.experimental.attention.context_parallel` is a
+        `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
     buffers = [] if buffers is None else buffers
@@ -1342,11 +1470,25 @@ def context_parallel(
             raise ValueError("`no_restore_buffers` must be a subset of `buffers`.")
 
     original_buffers = [None if b in no_restore_buffers else b.clone() for b in buffers]
-    chunks = _context_parallel_buffers(mesh, buffers, buffer_seq_dims)
-    for buffer, chunk in zip(buffers, chunks):
-        chunk = chunk.clone()
-        buffer.resize_(chunk.shape)
-        buffer.copy_(chunk)
+
+    device = buffers[0].device
+    seq_length = buffers[0].shape[buffer_seq_dims[0]]
+    cp_world_size = mesh.size()
+    if _cp_options.enable_load_balance:
+        load_balance_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+        )
+    else:
+        load_balance_indices = None
+    shards = _context_parallel_buffers(
+        mesh, buffers, buffer_seq_dims, load_balance_indices
+    )
+    for buffer, shard in zip(buffers, shards):
+        shard = shard.clone()
+        buffer.resize_(shard.shape)
+        buffer.copy_(shard)
 
     with _context_parallel(seq_dim=2, mesh=mesh):
         yield
@@ -1375,12 +1517,30 @@ def context_parallel_unshard(
     Returns:
         List[torch.Tensor]: the unsharded buffers.
     """
-    sharder = (
-        _RoundRobinLoadBalancer
-        if _cp_options.enable_load_balance
-        else _SequentialSharder
-    )
-    return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+    if _cp_options.enable_load_balance:
+        device = buffers[0].device
+        cp_world_size = mesh.size()
+        seq_length = buffers[0].shape[seq_dims[0]] * cp_world_size
+        restore_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+            restore=True,
+        )
+    else:
+        restore_indices = None
+    unsharded_buffers = []
+    for b, dim in zip(buffers, seq_dims):
+        b = b.contiguous()
+        unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
+
+        if restore_indices is not None:
+            unsharded_b = torch.index_select(
+                unsharded_b, dim=dim, index=restore_indices
+            )
+
+        unsharded_buffers.append(unsharded_b)
+    return unsharded_buffers
 
 
 def set_rotate_method(rotate_method: str) -> None:

@@ -6,18 +6,18 @@ from typing import Optional
 
 import torch
 from torch import distributed as dist
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_module,
-    DTensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
+)
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_module,
+    DTensor,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
@@ -91,9 +91,9 @@ class TestTPFSDPIntegration(FSDPTest):
         tensor_parallel_size: int,
     ) -> tuple[dict[str, int], dict[str, tuple[torch.Size, int]]]:
         """ """
-        assert (
-            type(model) is SimpleModel
-        ), "Expects a `SimpleModel` since the sharding cases on the model definition"
+        assert type(model) is SimpleModel, (
+            "Expects a `SimpleModel` since the sharding cases on the model definition"
+        )
         param_name_to_numel = OrderedDict()
         param_name_to_sharding_info = OrderedDict()
         for param_name, param in model.named_parameters():
@@ -190,9 +190,11 @@ class TestTPFSDPIntegration(FSDPTest):
         local_grads_as_flattened = (
             torch.cat(
                 [
-                    torch.flatten(param.grad)
-                    if param.grad is not None
-                    else torch.zeros_like(torch.flatten(param))
+                    (
+                        torch.flatten(param.grad)
+                        if param.grad is not None
+                        else torch.zeros_like(torch.flatten(param))
+                    )
                     for param in model.parameters()
                 ]
             )

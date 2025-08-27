@@ -1,10 +1,10 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import operator
 from collections import abc as container_abcs, OrderedDict
-from collections.abc import Iterable, Iterator, Mapping
 from itertools import chain, islice
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, Self
 
 import torch
@@ -12,6 +12,10 @@ from torch._jit_internal import _copy_to_script_wrapper
 from torch.nn.parameter import Parameter
 
 from .module import Module
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Mapping
 
 
 __all__ = [
@@ -24,6 +28,7 @@ __all__ = [
 ]
 
 T = TypeVar("T", bound=Module)
+_V = TypeVar("_V")
 
 
 # Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
@@ -81,31 +86,30 @@ class Sequential(Module):
         # for `Conv2d(20,64,5)`. Finally, the output of
         # `Conv2d(20,64,5)` will be used as input to the second `ReLU`
         model = nn.Sequential(
-                  nn.Conv2d(1,20,5),
-                  nn.ReLU(),
-                  nn.Conv2d(20,64,5),
-                  nn.ReLU()
-                )
+            nn.Conv2d(1, 20, 5), nn.ReLU(), nn.Conv2d(20, 64, 5), nn.ReLU()
+        )
 
         # Using Sequential with OrderedDict. This is functionally the
         # same as the above code
-        model = nn.Sequential(OrderedDict([
-                  ('conv1', nn.Conv2d(1,20,5)),
-                  ('relu1', nn.ReLU()),
-                  ('conv2', nn.Conv2d(20,64,5)),
-                  ('relu2', nn.ReLU())
-                ]))
+        model = nn.Sequential(
+            OrderedDict(
+                [
+                    ("conv1", nn.Conv2d(1, 20, 5)),
+                    ("relu1", nn.ReLU()),
+                    ("conv2", nn.Conv2d(20, 64, 5)),
+                    ("relu2", nn.ReLU()),
+                ]
+            )
+        )
     """
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
     @overload
-    def __init__(self, *args: Module) -> None:
-        ...
+    def __init__(self, *args: Module) -> None: ...
 
     @overload
-    def __init__(self, arg: "OrderedDict[str, Module]") -> None:
-        ...
+    def __init__(self, arg: OrderedDict[str, Module]) -> None: ...
 
     def __init__(self, *args):
         super().__init__()
@@ -116,7 +120,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
+    def _get_item_by_idx(self, iterator: Iterable[_V], idx: int) -> _V:
         """Get the idx-th item of the iterator."""
         size = len(self)
         idx = operator.index(idx)
@@ -126,7 +130,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union["Sequential", T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, Module]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -151,7 +155,7 @@ class Sequential(Module):
     def __len__(self) -> int:
         return len(self._modules)
 
-    def __add__(self, other) -> "Sequential":
+    def __add__(self, other) -> Sequential:
         if isinstance(other, Sequential):
             ret = Sequential()
             for layer in self:
@@ -166,6 +170,9 @@ class Sequential(Module):
             )
 
     def pop(self, key: Union[int, slice]) -> Module:
+        """
+        Pop ``key`` from self.
+        """
         v = self[key]
         del self[key]
         return v
@@ -182,7 +189,7 @@ class Sequential(Module):
                 f"of Sequential class, but {str(type(other))} is given."
             )
 
-    def __mul__(self, other: int) -> "Sequential":
+    def __mul__(self, other: int) -> Sequential:
         if not isinstance(other, int):
             raise TypeError(
                 f"unsupported operand type(s) for *: {type(self)} and {type(other)}"
@@ -200,7 +207,7 @@ class Sequential(Module):
                     offset += 1
             return combined
 
-    def __rmul__(self, other: int) -> "Sequential":
+    def __rmul__(self, other: int) -> Sequential:
         return self.__mul__(other)
 
     def __imul__(self, other: int) -> Self:
@@ -222,7 +229,7 @@ class Sequential(Module):
             return self
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -236,20 +243,54 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         for module in self:
             input = module(input)
         return input
 
-    def append(self, module: Module) -> "Sequential":
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end.
 
         Args:
             module (nn.Module): module to append
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.append(nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+            )
+
         """
         self.add_module(str(len(self)), module)
         return self
 
-    def insert(self, index: int, module: Module) -> "Sequential":
+    def insert(self, index: int, module: Module) -> Self:
+        """
+        Inserts a module into the Sequential container at the specified index.
+
+        Args:
+            index (int): The index to insert the module.
+            module (Module): The module to be inserted.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.insert(0, nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=3, out_features=4, bias=True)
+                (1): Linear(in_features=1, out_features=2, bias=True)
+                (2): Linear(in_features=2, out_features=3, bias=True)
+            )
+
+        """
         if not isinstance(module, Module):
             raise AssertionError(f"module should be of type: {Module}")
         n = len(self._modules)
@@ -262,7 +303,27 @@ class Sequential(Module):
         self._modules[str(index)] = module
         return self
 
-    def extend(self, sequential) -> "Sequential":
+    def extend(self, sequential: Iterable[Module]) -> Self:
+        """
+        Extends the current Sequential container with layers from another Sequential container.
+
+        Args:
+            sequential (Sequential): A Sequential container whose layers will be added to the current container.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> other = nn.Sequential(nn.Linear(3, 4), nn.Linear(4, 5))
+            >>> n.extend(other) # or `n + other`
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+                (3): Linear(in_features=4, out_features=5, bias=True)
+            )
+
+        """
         for layer in sequential:
             self.append(layer)
         return self
@@ -309,15 +370,13 @@ class ModuleList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: slice) -> "ModuleList":
-        ...
+    def __getitem__(self, idx: slice) -> ModuleList: ...
 
     @overload
-    def __getitem__(self, idx: int) -> Module:
-        ...
+    def __getitem__(self, idx: int) -> Module: ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, ModuleList]:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -348,13 +407,13 @@ class ModuleList(Module):
     def __iadd__(self, modules: Iterable[Module]) -> Self:
         return self.extend(modules)
 
-    def __add__(self, other: Iterable[Module]) -> "ModuleList":
+    def __add__(self, other: Iterable[Module]) -> ModuleList:
         combined = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
         return combined
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a custom repr for ModuleList that compresses repeated module representations."""
         list_of_reprs = [repr(item) for item in self]
         if len(list_of_reprs) == 0:
@@ -387,7 +446,7 @@ class ModuleList(Module):
         return main_str
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -403,7 +462,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: Module) -> "ModuleList":
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end of the list.
 
         Args:
@@ -433,7 +492,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -465,14 +524,12 @@ class ModuleDict(Module):
         class MyModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.choices = nn.ModuleDict({
-                        'conv': nn.Conv2d(10, 10, 3),
-                        'pool': nn.MaxPool2d(3)
-                })
-                self.activations = nn.ModuleDict([
-                        ['lrelu', nn.LeakyReLU()],
-                        ['prelu', nn.PReLU()]
-                ])
+                self.choices = nn.ModuleDict(
+                    {"conv": nn.Conv2d(10, 10, 3), "pool": nn.MaxPool2d(3)}
+                )
+                self.activations = nn.ModuleDict(
+                    [["lrelu", nn.LeakyReLU()], ["prelu", nn.PReLU()]]
+                )
 
             def forward(self, x, choice, act):
                 x = self.choices[choice](x)
@@ -524,17 +581,17 @@ class ModuleDict(Module):
         return v
 
     @_copy_to_script_wrapper
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ModuleDict keys."""
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[tuple[str, Module]]:
+    def items(self) -> container_abcs.ItemsView[str, Module]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
     @_copy_to_script_wrapper
-    def values(self) -> Iterable[Module]:
+    def values(self) -> container_abcs.ValuesView[Module]:
         r"""Return an iterable of the ModuleDict values."""
         return self._modules.values()
 
@@ -575,7 +632,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
@@ -597,7 +654,9 @@ class ParameterList(Module):
         class MyModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
+                self.params = nn.ParameterList(
+                    [nn.Parameter(torch.randn(10, 10)) for i in range(10)]
+                )
 
             def forward(self, x):
                 # ParameterList can act as an iterable, or be indexed using ints
@@ -622,12 +681,10 @@ class ParameterList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: int) -> Any:
-        ...
+    def __getitem__(self, idx: int) -> Any: ...
 
     @overload
-    def __getitem__(self: T, idx: slice) -> T:
-        ...
+    def __getitem__(self: T, idx: slice) -> T: ...
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -660,12 +717,12 @@ class ParameterList(Module):
     def __iadd__(self, parameters: Iterable[Any]) -> Self:
         return self.extend(parameters)
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def append(self, value: Any) -> "ParameterList":
+    def append(self, value: Any) -> Self:
         """Append a given value at the end of the list.
 
         Args:
@@ -695,6 +752,9 @@ class ParameterList(Module):
         return self
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         child_lines = []
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
@@ -749,10 +809,12 @@ class ParameterDict(Module):
         class MyModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.params = nn.ParameterDict({
-                        'left': nn.Parameter(torch.randn(5, 10)),
-                        'right': nn.Parameter(torch.randn(5, 10))
-                })
+                self.params = nn.ParameterDict(
+                    {
+                        "left": nn.Parameter(torch.randn(5, 10)),
+                        "right": nn.Parameter(torch.randn(5, 10)),
+                    }
+                )
 
             def forward(self, x, choice):
                 x = self.params[choice].mm(x)
@@ -804,9 +866,9 @@ class ParameterDict(Module):
         return iter(self._keys)
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(list(self._keys))
+        return reversed(self._keys)
 
-    def copy(self) -> "ParameterDict":
+    def copy(self) -> ParameterDict:
         """Return a copy of this :class:`~torch.nn.ParameterDict` instance."""
         # We have to use an OrderedDict because the ParameterDict constructor
         # behaves differently on plain dict vs OrderedDict
@@ -865,7 +927,7 @@ class ParameterDict(Module):
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
-    ) -> "ParameterDict":
+    ) -> ParameterDict:
         r"""Return a new ParameterDict with the keys provided.
 
         Args:
@@ -874,7 +936,7 @@ class ParameterDict(Module):
         """
         return ParameterDict((k, default) for k in keys)
 
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 
@@ -886,7 +948,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict values."""
         return (self[k] for k in self._keys)
 
-    def update(self, parameters: Union[Mapping[str, Any], "ParameterDict"]) -> None:
+    def update(self, parameters: Union[Mapping[str, Any], ParameterDict]) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::
@@ -951,16 +1013,16 @@ class ParameterDict(Module):
     def __call__(self, input):
         raise RuntimeError("ParameterDict should not be called.")
 
-    def __or__(self, other: "ParameterDict") -> "ParameterDict":
+    def __or__(self, other: ParameterDict) -> ParameterDict:
         copy = self.copy()
         copy.update(other)
         return copy
 
-    def __ror__(self, other: "ParameterDict") -> "ParameterDict":
+    def __ror__(self, other: ParameterDict) -> ParameterDict:
         copy = other.copy()
         copy.update(self)
         return copy
 
-    def __ior__(self, other: "ParameterDict") -> Self:
+    def __ior__(self, other: ParameterDict) -> Self:
         self.update(other)
         return self

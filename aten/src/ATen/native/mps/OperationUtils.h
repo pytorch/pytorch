@@ -5,6 +5,7 @@
 #include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
@@ -35,10 +36,6 @@
                                                                        name:(NSString*)name;
 @end
 
-// Fwd declarations
-namespace at {
-struct TensorIteratorBase;
-}
 using namespace at::mps;
 
 namespace at::native::mps {
@@ -91,15 +88,10 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
-                               MPSGraphTensor* inputTensor,
-                               const TensorBase& input,
-                               bool includesInt64 = false);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph,
-                                 MPSGraphTensor* inputTensor,
-                                 const TensorBase& input,
-                                 bool includesInt64 = false);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
 
+MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
@@ -147,8 +139,6 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
-void printTensorNDArray(const TensorBase& t);
-MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType);
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
@@ -156,9 +146,29 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, const TensorBase& 
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph* mpsGraph, const Scalar& scalar);
 
-string get_mem_format_string(c10::MemoryFormat memory_format);
+std::string get_mem_format_string(c10::MemoryFormat memory_format);
 
 using MPSCacheKey = uint64_t;
+
+struct MPSCachedKernel {
+  MPSCachedKernel(NSObject* object) : _object([object retain]) {}
+  virtual ~MPSCachedKernel() {
+    [_object release];
+    _object = nullptr;
+  }
+
+  // Delete copy constructor and assignment
+  MPSCachedKernel(const MPSCachedKernel&) = delete;
+  void operator=(const MPSCachedKernel&) = delete;
+
+  template <typename T>
+  inline T* kernel() const {
+    return (T*)_object;
+  }
+
+ private:
+  NSObject* _object = nullptr;
+};
 
 // derive this class to cache a graph and its inputs/outputs
 // can be used to store any NSObject
@@ -213,6 +223,97 @@ struct MPSBinaryGradCachedGraph : public MPSCachedGraph {
   MPSGraphTensor* otherTensor_ = nil;
   MPSGraphTensor* gradInputTensor_ = nil;
 };
+
+struct MPSKernelCache {
+  typedef MPSCachedKernel* (^CreateCachedKernelBlock)();
+
+  struct CacheEntry {
+    CacheEntry(const std::string& key, MPSCachedKernel* cachedKernel) : cachedKernel_(cachedKernel), key_(key) {}
+    MPSCachedKernel* cachedKernel_ = nullptr;
+    std::string key_;
+  };
+
+ public:
+  static MPSKernelCache* getInstance() {
+    if (_instance_cache == nullptr) {
+      _instance_cache = new MPSKernelCache();
+    }
+    return _instance_cache;
+  }
+
+  ~MPSKernelCache() {
+    dispatch_release(serialQueue_);
+    for (const auto& i : cache_) {
+      delete i.second.cachedKernel_;
+    }
+  }
+
+  // Disallow the copy constructor and operator= functions
+  MPSKernelCache(const MPSKernelCache&) = delete;
+  void operator=(const MPSKernelCache&) = delete;
+
+  MPSCachedKernel* CreateCachedKernel(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    __block MPSCachedKernel* cachedKernel = nil;
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      } else {
+        cachedKernel = createCacheBlock();
+        CacheEntry entry(key, cachedKernel);
+        cache_.emplace(hash, entry);
+      }
+    });
+    return cachedKernel;
+  }
+  template <typename T>
+  inline T* CreateCachedKernelAs(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    return static_cast<T*>(CreateCachedKernel(key, createCacheBlock));
+  }
+
+  MPSCachedKernel* LookUp(const std::string& key) const {
+    __block MPSCachedKernel* cachedKernel = nil;
+
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      }
+    });
+    return cachedKernel;
+  }
+
+  template <typename T>
+  inline T* LookUpAs(const std::string& key) const {
+    return static_cast<T*>(LookUp(key));
+  }
+
+ private:
+  MPSKernelCache() {
+    serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
+  }
+
+  static MPSKernelCache* _instance_cache;
+  std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  dispatch_queue_t serialQueue_ = nullptr;
+};
+
+// Common template for creating cached kernel if missing
+template <typename T>
+inline T* LookUpOrCreateCachedKernel(const std::string& key, std::function<MPSKernel*()> instantiate) {
+  auto cache_ = MPSKernelCache::getInstance();
+  if (auto rc = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedKernelAs<T>(key, ^mps::MPSCachedKernel*() {
+    auto k_ = new mps::MPSCachedKernel(instantiate());
+    return k_;
+  });
+}
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
@@ -328,14 +429,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
-#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                            \
-  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                        \
-    TORCH_WARN_ONCE(                                                                                                     \
-        "MPS: no support for int64 for ",                                                                                \
-        op_name,                                                                                                         \
-        ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3."); \
-  }
-
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
@@ -355,6 +448,17 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
+      // MPS does not support doubles, silently downcast CPU scalar to float
+      if (C10_UNLIKELY(t.scalar_type() == kDouble)) {
+        auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
+        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
+        return;
+      }
+      if (C10_UNLIKELY(t.scalar_type() == kComplexDouble)) {
+        auto val = static_cast<c10::complex<float>>(*reinterpret_cast<const c10::complex<double>*>(t.const_data_ptr()));
+        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
+        return;
+      }
       [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
@@ -383,6 +487,30 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
 
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSScalar& s, unsigned idx) {
   [encoder setBytes:&s.value length:s.size atIndex:idx];
+}
+
+static size_t iter_tensor_offset(TensorIteratorBase& iter, unsigned idx) {
+  // At the moment, MPS storage data is not the real GPU pointer, but rather a pointer to id<MTLBuffer> object
+  // But TensorIterator constructs data_ptr as if base was just a raw pointer
+  // Workaround this problem by computing an offset from the start of the tensor, which works for both
+  // tensor views and sliced 64-bit iterators
+  return reinterpret_cast<size_t>(iter.data_ptr(idx)) -
+      reinterpret_cast<size_t>(iter.tensor_base(idx).storage().data());
+}
+
+static inline void bind_iter_tensors(id<MTLComputeCommandEncoder> encoder,
+                                     TensorIteratorBase& iter,
+                                     std::optional<size_t> ntensors = std::nullopt) {
+  for (auto idx : c10::irange(ntensors.value_or(iter.ntensors()))) {
+    auto& t = iter.tensor_base(idx);
+    // Handle CPU scalars
+    if (C10_UNLIKELY(t.device().type() == kCPU)) {
+      mtl_setBuffer(encoder, t, idx);
+      continue;
+    }
+    auto offs = iter_tensor_offset(iter, idx);
+    [encoder setBuffer:getMTLBufferStorage(t) offset:offs atIndex:idx];
+  }
 }
 
 namespace detail {
@@ -476,10 +604,6 @@ inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds,
   runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
 }
 
-inline bool supportsComplex() {
-  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
-}
-
 // MPS yet to support double types, but starting from MacOS 14, supports bfloat16
 inline bool supportedFloatingType(ScalarType dtype) {
   return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
@@ -491,17 +615,12 @@ inline bool supportedFloatingType(const TensorBase& t) {
 
 inline bool supportedFloatingOrComplexType(ScalarType dtype) {
   if (dtype == kComplexFloat || dtype == kComplexHalf) {
-    return supportsComplex();
+    return true;
   }
   return supportedFloatingType(dtype);
 }
 inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
-}
-
-inline void checkSupportsBFloat16() {
-  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
 }
 
 inline bool needsGather(const TensorBase& t) {

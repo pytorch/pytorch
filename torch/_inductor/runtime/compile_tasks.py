@@ -8,7 +8,9 @@ import time
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
+
+from torch._utils_internal import log_triton_builds
 
 
 if TYPE_CHECKING:
@@ -34,7 +36,7 @@ def _reload_python_module(
         return mod
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
@@ -48,15 +50,27 @@ def _set_triton_ptxas_path() -> None:
 
 
 def _worker_compile_triton(
-    load_kernel: Callable[[], CachingAutotuner], extra_env: dict[str, str]
+    load_kernel: Callable[[], CachingAutotuner],
+    extra_env: dict[str, str],
+    extra_config: dict[str, Any],
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
-    start_ns = time.time_ns()
-    kernel = load_kernel()
-    kernel.precompile(warm_cache_only=True)
-    elapsed_ns = time.time_ns() - start_ns
-    kernel.prepare_for_pickle()
-    # We can release this memory in the compile subprocesses:
-    linecache.clearcache()
-    return kernel, elapsed_ns // 1000
+    from torch._inductor import config
+
+    with config.patch(extra_config):
+        fail = None
+        try:
+            start_ns = time.time_ns()
+            kernel = load_kernel()
+            kernel.precompile(warm_cache_only=True)
+            elapsed_ns = time.time_ns() - start_ns
+            kernel.prepare_for_pickle()
+            # We can release this memory in the compile subprocesses:
+            linecache.clearcache()
+            return kernel, elapsed_ns // 1000
+        except Exception as e:
+            fail = str(e)
+            raise
+        finally:
+            log_triton_builds(fail=fail)

@@ -47,7 +47,7 @@ class TypeGen:
             all_base_tys = [TypeGen.from_example(x) for x in obj]
             if len(set(all_base_tys)) > 1:
                 raise RuntimeError(
-                    f"Cannot generate schema for a seqeunce of args of heterogeneous types: {all_base_tys}. "
+                    f"Cannot generate schema for a sequence of args of heterogeneous types: {all_base_tys}. "
                     "Consider unpacking the argument and give proper names to them if possible "
                     "instead of using *args."
                 )

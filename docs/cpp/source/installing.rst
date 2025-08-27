@@ -92,7 +92,7 @@ We can now run the following commands to build the application from within the
   cmake --build . --config Release
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
-distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can be queried
+distribution. If PyTorch was installed via pip, `CMAKE_PREFIX_PATH` can be queried
 using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
 
 .. code-block:: sh

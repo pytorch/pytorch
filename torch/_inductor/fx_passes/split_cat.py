@@ -2,6 +2,7 @@
 import itertools
 import logging
 import operator
+import os
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
@@ -9,7 +10,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_or_false
 from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import (
@@ -62,6 +63,7 @@ pre_grad_pass_names = [
     "split_stack_to_cats_pass",
     "unbind_stack_to_slices_pass",
     "move_reshape_out_of_split_stack_pass",
+    "einsum_to_pointwise_pass",
 ]
 
 post_grad_pass_names = [
@@ -74,6 +76,8 @@ post_grad_pass_names = [
     "select_cat_aten_pass",
     "move_view_after_cat_aten_pass",
 ]
+
+backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
 for pass_name in pre_grad_pass_names:
     # exclude all passes from the group batch fusion
@@ -206,7 +210,7 @@ def normalize_split_base(
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
-    counters["inductor"]["normalization_pass"] += 1
+    counters[backend]["normalization_pass"] += 1
 
 
 @register_graph_pattern(
@@ -247,7 +251,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         return
     # remove the dummy split whose split sections size is one
     # theoretically nodes with no users should be removed, but we have seen the corner case
-    # thus we add its uers check to walk around the StopIteration error.
+    # thus we add its users check to walk around the StopIteration error.
     if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
@@ -258,7 +262,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         # erase the split node and its child
         graph.erase_node(user)
         graph.erase_node(split_node)
-        counters["inductor"]["remove_split_with_size_one_pass"] += 1
+        counters[backend]["remove_split_with_size_one_pass"] += 1
 
 
 @register_graph_pattern(
@@ -298,16 +302,14 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
     node.replace_all_uses_with(new_node)
     new_node.meta.update(node.meta)
     graph.erase_node(node)
-    counters["inductor"]["normalization_pass"] += 1
+    counters[backend]["normalization_pass"] += 1
 
 
 @register_graph_pattern(
-    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    CallFunctionVarArgs([torch.cat, torch.concat], users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     cat_node = match.nodes[0]
     graph = match.graph
     tensors = get_arg_value(cat_node, 0, "tensors")
@@ -332,7 +334,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     def is_empty_tensor(x):
         # special case where torch.cat supports cat'ing with an empty tensor
         x_shape = x.meta["example_value"].shape
-        return len(x_shape) == 1 and guard_size_oblivious(x_shape[0] == 0)
+        return len(x_shape) == 1 and guard_or_false(x_shape[0] == 0)
 
     assert all(
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
@@ -347,6 +349,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         cat_node.args == new_args
         and cat_node.kwargs == new_kwargs
         and cat_node.op == "call_function"
+        and cat_node.target == torch.cat
     ):
         return
 
@@ -359,7 +362,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
     graph.erase_node(cat_node)
-    counters["inductor"]["normalization_pass"] += 1
+    counters[backend]["normalization_pass"] += 1
 
 
 @register_graph_pattern(
@@ -395,7 +398,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
     node.replace_all_uses_with(new_node)
     new_node.meta.update(node.meta)
     graph.erase_node(node)
-    counters["inductor"]["normalization_pass"] += 1
+    counters[backend]["normalization_pass"] += 1
 
 
 def find_next_users(split_node: torch.fx.Node) -> list[torch.fx.Node]:
@@ -656,7 +659,7 @@ def merge_splits(
     for node in to_remove:
         graph.erase_node(node)
 
-    counters["inductor"]["merge_splits_pass"] += 1
+    counters[backend]["merge_splits_pass"] += 1
 
 
 class SplitCatSimplifier:
@@ -716,7 +719,7 @@ class SplitCatSimplifier:
             transform_params_list,  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
-        counters["inductor"]["unbind_stack_pass"] += 1
+        counters[backend]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: list[torch.fx.Node]
@@ -815,9 +818,9 @@ class SplitCatSimplifier:
         split_ranges = self.fill_gaps(split_ranges, 0, cumulative_sizes[-1])
         if len(split_sections) == len(split_ranges):  # Simplification not possible
             return None
-        counters["inductor"]["scmerge_split_sections_removed"] = len(
-            split_sections
-        ) - len(split_ranges)
+        counters[backend]["scmerge_split_sections_removed"] = len(split_sections) - len(
+            split_ranges
+        )
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: list[_Range]) -> bool:
@@ -867,7 +870,8 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
-                        user_input[0] : user_input[1] + 1
+                        user_input[0] : user_input[1]
+                        + 1  # type: ignore[index]
                     ]
                     # All sections should be equal
                     if len(OrderedSet(subset_split_sections)) != 1:  # type: ignore[arg-type]
@@ -924,7 +928,7 @@ class SplitCatSimplifier:
                         [r[1] - r[0] for r in split_ranges],
                         dim=split_dim,
                     )
-                counters["inductor"]["scmerge_split_added"] += 1
+                counters[backend]["scmerge_split_added"] += 1
             split_items = []
             with graph.inserting_after(new_split):
                 for i in range(len(split_ranges)):
@@ -1085,7 +1089,7 @@ class SplitCatSimplifier:
                         user_inputs_new_transformed_meta,
                         dim=cat_dim,
                     )
-                    counters["inductor"]["scmerge_cat_added"] += 1
+                    counters[backend]["scmerge_cat_added"] += 1
                 else:
                     new_cat_node = user_inputs_new_transformed[-1]
                     new_cat_node.meta["example_value"] = (
@@ -1117,12 +1121,12 @@ class SplitCatSimplifier:
         next_users: list[torch.fx.Node],
     ):
         to_remove = [split_node]
-        counters["inductor"]["scmerge_split_removed"] += 1
+        counters[backend]["scmerge_split_removed"] += 1
         to_remove.extend(split_node.users.keys())
         for next_user in next_users:
             if next_user.target not in (torch.cat, torch.stack):
                 continue
-            counters["inductor"]["scmerge_cat_removed"] += 1
+            counters[backend]["scmerge_cat_removed"] += 1
             to_remove.append(next_user)
         for node in reversed(to_remove):
             if len(node.users.keys()) == 0:
@@ -1315,7 +1319,7 @@ def merge_split_squeeze(
             graph.erase_node(squeeze)
             graph.erase_node(getitem_node)
     graph.erase_node(split)
-    counters["inductor"]["split_cat_pass"] += 1
+    counters[backend]["split_cat_pass"] += 1
 
 
 getitem_unbind = ListOf(
@@ -1448,7 +1452,7 @@ def has_same_parent_node(node: torch.fx.Node):
         if prev_node is None:
             prev_node = getitem.args[0]  # type: ignore[union-attr]
         else:
-            if getitem.args[0] != prev_node:
+            if getitem.args[0] != prev_node:  # type: ignore[union-attr]
                 return False
     return True
 
@@ -1524,7 +1528,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
             # find the index of getitems to be cated/stacked
             # type: ignore[union-attr]
             indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -1575,7 +1579,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
                 split_node = new_split_node
                 split_sections = new_split_sections
 
-                counters["inductor"]["merge_getitem_cat_pass"] += 1
+                counters[backend]["merge_getitem_cat_pass"] += 1
 
 
 # ############pattern to be optimized is#########
@@ -1626,7 +1630,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
             for getitem in cat_user.args[0]:  # type: ignore[union-attr]
                 indices.append(getitem.args[1])  # type: ignore[union-attr]
                 idx_to_getitem[getitem.args[1]] = getitem  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -1636,7 +1640,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
                 cat_user.replace_all_uses_with(split_node.args[0])  # type: ignore[arg-type]
                 # remove the cat node
                 graph.erase_node(cat_user)
-                counters["inductor"]["mutate_cat_pass"] += 1
+                counters[backend]["mutate_cat_pass"] += 1
             # case 2: the cat uses some getitems from the split
             elif is_node_meta_valid(split_node.args[0]):  # type: ignore[arg-type]
                 # check the split dim, and construct the slice tuple
@@ -1664,7 +1668,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
 
                 # remove the cat node
                 graph.erase_node(cat_user)
-                counters["inductor"]["mutate_cat_pass"] += 1
+                counters[backend]["mutate_cat_pass"] += 1
 
 
 getitem_split_aten = ListOf(
@@ -1699,6 +1703,12 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["val"].dim()
+    # we also need to check the input of the split_node
+    # primals =torch.randn(4096, 300)
+    # split = torch.ops.aten.split.Tensor(primals, 320, 1) -> truncate to 300 automatically
+    # split_2 = torch.ops.aten.split_with_sizes.default(primals, [320], dim = 1) -> runtime error
+    split_input_size = split_input.meta["val"].shape[split_dim]
+    split_size = min(split_size, split_input_size)
     split_section_list = [split_size] * (len(split_node.meta["val"]))
     new_args = (split_input, split_section_list)
     new_kwargs = {"dim": split_dim}
@@ -1718,7 +1728,7 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
-    counters["inductor"]["normalization_aten_pass"] += 1
+    counters[backend]["normalization_aten_pass"] += 1
 
 
 @register_graph_pattern(
@@ -1759,7 +1769,7 @@ def normalize_split_with_size_default_aten(match: Match, *args, **kwargs):
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
-    counters["inductor"]["normalization_aten_pass"] += 1
+    counters[backend]["normalization_aten_pass"] += 1
 
 
 @register_graph_pattern(
@@ -1782,7 +1792,11 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
     for cat_node in list(getitem_nodes[0].users.keys()):
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
-        if len(cat_inputs) < threshold_to_cat:
+        try:
+            cat_input_len = len(cat_inputs)
+        except TypeError:
+            continue
+        if cat_input_len < threshold_to_cat:
             continue
         # check split node and cat node has same dim, and all getitem nodes have same parent node
         parent_to_indices = defaultdict(list)  # type: ignore[var-annotated]
@@ -1856,7 +1870,7 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
                 graph.erase_node(getitem_node)
         if len(split_node.users) == 0:
             graph.erase_node(split_node)
-        counters["inductor"]["split_cat_aten_pass"] += 1
+        counters[backend]["split_cat_aten_pass"] += 1
 
 
 @register_graph_pattern(
@@ -1916,7 +1930,7 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
             for select_node in select_nodes:
                 if len(select_node.users) == 0:
                     graph.erase_node(select_node)
-            counters["inductor"]["select_cat_aten_pass"] += 1
+            counters[backend]["select_cat_aten_pass"] += 1
 
 
 @register_graph_pattern(
@@ -1964,7 +1978,7 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
     graph.erase_node(cat_node)
-    counters["inductor"]["normalization_aten_pass"] += 1
+    counters[backend]["normalization_aten_pass"] += 1
 
 
 @register_graph_pattern(
@@ -2025,7 +2039,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     for select_node in select_nodes:
         if len(select_node.users) == 0:
             graph.erase_node(select_node)
-    counters["inductor"]["unbind_stack_aten_pass"] += 1
+    counters[backend]["unbind_stack_aten_pass"] += 1
 
 
 def divide_into_consecutive_sublists(indices: list[int]) -> list[list[int]]:
@@ -2068,7 +2082,7 @@ def update_args_from_split_getitem(
     threshold_to_cat: int = 2,
 ):
     split_input, split_size, split_dim = _get_split_args_default(parents_seen[-1])
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     if len(split_size) == len(getitem_indices) and is_sorted_and_consecutive(
         getitem_indices
     ):
@@ -2163,7 +2177,7 @@ def update_args_from_unbind_getitem(
     unbind_input = get_arg_value(parents_seen[-1], 0, "input")  # split or unbind input
     unbind_dim = get_arg_value(parents_seen[-1], 1, "dim")  # split or unbind dim
     cat_dim = get_arg_value(node, 1, "dim")  # cat or stack dim
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     size = list(unbind_input.meta["example_value"].shape)[unbind_dim]
     if size == len(getitem_indices):
         cat_shape = torch.cat(
@@ -2363,7 +2377,7 @@ def split_cat_to_slices(match: Match, split_sections: list[int], dim: int):
             cat_inputs = cat_node.args[0]  # type: ignore[union-attr]
             graph.erase_node(cat_node)
             remove_split_unbind_children(graph, cat_inputs)  # type: ignore[arg-type]
-            counters["inductor"]["split_cat_to_slices_pass"] += 1
+            counters[backend]["split_cat_to_slices_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(cat_inputs):
             new_args = (new_cat_args,)
@@ -2379,7 +2393,7 @@ def split_cat_to_slices(match: Match, split_sections: list[int], dim: int):
                 # remove the cat node
                 graph.erase_node(cat_node)
                 remove_split_unbind_children(graph, cat_inputs)
-                counters["inductor"]["split_cat_to_slices_pass"] += 1
+                counters[backend]["split_cat_to_slices_pass"] += 1
 
 
 # ############pattern to be optimized is#########
@@ -2440,7 +2454,7 @@ def unbind_cat_to_view(match: Match, unbind_input: torch.fx.Node, dim: int):
             cat_inputs = cat_node.args[0]  # type: ignore[union-attr]
             graph.erase_node(cat_node)
             remove_split_unbind_children(graph, cat_inputs)  # type: ignore[arg-type]
-            counters["inductor"]["unbind_cat_to_view_pass"] += 1
+            counters[backend]["unbind_cat_to_view_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
             # get the view shape
@@ -2460,7 +2474,7 @@ def unbind_cat_to_view(match: Match, unbind_input: torch.fx.Node, dim: int):
             cat_inputs = cat_node.args[0]  # type: ignore[union-attr]
             graph.erase_node(cat_node)
             remove_split_unbind_children(graph, cat_inputs)  # type: ignore[arg-type]
-            counters["inductor"]["unbind_cat_to_view_pass"] += 1
+            counters[backend]["unbind_cat_to_view_pass"] += 1
 
 
 def reshape_cat_node_to_stack(
@@ -2610,7 +2624,7 @@ def split_stack_to_cats(match: Match, split_sections: list[int], dim: int):
         # case 1: only one node in the new cat args, don't need to cat
         if len(new_cat_args) == 1:
             reshape_cat_node_to_stack(graph, new_cat_args[0], stack_node, split_dim)
-            counters["inductor"]["split_stack_to_cats_pass"] += 1
+            counters[backend]["split_stack_to_cats_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
             with graph.inserting_after(stack_node):
@@ -2623,7 +2637,7 @@ def split_stack_to_cats(match: Match, split_sections: list[int], dim: int):
                     new_cat_args_meta, dim=split_dim
                 )
                 reshape_cat_node_to_stack(graph, cat_node, stack_node, split_dim)
-                counters["inductor"]["split_stack_to_cats_pass"] += 1
+                counters[backend]["split_stack_to_cats_pass"] += 1
 
 
 # ############pattern to be optimized is#########
@@ -2682,7 +2696,7 @@ def unbind_stack_to_slices(match: Match, unbind_input: torch.fx.Node, dim: int):
         # case 1: only one node in the new cat args, don't need to cat
         if len(new_cat_args) == 1:
             reshape_cat_node_to_stack(graph, new_cat_args[0], stack_node, unbind_dim)
-            counters["inductor"]["unbind_stack_to_slices_pass"] += 1
+            counters[backend]["unbind_stack_to_slices_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
             # get the view shape
@@ -2697,7 +2711,7 @@ def unbind_stack_to_slices(match: Match, unbind_input: torch.fx.Node, dim: int):
                     new_cat_args_meta, dim=cat_dim
                 )
                 reshape_cat_node_to_stack(graph, new_cat_node, stack_node, unbind_dim)
-            counters["inductor"]["unbind_stack_to_slices_pass"] += 1
+            counters[backend]["unbind_stack_to_slices_pass"] += 1
 
 
 # ############pattern to be optimized is#########
@@ -2802,7 +2816,7 @@ def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
             # check the input of stack node, and remove nodes that have no users
             remove_split_unbind_children(graph, stack_inputs)  # type: ignore[arg-type]
             remove_split_unbind_children(graph, split_users)  # type: ignore[arg-type]
-            counters["inductor"]["move_reshape_out_of_split_stack_pass"] += 1
+            counters[backend]["move_reshape_out_of_split_stack_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
             # decompose the cat args into multiple stack nodes, i.e., we stack
@@ -2864,7 +2878,7 @@ def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
                 graph.erase_node(stack_node)
                 remove_split_unbind_children(graph, stack_inputs)  # type: ignore[arg-type]
                 remove_split_unbind_children(graph, split_users)  # type: ignore[arg-type]
-            counters["inductor"]["move_reshape_out_of_split_stack_pass"] += 1
+            counters[backend]["move_reshape_out_of_split_stack_pass"] += 1
 
 
 view_getitem_split_aten = ListOf(
@@ -2956,4 +2970,66 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             cat_node.replace_all_uses_with(view_node)
             view_node.meta.update(cat_node.meta)
             graph.erase_node(cat_node)
-        counters["inductor"]["move_view_after_cat_aten_pass"] += 1
+        counters[backend]["move_view_after_cat_aten_pass"] += 1
+
+
+def match_einsum_strings(s: str) -> bool:
+    """
+    This function takes a string s as input, where s is in the format "3 letter string,
+    4 letter string -> 3 letter string".
+    It checks if the strings match the rule and returns True if they do, False otherwise.
+
+    The rule is:
+    - The three strings have the same first two characters.
+    - The first two strings have the same third character.
+    - The second and third strings have the same last character.
+    """
+
+    # Split the input string into parts
+    parts = s.replace("->", ",").split(",")
+
+    # Strip leading/trailing whitespaces from each part
+    parts = [part.strip() for part in parts]
+
+    # Check if we have exactly three parts
+    if len(parts) != 3:
+        return False
+
+    # Extract the strings
+    s1, s2, s3 = parts
+
+    # Check if the strings have the correct lengths
+    if len(s1) != 3 or len(s2) != 4 or len(s3) != 3:
+        return False
+
+    # Check the rule
+    return s1[:2] == s2[:2] == s3[:2] and s1[2] == s2[2] and s2[3] == s3[2]
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.functional.einsum, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("einsum_to_pointwise_pass"),
+)
+def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
+    def repl(input, weights):
+        return (input.unsqueeze(-1) * weights).sum(-2)
+
+    def should_replace_einsum(einsum_node) -> bool:
+        equation = get_arg_value(einsum_node, 0)
+        users = einsum_node.users.keys()
+        # for now, we only consider the case of two operands
+        return (
+            len(einsum_node.args) == 3
+            and is_node_meta_valid(input)
+            and is_node_meta_valid(weights)
+            and any(
+                user.target == "add" or user.target == operator.add for user in users
+            )
+            and match_einsum_strings(equation)
+        )
+
+    einsum_node = match.nodes[0]
+    input, weights = get_arg_value(einsum_node, 1), get_arg_value(einsum_node, 2)
+    if should_replace_einsum(einsum_node):
+        match.replace_by_example(repl, [input, weights])
+        counters[backend]["einsum_to_pointwise_pass"] += 1

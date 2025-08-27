@@ -5,8 +5,8 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.export import Dim, export
-from torch.export._draft_export import draft_export, FailureType
+from torch.export import Dim, draft_export, export
+from torch.export._draft_export import FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
@@ -56,7 +56,9 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_missing_meta_kernel_impl(self):
@@ -95,7 +97,9 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles["mylib.foo.default"]), 1)
             print(report.op_profiles)
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep = ep.run_decompositions()
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
@@ -129,7 +133,9 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo3.default"]), 2)
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_missing_meta_kernel_custom_op_update_profile(self):
@@ -159,7 +165,9 @@ class TestDraftExport(TestCase):
                 torch.ones(2, 3, 4),
             )
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
                     torch.ops.mylib.foo8(*inp)
                     with self.assertRaisesRegex(
@@ -173,9 +181,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.register_fake_profile(
-                report.op_profiles
-            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(
+                    report.op_profiles
+                ),
+                FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()),
+            ):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new
@@ -311,11 +322,7 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
+        self.assertEqual(len(report.failures), 0)
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -374,13 +381,6 @@ class TestDraftExport(TestCase):
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
         for _ep in [ep, ep.run_decompositions()]:
-            # check data-dependent asserts
-            assert_scalar_nodes = [
-                node
-                for node in _ep.graph.nodes
-                if node.target == torch.ops.aten._assert_scalar.default
-            ]
-            self.assertEqual(len(assert_scalar_nodes), 5)
             # unbacked bindings
             unbacked_binding_symbols = set()
             for node in _ep.graph.nodes:
@@ -472,6 +472,7 @@ class TestDraftExport(TestCase):
                 return torch.nn.functional.linear(masked, weight, bias)
 
         x = torch.zeros(10)
+        x[0] += 1
         inp = (torch.randn(10, 8, 7), x, torch.randn(25, 7), torch.randn(25))
         draft_ep = draft_export(M(), inp)
         ep = export(M(), inp)
@@ -560,7 +561,9 @@ class TestDraftExport(TestCase):
                 ],
             )
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_override_incorrectly_aliasing_kernel(self):
@@ -641,7 +644,9 @@ class TestDraftExport(TestCase):
                 report.failures[0].data["reason"],
                 "Dtypes torch.bfloat16 and torch.float32 are not equal!",
             )
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     # https://github.com/pytorch/pytorch/issues/140625
@@ -661,6 +666,36 @@ class TestDraftExport(TestCase):
                 draft_ep,
                 package_path=f.name,
             )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**28,
+        "Requires 16 MB GPU memory to pass the test; setting it higher to catch violations",
+    )
+    def test_cuda_memory_usage(self):
+        # This used to OOM
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                for _ in range(100):
+                    x = x + 1e-3
+                return x
+
+        # measure base usage
+        device = torch.device("cuda:0")
+        torch.cuda.reset_peak_memory_stats()
+        base_usage = torch.cuda.memory_allocated(device)
+
+        # usage with input tensor allocated
+        x = torch.randn(2**10, 2**10).to(device)
+        x_usage = torch.cuda.memory_allocated(device)
+
+        # draft export peak memory usage
+        draft_export(Foo(), (x,), strict=False)
+        peak_mem_usage = torch.cuda.memory_stats(device)["allocated_bytes.all.peak"]
+
+        # right now it's actually exactly 4x;
+        # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
+        self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
 
 
 if __name__ == "__main__":

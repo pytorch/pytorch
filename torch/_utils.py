@@ -159,7 +159,7 @@ def _get_restore_location(device):
 #     serialization), and the state dict saves "data" only, thus
 #     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
-#     but DDP already manages readding the hooks!
+#     but DDP already manages re-adding the hooks!
 #
 #   - We didn't serialize them in many cases.  Prior to #10220, we
 #     were dropping backward hooks in ForkingPickler.  We "fixed" this
@@ -190,7 +190,7 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
 def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
-    # Currently, this only returns a dict[string, bool] specifing whether
+    # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
     assert isinstance(tensor, torch.Tensor)
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
@@ -274,11 +274,25 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
 def _validate_loaded_sparse_tensors():
+    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+        # Skip sparse tensor invariants validation for better
+        # performance. See check_sparse_tensor_invariants
+        # documentation for how to control sparse tensor invariants
+        # checking.
+        _sparse_tensors_to_validate.clear()
+        return
     try:
+        # We disable pinning check (see check_pinning=False below) to
+        # avoid gh-153143. In fact, pinning check is unnecessary
+        # anywhy when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size(), t.is_coalesced()
+                    t._indices(),
+                    t._values(),
+                    t.size(),
+                    t.is_coalesced(),
+                    check_pinning=False,
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -299,7 +313,12 @@ def _validate_loaded_sparse_tensors():
                         t.row_indices(),
                     )
                 torch._validate_sparse_compressed_tensor_args(
-                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
+                    compressed_indices,
+                    plain_indices,
+                    t.values(),
+                    t.size(),
+                    t.layout,
+                    check_pinning=False,
                 )
             else:
                 raise NotImplementedError(
@@ -391,7 +410,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,
@@ -480,7 +499,7 @@ def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
 
 def _get_obj_state(obj):
     # Get the state of the python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
+    # This loosely mimics the function on the object class but since Tensor do not inherit
     # from it, we cannot call that function directly
     # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
     # Note that starting with Python 3.11, this `__getstate__` is always defined and thus

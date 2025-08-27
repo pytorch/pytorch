@@ -38,7 +38,7 @@ def get_lib_extension() -> str:
         return "so"
     if sys.platform == "darwin":
         return "dylib"
-    raise RuntimeError(f"Usupported platform {sys.platform}")
+    raise RuntimeError(f"Unsupported platform {sys.platform}")
 
 
 def create_symlinks() -> None:
@@ -78,7 +78,7 @@ def create_build_plan() -> list[tuple[str, str]]:
         if line.startswith(": &&") and line.endswith("&& :"):
             line = line[4:-4]
         line = line.replace("-O2", "-g").replace("-O3", "-g")
-        # Build Metal shaders with debug infomation
+        # Build Metal shaders with debug information
         if "xcrun metal " in line and "-frecord-sources" not in line:
             line += " -frecord-sources -gline-tables-only"
         try:
@@ -95,7 +95,8 @@ def main() -> None:
         sys.exit(-95)
     if not is_devel_setup():
         print(
-            "Not a devel setup of PyTorch, please run `python3 setup.py develop --user` first"
+            "Not a devel setup of PyTorch, "
+            "please run `python -m pip install --no-build-isolation -v -e .` first"
         )
         sys.exit(-1)
     if not has_build_ninja():

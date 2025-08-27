@@ -63,7 +63,7 @@ class ModelReportVisualizer:
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
     3.) Call model_report.prepare_detailed_calibration on your model to add relevant observers
-    4.) Callibrate your model with data
+    4.) Calibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
     7.) Use instance to view different views of data as desired, applying filters as needed
@@ -338,9 +338,8 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_filtered_tables(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
-            ... ) # generates table with per_channel_min info for all modules in block 1 of the model
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
+            ... )  # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(
@@ -427,8 +426,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_table_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # prints out neatly formatted table with per_channel_min info
             >>> # for all modules in block 1 of the model
@@ -590,8 +588,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
             >>> # modules in block1 of model each channel gets it's own line,
@@ -664,8 +661,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP
             >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             # outputs histogram of per_channel_min information for all modules in block1 of model
                 information is gathered across all channels for all modules in block 1 for the

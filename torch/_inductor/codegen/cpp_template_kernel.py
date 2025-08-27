@@ -2,11 +2,13 @@
 import itertools
 from collections.abc import Iterable
 from typing import Any, Callable, Optional, Union
+from unittest.mock import patch
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
+from torch._inductor.utils import do_bench_using_profiling
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import SymT
 
@@ -17,7 +19,7 @@ from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import REMOVED
-from .cpp import CppKernel, CppKernelProxy, KernelGroup
+from .cpp import CppKernel, CppKernelProxy, KernelGroup, ParallelDepth
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
 
@@ -32,7 +34,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> ir.TensorBox:
+def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -160,6 +162,7 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced, ir.TensorBox)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
@@ -172,10 +175,10 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
-    def view(self, node, sizes: list[Any]) -> ir.View:
+    def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data
+        return L.view(node, sizes).data  # type: ignore[arg-type]
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -187,7 +190,11 @@ class CppTemplateKernel(CppKernel):
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
-            return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+            handle_str = (
+                "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
+            )
+            return handle_str
         else:
             return ""
 
@@ -207,6 +214,19 @@ class CppTemplateKernel(CppKernel):
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+
+    def define_stack_allocated_buffer(
+        self, name, sizes: list[Any], dtype=torch.float
+    ) -> str:
+        """Define stack-allocated buffer"""
+        sizes = parse_expr_with_index_symbols(sizes)
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
+        self.local_buffers[name] = buf
+        ctype = f"{DTYPE_TO_CPP[dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"alignas(64) {ctype} _{name}[{numel}]; {ctype}* {name} = _{name};"
 
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
@@ -273,7 +293,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_grouped_gemm_pointwise_nodes(
@@ -327,7 +355,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_output(
@@ -553,7 +589,10 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:
         return "-".join(
@@ -568,7 +607,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
     ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> ir.TensorBox:
+    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
         return ir.TensorBox.create(
             ir.CppTemplateBuffer(
                 layout=self.layout,

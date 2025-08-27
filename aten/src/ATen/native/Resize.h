@@ -101,7 +101,7 @@ inline void checkInBoundsForStorage(
   // It's ok to always evaluate to False for this early return for SymInts because
   // (1) maybe_convert_symint below only installs guard for int64_t case
   // (2) we check for this condition in the TORCH_MAYBE_SYM_CHECK below
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(storage_size_bytes, 0))) {
+  if (TORCH_GUARD_OR_FALSE(sym_eq(storage_size_bytes, 0))) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
@@ -138,7 +138,7 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
 
   // storageOffset
   TORCH_CHECK(
-      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+    TORCH_GUARD_OR_TRUE(sym_ge(storage_offset, 0)), "Tensor: invalid storage offset ", storage_offset);
 
   // set_storage_{device} (except set_storage_meta__symint)
   // will (unsafely) set the storage offset and then call resize_impl that

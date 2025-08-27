@@ -20,6 +20,10 @@ sycl::event matmul(
     bool m2_trans,
     Attr attr,
     const std::vector<sycl::event>& deps) {
+  // m2_trans means mat2 is transposed from the nn.Linear perspective.
+  // m2_trans==true means mat2 is [k, n] layout.
+  // m2_trans==false means mat2 is [n, k] layout, aka, the default layout in
+  // nn.Linear.
   int64_t dims = result.dim();
   TORCH_CHECK(
       dims == 2 || dims == 3,
@@ -194,7 +198,12 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    bool allow_tf32 = at::globalContext().allowTF32OneDNN();
+    if (allow_tf32) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+    } else {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    }
   }
 
   // STEP3: create primitive

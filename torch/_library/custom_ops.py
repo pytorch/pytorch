@@ -28,8 +28,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable[[Callable[..., object]], "CustomOpDef"]:
-    ...
+) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
 @overload
@@ -41,8 +40,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> "CustomOpDef":
-    ...
+) -> "CustomOpDef": ...
 
 
 @exposed_in("torch.library")
@@ -212,6 +210,7 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
+        self._used_triton_kernels: list[Any] = list()
         OPDEFS[self._qualname] = self
 
     @property
@@ -405,7 +404,7 @@ class CustomOpDef:
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        Please see :func:`torch.library.impl_abstract` for more details.
+        Please see :func:`torch.library.register_fake` for more details.
 
         Args:
             fn (Callable): The function to register as the FakeTensor
@@ -448,10 +447,10 @@ class CustomOpDef:
             >>>
             >>> @nonzero.register_fake
             >>> def _(x):
-            >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an abstract impl,
-            >>>     # we use the ctx object to construct a new symint that
-            >>>     # represents the data-dependent size.
+            >>> # Number of nonzero-elements is data-dependent.
+            >>> # Since we cannot peek at the data in an abstract impl,
+            >>> # we use the ctx object to construct a new symint that
+            >>> # represents the data-dependent size.
             >>>     ctx = torch.library.get_ctx()
             >>>     nnz = ctx.new_dynamic_size()
             >>>     shape = [nnz, x.dim()]
@@ -561,7 +560,7 @@ class CustomOpDef:
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
-            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
             >>>
             >>> # Example with a keyword-only arg
@@ -581,7 +580,7 @@ class CustomOpDef:
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_mul(x, val=3.14)
-            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
         """
@@ -597,10 +596,6 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
-        if torch._running_with_deploy():
-            utils.warn_deploy(stacklevel=5)
-            return
-
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -615,7 +610,7 @@ class CustomOpDef:
 
         lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order, *tags],
+            tags=[_C.Tag.pt2_compliant_tag, *tags],
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
@@ -919,7 +914,7 @@ def get_library_allowing_overwrite(
 
 
 def _maybe_get_opdef(
-    op: Union[CustomOpDef, _ops.OpOverload, str]
+    op: Union[CustomOpDef, _ops.OpOverload, str],
 ) -> Optional[CustomOpDef]:
     if isinstance(op, CustomOpDef):
         return op

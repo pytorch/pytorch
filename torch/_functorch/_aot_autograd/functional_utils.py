@@ -6,6 +6,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,11 +18,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
-from torch.fx.experimental.symbolic_shapes import (
-    definitely_true,
-    sym_eq,
-    SymIntEqByExpr,
-)
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -317,13 +314,13 @@ def gen_alias_from_base(
 
 def has_same_metadata(t1, t2):
     return (
-        definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(t1.layout == t2.layout)
+        guard_or_false(sym_eq(t1.size(), t2.size()))
+        and guard_or_false(t1.layout == t2.layout)
         and (
             is_sparse_any(t1)
             or (
-                definitely_true(sym_eq(t1.stride(), t2.stride()))
-                and definitely_true(t1.storage_offset() == t2.storage_offset())
+                guard_or_false(sym_eq(t1.stride(), t2.stride()))
+                and guard_or_false(t1.storage_offset() == t2.storage_offset())
             )
         )
         and t1.is_conj() == t2.is_conj()
@@ -374,7 +371,7 @@ class FunctionalTensorMetadataEq:
         if other is None:
             return True
 
-        # Comparison agains any other type is not implemented.
+        # Comparison against any other type is not implemented.
         if not isinstance(other, FunctionalTensorMetadataEq):
             return NotImplemented
 
@@ -456,14 +453,14 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    assert n.args[0] in placeholders, (
+                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    )
                 mutation_count += 1
             else:
-                assert (
-                    not n.target._schema.is_mutable
-                ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                assert not n.target._schema.is_mutable, (
+                    f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                )
     return mutation_count
 
 
@@ -476,9 +473,9 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    assert n.args[0] in placeholders, (
+                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    )
                     placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,

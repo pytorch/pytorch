@@ -89,7 +89,7 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
   static LinearPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
-    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+    TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
     return unpacked_;
   }

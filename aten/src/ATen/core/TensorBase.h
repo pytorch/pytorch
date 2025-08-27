@@ -57,16 +57,16 @@ inline bool variable_excluded_from_dispatch() {
 // NOTE: [Tensor vs. TensorBase]
 //
 // Tensor, being the central data structure in PyTorch, gets used and
-// it's header included almost everywhere. Unfortunately this means
+// its header included almost everywhere. Unfortunately this means
 // every time an operator signature is updated or changed in
 // native_functions.yaml, you (and every other PyTorch developer) need
-// to recompile all of ATen and it's dependencies.
+// to recompile all of ATen and its dependencies.
 //
 // TensorBase aims to break up these header dependencies, and improve
 // incremental build times for all PyTorch developers. TensorBase
 // represents a reference counted handle to TensorImpl, exactly the
 // same as Tensor. However, TensorBase doesn't have code generated
-// methods in it's API and thus no dependence on native_functions.yaml.
+// methods in its API and thus no dependence on native_functions.yaml.
 //
 // Usage tips
 // ----------
@@ -75,9 +75,9 @@ inline bool variable_excluded_from_dispatch() {
 //   native_functions.yaml (direct or indirect).
 // - Tensor inherits from TensorBase, so functions taking
 //   `const TensorBase &` are callable with Tensor as well.
-// - TensorBase can be converted to tensor with `Tensor(tensor_base)`,
-//   but this requires a reference-count bump. OptionalTensorRef on
-//   the other hand can materialize a `const Tensor &` without
+// - TensorBase can be converted to Tensor with `Tensor(tensor_base)`,
+//   but this requires a reference-count bump. OptionalTensorRef, on
+//   the other hand, can materialize a `const Tensor &` without
 //   touching the reference-count.
 class TORCH_API TensorBase {
  public:
@@ -124,7 +124,7 @@ class TORCH_API TensorBase {
   }
 
   TensorBase contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
-    if (is_contiguous(memory_format)) {
+    if (is_contiguous_or_false(memory_format)) {
       return *this;
     } else {
       return __dispatch_contiguous(memory_format);
@@ -262,6 +262,25 @@ class TORCH_API TensorBase {
   }
 
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    return impl_->is_contiguous(memory_format);
+  }
+
+  // Like is_contiguous, but more dynamic shape-friendly. May return a symbolic representation of
+  // contiguity instead of SymTrue SymFalse, when results are data-dependent.
+  c10::SymBool sym_is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (impl_->has_symbolic_sizes_strides()) {
+      return impl_->sym_is_contiguous(memory_format);
+    }
+    return impl_->is_contiguous(memory_format);
+  }
+
+  // Like is_contiguous, but more dynamic shape-friendly. Can returns
+  // false instead of throwing data-dependent errors for tensors with unbacked
+  // sizes or strides.
+  bool is_contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (impl_->has_symbolic_sizes_strides()) {
+      return impl_->sym_is_contiguous(memory_format).guard_or_false(__FILE__, __LINE__);
+    }
     return impl_->is_contiguous(memory_format);
   }
 

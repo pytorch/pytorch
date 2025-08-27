@@ -307,14 +307,7 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
             torch.randn((8), dtype=torch.float32, device=GPU_TYPE),
         )
-
-        args2 = (
-            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
-            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
-            torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
-        )
         self._test_fused_int_mm_mul_impl(fn1, args1, True)
-        self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
 
     def _test_mixed_impl(
         self,
@@ -642,6 +635,44 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @inductor_config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+        }
+    )
+    def test_bmm_to_mm(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(1, 16, 8, device=GPU_TYPE)
+        b = torch.randn(1, 8, 32, device=GPU_TYPE)
+
+        result, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+
+        # The mm kernel should use ATen (because we set max_autotune_gemm_backends = ATEN).
+        # Its name should contain `aten.bmm` since this is the original aten op where the bmm came from.
+        if HAS_GPU:
+            FileCheck().check("extern_kernels.mm(").check_not(
+                "extern_kernels.bmm("
+            ).run(code)
+        else:
+            FileCheck().check("extern_kernels.bmm(")
+
+        a_multi = torch.randn(3, 16, 8, device=GPU_TYPE)
+        b_multi = torch.randn(3, 8, 32, device=GPU_TYPE)
+
+        result_multi, (code_multi,) = run_and_get_code(
+            torch.compile(fn), a_multi, b_multi
+        )
+
+        expected_multi = fn(a_multi, b_multi)
+        torch.testing.assert_close(result_multi, expected_multi)
+
+        FileCheck().check("extern_kernels.bmm(").run(code_multi)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -743,6 +774,32 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+        # handle negative 1 in size argument of view
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [-1, 7])
+            return x
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+    def test_pointless_view_pair_dynamic_shapes(self):
+        def f(x):
+            s1, s2 = x.shape
+            x = aten.view.default(x, [-1])
+            x = aten.view.default(x, [s1, s2])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        out = torch.compile(f, dynamic=True)(x)
+        self.assertTrue(torch.equal(x, out))
+
+        self.assertEqual(counters["inductor"]["removed_pointless_view_pair"], 1)
 
     def test_pointless_permute_pair(self):
         def f(x):
@@ -947,7 +1004,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-        # cat and split lenghts are different
+        # cat and split lengths are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
@@ -1101,15 +1158,19 @@ class TestPatternMatcher(TestCase):
             torch.randn(5, 5, device=GPU_TYPE),
         ]
 
-        with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
-            {"test": {}},
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
-            [],
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
-            {"test": test_pass},
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+                {"test": {}},
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+                [],
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+                {"test": test_pass},
+            ),
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
@@ -1292,6 +1353,35 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_addmm_dtype_mismatch(self):
+        a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
+        a = a.to(dtype=torch.float16)
+
+        w = torch.randn(1024, 1024, device=GPU_TYPE)
+
+        def func():
+            x = torch.ones(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+            x = a(x)
+            x = x + w
+            return x
+
+        actual, (code) = run_and_get_code(torch.compile(func))
+        self.assertEqual(actual, func())
+        FileCheck().check_not("addmm").run(code[0])
+
+    def test_replace_mul_zero(self):
+        def test(x, y):
+            return x + (y * 0)
+
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
+
+        test_c = torch.compile(test)
+
+        out, code = run_and_get_code(test_c, x, y)
+        FileCheck().check_not(".run").run(code[0])
+        self.assertEqual(out, test(x, y))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
@@ -1661,6 +1751,18 @@ class TestPatternMatcher(TestCase):
         # print(my_func_static(*inputs))
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
+
+    def test_fwd_only_generate_original_aten_meta(self):
+        def f(x):
+            return torch.ops.aten.sigmoid(x)
+
+        sample_input = torch.randn(3, 5, device=GPU_TYPE)
+        gm_with_meta = fwd_only(f, args=[sample_input])
+        sigmoid_nodes = gm_with_meta.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sigmoid.default
+        )
+        self.assertEqual(len(sigmoid_nodes), 1)
+        self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
 
 if __name__ == "__main__":

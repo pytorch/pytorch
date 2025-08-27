@@ -8,11 +8,11 @@ import torch
 from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -97,7 +97,13 @@ class TestCaseBase(TestCase):
         if HAS_GPU:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
-            torch.set_float32_matmul_precision("high")
+            # In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
+            # In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
+            # logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
+            if torch.version.hip:
+                torch.set_float32_matmul_precision("highest")
+            else:
+                torch.set_float32_matmul_precision("high")
             torch.set_default_device(GPU_TYPE)
 
     @classmethod
@@ -363,7 +369,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST or not HAS_TRANSFORMER, "Perf test not enabled")
     def test_longformer_small_bs(self):
         """
-        The model exists in both HF and TB. In TB it uses a samller batch size.
+        The model exists in both HF and TB. In TB it uses a smaller batch size.
         """
         self.test_longformer(bs=2)
 
@@ -404,7 +410,7 @@ class PaddingTest(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_padmm(self):
         """
-        Latency between origional matmul and padded matmul: 2.717 v.s. 2.356
+        Latency between original matmul and padded matmul: 2.717 v.s. 2.356
         """
         mat1_pad = torch.randn(8192, 30522, dtype=torch.float16)
         mat2_pad = torch.randn(30522, 768, dtype=torch.float16)
@@ -428,7 +434,7 @@ class PaddingTest(TestCaseBase):
         pad_time = benchmarker.benchmark_gpu(g)
 
         print(
-            f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
+            f"Latency between original matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
         )
         self.do_profiling(f, g, "No MM Padding", "With mm padding")
 
@@ -481,7 +487,7 @@ class PaddingTest(TestCaseBase):
         self.assertEqual(
             m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
-        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
+        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and one for backward
         forward_wrapper = wrapper_codes[0]
 
         # make sure the load for softmax is aligned

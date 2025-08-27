@@ -49,7 +49,7 @@ class DistributedVariable(VariableTracker):
     Concrete distributed objects could inherit this class and add object
     specific logic.
 
-    i.e. It provides the check on the distributed package existance
+    i.e. It provides the check on the distributed package existence
     and hold the tracking value for the corresponding distributed object.
     """
 
@@ -59,7 +59,7 @@ class DistributedVariable(VariableTracker):
             unimplemented_v2(
                 gb_type="torch.distributed package is not available!",
                 context="",
-                explanation="The PyTorch package doesn't include torch.distributed when builing from source.",
+                explanation="The PyTorch package doesn't include torch.distributed when building from source.",
                 hints=[
                     "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
                 ],
@@ -266,6 +266,10 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
+        if name == "get_rank":
+            return ConstantVariable.create(self.value.get_rank())
+        if name == "get_local_rank":
+            return ConstantVariable.create(self.value.get_local_rank())
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
