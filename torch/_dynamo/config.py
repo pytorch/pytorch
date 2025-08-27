@@ -481,6 +481,18 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+debug_force_nested_calls = False
+
+# Used for testing - forces a graph break when a function
+# that doesn't make any Dynamo-inlined calls returns
+debug_force_graph_break_on_leaf_return = False
+
+# Used for testing - causes CompileCounter.frame_count to always
+# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
+# always pass.
+debug_disable_compile_counter = False
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
@@ -670,6 +682,8 @@ wrap_top_frame = False
 # Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
+
+enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
