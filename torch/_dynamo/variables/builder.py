@@ -120,6 +120,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UserSpecifiedSymIntSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -1100,6 +1101,10 @@ class VariableBuilder:
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
+            def is_user_specified_symint(value):
+                expr = value.node.expr
+                shape_env = value.node.shape_env
+                return len(shape_env.var_to_sources[expr]) == 1 and isinstance(shape_env.var_to_sources[expr][0], UserSpecifiedSymIntSource)
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
@@ -1111,14 +1116,23 @@ class VariableBuilder:
                 if isinstance(value, torch.SymInt)
                 else ConvertIntSource(self.source)
             )
-            if value.node.has_hint():
-                new_symint = (
-                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value.node.hint),
-                        source,
-                        dynamic_dim=DimDynamic.DYNAMIC,
-                    )
+
+            def copy_symint(value):
+                return self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                    int(value.node.hint),
+                    source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
                 )
+
+            def refine_ranges(old_symint, new_symint):  # try to propagate min/max (to start)
+                expr = old_symint.node.expr
+                vr = old_symint.node.shape_env.var_to_range[expr]
+                self.tx.output.shape_env._constrain_range(new_symint.node.expr, vr.lower, vr.upper)
+
+            if value.node.has_hint():
+                new_symint = copy_symint(value)
+                if is_user_specified_symint(value):
+                    refine_ranges(value, new_symint)
             else:
                 if isinstance(value, torch.SymBool):
                     # We need to create an unbacked symint to replace the unbacked symbool.
@@ -1157,6 +1171,18 @@ class VariableBuilder:
                 f"{sym_expr} is not a basic Symbol."
             )
             self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+
+            # add int() call into graph, to accomodate symint inputs
+            if is_user_specified_symint(value):
+                sym_node_proxy = self.tx.output.root_tracer.create_proxy(
+                    "call_function",
+                    int,
+                    (sym_node_proxy,),
+                    {},
+                )
+                int_cast_symint = copy_symint(value)
+                refine_ranges(value, int_cast_symint)
+                wrap_fx_proxy(self.tx, sym_node_proxy, int_cast_symint)
 
             tracing_symint = (
                 new_symint if isinstance(value, torch.SymInt) else new_symint == 1
