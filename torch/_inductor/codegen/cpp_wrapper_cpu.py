@@ -1219,6 +1219,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
+        debug_handle: Optional[int] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1235,14 +1236,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
+            self.write_provenance_debug_handle(shim_fn, debug_handle)
             shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
             if enable_kernel_profile:
+                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1338,6 +1341,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        debug_handle: Optional[int] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1346,7 +1350,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(
+            kernel, args, device, debug_handle=debug_handle
+        )
 
     def generate_scatter_fallback(
         self,

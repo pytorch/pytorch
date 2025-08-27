@@ -66,6 +66,81 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_mempool_tensor_factory(self) -> None:
+        """
+        Test the effectiveness of MemPool on tensor factory ops.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        src_rank = 0
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            if self.rank == src_rank:
+                tensor = torch.arange(numel, dtype=dtype, device=self.device)
+            else:
+                tensor = torch.zeros(numel, dtype=dtype, device=self.device)
+
+        symm_mem.rendezvous(tensor, group=group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
+
+    @skipIfRocm
+    def test_mempool_compute_ops(self) -> None:
+        """
+        Apply MemPool context to a compute op that creates input to collective.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x0 = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x = x0 + self.rank
+            y = torch.mm(x, w)
+
+        # y should be a symm tensor
+        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        expected = torch.mm(x0, w)
+        self.assertEqual(y, expected)
+
+    @skipIfRocm
+    def test_handle_offset(self) -> None:
+        """
+        Test if handle offset is correctly set.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x0 = torch.empty(numel, dtype=dtype, device=self.device)
+            x1 = torch.empty_like(x0)
+
+        hdl0 = symm_mem.rendezvous(x0, group=group_name)
+        hdl1 = symm_mem.rendezvous(x1, group=group_name)
+        self.assertEqual(hdl0.offset, 0)
+        self.assertEqual(hdl1.offset, x0.untyped_storage().nbytes())
+
+    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -251,7 +326,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             nsplits, dtype=torch.int64, device=self.device
         ).copy_(inp_splits)
         # 2 rows: output splits, output offsets
-        # Initializing all values to -1 to check if they are updated
+        # Initiallizing all values to -1 to check if they are updated
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
@@ -361,7 +436,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             (2, nsplits), dtype=torch.int64, device=self.device
         )
         # 2 rows: output splits, output offsets
-        # Initializing all values to -1 to check if they are updated
+        # Initiallizing all values to -1 to check if they are updated
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
@@ -472,7 +547,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             nsplits, dtype=torch.int64, device=self.device
         ).copy_(inp_splits)
         # 2 rows: output splits, output offsets
-        # Initializing all values to -1 to check if they are updated
+        # Initiallizing all values to -1 to check if they are updated
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
@@ -487,7 +562,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             max_out_numel, dtype=dtype, device=self.device
         ).fill_(-1)
         # 2 rows: output splits, output offsets
-        # Initializing all values to -1 to check if they are updated
+        # Initiallizing all values to -1 to check if they are updated
         combine_out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
