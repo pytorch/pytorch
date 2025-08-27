@@ -479,9 +479,9 @@ def iter_issue_timeline_until_comment(
             return
         page += 1
 
-    # If we got here without finding the comment, then we either hit a bug or some github PR has a _really_
-    # long timeline.
-    # The max # of pages on any PR on pytorch/pytorch that found at the time of this change was 41 pages.
+    # If we got here without finding the comment, then we either hit a bug or some github PR
+    # has a _really_ long timeline.
+    # The max # of pages found on any pytorch/pytorch PR at the time of this change was 41
     raise RuntimeError(
         f"Could not find a merge commit in the first {max_pages} pages of the timeline at url {url}."
         f"This is most likely a bug, please report it to the @pytorch/pytorch-dev-infra team."
