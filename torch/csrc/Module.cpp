@@ -1362,7 +1362,7 @@ static PyObject* THPModule_qEngine(PyObject* _unused, PyObject* noargs) {
 static PyObject* THPModule_supportedQEngines(
     PyObject* _unused,
     PyObject* noargs) {
-  const auto& qengines = at::globalContext().supportedQEngines();
+  auto qengines = at::globalContext().supportedQEngines();
   auto list =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(qengines.size())));
   if (!list)
@@ -2473,16 +2473,13 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
-      "_get_fp32_precision_getter",
-      [](const std::string& backend, const std::string& op) {
+      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
         return at::globalContext().float32Precision(backend, op);
       });
 
   py_module.def(
       "_set_fp32_precision_setter",
-      [](const std::string& backend,
-         const std::string& op,
-         const std::string& precision) {
+      [](std::string backend, std::string op, std::string precision) {
         at::globalContext().setFloat32Precision(backend, op, precision);
         return precision;
       });
@@ -2603,6 +2600,30 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
+
+// See note [Pybind11 ABI constants]
+#define SET_STR_DEFINE(name) \
+  ASSERT_TRUE(set_module_attr("_" #name, THPUtils_packString(name)))
+
+#ifdef PYBIND11_COMPILER_TYPE
+  SET_STR_DEFINE(PYBIND11_COMPILER_TYPE);
+#else
+  ASSERT_TRUE(
+      set_module_attr("_" C10_STRINGIZE(PYBIND11_COMPILER_TYPE), Py_None));
+#endif
+
+#ifdef PYBIND11_STDLIB
+  SET_STR_DEFINE(PYBIND11_STDLIB);
+#else
+  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_STDLIB), Py_None));
+#endif
+
+#ifdef PYBIND11_BUILD_ABI
+  SET_STR_DEFINE(PYBIND11_BUILD_ABI);
+#else
+  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
+#endif
+#undef SET_STR_DEFINE
 
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
