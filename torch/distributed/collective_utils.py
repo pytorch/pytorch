@@ -270,7 +270,7 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
         elif r.step == 1:
             result.append(f"{r.start}:{r.stop}")
         else:
-            result.append(f"({r.start}:{r.stop}:{r.step}")
+            result.append(f"{r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 
 
