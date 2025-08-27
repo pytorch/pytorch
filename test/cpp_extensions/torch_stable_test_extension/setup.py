@@ -2,9 +2,8 @@ import distutils.command.clean
 import shutil
 from pathlib import Path
 
-import torch
-
 from setuptools import find_packages, setup
+
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 
