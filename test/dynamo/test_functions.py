@@ -40,10 +40,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.common_device_type import (
-    skipGPUIf,
-)
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -4731,7 +4727,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3), dtype=torch.float32, device=torch.accelerator.current_device_index()
+                (2, 3),
+                dtype=torch.float32,
+                device=torch.accelerator.current_device_index()
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
