@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import itertools
-
 from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
@@ -56,9 +55,9 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
     # for each strategy that the input supports, we create a corresponding strategy.
     # Note: this may be a complete waste of work, because it should be equivalent to
     # `return first_input_strategy` (unless creating a deep copy is important for some reason)
-    assert (
-        len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1
-    ), "propagate_single_input_strategy only works for single-tensor-input ops"
+    assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
+        "propagate_single_input_strategy only works for single-tensor-input ops"
+    )
     first_input_strategy = op_schema.args_schema[0]
     assert isinstance(first_input_strategy, OpStrategy)
     return OpStrategy(
@@ -831,9 +830,9 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     for this_strategy in input_tuple_strategy.children:
         # check strategy of each tensor to be concatenated
         assert isinstance(this_strategy, OpStrategy)
-        assert (
-            this_strategy.mesh == mesh
-        ), "cat op doesn't support cross mesh concatenation"
+        assert this_strategy.mesh == mesh, (
+            "cat op doesn't support cross mesh concatenation"
+        )
         for op_spec in this_strategy.strategies:
             # Check each OpSpec of the tensor, the placement in this OpSpec
             # is used as the exemplar strategy that other tensors and output
@@ -1125,7 +1124,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             if placement.is_shard():
                 placement = cast(Shard, placement)
                 dim = placement.dim
-                if not dim in free_dims:
+                if dim not in free_dims:
                     self_input_tgt_placements.append(Replicate())
                 else:
                     self_input_tgt_placements.append(placement)
@@ -1163,9 +1162,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             )
         else:  # output has new select_dim(s) at the first remove/select dim
             # all remove_dims and select_dims in dim_map cannot be Shard()
-            any_shard = any(
-                [out_dim_map[dim] >= 0 for dim in remove_dims + select_dims]
-            )
+            any_shard = any(out_dim_map[dim] >= 0 for dim in remove_dims + select_dims)
             # TODO: remove
             assert not any_shard
 
@@ -1180,10 +1177,8 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                 # on ``index_input_shard_mesh_dims``
                 self_input_placements = self_input_spec.placements
                 if not all(
-                    [
-                        self_input_placements[mesh_dim].is_replicate()
-                        for mesh_dim in index_input_shard_mesh_dims
-                    ]
+                    self_input_placements[mesh_dim].is_replicate()
+                    for mesh_dim in index_input_shard_mesh_dims
                 ):
                     # we found some mesh dim that could shard more than 1 tensor
                     # dims in the output. We need to make decision to replicate
@@ -1217,7 +1212,6 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                     index_input_spec = new_specs[-1]
 
             # change out_dim_map
-            insert_ndim = index_input_spec.ndim
             insert_dim_map = index_input_spec.dim_map
             old_out_dim_map = out_dim_map
             first_select_dim = min(first_remove_dim, first_select_dim)
