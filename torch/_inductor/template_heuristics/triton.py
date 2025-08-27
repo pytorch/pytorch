@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.template_heuristics.addmm import AddMMConfigMixin
+from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
 
@@ -1791,6 +1791,18 @@ class CUDAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CUDAConfigHeu
 )
 class ROCmMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
     """Standard MM template heuristic for ROCm"""
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "mm", "cuda", register=torch.version.hip is not None, op_name="addmm"
+)
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "bmm", "cuda", register=torch.version.hip is not None, op_name="baddbmm"
+)
+class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeuristic):
+    """Addmm specific mixin for ROCm"""
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
