@@ -1382,7 +1382,7 @@ class GitHubPR:
                     f"Could not find commit that was pushed before comment {comment_id}"
                 )
 
-            # Validate that this commit actually belongs to this PR
+            # Validate that this commit is the latest commit on the PR
             latest_commit = self.last_commit()["oid"]
             if commit_to_merge == latest_commit:
                 print(
