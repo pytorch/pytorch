@@ -73,6 +73,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    _get_current_dispatch_mode_stack,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -1630,6 +1631,21 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
+def should_skip_due_to_torch_dispatch_mode() -> bool:
+    # fast check
+    if not is_in_torch_dispatch_mode(include_infra_modes=False):
+        return False
+
+    mode_stack = _get_current_dispatch_mode_stack()
+    for mode in mode_stack:
+        if mode.ignore_compile_internals():
+            continue
+        if mode.is_infra_mode():
+            continue
+        return True
+    return False
+
+
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -1657,7 +1673,7 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False)
+                should_skip_due_to_torch_dispatch_mode()
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
@@ -1667,6 +1683,7 @@ class CatchErrorsWrapper:
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
                 elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                    breakpoint()
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"

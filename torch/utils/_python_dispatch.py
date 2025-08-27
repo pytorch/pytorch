@@ -137,6 +137,36 @@ class TorchDispatchMode:
     def is_infra_mode(cls):
         return False
 
+    @classmethod
+    def ignore_compile_internals(cls):
+        """Ignore operators that are compiled via torch.compile.
+
+        If ``True``, then this TorchDispatchMode ignores operators that
+        are optimized by :func:`torch.compile`. Mechanically, this involves
+        turning off the TorchDispatchMode throughout the whole compilation process,
+        and turning it back on for the runtime of the compiled artifact(s).
+        For example,
+
+        @torch.compile
+        def f(x):
+            return x.sin().cos()
+
+        with LoggingMode():
+            f(x)
+
+        The above example will not log anything if
+        ``LoggingMode.ignore_compile_internals`` is True.
+        torch.compile will fuse sin() and cos() into a single operation
+        and this TorchDispatchMode will not be passed sin and cos.
+
+        If ``False`` (default), :func:`torch.compile` will respect
+        the eager semantics of passing this TorchDispatchMode all
+        operators that would have run during eager execution.
+        The way this will usually happen is that :func:`torch.compile`
+        will just fallback to eager-mode PyTorch.
+        """
+        return False
+
 
 def _get_current_dispatch_mode():
     stack_len = _len_torch_dispatch_stack()
