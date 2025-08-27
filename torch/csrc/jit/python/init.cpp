@@ -1979,6 +1979,16 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self) -> decltype(auto) {
             return self.arguments();
           })
+      .def(
+          "_has_any_present_but_not_write_alias_info",
+          [](const FunctionSchema& self) -> bool {
+            for (const auto& arg : self.arguments()) {
+              if (arg.alias_info() && !arg.alias_info()->isWrite()) {
+                return true;
+              }
+            }
+            return false;
+          })
       .def_property_readonly(
           "returns",
           [](const FunctionSchema& self) -> decltype(auto) {

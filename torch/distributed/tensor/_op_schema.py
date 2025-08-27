@@ -30,6 +30,7 @@ from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
+
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -477,10 +478,7 @@ class OpSchema:
         return "out" in self.op._schema.overload_name
 
     def is_view_op(self) -> bool:
-        return any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in self.op._schema.arguments
-        )
+        return self.op._schema._has_any_present_but_not_write_alias_info()
 
     def _recompute_comparison_key(self):
         if not self.schema_info:
