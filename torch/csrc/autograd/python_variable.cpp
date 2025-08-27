@@ -796,7 +796,6 @@ static PyObject* THPVariable_make_dtensor(
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
-#ifndef NDEBUG
   TORCH_CHECK_TYPE(
       PyType_Check(cls),
       "cls must be a type (got ",
@@ -808,7 +807,6 @@ static PyObject* THPVariable_make_dtensor(
           attr.ptr() != torch::disabled_torch_dispatch_impl(),
       ((PyTypeObject*)cls)->tp_name,
       " must define __torch_dispatch__");
-#endif
 
   const auto& local_tensor = r.tensor(3);
   const auto options = TensorOptions()
@@ -856,7 +854,7 @@ static PyObject* THPVariable_make_dtensor(
       tensor,
       // false is the default
       /* allow_preexisting_pyobj = */ false,
-      // we know DTensor has __torch_dispatch__ and we debug-asserted
+      // we know DTensor has __torch_dispatch__ and we double-checked
       // above; avoid checking again.
       /*has_torch_dispatch_if_known=*/true);
   END_HANDLE_TH_ERRORS
