@@ -8,7 +8,8 @@ import torch._inductor.config
 from torch._inductor import metrics
 from torch._inductor.compiler_bisector import BisectionResult, CompilerBisector
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class TestTorchDeviceAssertTrigger(TestCase):
@@ -111,28 +112,30 @@ class TestTorchDeviceAssertTrigger(TestCase):
         self._run_assert_should_not_throw(device)
         self._run_assert_inline_expression_should_not_throw(device)
 
-    if HAS_CUDA_AND_TRITON:
+    @requires_cuda_and_triton
+    @skipIfRocm
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_assert_fusion(self):
+        torch._logging.set_logs(inductor_metrics=True)
 
-        @torch._inductor.config.patch(force_disable_caches=True)
-        def test_assert_fusion(self):
-            torch._logging.set_logs(inductor_metrics=True)
+        def func():
+            a = torch.tensor([1.0, 2.0], device="cuda")
+            result = torch.all(a > 0)
+            assert result, "should throw"
 
-            def func():
-                a = torch.tensor([1.0, 2.0], device="cuda")
-                result = torch.all(a > 0)
-                assert result, "should throw"
+        torch._dynamo.reset()
+        f_c = torch.compile(func, backend="inductor")
+        metrics.reset()
+        self.assertEqual(metrics.generated_kernel_count, 0)
+        f_c()
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        torch._logging.set_logs()
 
-            torch._dynamo.reset()
-            f_c = torch.compile(func, backend="inductor")
-            metrics.reset()
-            self.assertEqual(metrics.generated_kernel_count, 0)
-            f_c()
-            self.assertEqual(metrics.generated_kernel_count, 1)
-            torch._logging.set_logs()
-
-        @torch._inductor.config.patch(force_disable_caches=True)
-        def test_run_assert_triton(self):
-            should_throw = """
+    @requires_cuda_and_triton
+    @skipIfRocm
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_run_assert_triton(self):
+        should_throw = """
 import torch
 import torch._dynamo
 
@@ -156,7 +159,7 @@ result = test_fn()
 print(f"Test result: {result}")
 """
 
-            should_not_throw = """
+        should_not_throw = """
 import torch
 import torch._dynamo
 
@@ -179,22 +182,22 @@ def test_fn():
 result = test_fn()
 print(f"Test result: {result}")
 """
-            for script in [should_not_throw, should_throw]:
-                p = subprocess.run(
-                    [sys.executable, "-c", script],
-                    cwd=os.path.dirname(os.path.realpath(__file__)),
-                    capture_output=True,
-                    text=True,
+        for script in [should_not_throw, should_throw]:
+            p = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                capture_output=True,
+                text=True,
+            )
+
+            output = p.stdout + "\n" + p.stderr
+
+            self.assertIn("Test result: True", output)
+
+            if p.returncode != 0:
+                self.fail(
+                    f"Subprocess failed with return code {p.returncode}. Output: {output}"
                 )
-
-                output = p.stdout + "\n" + p.stderr
-
-                self.assertIn("Test result: True", output)
-
-                if p.returncode != 0:
-                    self.fail(
-                        f"Subprocess failed with return code {p.returncode}. Output: {output}"
-                    )
 
 
 if __name__ == "__main__":
