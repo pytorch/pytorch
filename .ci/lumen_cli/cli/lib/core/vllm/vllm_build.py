@@ -29,8 +29,6 @@ from cli.lib.common.path_helper import (
 from cli.lib.common.utils import run_command
 from cli.lib.core.vllm.lib import clone_vllm
 
-from torch import torch_version
-
 
 logger = logging.getLogger(__name__)
 
@@ -163,15 +161,6 @@ class VllmBuildRunner(BaseRunner):
         logger.info("Running vllm build with inputs: %s", inputs)
         vllm_commit = clone_vllm()
 
-        vllm_sha_url = f"${vllm_commit}](https://github.com/vllm-project/vllm/commit/${vllm_commit})"
-        write_gh_step_summary(
-            f"""
-            ## Commit Info
-            - **Vllm Commit**: `{vllm_sha_url}`
-            - **Torch Version**: `{torch_version}`
-            """
-        )
-
         self.cp_dockerfile_if_exist(inputs)
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
@@ -193,22 +182,16 @@ class VllmBuildRunner(BaseRunner):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
-        vllm_sha_url = f"[{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
+
+        write_gh_step_summary("## Build vllm against Pytorch CI")
         write_gh_step_summary(
-            f"""
-            ## Build vllm against Pytorch CI
-            **Vllm Commit**: `{vllm_sha_url}`
-            """
+            f"**Vllm Commit**: [{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
         )
         torch_sha = os.getenv("GITHUB_SHA")
+
         if torch_sha:  # only can grab this in github action
-            torch_sha_url = (
-                f"[{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
-            )
             write_gh_step_summary(
-                f"""
-             **Pytorch Commit**: `{torch_sha_url}`
-             """
+                f"**Pytorch Commit**: [{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
             )
         vllm_artifact_dir = inputs.output_dir / "wheels"
         summarize_content_from_file(

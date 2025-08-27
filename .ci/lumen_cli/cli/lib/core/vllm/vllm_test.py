@@ -14,6 +14,7 @@ from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
 from cli.lib.common.gh_summary import (
     gh_summary_path,
     summarize_failures_by_test_command,
+    write_gh_step_summary,
 )
 from cli.lib.common.path_helper import copy, remove_dir
 from cli.lib.common.pip_helper import (
@@ -23,12 +24,7 @@ from cli.lib.common.pip_helper import (
     run_python,
 )
 from cli.lib.common.utils import ensure_dir_exists, run_command, working_directory
-from cli.lib.core.vllm.lib import (
-    clone_vllm,
-    run_test_plan,
-    sample_vllm_test_library,
-    write_gh_step_summary,
-)
+from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library
 
 
 logger = logging.getLogger(__name__)
@@ -144,25 +140,16 @@ class VllmTestRunner(BaseRunner):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
-
-        vllm_sha_url = f"[{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
+        write_gh_step_summary("## Build vllm against Pytorch CI")
         write_gh_step_summary(
-            f"""
-            ## Build vllm against Pytorch CI
-            **Vllm Commit**: `{vllm_sha_url}`
-            """
+            f"**Vllm Commit**: [{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
         )
         torch_sha = os.getenv("GITHUB_SHA")
         if torch_sha:  # only can grab this in github action
-            torch_sha_url = (
-                f"[{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
-            )
             write_gh_step_summary(
-                f"""
-                **Pytorch Commit**: `{torch_sha_url}`
-                """
+                f"**Pytorch Commit**: [{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
             )
-            summarize_failures_by_test_command(test_summary_results)
+        summarize_failures_by_test_command(test_summary_results)
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
