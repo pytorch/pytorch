@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -31,13 +32,14 @@ def write_gh_step_summary(md: str, *, append_content: bool = True) -> bool:
     """
     sp = gh_summary_path()
     if not sp:
-        # When running locally, just log to console instead of failing.
         logger.info("[gh-summary] GITHUB_STEP_SUMMARY not set, skipping write.")
         return False
-    sp.parent.mkdir(parents=True, exist_ok=True)
+
+    md_clean = textwrap.dedent(md).strip() + "\n"
+
     mode = "a" if append_content else "w"
     with sp.open(mode, encoding="utf-8") as f:
-        f.write(md.rstrip() + "\n")
+        f.write(md_clean)
     return True
 
 
