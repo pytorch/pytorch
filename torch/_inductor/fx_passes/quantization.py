@@ -431,7 +431,13 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16]
+        assert output_dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.float32,
+            torch.bfloat16,
+            torch.float16,
+        ]
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
         o_zero_point = kwargs["output_zero_point"]
@@ -1596,6 +1602,12 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         else:
             convert_to_bf16 = conv_node.args[0]
             dequant_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
+
+        dequant_dtype = dequant_node.kwargs.get("out_dtype", dtype)
+        is_amp = dtype == torch.bfloat16
+        if is_amp:
+            dequant_dtype = torch.bfloat16
+
         has_clone_to_channel_last_node_in_pattern = (
             conv_node.args[1].target is aten.clone.default  # type: ignore[union-attr]
         )
@@ -1682,7 +1694,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 groups,
                 1.0,  # output_scale
                 0,  # output_zero_point
-                dtype,  # output_dtype
+                dequant_dtype,  # output_dtype
                 "none",  # attr
                 [],  # scalars
                 "",  # algorithm
@@ -1934,6 +1946,7 @@ def _register_qlinear_weight_prepack_pass(
         # Argument dtype is used for mark whether AMP is enabled or not for
         # pattern matching. It does not claim the dtype of pattern output.
         # The real output dtype of pattern is determined by the dequant node instead.
+
         dequant_dtype = dequant_node.kwargs.get("out_dtype", dtype)
         is_amp = dtype == torch.bfloat16
         if is_amp:

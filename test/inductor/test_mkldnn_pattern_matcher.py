@@ -1153,6 +1153,57 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
         )
 
+    def _qconv2d_fp16_test_helper(self, device="cpu"):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, groups=4
+                )
+                self.softmax = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.softmax(x.to(torch.float32)).to(torch.float16)
+                x = self.conv3(self.conv2(x))
+                return x
+                # return self.conv3(self.conv2(self.conv(x).to(torch.float32)))
+
+        mod = M().eval().to(device=device, dtype=torch.float16)
+        v = (
+            torch.randn((1, 3, 8, 8), dtype=torch.float16, requires_grad=False)
+            .add(1)
+            .to(device=device)
+        )
+
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
+            #    int8_mixed_fp32: [dequant_node, dequantize_per_channel, clone, convolution]
+            #    int8_mixed_bf16: [dequant_node, optional(convert_element_type_4),
+            #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 3
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 12
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
+            )
+
+        self._test_common(
+            mod,
+            (v,),
+            matcher_check_fn,
+            check_quantization=True,
+            check_autocast=torch.float,
+        )
+
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
@@ -1170,6 +1221,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Conv2d module.
         """
         self._qconv2d_test_helper("xpu")
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qconv2d_fp16_xpu(self):
+        r"""
+        This testcase will quantize a single Conv2d module.
+        """
+        self._qconv2d_fp16_test_helper("xpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
