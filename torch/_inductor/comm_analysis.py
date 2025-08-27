@@ -186,6 +186,8 @@ def _get_collective_fn_kwargs(snode, tensor_arg_from_layout):  # type: ignore[no
     in_t = tensor_arg_from_layout(input_layout)
 
     name = getattr(kernel, "python_kernel_name", "")
+    print(f"XXX NCCL_EST PY_KERNEL_NAME:{name}")
+    print(f"XXX NCCL_EST PY_KERNEL_NAME:{name} constant_args:{constant_args}")
 
     # schemes are defined torch/csrc/distributed/c10d/Functional.cpp
     if name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
@@ -235,12 +237,13 @@ def _get_collective_fn_kwargs(snode, tensor_arg_from_layout):  # type: ignore[no
         fn = torch.ops._dtensor.shard_dim_alltoall
         gather_dim = constant_args[0]
         shard_dim = constant_args[1]
-        return fn, {
-            "input": in_t,
-            "gather_dim": gather_dim,
-            "shard_dim": shard_dim,
-            "group_name": pg_name,
-        }
+        return None, None
+        # return fn, {
+        #     "input": in_t,
+        #     "gather_dim": gather_dim,
+        #     "shard_dim": shard_dim,
+        #     "group_name": pg_name,
+        # }
 
     raise AssertionError(f"Unsupported collective:{name}")
 
@@ -260,12 +263,23 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
         device = torch.device(f"cuda:{rank}")
 
         fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
+        if fn is None:
+            return None
+        # print(f"XXX FN:{fn}")
+        # print(f"XXX KWARGS:{kwargs}")
+        # print(f"XXX DEVICE:{device}")
+        # for a in pytree.tree_flatten(kwargs):
+        #     print(f"XXX a:{a.shape if isinstance(a, torch.Tensor) else a}")
 
+        # print(f"XXX NCCL_EST PY_KERNEL_NAME:{name} PRE_TIME_EST")
         with torch.distributed._time_estimator(
             group=pg, device=device
         ) as time_estimator:
+            # print(f"XXX NCCL_EST PY_KERNEL_NAME:{name} TIME_EST 0")
             w = fn(**kwargs)
             torch.ops._c10d_functional.wait_tensor.default(w)
+            # print(f"XXX NCCL_EST PY_KERNEL_NAME:{name} TIME_EST 1")
+        # print(f"XXX NCCL_EST PY_KERNEL_NAME:{name} POST_TIME_EST")
 
         est_time_us = time_estimator.estimated_time
         # -1000 constant is NCCL return in case of error during estimations.
