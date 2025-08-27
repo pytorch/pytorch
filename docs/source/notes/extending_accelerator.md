@@ -36,7 +36,7 @@ Next, we will officially embark on the integration journey of the new PyTorch ac
 For new accelerators, one of the most important and fundamental aspects of integration is supporting high-performance operators. To facilitate operator adaptation for users and accelerator developers, PyTorch provides multiple methods for developing and registering operators in both `Python` and `C++`. The following sections detail some of PyTorch's fundamental capabilities for operator registration.
 
 ```{note}
-`Dispatch Key` is used to uniquely identify accelerator within PyTorch, such as `CPU`, `CUDA`, `MPS`, and `PrivateUse1`. In theory, all subsequent new accelerators will share `PrivateUse1`, leveraging its built-in comprehensive scaffolding capabilities to complete the integration of new accelerators. Please refer to [Let's talk about the PyTorch dispatcher](https://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) if you are interested with `Dispatcher`.
+`Dispatch Key` is used to uniquely identify accelerator within PyTorch, such as `CPU`, `CUDA`, `MPS`, and `PrivateUse1`. In theory, all subsequent new accelerators will share `PrivateUse1`, leveraging its built-in comprehensive scaffolding capabilities to complete the integration of new accelerators. Please refer to [Let's talk about the PyTorch dispatcher](https://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) if you are interested with dispatcher.
 ```
 
 (operator-set)=
@@ -272,7 +272,7 @@ In addition to PyTorch's built-in operators, custom accelerator operators are al
 * Forward and backward: Implemented using `torch.autograd.Function`
 
 ```{note}
-There are more details in `PyTorch Tutorials`, so refer to [PyTorch Custom Operators](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html) if you are interested.
+There are more details in PyTorch tutorials, so refer to [PyTorch Custom Operators](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html) if you are interested.
 ```
 
 Here, we'll briefly introduce the implementation process of custom operators, focusing on the forward-only approach. The implementation can be summarized into the following three points:
