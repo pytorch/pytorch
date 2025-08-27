@@ -226,17 +226,6 @@ class SpawnContext(ProcessContext):
         super().__init__(processes, error_files)
 
 
-def should_use_parallel_start(start_method: str) -> bool:
-    """
-    Returns:
-        Whether we will start subprocesses in parallel.
-    """
-    return (
-        start_method == "forkserver"
-        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
-    )
-
-
 # Note: [start_processes]
 # mp.start_processes handles both start_method='spawn' and 'fork'. It's supposed to be a
 # more generalized API than mp.spawn. Currently we only document mp.spawn as it's the
@@ -258,7 +247,10 @@ def start_processes(
     # this func will start processes in parallel if start_method is 'forkserver'.
     # Please opt in to this perf optimization by setting env var (TORCH_MP_PARALLEL_START) to 1.
     # todo: investigate why spawn does not work with threadpool and raises SIGINT
-    if should_use_parallel_start(start_method):
+    if (
+        start_method == "forkserver"
+        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
+    ):
         log.info("Starting processes in parallel.")
         start_parallel = True
     else:
