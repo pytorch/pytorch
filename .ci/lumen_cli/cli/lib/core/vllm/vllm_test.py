@@ -114,10 +114,12 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         vllm_commit = self.prepare()
+
+        # prepare test summary
         test_summary_path = Path("tmp_pytest_report").resolve()
         ensure_dir_exists(test_summary_path)
-
         test_summary_result = []
+
         try:
             with working_directory(self.work_directory):
                 if self.test_type == TestInpuType.TEST_PLAN:
