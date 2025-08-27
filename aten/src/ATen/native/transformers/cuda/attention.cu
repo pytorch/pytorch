@@ -91,7 +91,7 @@
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
 #endif
-#include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
+#include <ATen/native/transformers/hip/flash_attn/me_ck_api.h>
 #endif
 #endif
 

@@ -1,5 +1,5 @@
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
-#include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
+#include <ATen/native/transformers/hip/flash_attn/me_ck_api.h>
 
 #if defined(USE_ROCM_CK_SDPA)
 namespace pytorch_flash {
