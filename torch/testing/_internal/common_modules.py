@@ -4064,11 +4064,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LocalResponseNorm,
                module_inputs_func=module_inputs_torch_nn_LocalResponseNorm,
-               skips=(
-                   # uses avg_pool3d which is not supported on MPS backend
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous_tensors'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous'),)
                ),
     ModuleInfo(torch.nn.LayerNorm,
                module_inputs_func=module_inputs_torch_nn_LayerNorm,

@@ -36,6 +36,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -739,7 +740,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.wrap_top_frame or (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -1070,7 +1073,7 @@ def get_compiler_fn(
         compiler_str = compiler_fn
     else:
         compiler_str = None
-    compiler_fn = lookup_backend(compiler_fn)
+    compiler_fn = lookup_backend(compiler_fn)  # type: ignore[arg-type]
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
@@ -1219,7 +1222,8 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
+        error_on_graph_break=nopython
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1245,7 +1249,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
         graphs: list[torch.fx.GraphModule] = []
         break_reasons: list[Any] = []
         op_count: int = 0
-        ops_per_graph: list[torch.fx.Node] = []
+        ops_per_graph: list[list[Target]] = []
         out_guards: list[_guards.Guard] = []
 
         def dynamo_graph_accumulating_compiler(
@@ -1760,6 +1764,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 

@@ -34,11 +34,6 @@ from torch.overrides import TorchFunctionMode
 __all__ = ["context_parallel", "set_rotate_method"]
 
 
-compiled_create_block_mask = torch.compile(
-    create_block_mask, dynamic=False, fullgraph=True
-)
-
-
 class _CausalBehavior(Enum):
     SKIP = None
     NOT_IS_CAUSAL = False
@@ -1178,6 +1173,10 @@ def create_cp_block_mask(
         FlexAttention size is small.
     """
     from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
 
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,

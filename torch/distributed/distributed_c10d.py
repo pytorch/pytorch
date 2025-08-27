@@ -2035,8 +2035,12 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_options = ProcessGroupXCCL.Options()
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
-                backend_prefix_store, group_rank, group_size
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
@@ -4780,6 +4784,11 @@ def barrier(
         None, if not async_op or if not part of the group
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
+    .. note:: `ProcessGroupNCCL` implements barrier as an all_reduce of a 1-element tensor. A device must be chosen
+       for allocating this tensor.  The device choice is made by checking in this order (1) the first device passed to
+       `device_ids` arg of barrier if not None, (2) the device passed to init_process_group if not None, (3) the device
+       that was first used with this process group, if another collective with tensor inputs has been performed, (4)
+       the device index indicated by the global rank mod local device count.
     """
     group = group or _get_default_group()
 

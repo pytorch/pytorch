@@ -48,28 +48,11 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-static inline Tensor legacy_complex_as_view(const Tensor& t) {
-  // Convert non-complex types (and cdouble CPU scalars) to cfloat
-  if (!isComplexType(t.scalar_type()) || t.scalar_type() == kComplexDouble) {
-    return at::view_as_real(t.to(kMPS, kComplexFloat));
-  }
-  return at::view_as_real(t.dim() != 0 ? t : t.to(kMPS));
-}
-
 static void binaryOpTensor(const Tensor& self,
                            const Tensor& other,
                            const Tensor& output_,
                            std::string op_name,
                            BinaryOpBlock binaryBlock) {
-  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
-                (self.scalar_type() == ScalarType::Long ||
-                 (other.scalar_type() == ScalarType::Long &&
-                  (self.scalar_type() != ScalarType::Half && self.scalar_type() != ScalarType::Float)))),
-              "MPS: ",
-              op_name,
-              " op with int64 input is supported natively starting from macOS 13.2");
-  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()) || mps::supportsComplex(),
-                   "Complex types are supported starting from MacOS 14.0+");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
