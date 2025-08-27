@@ -2159,7 +2159,16 @@ class AOTInductorTestsTemplate:
         )
 
     def test_while_loop_with_parameters(self):
-        inputs = (torch.randn((10, 20), device=self.device),)
+        inputs = (
+            torch.randn(
+                (
+                    10,
+                    20,
+                ),
+                dtype=torch.float64,
+                device=self.device,
+            ),
+        )
         dim0_a = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "c": {},

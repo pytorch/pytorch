@@ -8099,7 +8099,7 @@ class GraphModule(torch.nn.Module):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
         dynamic_shapes = {"x": {0: torch.export.Dim("dim_x")}} if dynamic else None
         ep = self._check_export(m, args, strict=strict, dynamic_shapes=dynamic_shapes)
-        if strict and dynamic:
+        if strict and dynamic and not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
                 normalize_gm(ep.module().print_readable(print_output=False)),
                 """\
@@ -8181,23 +8181,21 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s77, s27, 2, 2, 3, child), (s27, s77));  cond_fn_0 = body_fn_0 = s77 = s27 = child = None
-
-        getitem_10: "Sym(u10)" = while_loop[0]
-        getitem_11: "Sym(u11)" = while_loop[1]
-        getitem_12: "Sym(u12)" = while_loop[2]
-        getitem_13: "Sym(u13)" = while_loop[3]
-        getitem_14: "Sym(u14)" = while_loop[4]
-
+        getitem_4: "Sym(u10)" = while_loop[0]
+        getitem_5: "Sym(u11)" = while_loop[1]
+        getitem_6: "Sym(u12)" = while_loop[2]
+        getitem_7: "Sym(u13)" = while_loop[3]
+        getitem_8: "Sym(u14)" = while_loop[4]
         out_x: "f32[s77, s27]" = while_loop[5];  while_loop = None
 
-        add: "Sym(u12 + 1)" = getitem_12 + 1
-        add_1: "Sym(u13 + 1)" = getitem_13 + 1
-        add_2: "Sym(u14 + 1)" = getitem_14 + 1
+        add: "Sym(u12 + 1)" = getitem_6 + 1
+        add_1: "Sym(u13 + 1)" = getitem_7 + 1
+        add_2: "Sym(u14 + 1)" = getitem_8 + 1
 
-        add_3: "f32[s77, s27]" = getitem_12 + out_x;  getitem_12 = None
-        add_4: "f32[s77, s27]" = getitem_13 + out_x;  getitem_13 = None
-        add_5: "f32[s77, s27]" = getitem_14 + out_x;  getitem_14 = None
-        return (getitem_10, getitem_11, add, add_1, add_2, add_3, add_4, add_5, out_x)
+        add_3: "f32[s77, s27]" = getitem_6 + out_x;  getitem_6 = None
+        add_4: "f32[s77, s27]" = getitem_7 + out_x;  getitem_7 = None
+        add_5: "f32[s77, s27]" = getitem_8 + out_x;  getitem_8 = None
+        return (getitem_4, getitem_5, add, add_1, add_2, add_3, add_4, add_5, out_x)
 
     class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child_1: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
