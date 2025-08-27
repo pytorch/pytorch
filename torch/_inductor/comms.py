@@ -1263,8 +1263,8 @@ def _sink_waits_iterative_internal(
                                 candidate, _group_nodes(candidate, None), runtimes
                             )
                             group_colls[candidate] = (comm_time, comp_time)
-                        if not contains_async_collective(candidate):
-                            group_runtime += runtimes[candidate]
+                            if not contains_async_collective(candidate):
+                                group_runtime += runtimes[candidate]
 
                         group_peak_memory = max(
                             group_peak_memory, _curr_memory[candidate][0]
