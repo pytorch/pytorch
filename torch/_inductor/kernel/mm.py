@@ -777,7 +777,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for kwargs, _ in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             # TODO(coconutruben): remove once we deprecate ah
             # mm-extra is a hack to keep the ah functionality alive
             # while we transition to the unified kwargs retrieval
@@ -786,6 +786,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             mm_template.uid,
             "mm-ah",
         ):
+            assert not kwargs, "mm-ah should not have any extra kwargs"
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=kernel_inputs.nodes(),
@@ -930,8 +931,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # TODO(coconutruben): combine this with the main flow of addmm through
         # a subgraph or something as inp vs inp_expanded causes some slight numeric
         # differences
+        kernel_inputs = MMKernelInputs(
+            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        )
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            MMKernelInputs([inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)),
+            kernel_inputs,
             aten_layout,
             aten_addmm.uid,
             name,
@@ -1169,7 +1173,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        scaled_mm_kwargs = {"USE_FAST_ACCUM": use_fast_accum}
+        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
@@ -1179,7 +1183,7 @@ def tuned_scaled_mm(
                 layout,
                 scaled_mm_device_tma_template.uid,
                 name,
-                kwarg_overrides=scaled_mm_kwargs,
+                overriders,
             ):
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
@@ -1193,7 +1197,7 @@ def tuned_scaled_mm(
             layout,
             mm_template.uid,
             name,
-            kwarg_overrides=scaled_mm_kwargs,
+            overriders,
         ):
             # possibly appends a TritonTemplateCaller to choices
             mm_template.maybe_append_choice(
