@@ -35,7 +35,6 @@ def compute_loss_helper(x):
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
-@torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):

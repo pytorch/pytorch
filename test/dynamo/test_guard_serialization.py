@@ -235,7 +235,6 @@ class CustomConstantType:
 pytree.register_constant(CustomConstantType)
 
 
-@torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def test_function_locals(self):
         def foo(x):

@@ -74,11 +74,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
-            for o in operands
-        ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
-        )
+            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
+        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
 
         return super().__call__(subgraph, identifier, *operands)
 

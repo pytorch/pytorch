@@ -3716,10 +3716,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             package_name = name
 
         if self.package is not None:
-            if self.output.package is not None:
-                self.package.add_resume_function(
-                    new_code, self.f_globals["__name__"], function_name=package_name
-                )
+            self.package.add_resume_function(
+                new_code, self.f_globals["__name__"], function_name=package_name
+            )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))

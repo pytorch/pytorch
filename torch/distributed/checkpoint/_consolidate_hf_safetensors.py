@@ -691,21 +691,27 @@ def consolidate_safetensors_files_on_every_rank(
         if idx in indices_for_this_rank
     }
 
-    if filtered_mapping:
-        # Convert index mapping to filename mapping
-        max_index = max(unique_indices)
-        filtered_filename_mapping = {}
-        for fqn, idx in filtered_mapping.items():
-            filename = _gen_file_name(idx, max_index)
-            filtered_filename_mapping[fqn] = filename
+    if not filtered_mapping:
+        logger.info("Rank %d: No files to process, exiting early", rank)
+        # Wait for all ranks to complete
+        if dist.is_available() and dist.is_initialized():
+            dist.barrier()
+        return
 
-        # Call the existing consolidation function with the filtered mapping
-        _consolidate_safetensors_files(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            fqn_to_file_mapping=filtered_filename_mapping,
-            num_threads=num_threads,
-        )
+    # Convert index mapping to filename mapping
+    max_index = max(unique_indices)
+    filtered_filename_mapping = {}
+    for fqn, idx in filtered_mapping.items():
+        filename = _gen_file_name(idx, max_index)
+        filtered_filename_mapping[fqn] = filename
+
+    # Call the existing consolidation function with the filtered mapping
+    _consolidate_safetensors_files(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        fqn_to_file_mapping=filtered_filename_mapping,
+        num_threads=num_threads,
+    )
 
     logger.info(
         "Rank %d: Done consolidating. Processed %d unique indices in %.2f secs.",
