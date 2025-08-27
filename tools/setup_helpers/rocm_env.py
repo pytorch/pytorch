@@ -49,8 +49,6 @@ def get_ck_dependency_string() -> str:
     Returns:
         str: The formatted dependency string for use in install_requires.
     """
-    # The dependency doesn't get resolved without version number in the end
-    # Since we use commit hash for versioning it will always be 1.0.0
     egg_name = "#egg=rocm-composable-kernel"
     commit_pin = f"@{read_ck_pin()}"
     if user_provided_ck_dir := os.getenv("TORCHINDUCTOR_CK_DIR"):
