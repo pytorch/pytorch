@@ -9,7 +9,6 @@ def check_if_rocm() -> bool:
         return True
     if os.environ.get("ROCM_PATH") is not None:
         return True
-    
     return False
 
 
