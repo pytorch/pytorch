@@ -4193,6 +4193,18 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
+@register_meta(
+    [
+        aten.add.Scalar,
+        aten.sub.Scalar,
+    ],
+)
+def meta_binop_alpha(self, other, alpha=1):
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta([aten.round.default, aten.round.decimals])
 def meta_round(self, **kwargs):
     return elementwise_meta(

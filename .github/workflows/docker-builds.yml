@@ -124,7 +124,7 @@ jobs:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           shell: bash
-          timeout_minutes: 30
+          timeout_minutes: 60
           max_attempts: 5
           retry_wait_seconds: 90
           command: |

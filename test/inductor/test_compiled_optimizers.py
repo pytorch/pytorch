@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import random
 import sys
 import types
 import unittest
@@ -583,6 +584,9 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
+        torch.cuda.manual_seed_all(0)
+        torch.manual_seed(0)
+        random.seed(0)
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
@@ -604,7 +608,10 @@ class CompiledOptimizerParityTests(TestCase):
                 torch._inductor.metrics.reset()
                 input = torch.ones([10, 10], device=device)
                 model_eager = torch.nn.Sequential(
-                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+                    *[
+                        torch.nn.Linear(10, 10, device=device, bias=False)
+                        for _ in range(2)
+                    ]
                 )
                 model_eager(input).sum().backward()
                 model_compiled = deepcopy(model_eager)

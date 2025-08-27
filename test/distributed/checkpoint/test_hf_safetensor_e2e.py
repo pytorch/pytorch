@@ -117,6 +117,46 @@ class TestSingleRankSaveLoad(TestCase):
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
 
+    @with_temp_dir
+    def test_load_with_multiple_threads(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        state_dict_to_save = MyTestModule().state_dict()
+        state_dict_to_load = MyTestModule().state_dict()
+
+        # Create a mapping to split tensors across multiple files
+        # This will force multiple files to be created, enabling multi-threading
+        fqn_to_index_mapping = {}
+        for i, fqn in enumerate(state_dict_to_save.keys()):
+            fqn_to_index_mapping[fqn] = (i % 2) + 1  # Split across 2 files
+
+        # Save using HuggingFaceStorageWriter with multiple files
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=CHECKPOINT_DIR, fqn_to_index_mapping=fqn_to_index_mapping
+            ),
+        )
+
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=dist_cp.HuggingFaceStorageReader(
+                path=CHECKPOINT_DIR, thread_count=2
+            ),
+        )
+
+        self.assertEqual(
+            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
+        )
+        for key in state_dict_to_save.keys():
+            self.assertTrue(
+                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
+            )
+
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
     @with_comms

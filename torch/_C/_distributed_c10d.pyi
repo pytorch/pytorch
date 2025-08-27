@@ -298,6 +298,8 @@ class Backend:
         def _timeout(self) -> timedelta: ...
         @_timeout.setter
         def _timeout(self, val: timedelta) -> None: ...
+        global_ranks_in_group: list[int]
+        group_name: str
 
     def __init__(
         self,
@@ -608,8 +610,6 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self): ...
 
@@ -651,8 +651,6 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -830,12 +828,18 @@ class _SymmetricMemory:
     def signal_pad_size(self) -> int: ...
 
 class ProcessGroupXCCL(Backend):
+    class Options(Backend.Options):
+        def __init__(self): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-    ): ...
+        options: Options,
+    ) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...

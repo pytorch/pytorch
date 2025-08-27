@@ -296,8 +296,7 @@ class TestDraftExport(TestCase):
                     res = torch.ops.mylib.foo1(a, b)
 
                     c_item = c.item()
-                    if c_item > 0:
-                        return res[:c_item]
+                    return res[:c_item]
 
             inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(3))
 
@@ -368,8 +367,8 @@ class TestDraftExport(TestCase):
                 a = a + 5
 
                 z = torch.cat([y, y])
-                if a > 0:
-                    return z[:a]
+
+                return z[:a]
 
         ep = draft_export(
             M(),
@@ -387,7 +386,7 @@ class TestDraftExport(TestCase):
             for node in _ep.graph.nodes:
                 if bindings := node.meta.get("unbacked_bindings"):
                     unbacked_binding_symbols.update(bindings.keys())
-            self.assertEqual(len(unbacked_binding_symbols), 2)
+            self.assertEqual(len(unbacked_binding_symbols), 1)
 
     def test_offsets(self):
         class M(torch.nn.Module):

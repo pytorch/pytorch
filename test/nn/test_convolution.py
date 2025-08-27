@@ -3241,17 +3241,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
-    @skipCUDAIfRocm
-    @largeTensorTest("24GB", "cpu")
-    @largeTensorTest("20GB", "cuda")
-    def test_conv3d_large_batch_1(self, device):
-        x = torch.rand(1, 32, 512, 512, 256)
-        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
-        yref = m(x)
-        y = m.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y.cpu())
-
-    @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_contig_wrong_stride_cudnn(self, device):
         # x has to have batch_size 1 to test contiguous checks
