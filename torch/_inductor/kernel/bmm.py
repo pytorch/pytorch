@@ -27,7 +27,7 @@ from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_a
 
 
 if TYPE_CHECKING:
-    from torch._inductor.ir import ChoiceCaller
+    from ..ir import ChoiceCaller
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
