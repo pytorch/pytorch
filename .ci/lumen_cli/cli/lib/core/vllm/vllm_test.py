@@ -22,7 +22,7 @@ from cli.lib.common.pip_helper import (
     pkg_exists,
     run_python,
 )
-from cli.lib.common.utils import run_command, working_directory
+from cli.lib.common.utils import ensure_dir_exists, run_command, working_directory
 from cli.lib.core.vllm.lib import (
     clone_vllm,
     run_test_plan,
@@ -114,10 +114,9 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         vllm_commit = self.prepare()
+        test_summary_path = Path("tmp_pytest_report").resolve()
+        ensure_dir_exists(test_summary_path)
 
-        test_summary_path = (
-            Path("tmp_pytest_report").resolve().mkdir(parents=True, exist_ok=True)
-        )
         test_summary_result = []
         try:
             with working_directory(self.work_directory):
