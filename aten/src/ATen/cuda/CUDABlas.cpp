@@ -1956,7 +1956,7 @@ void scaled_gemm(
             }
   #endif
   }
-#elif (CUDA_VERSION < 12080) || defined(USE_ROCM)
+#elif (CUDA_VERSION < 12080) && !defined(USE_ROCM)
   // hipblaslt supported row-wise before cublas, and did so their own way (via
   // the SCALE_POINTERSs), but then migrated to match how cublas does it (via
   // the SCALE_MODEs). Here we check for this early custom mode.
