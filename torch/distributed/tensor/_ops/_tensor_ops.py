@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import itertools
 from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
@@ -39,6 +40,14 @@ from ._pointwise_ops import pointwise_strategy
 
 
 aten = torch.ops.aten
+
+
+def propagate_first_input_strategy(op_schema: OpSchema) -> StrategyType:
+    return propagate_single_input_strategy(
+        OpSchema(
+            op=op_schema.op, args_schema=op_schema.args_schema[:1], kwargs_schema={}
+        )
+    )
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -1004,6 +1013,281 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
                     ],
                 )
             )
+    return op_strategy
+
+
+@register_op_strategy(
+    aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+)
+def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    In ``aten.index.Tensor(self, indices)``, the ``self`` tensor's dimensions can
+    be categorized into:
+    - free dimensions: the dimensions that are not indexed by any ``indices`` tensor.
+    - removed dimensions: the dimensions that are indexed by a scalar ``index`` tensor.
+    - selected dimensions: the dimensions that are indexed by a non-scalar ``index`` tensor.
+
+    For a free dimension in ``self``, it's accepted to be of any placement.
+    For a removed dimension, its placement can be ``Replicate()`` or ``Partial()``.
+    For a selected dimension, its placement can be ``Replicate()`` or ``Partial()``
+    (supported), but also ``Shard()`` if the corresponding ``index`` tensor is
+    replicated (not supported yet, need index rewrite).
+
+    The ``indices`` must be ``Replicate()`` except for one case: if a select dimension
+    is not sharded in ``self``, the corresponding ``index`` can be ``Shard()`` too.
+
+    As for the output tensor, its free dimensions should follow the placements. Regarding
+    the selected dimensions, the first selected dimensions should follow the placement, and
+    the other selected ones are removed from the output's dimensions.
+    """
+    # NOTE: somehow `op_schema.args_strategy` is not a good fit because it flattens
+    # and filters out the `None` values. So we use `op_schema.args_schema` instead.
+    self_strategy, indices_tuple_strategy = op_schema.args_schema
+    assert isinstance(self_strategy, OpStrategy)
+    # TODO: change it to something else
+    # TODO: each index can be multi-dim tensor.
+    assert isinstance(indices_tuple_strategy, TupleStrategy)
+    # `indices_tuple_strategy` only includes non-tailing `None`s
+    assert len(indices_tuple_strategy.children) <= self_strategy.ndim
+
+    # find free/select/remove dimensions
+    free_dims, select_dims, remove_dims = [], [], []
+    for i, strat in enumerate(indices_tuple_strategy.children):
+        if strat is None:
+            free_dims.append(i)
+        else:
+            assert isinstance(strat, OpStrategy)
+            if strat.ndim == 0:
+                remove_dims.append(i)
+            else:
+                select_dims.append(i)
+
+    for i in range(len(indices_tuple_strategy.children), self_strategy.ndim):
+        free_dims.append(i)
+
+    print(f"free: {free_dims}, remove: {remove_dims}, select: {select_dims}")
+    # special case: no-op
+    if not remove_dims and not select_dims:
+        return cast(OpStrategy, propagate_first_input_strategy(op_schema))
+
+    # normal cases: one tensor dim will be removed/selected
+    # enumerate all possible input_specs
+    self_input_specs: list[DTensorSpec] = [
+        strat.output_spec for strat in self_strategy.strategies
+    ]
+    non_empty_indices_input_specs: list[Sequence[DTensorSpec]] = []
+    for index_strategy in indices_tuple_strategy.children:
+        if isinstance(index_strategy, OpStrategy):
+            non_empty_indices_input_specs.append(
+                [strat.output_specs for strat in index_strategy.strategies]
+            )
+
+    all_input_specs_comb = itertools.product(
+        self_input_specs, *non_empty_indices_input_specs
+    )
+
+    # enumerate all acceptable input_specs
+    acceptable_input_specs_and_out_spec_dict = {}  # use dict to dedup
+    for input_specs_comb in all_input_specs_comb:
+        self_input_spec: DTensorSpec = input_specs_comb[0]
+        self_ndim = self_input_spec.ndim
+        indices_input_specs: list[DTensorSpec] = input_specs_comb[1:]
+
+        # first, if `indices` are sharded, they have to be sharded consistently.
+        # Besides, `indices` can broadcast. Therefore we leverage the `pointwise_rule`
+        # to produce acceptable `indices_input_specs`.
+        if_indices_comply_pointwise_rule = pointwise_rule(
+            OpSchema(
+                op=op_schema.op,
+                args_schema=tuple(indices_input_specs),
+                kwargs_schema={},
+            )
+        )
+        need_reshard_on_indices = if_indices_comply_pointwise_rule.output_spec is None
+        if need_reshard_on_indices:
+            assert if_indices_comply_pointwise_rule.redistribute_schema is not None
+            valid_indices_suggestion = (
+                if_indices_comply_pointwise_rule.redistribute_schema
+            )
+            # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
+            # use that to compute our ideal values_spec
+            indices_input_specs = list(valid_indices_suggestion.args_spec)
+            index_input_spec = pointwise_rule(valid_indices_suggestion).output_spec
+        else:
+            index_input_spec = if_indices_comply_pointwise_rule.output_spec
+
+        assert isinstance(index_input_spec, DTensorSpec)
+
+        # second, check `self` spec (i.e. placements)
+        self_input_tgt_placements: list[Placement] = []
+        for placement in self_input_spec.placements:
+            if placement.is_shard():
+                placement = cast(Shard, placement)
+                dim = placement.dim
+                if dim not in free_dims:
+                    self_input_tgt_placements.append(Replicate())
+                else:
+                    self_input_tgt_placements.append(placement)
+            else:
+                self_input_tgt_placements.append(placement)
+
+        self_input_spec = DTensorSpec(
+            mesh=self_input_spec.mesh,
+            placements=tuple(self_input_tgt_placements),
+            tensor_meta=self_input_spec.tensor_meta,
+        )
+        print(f"self_input_spec={self_input_spec}")
+
+        # last, create the output_spec from self_input_spec and indices_input_specs
+        # note that we will conduct in a tensor-dim oriented way because the output
+        # sharding is determined by ``indices`` which come in order of tensor-dims.
+        out_dim_map = self_input_spec.dim_map
+
+        # first, we need to find the first remove/select dim
+        first_remove_dim = self_ndim if not remove_dims else remove_dims[0]
+        first_select_dim = self_ndim if not select_dims else select_dims[0]
+        # case: remove a tensor dim
+        if remove_dims and not select_dims:
+            # TODO: shall we also check that all remove_dims have Replicate() shardings
+            # (i.e. dim_map[x] == -1)???
+            # NOTE: remove multiple dims is possible
+            out_dim_map = [
+                map for dim, map in enumerate(out_dim_map) if dim in free_dims
+            ]
+            # TODO: fill in sums
+            out_spec = DTensorSpec.from_dim_map(
+                mesh=self_input_spec.mesh,
+                dim_map=out_dim_map,
+                sums=[],
+            )
+        else:  # output has new select_dim(s) at the first remove/select dim
+            # all remove_dims and select_dims in dim_map cannot be Shard()
+            any_shard = any(out_dim_map[dim] >= 0 for dim in remove_dims + select_dims)
+            # TODO: remove
+            assert not any_shard
+
+            if index_input_spec.is_sharded():
+                # TODO: put this in a util. Find the sharding mesh dim(s).
+                index_input_shard_mesh_dims = [
+                    i
+                    for i, placement in enumerate(index_input_spec.placements)
+                    if placement.is_shard()
+                ]
+                # the ``self`` cannot be Partial() (i.e. must be Replicate())
+                # on ``index_input_shard_mesh_dims``
+                self_input_placements = self_input_spec.placements
+                if not all(
+                    self_input_placements[mesh_dim].is_replicate()
+                    for mesh_dim in index_input_shard_mesh_dims
+                ):
+                    # we found some mesh dim that could shard more than 1 tensor
+                    # dims in the output. We need to make decision to replicate
+                    # between the newly inserted sharded dim in ``self`` (i.e.
+                    # introduced by the sharded index tensor), or the existing
+                    # sharded dim.
+                    # TODO: for the moment, we always replicate the index tensor
+                    # over the mesh dims by heuristic but this might be improvable.
+                    new_specs = []
+                    for spec in *indices_input_specs, index_input_spec:
+                        # make a new copy to avoid overriding the input specs
+                        new_spec = DTensorSpec(
+                            mesh=spec.mesh,
+                            placements=spec.placements,
+                            tensor_meta=spec.tensor_meta,
+                        )
+                        new_placements = []
+                        for i, p in enumerate(spec.placements):
+                            if (
+                                p.is_shard()
+                                and not self_input_placements[i].is_replicate()
+                            ):
+                                new_placements.append(Replicate())
+                            else:
+                                new_placements.append(p)
+
+                        new_spec.placements = tuple(new_placements)
+                        new_specs.append(new_spec)
+
+                    indices_input_specs = new_specs[:-1]
+                    index_input_spec = new_specs[-1]
+
+            # change out_dim_map
+            insert_dim_map = index_input_spec.dim_map
+            old_out_dim_map = out_dim_map
+            first_select_dim = min(first_remove_dim, first_select_dim)
+            # NOTE: select multiple dims is possible.
+            # if select dims and remove dims are consecutive
+            new_dims = sorted(select_dims + remove_dims)
+            if all(prev + 1 == curr for prev, curr in zip(new_dims[:-1], new_dims[1:])):
+                out_dim_map = (
+                    [
+                        map
+                        for dim, map in enumerate(out_dim_map[:first_select_dim])
+                        if dim in free_dims
+                    ]
+                    + insert_dim_map
+                    + [
+                        map
+                        for dim, map in enumerate(out_dim_map[first_select_dim:])
+                        if first_select_dim + dim in free_dims
+                    ]
+                )
+            else:
+                out_dim_map = insert_dim_map + [
+                    map for dim, map in enumerate(out_dim_map) if dim in free_dims
+                ]
+
+            self_input_placements = self_input_spec.placements
+            print(
+                f"out_dim_map={out_dim_map}, from {old_out_dim_map} + {insert_dim_map}"
+            )
+            out_spec = DTensorSpec.from_dim_map(
+                mesh=self_input_spec.mesh,
+                dim_map=out_dim_map,
+                sums=[],
+            )
+
+        acceptable_input_specs = (self_input_spec, *indices_input_specs)
+        if acceptable_input_specs in acceptable_input_specs_and_out_spec_dict:
+            continue
+
+        # find a new acceptable arg shardings
+        print(
+            f"add {acceptable_input_specs} to acceptable_input_specs_and_out_spec_dict, output_spec={out_spec}"
+        )
+        # torch.distributed.breakpoint()
+        # torch.distributed.barrier()
+        acceptable_input_specs_and_out_spec_dict[acceptable_input_specs] = out_spec
+
+    # generate OpStrategy from input strategies and acceptable shardings
+    op_strategy = OpStrategy([])
+    for acc_shardings, out_spec in acceptable_input_specs_and_out_spec_dict.items():
+        # create the corresponding OpSpec
+        self_redistribute_cost = generate_redistribute_costs(
+            self_strategy, acc_shardings[0]
+        )
+        indices_redistribute_costs = []
+        i = 1
+        for index_strategy in indices_tuple_strategy.children:
+            if isinstance(index_strategy, OpStrategy):
+                indices_redistribute_costs.append(
+                    generate_redistribute_costs(index_strategy, acc_shardings[i])
+                )
+                i += 1
+            else:
+                indices_redistribute_costs.append([0.0])
+
+        op_strategy.strategies.append(
+            OpSpec(
+                output_specs=out_spec,
+                input_specs=acc_shardings,
+                redistribute_cost=[self_redistribute_cost] + indices_redistribute_costs,
+            )
+        )
+
+    if not op_strategy.strategies:
+        print(f"op schema={op_schema} produces no sharding")
+
     return op_strategy
 
 

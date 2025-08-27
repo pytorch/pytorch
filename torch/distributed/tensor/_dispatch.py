@@ -163,6 +163,7 @@ class OpDispatcher:
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
+        print(f"output_sharding for {op_call}: {output_sharding}")
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
