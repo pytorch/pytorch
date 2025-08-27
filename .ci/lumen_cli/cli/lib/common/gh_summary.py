@@ -1,11 +1,15 @@
 from __future__ import annotations
-import os
-from pathlib import Path
-from typing import Iterable, Mapping, Optional
+
 import logging
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Optional, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +88,7 @@ def md_details(summary: str, content: str) -> str:
 
 
 def summarize_failures_by_test_command(
-    xml_and_labels: Iterable[Tuple[str | Path, str]],
+    xml_and_labels: Iterable[tuple[str | Path, str]],
     *,
     title: str = "Pytest Failures by Test Command",
     dedupe_within_command: bool = True,

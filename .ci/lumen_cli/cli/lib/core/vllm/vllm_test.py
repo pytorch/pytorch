@@ -1,4 +1,3 @@
-from ast import Tuple
 import logging
 import os
 import re
@@ -8,10 +7,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
+from cli.lib.common.gh_summary import (
+    gh_summary_path,
+    summarize_failures_by_test_command,
+)
 from cli.lib.common.path_helper import copy, remove_dir
 from cli.lib.common.pip_helper import (
     pip_install_first_match,
@@ -26,12 +29,7 @@ from cli.lib.core.vllm.lib import (
     sample_vllm_test_library,
     write_gh_step_summary,
 )
-from cli.lib.common.gh_summary import (
-    summarize_content_from_file,
-    summarize_failures_by_test_command,
-    summarize_wheels,
-    gh_summary_path,
-)
+
 
 logger = logging.getLogger(__name__)
 

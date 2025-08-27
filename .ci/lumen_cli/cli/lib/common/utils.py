@@ -4,14 +4,15 @@ General Utility helpers for CLI tasks.
 
 import logging
 import os
-from pathlib import Path
+import secrets
 import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Optional
+
 from cli.lib.common.path_helper import ensure_dir_exists
-import secrets
 
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,7 @@ def attach_junitxml_if_pytest(
     *,
     ensure_unique: bool = False,
     resolve_xml: bool = False,
-) -> Tuple[str, Optional[Path]]:
+) -> tuple[str, Optional[Path]]:
     """
     Append --junitxml=<ABS_PATH> to a pytest command string.
     The XML filename is <prefix>_<random-hex>.xml.

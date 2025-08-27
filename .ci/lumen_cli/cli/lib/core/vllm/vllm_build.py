@@ -4,6 +4,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
 from cli.lib.common.envs_helper import (
@@ -11,6 +12,12 @@ from cli.lib.common.envs_helper import (
     env_path_field,
     env_str_field,
     with_params_help,
+)
+from cli.lib.common.gh_summary import (
+    gh_summary_path,
+    summarize_content_from_file,
+    summarize_wheels,
+    write_gh_step_summary,
 )
 from cli.lib.common.path_helper import (
     copy,
@@ -20,13 +27,8 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
-from cli.lib.core.vllm.lib import clone_vllm, write_gh_step_summary
-from cli.lib.common.gh_summary import (
-    summarize_content_from_file,
-    summarize_wheels,
-    gh_summary_path,
-)
-import torch
+from cli.lib.core.vllm.lib import clone_vllm
+
 from torch import torch_version
 
 
@@ -171,7 +173,6 @@ class VllmBuildRunner(BaseRunner):
         )
 
         self.cp_dockerfile_if_exist(inputs)
-
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
 

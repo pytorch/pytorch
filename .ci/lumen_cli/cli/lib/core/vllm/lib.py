@@ -1,19 +1,16 @@
-from ast import List, Tuple
 import logging
 from pathlib import Path
-import re
 from typing import Any, Optional
 
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
 from cli.lib.common.utils import (
     attach_junitxml_if_pytest,
-    ensure_dir_exists,
     run_command,
     temp_environ,
     working_directory,
 )
-from cli.lib.common.gh_summary import md_heading, write_gh_step_summary
+
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +180,7 @@ def run_test_plan(
     num_shards: int = 0,
     *,
     test_summary_path: Optional[Path] = None,
-    test_summary_result: list[tuple[str, str]] = [],
+    test_summary_result: Optional[list[tuple[str, str]]] = None,
 ):
     """
     a method to run list of tests based on the test plan.
@@ -210,11 +207,11 @@ def run_test_plan(
     ):
         failures = []
         for idx, step in enumerate(tests["steps"]):
-            # genrate xml report for each test for test summary if needed
+            # generate xml report for each test for test summary if needed
             step, xml_file_path = attach_junitxml_if_pytest(
                 cmd=step, dir=test_summary_path, prefix=f"{test_plan}_{idx}"
             )
-            if xml_file_path and xml_file_path.exists():
+            if xml_file_path and xml_file_path.exists() and test_summary_result:
                 test_summary_result.append((title, str(xml_file_path)))
             else:
                 logger.info("No test report will be generate for %s", step)
