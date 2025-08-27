@@ -13,7 +13,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
 
 from torch.numa.binding import (
-    maybe_temporarily_apply_numa_binding_to_current_process,
+    maybe_temporarily_apply_numa_binding_to_current_thread,
     NumaOptions,
 )
 
@@ -288,8 +288,8 @@ def start_processes(
             daemon=daemon,
         )
 
-        # HACK [NUMA inheritance]: Subprocesses inherit the parent process's CPU
-        # affinity. So, we temporarily apply the bindings to the current process,
+        # HACK [NUMA inheritance]: Subprocesses inherit the parent thread's CPU
+        # affinity. So, we temporarily apply the bindings to the current thread,
         # and then immediately undo them.
         # This is necessary because the alternatives would be to
         # either
@@ -301,7 +301,7 @@ def start_processes(
         # can result in worse memory locality, because torch and CUDA
         # initialization would occur before applying the bindings, thus
         # allowing some memory to be allocated on the wrong NUMA nodes.
-        with maybe_temporarily_apply_numa_binding_to_current_process(
+        with maybe_temporarily_apply_numa_binding_to_current_thread(
             gpu_index=i, numa_options=numa_options
         ):
             process.start()
