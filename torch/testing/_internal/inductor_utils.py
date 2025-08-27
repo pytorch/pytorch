@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
+from torch._inductor.utils import OrderedSet
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.custom_graph_pass import CustomGraphModulePass
 from torch._inductor.codegen.common import (
@@ -402,3 +403,21 @@ def try_patch_inductor_backend_config(device: str, key: str,
                 cd.__exit__(exc_type, exc_val, exc_tb)
 
     return ContextStack(contexts)
+
+class MockGraphHandler(GraphLowering):
+    """Minimal mock graph handler for testing virtualized context."""
+
+    def __init__(self, name_to_buffer=None):
+        import torch._inductor.sizevars
+
+        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
+        self.name_to_buffer = name_to_buffer or {}
+        self.graph_inputs = {}
+        self.mutated_buffers = OrderedSet()
+        self.removed_buffers = OrderedSet()
+        self.constants = {}
+        self.scheduler = None
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+        """Return default dtype for any buffer (for testing)."""
+        return torch.float32
