@@ -400,6 +400,57 @@ class FxirTestCase(InductorTestCase):
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
 
+    @parametrize(
+        "shape",
+        [
+            (20,),
+            (50, 30),
+            (50, 30, 40),
+        ],
+    )
+    @torch._inductor.config.patch(
+        {
+            "pad_dynamic_shapes": True,
+            "comprehensive_padding": True,
+            "padding_alignment_bytes": 32,
+            "pad_outputs": True,
+        }
+    )
+    def test_dynamic_shapes_with_padding(self, shape):
+        """
+        Test a graph with dynamic shapes with padding.
+        """
+
+        def get_input(shape):
+            pad_size = list(shape)
+            pad_size[-1] = ((shape[-1] + 7) // 8) * 8
+            pad = torch.randn(pad_size, dtype=torch.float32, device=self.device)
+            view = torch.as_strided(pad, shape, pad.stride())
+            return view
+
+        args = [get_input(shape) for _ in range(2)]
+        (gm,) = self._compile_and_check(
+            torch.add, args, compile_kwargs={"dynamic": True}
+        )
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        example_tensor = empty_strided.meta["val"]
+        symbolic_dims = example_tensor.shape
+        symbolic_strides = example_tensor.stride()
+
+        align_elems = 32 // args[0].dtype.itemsize
+        expected_strides = [1 for _ in range(len(shape))]
+        for i in range(len(shape) - 1, 0, -1):
+            expected_strides[i - 1] = align_elems * (
+                ((expected_strides[i] * symbolic_dims[i]) + align_elems - 1)
+                // align_elems
+            )
+        for i, j in zip(symbolic_strides, expected_strides):
+            self.assertEqual(i, j)
+
     def test_dynamic_shapes_precomputed_size(self):
         """
         Test dynamic shapes where a kernel's size arg is precomputed.

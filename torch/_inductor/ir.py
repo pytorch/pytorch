@@ -3746,18 +3746,8 @@ class Layout(OutputSpec):
         ):
             return in_strides
 
-        # get_stride_order does not work with dynamic shape. Also we can not
-        # statically decide if a padding is needed or how much padding we should
-        # do for dynamic shape.
-        #
-        # Skip padding the strides for dynamic shape for now.
-        if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
-        ):
-            return in_strides
-
-        stride_order = get_stride_order(in_strides)
+        shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
+        stride_order = get_stride_order(in_strides, shape_env)
         fill_order = stride_order2fill_order(stride_order)
 
         new_strides = [0 for _ in range(len(in_strides))]
@@ -3769,11 +3759,17 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
+            # Static stride and meets padding conditions OR
+            # Dynamic stride and config.pad_dynamic_shape=True
+            require_padding = (
+                isinstance(stride, (int, sympy.Integer))
+                and stride > config.padding_stride_threshold
+                and stride % align != 0
+            ) or (isinstance(stride, sympy.Expr) and config.pad_dynamic_shapes)
             new_strides[idx] = stride
+            if require_padding:
+                new_strides[idx] = ceildiv(stride, align) * align
+                padded = True
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
