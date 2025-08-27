@@ -92,12 +92,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    AttributeMutationExisting,
-    AttributeMutationNew,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
