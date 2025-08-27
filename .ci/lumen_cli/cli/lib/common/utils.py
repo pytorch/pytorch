@@ -121,6 +121,27 @@ def working_directory(path: str):
         os.chdir(prev_cwd)
 
 
+def get_wheels(
+    output_dir: Path,
+    max_depth: Optional[int] = None,
+) -> list[str]:
+    """Return a list of wheels found in the given output directory."""
+    root = Path(output_dir)
+    if not root.exists():
+        return []
+    items = []
+    for dirpath, _, filenames in os.walk(root):
+        depth = Path(dirpath).relative_to(root).parts
+        if max_depth is not None and len(depth) > max_depth:
+            continue
+        for fname in sorted(filenames):
+            if fname.endswith(".whl"):
+                pkg = fname.split("-")[0]
+                relpath = str((Path(dirpath) / fname).relative_to(root))
+                items.append({"pkg": pkg, "relpath": relpath})
+    return items
+
+
 def attach_junitxml_if_pytest(
     cmd: str,
     dir: Optional[Path],

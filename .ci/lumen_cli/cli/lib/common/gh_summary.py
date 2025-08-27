@@ -5,7 +5,10 @@ import os
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
+
+from cli.lib.common.utils import get_wheels
+from jinja2 import Template
 
 
 if TYPE_CHECKING:
@@ -13,6 +16,58 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+_TPL_CONTENT = Template(
+    textwrap.dedent("""\
+    ## {{ title }}
+
+    ```{{ lang }}
+    {{ content }}
+    ```
+""")
+)
+
+_TPL_LIST_ITEMS = Template(
+    textwrap.dedent("""\
+    ## {{ title }}
+    {% for it in items %}
+    - {{ it.pkg }}: {{ it.relpath }}
+    {% else %}
+    _(no item found)_
+    {% endfor %}
+    """)
+)
+
+_TPL_TABLE = Template(
+    textwrap.dedent("""\
+    {%- if rows %}
+    | {{ cols | join(' | ') }} |
+    |{%- for _ in cols %} --- |{%- endfor %}
+    {%- for r in rows %}
+    | {%- for c in cols %} {{ r.get(c, "") }} |{%- endfor %}
+    {%- endfor %}
+    {%- else %}
+    _(no data)_
+    {%- endif %}
+""")
+)
+
+
+# ---- Template (title + per-command failures) ----
+_TPL_TEST_FAIL_BY_CMD = Template(
+    textwrap.dedent("""\
+    ## {{ title }}
+
+    {%- for section in sections if section.failures %}
+    ### Test Command: {{ section.label }}
+
+    {%- for f in section.failures %}
+    - {{ f }}
+    {%- endfor %}
+
+    {%- endfor %}
+""")
+)
 
 
 def gh_summary_path() -> Path | None:
@@ -48,45 +103,79 @@ def md_heading(text: str, level: int = 2) -> str:
     return f"{'#' * max(1, min(level, 6))} {text}\n"
 
 
-def md_kv_table(rows: Iterable[Mapping[str, str | int | float]]) -> str:
-    """
-    Render a list of dictionaries as a Markdown table.
-    The first row (header) is derived from the union of all keys.
-        # Suppose you want to summarize benchmark results
-        rows = [
-            {"name": "transformer-small", "p50": 12.3, "p90(ms)": 18.4},
-            {"name": "transformer-large", "p50": 45.1, "p90(ms)": 60.7},
-        ]
-        content = []
-        content.append(md_heading("Benchmark Results", level=2))
-        content.append(md_kv_table(rows))
-        content.append(md_details("Raw logs", "```\n[INFO] benchmark log ...\n```"))
-        # Join the pieces into one Markdown block
-        markdown = '\n'.join(content)
-        # Write to GitHub Actions summary (or log locally if not in CI)
-        write_gh_step_summary(markdown, append=True)
-    """
-
-    rows = list(rows)
-    if not rows:
-        return "_(no data)_\n"
-    # Collect all columns across all rows
-    cols = list({k for r in rows for k in r.keys()})
-    header = "| " + " | ".join(cols) + " |\n"
-    sep = "|" + "|".join([" --- " for _ in cols]) + "|\n"
-    lines = []
-    for r in rows:
-        line = "| " + " | ".join(str(r.get(c, "")) for c in cols) + " |\n"
-        lines.append(line)
-    return header + sep + "".join(lines) + "\n"
-
-
 def md_details(summary: str, content: str) -> str:
     """Generate a collapsible <details> block with a summary and inner content."""
     return f"<details>\n<summary>{summary}</summary>\n\n{content}\n\n</details>\n"
 
 
-# ---- helper test to generate a summary for list of pytest failures ------#
+def summarize_content_from_file(
+    output_dir: Path,
+    freeze_file: str,
+    title: str = "Content from file",
+    code_lang: str = "",  # e.g. "text" or "ini"
+) -> bool:
+    f = Path(output_dir) / freeze_file
+    if not f.exists():
+        return False
+    content = f.read_text(encoding="utf-8").strip()
+    md = render_content(content, title=title, lang=code_lang)
+    return write_gh_step_summary(md)
+
+
+def summarize_wheels(path: Path, title: str = "Wheels", max_depth: int = 3):
+    items = get_wheels(path, max_depth=max_depth)
+    if not items:
+        return False
+    md = render_list(items, title=title)
+    return write_gh_step_summary(md)
+
+
+def md_kv_table(rows: Iterable[Mapping[str, str | int | float]]) -> str:
+    """
+    Render a list of dicts as a Markdown table using Jinja template.
+    """
+    rows = list(rows)
+    cols = list({k for r in rows for k in r.keys()})
+    md = _TPL_TABLE.render(cols=cols, rows=rows).strip() + "\n"
+    return md
+
+
+def render_list(
+    items: Iterable[str],
+    *,
+    title: str = "List",
+) -> str:
+    tpl = _TPL_LIST_ITEMS
+    md = tpl.render(title=title, items=items)
+    return md
+
+
+def render_content(
+    content: str,
+    *,
+    title: str = "Content",
+    lang: str = "text",
+) -> str:
+    tpl = _TPL_CONTENT
+    md = tpl.render(title=title, content=content, lang=lang)
+    return md
+
+
+# ---- Template (title + per-command failures) ----
+_TPL_FAIL_BY_CMD = Template(
+    textwrap.dedent("""\
+    ## {{ title }}
+
+    {%- for section in sections if section.failures %}
+    ### Test Command: {{ section.label }}
+
+    {%- for f in section.failures %}
+    - {{ f }}
+    {%- endfor %}
+
+    {%- endfor %}
+""")
+)
 
 
 def summarize_failures_by_test_command(
@@ -94,45 +183,36 @@ def summarize_failures_by_test_command(
     *,
     title: str = "Pytest Failures by Test Command",
     dedupe_within_command: bool = True,
-):
+) -> bool:
     """
-    Args:
-      xml_and_labels: list of (xml_path, label) pairs.
-                      Each XML corresponds to one pytest subprocess (one test command).
-    Behavior:
-      - Writes a section per test command if it has failures.
-      - Each failed test is listed as 'path/to/test.py:test_name'.
-
-    Example:
-        xml = [
-            ("reports/junit_cmd0.xml", "pytest -v -s tests/unit"),
-            ("reports/junit_cmd1.xml", "pytest -v -s tests/integration"),
-            ("reports/junit_cmd2.xml", "pytest -v -s tests/entrypoints"),
-        ]
-        summarize_failures_by_test_command(
-            xmls,
-            title="Consolidated Pytest Failures",
-        )
+    Render a single Markdown block summarizing failures grouped by test command.
+    Returns True if anything was written, False otherwise.
     """
-    write_gh_step_summary(md_heading(title, level=2))
+    sections: list[dict] = []
 
     for xml_path, label in xml_and_labels:
         xmlp = Path(xml_path)
-        failed = _parse_failed_simple(xmlp)
+        if not xmlp.exists():
+            # optional: your logger
+            # logger.warning("XML %s not found, skipping", xmlp)
+            continue
+
+        failed = _parse_failed(xmlp)
         if dedupe_within_command:
             failed = sorted(set(failed))
-        if not failed:
-            continue  # skip commands with no failures
-        write_gh_step_summary(md_heading(f"Test Command: {label}", level=3))
-        lines = "\n".join(f"- {item}" for item in failed)
-        write_gh_step_summary(lines + "\n")
+
+        # collect even if empty; we'll filter in the template render
+        sections.append({"label": label, "failures": failed})
+
+    # If *all* sections are empty or we collected nothing, skip writing.
+    if not sections or all(not s["failures"] for s in sections):
+        return False
+
+    md = _TPL_FAIL_BY_CMD.render(title=title, sections=sections).rstrip() + "\n"
+    return write_gh_step_summary(md)
 
 
-def _to_simple_name_from_testcase(tc: ET.Element) -> str:
-    """
-    Convert a <testcase> into 'path/to/test.py:test_name' format.
-    Prefer the 'file' attribute if available, else fall back to classname.
-    """
+def _to_name_from_testcase(tc: ET.Element) -> str:
     name = tc.attrib.get("name", "")
     file_attr = tc.attrib.get("file")
     if file_attr:
@@ -141,89 +221,19 @@ def _to_simple_name_from_testcase(tc: ET.Element) -> str:
     classname = tc.attrib.get("classname", "")
     parts = classname.split(".") if classname else []
     if len(parts) >= 1:
-        # drop last part if it's a class, treat rest as module path
         mod_parts = parts[:-1] if len(parts) >= 2 else parts
         mod_path = "/".join(mod_parts) + ".py" if mod_parts else "unknown.py"
         return f"{mod_path}:{name}"
     return f"unknown.py:{name or 'unknown_test'}"
 
 
-def _parse_failed_simple(xml_path: Path) -> list[str]:
-    """
-    Parse one XML, return failures as ['tests/a_test.py:test_x', ...].
-    Only include <failure> and <error>.
-    """
+def _parse_failed(xml_path: Path) -> list[str]:
     if not xml_path.exists():
         return []
     tree = ET.parse(xml_path)
     root = tree.getroot()
-    failed = []
+    failed: list[str] = []
     for tc in root.iter("testcase"):
         if any(x.tag in {"failure", "error"} for x in tc):
-            failed.append(_to_simple_name_from_testcase(tc))
+            failed.append(_to_name_from_testcase(tc))
     return failed
-
-
-def summarize_content_from_file(
-    output_dir: Path,
-    freeze_file: str,
-    title: str = "Wheels (pip freeze)",
-    code_lang: str = "",  # e.g. "text" or "ini"
-) -> bool:
-    """
-    Read a text file from output_dir/freeze_file and append it to
-    the GitHub Step Summary as a Markdown code block.
-
-    Returns True if something was written, False otherwise.
-    """
-
-    f = Path(output_dir) / freeze_file
-    if not f.exists():
-        return False
-
-    content = f.read_text(encoding="utf-8").strip()
-    if not content:
-        return False
-    md = []
-    md.append(md_heading(title, 2))
-    md.append(f"```{code_lang}".rstrip())
-    md.append(content)
-    md.append("```")
-
-    return write_gh_step_summary("\n".join(md) + "\n")
-
-
-def summarize_wheels(
-    output_dir: Path,
-    title: str = "Wheels",
-    max_depth: Optional[int] = None,  # None = unlimited
-):
-    """
-    Walk output_dir up to max_depth and list all *.whl files.
-    Grouped as 'package: filename.whl'.
-
-    Args:
-        output_dir: base directory to search
-        title: section title in GH summary
-        max_depth: maximum folder depth relative to output_dir (0 = only top-level)
-    """
-    if not output_dir.exists():
-        return False
-    root = Path(output_dir)
-    lines = [md_heading(title, 2)]
-
-    for dirpath, _, filenames in os.walk(root):
-        depth = Path(dirpath).relative_to(root).parts
-        if max_depth is not None and len(depth) > max_depth:
-            # skip going deeper
-            continue
-
-        for fname in sorted(filenames):
-            if not fname.endswith(".whl"):
-                continue
-            pkg = fname.split("-")[0]
-            relpath = str(Path(dirpath) / fname).replace(str(root) + os.sep, "")
-            lines.append(f"- {pkg}: {relpath}")
-
-    if len(lines) > 1:
-        write_gh_step_summary("\n".join(lines) + "\n")

@@ -17,7 +17,6 @@ from cli.lib.common.gh_summary import (
     gh_summary_path,
     summarize_content_from_file,
     summarize_wheels,
-    write_gh_step_summary,
 )
 from cli.lib.common.path_helper import (
     copy,
@@ -27,7 +26,7 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
-from cli.lib.core.vllm.lib import clone_vllm
+from cli.lib.core.vllm.lib import clone_vllm, summarize_build_info
 
 
 logger = logging.getLogger(__name__)
@@ -182,17 +181,10 @@ class VllmBuildRunner(BaseRunner):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
+        # summarize vllm build info
+        summarize_build_info(vllm_commit)
 
-        write_gh_step_summary("## Build vllm against Pytorch CI")
-        write_gh_step_summary(
-            f"**Vllm Commit**: [{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
-        )
-        torch_sha = os.getenv("GITHUB_SHA")
-
-        if torch_sha:  # only can grab this in github action
-            write_gh_step_summary(
-                f"**Pytorch Commit**: [{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
-            )
+        # summarize vllm build artifacts
         vllm_artifact_dir = inputs.output_dir / "wheels"
         summarize_content_from_file(
             vllm_artifact_dir,

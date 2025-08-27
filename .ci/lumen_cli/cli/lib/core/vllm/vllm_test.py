@@ -131,6 +131,8 @@ class VllmTestRunner(BaseRunner):
                         )
                 else:
                     raise ValueError(f"Unknown test type {self.test_type}")
+        except Exception as e:
+            logger.error("Failed to run vllm test: %s", e)
         finally:
             self.vllm_test_gh_summary(vllm_commit, test_summary_result)
 
