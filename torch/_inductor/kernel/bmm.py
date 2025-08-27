@@ -269,7 +269,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # options to tune from
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        aten_baddbmm.maybe_append_choice(choices, layout=layout, alpha=alpha, beta=beta)
+        aten_baddbmm.maybe_append_choice(
+            choices,
+            input_nodes=kernel_inputs.nodes(),
+            layout=layout,
+            alpha=alpha,
+            beta=beta,
+        )
 
     if use_triton_template(layout):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
