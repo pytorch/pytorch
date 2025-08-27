@@ -24,7 +24,7 @@ from cli.lib.common.pip_helper import (
     run_python,
 )
 from cli.lib.common.utils import ensure_dir_exists, run_command, working_directory
-from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library
+from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library, summarize_build_info
 
 
 logger = logging.getLogger(__name__)
@@ -142,15 +142,7 @@ class VllmTestRunner(BaseRunner):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
-        write_gh_step_summary("## Build vllm against Pytorch CI")
-        write_gh_step_summary(
-            f"**Vllm Commit**: [{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
-        )
-        torch_sha = os.getenv("GITHUB_SHA")
-        if torch_sha:  # only can grab this in github action
-            write_gh_step_summary(
-                f"**Pytorch Commit**: [{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
-            )
+        summarize_build_info(vllm_commit)
         summarize_failures_by_test_command(test_summary_results)
 
     def _install_wheels(self, params: VllmTestParameters):

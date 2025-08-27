@@ -17,6 +17,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ---- Template (title + per-command failures) ----
+_TPL_FAIL_BY_CMD = Template(
+    textwrap.dedent("""\
+    ## {{ title }}
+
+    {%- for section in sections if section.failures %}
+    ### Test Command: {{ section.label }}
+
+    {%- for f in section.failures %}
+    - {{ f }}
+    {%- endfor %}
+
+    {%- endfor %}
+""")
+)
+
 _TPL_CONTENT = Template(
     textwrap.dedent("""\
     ## {{ title }}
@@ -49,23 +66,6 @@ _TPL_TABLE = Template(
     {%- else %}
     _(no data)_
     {%- endif %}
-""")
-)
-
-
-# ---- Template (title + per-command failures) ----
-_TPL_TEST_FAIL_BY_CMD = Template(
-    textwrap.dedent("""\
-    ## {{ title }}
-
-    {%- for section in sections if section.failures %}
-    ### Test Command: {{ section.label }}
-
-    {%- for f in section.failures %}
-    - {{ f }}
-    {%- endfor %}
-
-    {%- endfor %}
 """)
 )
 
@@ -160,22 +160,6 @@ def render_content(
     md = tpl.render(title=title, content=content, lang=lang)
     return md
 
-
-# ---- Template (title + per-command failures) ----
-_TPL_FAIL_BY_CMD = Template(
-    textwrap.dedent("""\
-    ## {{ title }}
-
-    {%- for section in sections if section.failures %}
-    ### Test Command: {{ section.label }}
-
-    {%- for f in section.failures %}
-    - {{ f }}
-    {%- endfor %}
-
-    {%- endfor %}
-""")
-)
 
 
 def summarize_failures_by_test_command(
