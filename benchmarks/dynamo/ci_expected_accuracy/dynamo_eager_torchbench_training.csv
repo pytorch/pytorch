@@ -234,7 +234,7 @@ soft_actor_critic,pass,6
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,15
 
 
 
@@ -286,7 +286,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,pass,35
 
 
 
