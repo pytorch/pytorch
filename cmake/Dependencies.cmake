@@ -569,6 +569,14 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
     endif()
 
+    # Update xnnpack memory target name. It has conflict with ProtoBuf.
+    if(NOT EXISTS "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag")
+      file(READ "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" FILE_CONTENTS)
+      string(REPLACE "memory " "xnnpack_memory " FILE_CONTENTS "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag" "xnnpack_memory")
+    endif()
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
