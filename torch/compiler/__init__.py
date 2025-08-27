@@ -656,15 +656,6 @@ def load_compiled_function(file: io.IOBase):
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
-
-    Example::
-
-        >>> def foo(x):
-        >>>     return x + 1
-        >>>
-        >>> compiled_fn = torch.compile(foo).aot_compile(...)
-        >>> compiled_fn.save_compiled_function("foo.pt")
-        >>> loaded_fn = torch.compiler.load_compiled_function("foo.pt")
     """
     from torch._dynamo.aot_compile import CompileArtifacts
 

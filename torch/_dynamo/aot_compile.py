@@ -155,7 +155,8 @@ def aot_compile_fullgraph(
         else:
             compiler_fn = backend
         raise RuntimeError(
-            f"Compilation result {compiled_fn} produced from backend {compiler_fn} does not implement SerializableCallable."
+            f"Compiled function type {type(compiled_fn)} (produced "
+            + f"from backend {compiler_fn}) does not implement SerializableCallable."
         )
     compile_artifacts = CompileArtifacts(
         signature=signature,
