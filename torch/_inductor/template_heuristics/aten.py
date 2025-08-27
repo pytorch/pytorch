@@ -77,9 +77,11 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
         alpha = kernel_inputs.get_scalar("alpha")
         beta = kernel_inputs.get_scalar("beta")
-        kwargs["alpha"] = alpha
-        kwargs["beta"] = beta
-        return kwargs
+        return {
+            **kwargs,
+            "alpha": alpha,
+            "beta": beta,
+        }
 
 
 @register_template_heuristic(aten_bias_addmm.uid, "cuda", op_name="addmm")
