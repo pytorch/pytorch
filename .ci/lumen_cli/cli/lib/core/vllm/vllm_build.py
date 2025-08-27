@@ -182,26 +182,22 @@ class VllmBuildRunner(BaseRunner):
         if not gh_summary_path():
             return logger.info("Skipping, not detect GH Summary env var....")
         logger.info("Generate GH Summary ...")
-        vllm_sha_url = f"[{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
+
+        write_gh_step_summary("## Build vllm against Pytorch CI")
         write_gh_step_summary(
-            f"""
-            ## Build vllm against Pytorch CI
-            **Vllm Commit**: `{vllm_sha_url}`
-            """
+            f"**Vllm Commit**: [{vllm_commit}](https://github.com/vllm-project/vllm/commit/{vllm_commit})"
         )
         torch_sha = os.getenv("GITHUB_SHA")
+
         if torch_sha:  # only can grab this in github action
-            torch_sha_url = (
-                f"[{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
-            )
             write_gh_step_summary(
-                f"""
-             **Pytorch Commit**: `{torch_sha_url}`
-             """
+                f"**Pytorch Commit**: [{torch_sha}](https://github.com/pytorch/pytorch/commit/{torch_sha})]"
             )
         vllm_artifact_dir = inputs.output_dir / "wheels"
         summarize_content_from_file(
-            vllm_artifact_dir, "build_summary.txt", title="Vllm build env pip p summary"
+            vllm_artifact_dir,
+            "build_summary.txt",
+            title="Vllm build env pip package summary",
         )
         summarize_wheels(
             inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts"
