@@ -172,7 +172,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   // The logic below follows what TensorIterator uses in its logic:
   //   1. Fast_set_up is the short-cut to identify a. channels_last and
   //      b. contiguous format, which is what we have in the below logic.
-  //   2. In more generla cases, it does best effort to preserve permutatoin.
+  //   2. In more general cases, it does best effort to preserve permutatoin.
   if (is_channels_last_strides_2d(sizes, strides) || is_channels_last_strides_3d(sizes, strides)) {
     // case 1.a. short cut channels last
     std::iota(stride_indices.rbegin() + 1, stride_indices.rend() - 1, 2);

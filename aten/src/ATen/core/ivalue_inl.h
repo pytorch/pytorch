@@ -990,7 +990,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
-      // log errors and thats why we have this log here.
+      // log errors and that's why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
@@ -1501,7 +1501,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // However, the CompilationUnit holds ownership of the type's graphs, so
   // inserting a constant object into a Graph would create a reference cycle if
   // that constant object held a shared_ptr to its CU. For these objects we
-  // instatiate them with non-owning references to its CU
+  // instantiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }

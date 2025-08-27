@@ -931,6 +931,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_mapping_proxy_ban_muation_on_dict_realization(self):
+        def fn(x):
+            class Foo:
+                b = 4
+
+            d = dict(Foo.__dict__)
+            y = torch.sin(x) * d["b"]
+            # This should cause a graph break, because otherwise the
+            # Foo.__dict__ will not be updated.
+            Foo.bar = 3
+            return Foo, y * Foo.__dict__["bar"]
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        foo1, ref = fn(x)
+        foo2, res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(foo1.bar, foo2.bar)
+
     def test_overridden_get_item(self):
         class MyDict(dict):
             def __init__(self, *args, **kwargs):

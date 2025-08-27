@@ -115,7 +115,7 @@ struct CUDACachingHostAllocatorImpl
   void free_block(Block* block) override {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
     bool use_register = false;

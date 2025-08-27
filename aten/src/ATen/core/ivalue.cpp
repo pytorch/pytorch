@@ -357,7 +357,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
-      // Unitialized ivalues show up in no-ops when the compiler can prove a
+      // Uninitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
   }
