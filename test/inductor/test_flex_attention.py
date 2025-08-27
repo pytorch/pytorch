@@ -50,8 +50,8 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
