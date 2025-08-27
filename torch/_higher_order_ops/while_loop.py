@@ -735,6 +735,17 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                 else:
                     loop_count = out.size(0)
         assert loop_count is not None
+
+        # Remove the loop_count from pending_fresh_unbacked_symbols
+        # because it's not part of forward output and it's impossible
+        # to bind it to a proxy in forward graph anyways.
+        if (
+            isinstance(loop_count, torch.SymInt)
+            and (shape_env := loop_count.node.shape_env)
+            and loop_count in shape_env.pending_fresh_unbacked_symbols
+        ):
+            shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
+
         # Even when body function is not executed, we clone and unsqueeze the input
         # this avoids the aliasing
         torch._check(loop_count >= 1)

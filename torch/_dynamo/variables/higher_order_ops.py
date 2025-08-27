@@ -520,31 +520,14 @@ def _call_while_loop(
         assert isinstance(flat_variable, TupleVariable), flat_variable
         return flat_variable
     else:
-        with tx.output.fake_mode.shape_env.ignore_fresh_unbacked_symbols():
-
-            def _get_example_value(proxy):
-                return (
-                    proxy.node.meta["example_value"]
-                    if isinstance(proxy, torch.fx.Proxy)
-                    else proxy
-                )
-
-            example_operands = [_get_example_value(proxy) for proxy in operands_proxy]
-            example_addis = [
-                _get_example_value(proxy) for proxy in additional_inputs_proxy
-            ]
-            example_values = self.value(
-                cond_gm, body_gm, example_operands, example_addis
-            )
-
-            return _call_function_and_unflatten_output(
-                tx,
-                self.value,
-                p_args,
-                {},
-                example_values,
-                body_treespec,
-            )
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            {},
+            None,
+            body_treespec,
+        )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):

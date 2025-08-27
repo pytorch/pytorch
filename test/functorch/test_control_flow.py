@@ -5540,16 +5540,9 @@ class GraphModule(torch.nn.Module):
 
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
-        while_loop_with_checkpoint = torch.ops.higher_order.while_loop_with_checkpoint(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
-
-        getitem_4: "i64[u0]" = while_loop_with_checkpoint[2]
-        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_4, 0);  getitem_4 = None
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
-
-        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
-        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-        getitem: "i64[]" = while_loop_with_checkpoint[0]
-        getitem_1: "f32[2, 2]" = while_loop_with_checkpoint[1];  while_loop_with_checkpoint = None
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
+        getitem: "i64[]" = while_loop[0]
+        getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
         return (getitem, getitem_1)
 
     class cond_fn_0(torch.nn.Module):
@@ -8181,21 +8174,23 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s77, s27, 2, 2, 3, child), (s27, s77));  cond_fn_0 = body_fn_0 = s77 = s27 = child = None
-        getitem_4: "Sym(u10)" = while_loop[0]
-        getitem_5: "Sym(u11)" = while_loop[1]
-        getitem_6: "Sym(u12)" = while_loop[2]
-        getitem_7: "Sym(u13)" = while_loop[3]
-        getitem_8: "Sym(u14)" = while_loop[4]
+
+        getitem_10: "Sym(u10)" = while_loop[0]
+        getitem_11: "Sym(u11)" = while_loop[1]
+        getitem_12: "Sym(u12)" = while_loop[2]
+        getitem_13: "Sym(u13)" = while_loop[3]
+        getitem_14: "Sym(u14)" = while_loop[4]
+
         out_x: "f32[s77, s27]" = while_loop[5];  while_loop = None
 
-        add: "Sym(u12 + 1)" = getitem_6 + 1
-        add_1: "Sym(u13 + 1)" = getitem_7 + 1
-        add_2: "Sym(u14 + 1)" = getitem_8 + 1
+        add: "Sym(u12 + 1)" = getitem_12 + 1
+        add_1: "Sym(u13 + 1)" = getitem_13 + 1
+        add_2: "Sym(u14 + 1)" = getitem_14 + 1
 
-        add_3: "f32[s77, s27]" = getitem_6 + out_x;  getitem_6 = None
-        add_4: "f32[s77, s27]" = getitem_7 + out_x;  getitem_7 = None
-        add_5: "f32[s77, s27]" = getitem_8 + out_x;  getitem_8 = None
-        return (getitem_4, getitem_5, add, add_1, add_2, add_3, add_4, add_5, out_x)
+        add_3: "f32[s77, s27]" = getitem_12 + out_x;  getitem_12 = None
+        add_4: "f32[s77, s27]" = getitem_13 + out_x;  getitem_13 = None
+        add_5: "f32[s77, s27]" = getitem_14 + out_x;  getitem_14 = None
+        return (getitem_10, getitem_11, add, add_1, add_2, add_3, add_4, add_5, out_x)
 
     class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child_1: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
