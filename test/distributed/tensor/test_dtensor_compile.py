@@ -20,7 +20,15 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_module,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -86,6 +94,33 @@ aot_eager_graph = aot_autograd(
     bw_compiler=bw_compiler,
     partition_fn=min_cut_rematerialization_partition,
 )
+
+
+def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
+    """
+    Shards on the given dimension if possible, else replicate
+    Args:
+        mod: (nn.Module) Module to shard or replicate
+        shard_dim: (int) Dimension to shard on if possible
+        device_mesh: (DeviceMesh) 1D Device Mesh
+
+    Returns:
+        Sharded DTensor
+    """
+
+    def shard_module_params(name, module, device_mesh):
+        for name, param in module.named_parameters():
+            placement = Replicate()
+            if shard_dim < len(param.size()):
+                placement = Shard(shard_dim)
+            dist_param = torch.nn.Parameter(
+                distribute_tensor(param, device_mesh, [placement])
+            )
+            name = name.split(".")[-1]
+            module.register_parameter(name, dist_param)
+
+    sharded_mod = distribute_module(mod, device_mesh, shard_module_params)
+    return sharded_mod
 
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
@@ -1178,6 +1213,29 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)
+
+    @with_comms
+    def test_compile_embedding_redistribute(self):
+        mesh = self.build_device_mesh()
+
+        class Network(nn.Module):
+            def __init__(self, embedding, mesh):
+                super().__init__()
+                self.mesh = mesh
+                self.embedding = _apply_sharding(embedding, 0, self.mesh)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                x = x.redistribute(self.mesh, [Shard(1)])
+                return x
+
+        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        ref_out = embedding(inp)
+        sharded_net = torch.compile(Network(embedding, mesh))
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        output = sharded_net(replicated_inp)
+        self.assertEqual(output.full_tensor(), ref_out)
 
 
 if __name__ == "__main__":
