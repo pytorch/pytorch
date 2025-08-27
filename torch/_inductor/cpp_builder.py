@@ -1126,15 +1126,8 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
             str(
                 (
                     Path(sysconfig.get_path("include", scheme="nt")).parent / "libs"
-                ).absolute()  # python[ver].lib
-            ),
-            str(
-                (
-                    Path(sysconfig.get_path("include", scheme="nt")).parent
-                    / "Library"
-                    / "lib"
-                ).absolute()  # install python librarys location, such as intel-openmp
-            ),
+                ).absolute()
+            )
         ]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
@@ -1300,10 +1293,11 @@ def _get_openmp_args(
             libs.append("libiomp5md")
             perload_icx_libomp_win(cpp_compiler)
         else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
             cflags.append("openmp")
-            cflags.append("openmp:experimental")
-            libs.append("libiomp5md")  # intel-openmp
-            ldflags.append("nodefaultlib:vcomp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
