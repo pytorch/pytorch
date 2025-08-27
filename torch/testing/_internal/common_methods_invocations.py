@@ -19562,7 +19562,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestDeviceUtils', 'test_device_mode_ops'),
                # https://github.com/intel/torch-xpu-ops/issues/1964
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type='xpu'))),
-               
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
@@ -24676,9 +24675,7 @@ python_ref_db = [
         torch_opinfo_name="std_mean",
         skips=(
             # https://github.com/intel/torch-xpu-ops/issues/1859
-            DecorateInfo(
-                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref', device_type='xpu',
-                dtypes=[torch.float64, torch.complex128,]),
+            skipXPU,
         ),
     ),
     ReductionPythonRefInfo(
@@ -24768,12 +24765,7 @@ python_ref_db = [
         validate_view_consistency=False,
         skips=(
             # https://github.com/intel/torch-xpu-ops/issues/1859
-            DecorateInfo(
-                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref', device_type='xpu',
-                dtypes=[torch.float64, torch.complex128,]),
-            DecorateInfo(
-                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor', device_type='xpu',
-                dtypes=[torch.float64, torch.complex128,]),
+            skipXPU,
         ),
     ),
     #
