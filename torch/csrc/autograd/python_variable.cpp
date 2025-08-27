@@ -633,6 +633,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   HANDLE_TH_ERRORS
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
+  // NOTE: Updates to this function need to be synced with
+  // THPVariable_make_dtensor below.
 
   // cls: Python subclass type
   // size, strides, storage_offset, memory_format, dtype: self-explanatory
@@ -767,6 +769,81 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
+  return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
+  END_HANDLE_TH_ERRORS
+}
+
+// DTensor-specific variant of make_wrapper_subclass to minimize DTensor
+// overhead.
+static PyObject* THPVariable_make_dtensor(
+    PyObject*,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      // REVIEW: is requiring strides correct?
+      "_make_dtensor(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
+      "Tensor local_tensor, bool requires_grad)",
+  });
+  ParsedArgs<5> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+
+#ifndef NDEBUG
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
+      ((PyTypeObject*)cls)->tp_name,
+      " must define __torch_dispatch__");
+#endif
+
+  const auto& local_tensor = r.tensor(3);
+  const auto options = TensorOptions()
+                           .dtype(local_tensor.dtype())
+                           .device(local_tensor.device())
+                           .layout(local_tensor.layout());
+
+  Tensor tensor;
+  {
+    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+    tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+    auto sym_sizes = r.symintlist(1);
+    auto sym_strides = r.symintlist(2);
+
+    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+        sym_sizes, sym_strides, dtype_itemsize, 0);
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
+    Storage storage{
+        Storage::use_byte_size_t{},
+        size_bytes,
+        /*allocator=*/c10::GetAllocator(c10::kMeta),
+        /*resizable=*/true};
+    // TODO: constructor should probably accept data pointer
+    storage.set_data_ptr_noswap(at::DataPtr{nullptr, local_tensor.device()});
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    const auto tensor_keys = local_tensor.key_set();
+    if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
+      keys = keys.add(c10::DispatchKey::Conjugate);
+    }
+    if (tensor_keys.has(c10::DispatchKey::Negative)) {
+      keys = keys.add(c10::DispatchKey::Negative);
+    }
+    tensor = at::detail::make_tensor<TensorImpl>(
+        std::move(storage), keys, options.dtype());
+
+    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides);
+  }
+  tensor.set_requires_grad(r.toBool(4));
   return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
   END_HANDLE_TH_ERRORS
 }
@@ -1659,6 +1736,10 @@ static PyMethodDef extra_methods[] = {
      nullptr},
     {"_make_wrapper_subclass",
      castPyCFunctionWithKeywords(THPVariable_make_wrapper_subclass),
+     METH_STATIC | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_make_dtensor",
+     castPyCFunctionWithKeywords(THPVariable_make_dtensor),
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},

@@ -270,23 +270,13 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-        # _dispatch_key_set_with_conjugate_and_negative_corresponding_to_tensor exists
-        # to support this case, because manipulating DispatchKeySet via pybind11 is
-        # disappointingly slow. Reduces DTensor overhead as observed in perf by a couple
-        # percent. (This still pybinds one DispatchKeySet; it would be even faster to
-        # fuse _make_wrapper_subclass with this operation, but that's more invasive.)
-        extra_dispatch_keys = torch._C._dispatch_key_set_with_conjugate_and_negative_corresponding_to_tensor(
-            local_tensor
-        )
-        r = torch.Tensor._make_wrapper_subclass(
+
+        r = torch.Tensor._make_dtensor(
             cls,
             spec.tensor_meta.shape,
-            strides=spec.tensor_meta.stride,
-            dtype=local_tensor.dtype,
-            device=local_tensor.device,
-            layout=local_tensor.layout,
-            requires_grad=requires_grad,
-            _extra_dispatch_keys=extra_dispatch_keys,
+            spec.tensor_meta.stride,
+            local_tensor,
+            requires_grad,
         )
 
         r._spec = spec
