@@ -265,10 +265,12 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
 
     result = []
     for r in ranges:
-        if r.step > 1:
-            result.append(f"({r.start}:{r.stop}:{r.step}")
-        else:
+        if len(r) == 1:
+            result.append(f"{r.start}")
+        elif r.step == 1:
             result.append(f"{r.start}:{r.stop}")
+        else:
+            result.append(f"({r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 
 

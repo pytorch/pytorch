@@ -167,7 +167,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         log_str = _check_rng_sync(generator, group)
         FileCheck().check("Generator desync detected").check("Ranks").check("0").check(
             "1"
-        ).check("2-3").run(log_str)
+        ).check("2:4").run(log_str)
 
 
 class TestUtils(TestCase):
@@ -203,6 +203,10 @@ class TestUtils(TestCase):
         self.assertEqual(
             _summarize_ranks([1, 2, 3, 6, 7, 8, 10, 12, 14, 16]),
             "1:4,6:9,10:18:2",
+        )
+        self.assertEqual(
+            _summarize_ranks([1]),
+            "1",
         )
 
 
