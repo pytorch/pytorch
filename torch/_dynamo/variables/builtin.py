@@ -308,6 +308,7 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
+            complex,
             divmod,
             float,
             getattr,
