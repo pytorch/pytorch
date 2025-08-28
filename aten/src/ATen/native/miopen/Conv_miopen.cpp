@@ -1,9 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_ROCM_ENABLED
-
-#if AT_ROCM_ENABLED()
-
 #include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
+#include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -11,6 +9,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
 #include <ATen/ops/miopen_convolution_add_relu_native.h>
 #include <ATen/ops/miopen_convolution_native.h>
 #include <ATen/ops/miopen_convolution_relu_native.h>
@@ -22,69 +21,150 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#include <ATen/Config.h>
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
+#include <ATen/cuda/CUDAConfig.h>
 
-#include <ATen/hip/EmptyTensor.h>
+#if !AT_ROCM_ENABLED()
+
+namespace at { namespace native {
+
+// See Note [ATen preprocessor philosophy]
+
+at::Tensor miopen_convolution(
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_backward_input(
+    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution_backward_input: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_backward_weight(
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_backward_bias(
+    const at::Tensor& grad_output) {
+  TORCH_CHECK(false, "miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  TORCH_CHECK(false, "miopen_convolution_backward: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_transpose(
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution_transpose: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_transpose_backward_input(
+    const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_transpose_backward_weight(
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  TORCH_CHECK(false, "miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution(
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_depthwise_convolution: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution_backward_input(
+    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_depthwise_convolution_backward_input: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution_backward_weight(
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  TORCH_CHECK(false, "miopen_depthwise_convolution_backward_weight: ATen not compiled with MIOpen support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  TORCH_CHECK(false, "miopen_depthwise_convolution_backward: ATen not compiled with MIOpen support");
+}
+
+
+at::Tensor miopen_convolution_add_relu(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& z,
+    const std::optional<Scalar>& alpha, const std::optional<Tensor>& bias, IntArrayRef stride,
+    IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  TORCH_CHECK(false, "miopen_convolution_add_relu: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_relu(
+    const at::Tensor& input, const at::Tensor& weight, const std::optional<Tensor>& bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  TORCH_CHECK(false, "miopen_convolution_relu: ATen not compiled with MIOpen support");
+}
+
+}}
+
+#else  // AT_ROCM_ENABLED
+
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
-#include <ATen/native/ConvUtils.h>
-#include <ATen/native/utils/ParamsHash.h>
+#include <ATen/hip/EmptyTensor.h>
 
 #include <ATen/TensorUtils.h>
-#include <c10/hip/HIPCachingAllocator.h>
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/ParamsHash.h>
 #include <c10/util/irange.h>
 
-#include <stdint.h>
-#include <algorithm>
+#include <c10/hip/HIPCachingAllocator.h>
+
 #include <functional>
 #include <iterator>
+#include <sstream>
+#include <algorithm>
 #include <memory>
 #include <mutex>
-#include <sstream>
+#include <stdint.h>
 #include <unordered_map>
-#include <vector>
 
 #define AT_MIOPEN_MAX_SOLUTIONS 10
 
-namespace at::native {
+namespace at { namespace native {
 
-// ConvPlaceholders.cpp contains placeholder implementation of miopen
-// convolution when miopen is not enabled. These operators only raises
-// errors, and do no real computation. These operators are implemented
-// using current operators.
-//
-// NOTE [ Convolution design ]
-//
-// miopen convolutions does not handle bias. Bias is handled outside.
-// However, bias is passed as an optional Tensor in torch's public miopen APIs.
-//
-// The general strategy:
-//
-//    - miopen_convolution (Tensor)
-//      Entry points for clients
-//
-//    - miopen_convolution_forward (TensorArg)
-//      Entry point, which may be reused between regular
-//      convolution and transposed convolution.
-//
-//    - raw_miopen_convolution_forward_out (Tensor)
-//      Directly invokes MIOpen.
-//
-// There are a few reasons raw should never be directly exposed
-// via ATen:
-//
-//    - It takes output as a parameter (this should be computed!)
-//    - It doesn't do input checking
-//    - It doesn't resize output (it is assumed to be correctly sized)
-//
-// Where does argument checking happen?  Here's the division of
-// responsibility:
-//  - Things that happen in at::Tensor
-//    - TensorArg allocation
-//  - Things that happen in TensorArg
-//    - Check arguments (type, GPU, shape)
+// See NOTE [ Convolution design ] in aten/src/ATen/native/cudnn/ConvShared.cpp
 
 // ---------------------------------------------------------------------
 //
@@ -94,8 +174,8 @@ namespace at::native {
 
 // This POD struct is used to let us easily compute hashes of the
 // parameters
-struct ConvolutionParams {
-  c10::DeviceIndex device_id; //This is needed to distinguish between miopen handles of multiple gpus.
+struct ConvolutionParams
+{
   miopenHandle_t handle;
   miopenDataType_t dataType;
   int input_size[2 + max_dim];
@@ -108,6 +188,7 @@ struct ConvolutionParams {
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  c10::DeviceIndex device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
@@ -138,16 +219,15 @@ void setConvolutionParams(
     at::MemoryFormat memory_format) {
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
-  params->device_id = at::cuda::current_device();
   params->dataType = dataType;
   params->handle = handle;
   // ASSERT(weight.dim() == input.dim())
   params->input_dim = input.dim();
   params->memory_format = memory_format;
-  for (int i = 0; i != params->input_dim; ++i) {
-    params->input_size[i] = (int)input.sizes()[i];
-    params->weight_size[i] = (int)weight.sizes()[i];
-    params->input_stride[i] = (int)input.stride(i);
+  for (int i = 0; i != input.dim(); ++i) {
+    params->input_size[i] = (int) input.size(i);
+    params->input_stride[i] = (int) input.stride(i);
+    params->weight_size[i] = (int) weight.size(i);
   }
   // ASSERT(padding.size() == stride.size())
   // ASSERT(padding.size() == dilation.size())
@@ -158,6 +238,7 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  params->device_id = at::cuda::current_device();
 }
 
 std::string repro_from_args(const ConvolutionParams& params) {
@@ -226,14 +307,11 @@ struct ConvolutionArgs {
   ConvolutionParams params;
   TensorDescriptor idesc, odesc;
   FilterDescriptor wdesc;
-  const Tensor &input, output, weight;
+  const Tensor& input, output, weight;
   ConvolutionDescriptor cdesc;
 
-  ConvolutionArgs(
-      const Tensor& input,
-      const Tensor& output,
-      const Tensor& weight)
-      : input(input), output(output), weight(weight) {}
+  ConvolutionArgs(const Tensor& input, const Tensor& output, const Tensor& weight) : input(input), output(output), weight(weight) {
+  }
 };
 
 std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
@@ -260,12 +338,7 @@ std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
 template <typename T>
 struct BenchmarkCache {
   std::mutex mutex;
-  std::unordered_map<
-      ConvolutionParams,
-      T,
-      ParamsHash<ConvolutionParams>,
-      ParamsEqual<ConvolutionParams>>
-      map;
+  std::unordered_map<ConvolutionParams, T, ParamsHash<ConvolutionParams>, ParamsEqual<ConvolutionParams>> map;
 
   bool find(const ConvolutionParams& params, T* results) {
     std::lock_guard<std::mutex> guard(mutex);
@@ -308,55 +381,56 @@ struct Workspace {
   void* data;
 };
 
-template <typename algo_t>
-struct algorithm_search {};
+template<typename algo_t>
+struct algorithm_search {
+};
 
 size_t getWorkspaceSize(
-    const ConvolutionArgs& args,
-    const miopenConvFwdAlgorithm_t) {
-  size_t sz = 0;
-  MIOPEN_CHECK(miopenConvolutionForwardGetWorkSpaceSize(
-      args.handle,
-      args.wdesc.desc(),
-      args.idesc.desc(),
-      args.cdesc.desc(),
-      args.odesc.desc(),
-      &sz));
-  return sz;
+    const ConvolutionArgs& args, const miopenConvFwdAlgorithm_t)
+{
+    size_t sz = 0;
+    MIOPEN_CHECK(miopenConvolutionForwardGetWorkSpaceSize(
+        args.handle,
+        args.wdesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
+        &sz));
+    return sz;
 }
 size_t getWorkspaceSize(
-    const ConvolutionArgs& args,
-    const miopenConvBwdDataAlgorithm_t) {
-  size_t sz = 0;
-  MIOPEN_CHECK(miopenConvolutionBackwardDataGetWorkSpaceSize(
-      args.handle,
-      args.odesc.desc(),
-      args.wdesc.desc(),
-      args.cdesc.desc(),
-      args.idesc.desc(),
-      &sz));
-  return sz;
+    const ConvolutionArgs& args, const miopenConvBwdDataAlgorithm_t)
+{
+    size_t sz = 0;
+    MIOPEN_CHECK(miopenConvolutionBackwardDataGetWorkSpaceSize(
+        args.handle,
+        args.odesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
+        &sz));
+    return sz;
 }
 size_t getWorkspaceSize(
-    const ConvolutionArgs& args,
-    const miopenConvBwdWeightsAlgorithm_t) {
-  size_t sz = 0;
-  MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-      args.handle,
-      args.odesc.desc(),
-      args.idesc.desc(),
-      args.cdesc.desc(),
-      args.wdesc.desc(),
-      &sz));
-  return sz;
+    const ConvolutionArgs& args, const miopenConvBwdWeightsAlgorithm_t)
+{
+    size_t sz = 0;
+    MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
+        args.handle,
+        args.odesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
+        &sz));
+    return sz;
 }
 
-template <typename perf_t>
+template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
   return perfResults[0];
 }
 
-template <>
+template<>
 struct algorithm_search<miopenConvFwdAlgorithm_t> {
   using perf_t = miopenConvAlgoPerf_t;
   using algo_t = miopenConvFwdAlgorithm_t;
@@ -429,7 +503,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   }
 };
 
-template <>
+template<>
 struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   using perf_t = miopenConvAlgoPerf_t;
   using algo_t = miopenConvBwdDataAlgorithm_t;
@@ -502,7 +576,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   }
 };
 
-template <>
+template<>
 struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   using perf_t = miopenConvAlgoPerf_t;
   using algo_t = miopenConvBwdWeightsAlgorithm_t;
@@ -575,13 +649,22 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   }
 };
 
-template <typename algo_t>
+template<typename algo_t>
 void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
   auto& wsscache = search::wsscache();
 
   if (cache.find(args.params, algo)) {
+    return;
+  }
+
+  if (args.params.deterministic && !benchmark) {
+    *algo = search::DEFAULT_ALGO;
+  }
+
+  if (cache.find(args.params, algo)) {
+    // re-check cache since another thread may have benchmarked the algorithm
     return;
   }
 
@@ -592,11 +675,12 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   wsscache.insert(args.params, perfResults.memory);
 
   if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
-    c10::hip::HIPCachingAllocator::emptyCache();
+      c10::hip::HIPCachingAllocator::emptyCache();
   }
+
 }
 
-template <typename algo_t>
+template<typename algo_t>
 Workspace chooseAlgorithm(
     const ConvolutionArgs& args,
     bool benchmark,
@@ -622,7 +706,7 @@ Workspace chooseAlgorithm(
   }
 }
 
-template <typename algo_t>
+template<typename algo_t>
 Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
 {
   using search = algorithm_search<algo_t>;
@@ -640,17 +724,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   }
 }
 
-// NOTE [ raw_miopen_convolution_forward_out ]
-//
-//    - raw_miopen_convolution_forward_out (Tensor)
-//      Functiont that handles tensors that are too large to use 32bit indexing.
-//      It just split the tensor and dispatches to
-//      `raw_miopen_convolution_forward_out_32bit`.
-//
-//    - raw_miopen_convolution_forward_out_32bit (Tensor)
-//      Low level function which invokes MIOpen, and takes an output
-//      tensor which is directly written to (thus _out).
-//
+// See NOTE [ raw_cudnn_convolution_forward_out ] in aten/src/ATen/native/cudnn/Conv_v7.cpp
 
 // ---------------------------------------------------------------------
 //
@@ -843,8 +917,7 @@ void raw_miopen_convolution_forward_out_32bit(
 
   ConvolutionArgs args{input, output, weight};
   args.handle = getMiopenHandle();
-  at::MemoryFormat memory_format =
-      miopen_conv_suggest_memory_format(input, weight);
+  at::MemoryFormat memory_format = miopen_conv_suggest_memory_format(input, weight);
   setConvolutionParams(
       &args.params,
       args.handle,
@@ -2051,6 +2124,6 @@ REGISTER_CUDA_DISPATCH(miopen_convolution_backward_stub, &miopen_convolution_bac
 REGISTER_CUDA_DISPATCH(miopen_convolution_transpose_backward_stub, &miopen_convolution_transpose_backward)
 REGISTER_CUDA_DISPATCH(miopen_depthwise_convolution_backward_stub, &miopen_depthwise_convolution_backward)
 
-}  // namespace
+}}  // namespace
 
-#endif // AT_ROCM_ENABLED()
+#endif
