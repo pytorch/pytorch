@@ -7,6 +7,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/LinearCrossEntropyLoss.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
 
@@ -621,4 +622,21 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cuda)
       reduction,
       ignore_index);
 }
+
+Tensor linear_cross_entropy_loss_cuda(
+    Tensor const& input,
+    Tensor const& target,
+    Tensor const& linear_weight,
+    std::optional<Tensor> const& bias,
+    std::optional<Tensor> const& cross_entropy_weight,
+    std::string_view chunking_strategy,
+    int64_t reduction,
+    int64_t ignore_index,
+    double label_smoothing) {
+  auto chunking_strategy_ = LinearCrossEntropyChecker::check(
+      input, target, linear_weight, bias, cross_entropy_weight, chunking_strategy, label_smoothing);
+  Tensor tensor;
+  return tensor;
+}
+
 }  // namespace at::native
