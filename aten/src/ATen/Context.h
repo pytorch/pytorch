@@ -319,13 +319,7 @@ class TORCH_API Context {
   //
   // * Throw an error when `Context::deterministicAlgorithms()` is true. Most
   //   of the time, this should be accomplished by calling
-  //   `at::globalContext().alertNotDeterminstic()`.  However, if the
-  //   nondeterministic behavior is caused by the CuBLAS workspace
-  //   configuration in CUDA >= 10.2,
-  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should be
-  //   called instead (in this case, a comment explaining why the operation is
-  //   nondeterministic is not necessary). See below for details on these
-  //   methods.
+  //   `at::globalContext().alertNotDeterminstic().
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
@@ -348,12 +342,6 @@ class TORCH_API Context {
 
   // Throws an error if `Context::deterministicAlgorithms()` is true
   static void alertNotDeterministic(std::string_view const& caller);
-
-  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
-  // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
-  // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-  void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
   void setFloat32Precision(
@@ -436,7 +424,6 @@ class TORCH_API Context {
   }
 
  private:
-  static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
