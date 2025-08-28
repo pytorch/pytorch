@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
-from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -28,16 +27,20 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
+    add_preprocessing_fn,
     AlgorithmSelectorCache,
     clear_feedback_savers,
+    clear_preprocessing_fns,
+    ExternKernelCaller,
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
+from torch._inductor.template_heuristics.registry import override_template_heuristics
+from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -1271,16 +1274,14 @@ class TestMaxAutotune(TestCase):
 
         # Force only decomposeK choice
         with (
-            mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
-            ) as base_mm_mock,
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
             ) as decompose_mock,
         ):
-            mm_configs_mock = MagicMock()
-            mm_configs_mock.return_value = []
-            base_mm_mock.return_value = mm_configs_mock
             decompose_mock.return_value = True
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
@@ -1660,7 +1661,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_registry.get_template_heuristic"
+            "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
             config_heuristics = CUDAMMTemplateConfigHeuristic()
 
@@ -1698,6 +1699,112 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
+    @parametrize("op", ("mm", "addmm", "bmm", "baddbmm", "mm_plus_mm"))
+    @parametrize("max_autotune", (False, True))
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+    )
+    def test_autotune_gemm_choice_validation(self, op, max_autotune):
+        def generate_inputs_and_func(op_name):
+            # Base config with just x and w
+            base_inputs = [
+                torch.randn(128, 256, device=GPU_TYPE),
+                torch.randn(256, 128, device=GPU_TYPE),
+            ]
+            func = torch.mm
+            if op_name == "mm":
+                # default
+                pass
+            elif op_name == "addmm":
+                # Add bias for addmm
+                base_inputs = [torch.randn(128, device=GPU_TYPE)] + base_inputs
+                func = torch.addmm
+            elif op_name in ["bmm", "baddbmm"]:
+                # Override for batch dimensions
+                base_inputs[0] = torch.randn(4, 128, 256, device=GPU_TYPE)
+                base_inputs[1] = torch.randn(4, 256, 128, device=GPU_TYPE)
+                func = torch.bmm
+                if op_name == "baddbmm":
+                    # Add batch bias
+                    base_inputs = [
+                        torch.torch.randn(4, 128, 128, device=GPU_TYPE)
+                    ] + base_inputs
+                    func = torch.baddbmm
+            elif op_name == "mm_plus_mm":
+                # Add second matrix pair
+                base_inputs += [
+                    torch.randn(128, 256, device=GPU_TYPE),
+                    torch.randn(256, 128, device=GPU_TYPE),
+                ]
+
+                def mmpmm(x, w, x2, w2):
+                    return torch.mm(x, w) + torch.mm(x2, w2)
+
+                func = mmpmm
+            else:
+                raise ValueError(f"Unsupported op: {op_name}")
+            return base_inputs, func
+
+        choice_types_seen = set()
+
+        def choice_validator(choices):
+            for choice in choices:
+                choice_types_seen.add(type(choice))
+            return choices
+
+        inputs, fn = generate_inputs_and_func(op)
+
+        add_preprocessing_fn(choice_validator)
+        try:
+            with config.patch({"max_autotune": max_autotune}):
+                compiled_fn = torch.compile(fn, dynamic=False)
+                compiled_fn(*inputs)
+
+                if max_autotune:
+                    self.assertIn(ExternKernelCaller, choice_types_seen)
+                    self.assertIn(TritonTemplateCaller, choice_types_seen)
+                else:
+                    self.assertIn(ExternKernelCaller, choice_types_seen)
+                    self.assertNotIn(TritonTemplateCaller, choice_types_seen)
+        finally:
+            clear_preprocessing_fns()
+
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+    )
+    @parametrize("max_autotune_enabled", (True, False))
+    def test_autotune_layout_optimization(self, max_autotune_enabled):
+        """Test that layouts are flexible when every choice is ExternKernelChoice"""
+
+        # we use a proxy here of bias_addmm and max-autotune because this enables us to see
+        # multiple choices in both scenarios (bias_addmm, addmm, triton (max-autotune only))
+        # and both bias_addmm and addmm are extern kernel choices
+        def layout_checker(choices):
+            if choices:
+                expected_layout = (
+                    FixedLayout if max_autotune_enabled else FlexibleLayout
+                )
+                for choice in choices:
+                    self.assertIsInstance(
+                        choice.layout,
+                        expected_layout,
+                        f"Expected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                    )
+            return choices
+
+        add_preprocessing_fn(layout_checker)
+
+        try:
+            bias = torch.randn(64, device=GPU_TYPE)
+            x = torch.randn(32, 128, device=GPU_TYPE)
+            w = torch.randn(128, 64, device=GPU_TYPE)
+
+            with config.patch({"max_autotune": max_autotune_enabled}):
+                compiled_fn = torch.compile(lambda b, x, w: torch.addmm(b, x, w))
+                _ = compiled_fn(bias, x, w)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
 
 
 class TestMaxAutotunePrecompile(TestCase):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.config
@@ -21,15 +21,32 @@ class KernelInputs:
     information about these nodes, such as their device type and device.
     """
 
-    def __init__(self, input_nodes: list[Any]):
+    def __init__(
+        self,
+        input_nodes: list[Any],
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+        views: Optional[dict[str, Any]] = None,
+    ):
         """
         Initialize with a tuple of input nodes.
 
+        You can use scalars to propagate through scalar values that are not nodes
+
+        You can use views if some templates/ops need specific nodes to be different
+        views of some of the input_nodes. It is your responsibility to manage this
+        correctly inside the heuristic e.g. through adjust_kernel_inputs
+
         Args:
             input_nodes: A tuple of input nodes to store
+            scalars: Optional dictionary of scalar values
+                e.g. {'alpha': 0.5}
+            views: Optional dictionary of view information
+                e.g. {'inp_unexpanded': inp}
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
+        self._views = views if views is not None else {}
+        self._scalars = scalars if scalars is not None else {}
         assert len(input_nodes) > 0, "Expected at least one input node"
 
     def nodes(self, reorder: Optional[Sequence[int]] = None) -> list[Any]:
@@ -49,6 +66,57 @@ class KernelInputs:
             f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
         )
         return [self._input_nodes[i] for i in reorder]
+
+    def views(self) -> dict[str, Any]:
+        """
+        Return the stored view information.
+
+        Returns:
+            The dictionary of view information
+        """
+        return self._views
+
+    @property
+    def key(self) -> str:
+        """
+        Generate a key based on input node properties and scalars.
+        The key includes dtype, size, and stride information for each input node,
+        plus scalar values as key=value pairs separated by & signs.
+        """
+        # Get node information using existing methods
+        dtypes = self.dtypes()
+        shapes = self.shapes_hinted()
+        strides = self.strides_hinted()
+
+        # Create tuple of (dtype, shape_list, stride_list) for each node
+        node_info = tuple(
+            (dtype, list(shape), list(stride))
+            for dtype, shape, stride in zip(dtypes, shapes, strides)
+        )
+
+        # Create base key from node information
+        fmt_key = f"{self.device_name}+{str(node_info)}"
+
+        # Add scalar information if present
+        if self._scalars:
+            # Sort scalars for consistent key generation and join with &
+            scalar_parts = [
+                f"{key}={value}" for key, value in sorted(self._scalars.items())
+            ]
+            scalars_key = "&".join(scalar_parts)
+            fmt_key = f"{fmt_key}+{scalars_key}"
+
+        return f"{fmt_key}"
+
+    @property
+    def count(self) -> int:
+        """
+        Get the number of input nodes.
+
+        Returns:
+            The number of input nodes
+        """
+        return len(self._input_nodes)
 
     @property
     def device_type(self) -> Optional[str]:
@@ -70,6 +138,7 @@ class KernelInputs:
         """
         return self._input_nodes[0].get_device()
 
+    @property
     def device_name(self) -> Optional[str]:
         """
         Get the device name information.
@@ -153,6 +222,28 @@ class KernelInputs:
         """
         return self._input_nodes[idx].get_dtype()
 
+    def scalars(self) -> dict[str, Union[float, int]]:
+        """
+        Get the scalar values for all input nodes.
+
+        Returns:
+            A dictionary of scalar values for each input node
+        """
+        return self._scalars
+
+    def get_scalar(self, name: str) -> Union[float, int]:
+        """
+        Get the scalar value for a given name.
+
+        Args:
+            name: Name of the scalar to get
+
+        Returns:
+            The scalar value
+        """
+        assert name in self._scalars, f"Scalar {name} not found, but required"
+        return self._scalars[name]
+
 
 class MMKernelInputs(KernelInputs):
     """
@@ -160,14 +251,21 @@ class MMKernelInputs(KernelInputs):
     Provides additional methods to access M, N, K dimensions.
     """
 
-    def __init__(self, input_nodes: list[Any], mat1_idx: int = -2, mat2_idx: int = -1):
+    def __init__(
+        self,
+        input_nodes: list[Any],
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+        views: Optional[dict[str, Any]] = None,
+        mat1_idx: int = -2,
+        mat2_idx: int = -1,
+    ):
         """
         Initialize with a tuple of input nodes.
 
         By default, we assume the last 2 input nodes are mat1 and mat2, but
         the caller can adjust when necessary
         """
-        super().__init__(input_nodes)
+        super().__init__(input_nodes, scalars, views)
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
@@ -211,6 +309,16 @@ class MMKernelInputs(KernelInputs):
         k0 = mat2.get_size()[-2]  # K from second-to-last dimension of mat2
         V.graph.sizevars.check_equals(k, k0)
         return (m, n, k)
+
+    def mat1mat2(self) -> tuple[Any, Any]:
+        """
+        Get the mat1 and mat2 nodes.
+
+        Returns:
+            A tuple of (mat1, mat2) nodes
+        """
+        nodes = self.nodes()
+        return nodes[self._mat1_idx], nodes[self._mat2_idx]
 
     def mnk_hinted(self) -> tuple[int, int, int]:
         """
