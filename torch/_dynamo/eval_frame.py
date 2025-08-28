@@ -603,6 +603,7 @@ class _TorchDynamoContext:
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -617,6 +618,7 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        self._hooks = hooks
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -699,6 +701,27 @@ class _TorchDynamoContext:
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
 
         fn = innermost_fn(fn)
+
+        def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if not self.error_on_graph_break:
+                raise RuntimeError(
+                    "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+                )
+
+            if not callable(self.callback):
+                raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+            assert self._hooks is not None
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
@@ -846,6 +869,8 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(compile_wrapper, "get_compiler_config")
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if torch._dynamo.config.enable_aot_compile:
+            compile_wrapper.aot_compile = aot_compile  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -904,6 +929,7 @@ class OptimizeContext(_TorchDynamoContext):
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -919,6 +945,7 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
             package=package,
+            hooks=hooks,
         )
 
         if config.compiled_autograd:
@@ -1055,6 +1082,7 @@ def _optimize_catch_errors(
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        hooks=hooks,
     )
 
 

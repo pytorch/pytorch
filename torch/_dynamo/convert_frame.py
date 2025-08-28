@@ -1432,7 +1432,12 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
-            log_frame_dynamic_whitelist(code)
+            if (
+                tracer_output
+                and (output_graph := tracer_output.output_graph)
+                and output_graph.has_outputs()
+            ):
+                log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1456,15 +1461,7 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if tracer_output and tracer_output.is_tracing_resume_prologue:
-                # Do not allow any errors to be suppressed if tracer is currently tracing
-                # through resume function.
-                raise ResumePrologueTracingError(
-                    "Error while tracing through a Dynamo-generated resume function prologue. "
-                    "Errors are not allowed when tracing resume function prologues.\n"
-                    f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
-            elif isinstance(
+            if isinstance(
                 e,
                 (
                     Unsupported,
@@ -1478,6 +1475,7 @@ def _compile(
                     BisectValidationException,
                     ShortenTraceback,
                     PackageError,
+                    ResumePrologueTracingError,
                 ),
             ):
                 raise
