@@ -448,6 +448,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: inf
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            # Too slow
+            DecorateInfo(
+                unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -472,6 +476,10 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
+            # Too slow
+            DecorateInfo(
+                unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
+            ),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
