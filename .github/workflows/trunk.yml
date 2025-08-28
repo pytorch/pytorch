@@ -157,12 +157,12 @@ jobs:
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      runner: "lf.c.windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
@@ -186,7 +186,7 @@ jobs:
     with:
       build-environment: win-vs2022-cuda12.6-py3
       cuda-version: "12.6"
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      runner: "lf.c.windows.4xlarge.nonephemeral"
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
