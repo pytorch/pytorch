@@ -387,13 +387,7 @@ class OpSchema:
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
-        has_symints = False
-        for a in self.args_schema:
-            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
-                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
-                    has_symints = True
-                    break
-        self.has_symints = has_symints
+        self.has_symints = torch._C._DTensor_OpSchema_post_init(self.args_schema)
         self._recompute_comparison_key()
 
     def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:

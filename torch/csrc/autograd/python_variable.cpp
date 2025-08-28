@@ -860,6 +860,78 @@ static PyObject* THPVariable_make_dtensor(
   END_HANDLE_TH_ERRORS
 }
 
+static py::handle get_dtensorspec_class() {
+#if IS_PYBIND_2_13_PLUS
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  return storage
+      .call_once_and_store_result([]() -> py::object {
+        return py::module::import("torch")
+            .attr("distributed")
+            .attr("tensor")
+            .attr("_dtensor_spec")
+            .attr("DTensorSpec");
+      })
+      .get_stored();
+#else
+  static py::handle dtensorspec_class = py::object(py::module::import("torch")
+                                                       .attr("distributed")
+                                                       .attr("tensor")
+                                                       .attr("_dtensor_spec")
+                                                       .attr("DTensorSpec"))
+                                            .release();
+  return dtensorspec_class;
+#endif
+}
+
+// XXX: need to find a better place for this to live
+static PyObject* DTensor_OpSchema_post_init(
+    PyObject* self,
+    PyObject* raw_args_schema) {
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(raw_args_schema)) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "DTensor_OpSchema_post_init requires 1 tuple argument!");
+    return nullptr;
+  }
+  py::tuple args_schema = py::reinterpret_borrow<py::tuple>(raw_args_schema);
+  // TODO: build utility for interning strings.
+  const auto dtensor_spec_class = get_dtensorspec_class();
+  static const auto tensor_meta_str = py::str("tensor_meta").release();
+  static const auto shape_str = py::str("shape").release();
+  bool has_symints = false;
+  for (const auto& a : args_schema) {
+    if (Py_TYPE(a.ptr()) != (PyTypeObject*)(dtensor_spec_class.ptr()) &&
+        !py::isinstance(a, dtensor_spec_class)) {
+      continue;
+    }
+    const py::handle tensor_meta = a.attr(tensor_meta_str);
+    if (tensor_meta.is_none()) {
+      continue;
+    }
+    const auto contains_any_symint = [](const py::tuple& sequence) {
+      for (const auto& s : sequence) {
+        if (THPUtils_checkLong(s.ptr())) {
+          continue;
+        }
+        if (torch::is_symint(s)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Specifically it's supposed to be torch.Size.
+    const auto& shape = py::cast<py::tuple>(tensor_meta.attr(shape_str));
+    if (contains_any_symint(shape)) {
+      Py_RETURN_TRUE;
+      break;
+    }
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
 
@@ -1770,6 +1842,14 @@ static PyMethodDef extra_methods[] = {
     {"_use_count", THPVariable__use_count, METH_NOARGS, nullptr},
     {nullptr}};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
+static PyMethodDef extra_functions[] = {
+    {"_DTensor_OpSchema_post_init",
+     DTensor_OpSchema_post_init,
+     METH_O,
+     nullptr},
+    {nullptr}};
+
 struct THPVariableMeta {
   PyHeapTypeObject base;
 };
@@ -2497,5 +2577,7 @@ bool THPVariable_initModule(PyObject* module) {
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
   torch::utils::validate_numpy_for_dlpack_deleter_bug();
+
+  PyModule_AddFunctions(module, extra_functions);
   return true;
 }
