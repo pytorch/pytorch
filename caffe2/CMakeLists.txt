@@ -1755,10 +1755,6 @@ if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-  if(USE_FBGEMM_GENAI)
-    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
-  endif()
-
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
 
@@ -1774,6 +1770,10 @@ if(USE_ROCM)
   endif()
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+  if(USE_FBGEMM_GENAI)
+    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+  endif()
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
