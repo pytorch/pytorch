@@ -521,10 +521,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             spec = ChunkShardingSpec(
                 dim=dim,
                 placements=[
-                f"rank:0/{DEVICE_TYPE}:0",
-                f"rank:1/{DEVICE_TYPE}:1",
-                f"rank:2/{DEVICE_TYPE}:2",
-                f"rank:3/{DEVICE_TYPE}:3",
+                    f"rank:0/{DEVICE_TYPE}:0",
+                    f"rank:1/{DEVICE_TYPE}:1",
+                    f"rank:2/{DEVICE_TYPE}:2",
+                    f"rank:3/{DEVICE_TYPE}:3",
             ],
             )
             st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
@@ -533,7 +533,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual(torch.device(self.rank), local_shard.device)
             if self.rank == 3:
                 self.assertEqual((1, 20), local_shard.size())
             else:
@@ -551,7 +551,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 else:
                     self.assertEqual([3, 20], shard_metadata.shard_sizes)
                 self.assertEqual(
-                    f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement)
+                    f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
                 )
 
             # Validate remote shards.
