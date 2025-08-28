@@ -1081,6 +1081,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
+
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1316,19 +1323,6 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             )
             yield template_kwargs
 
-    @staticmethod
-    def _get_input_precision(
-        m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
-    ) -> str:
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-        result = "tf32" if allow_tf32 else "ieee"
-
-        # wrap in quotes, because the string will be dropped into the templates
-        return f'"{result}"'
-
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
@@ -1348,10 +1342,16 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            FLOAT32_PRECISION=MMTemplateConfigMixin._get_input_precision(m, n, k),
+            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(layout.dtype),
             num_stages=triton_config.num_stages,
@@ -1494,6 +1494,11 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
 
             return False
 
+        def is_scalar_like(sz: Any) -> bool:
+            return (len(sz) == 0) or all(
+                V.graph.sizevars.statically_known_equals(d, 1) for d in sz
+            )
+
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
         assert are_compatible_scales(size_a, size_b), (
             "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
@@ -1507,8 +1512,9 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
             template_kwargs["ACC_TYPE"] = "tl.float32"
-            # Add SCALING_ROWWISE attribute based on scale_a tensor shape
-            template_kwargs["SCALING_ROWWISE"] = len(size_a) == 2
+            # Add SCALING_ROWWISE attribute based on scale tensor shapes
+            both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
+            template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
 
             yield template_kwargs
 
@@ -1578,6 +1584,19 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
     "mm_persistent_tma", "cuda", register=torch.version.hip is None
 )
 class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
+    """Persistent TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
+    "mm_persistent_tma",
+    "xpu",
+)
+class XPUPersistentTMATemplateConfigHeuristic(TMAConfigMixin, XPUConfigHeuristic):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
