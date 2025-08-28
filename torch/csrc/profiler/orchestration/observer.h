@@ -104,15 +104,15 @@ struct TORCH_API ExperimentalConfig {
    * function schema and stored in the profile  */
   bool capture_overload_names;
 
-  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
-   * in the PyTorch Profiler as a JSON string */
-  bool expose_kineto_event_metadata;
-
   /*
    * Controls whether or not python gc info is recorded. This is used to
    * determine if gc collect is slowing down your profile.
    */
   bool record_python_gc_info;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
 
   /*
    * A custom_profiler_config option is introduced to allow custom backends
