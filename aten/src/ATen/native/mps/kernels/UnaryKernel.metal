@@ -503,11 +503,21 @@ struct round_decimals_functor {
   }
 };
 
+struct round_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return static_cast<T>(rint(float(x)));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return x;
+  }
+};
+
 DEFINE_UNARY_FLOATING_FUNCTOR(erf);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
-DEFINE_UNARY_FLOATING_FUNCTOR(round);
 
 REGISTER_UNARY_OP(neg, int, int);
 REGISTER_UNARY_OP(neg, long, long);
@@ -516,6 +526,13 @@ REGISTER_UNARY_OP(neg, char, char);
 REGISTER_UNARY_OP(neg, uchar, uchar);
 REGISTER_UNARY_OP(neg, float, float);
 REGISTER_UNARY_OP(neg, half, half);
+REGISTER_UNARY_OP(round, int, int);
+REGISTER_UNARY_OP(round, long, long);
+REGISTER_UNARY_OP(round, short, short);
+REGISTER_UNARY_OP(round, char, char);
+REGISTER_UNARY_OP(round, uchar, uchar);
+REGISTER_UNARY_OP(round, float, float);
+REGISTER_UNARY_OP(round, half, half);
 
 REGISTER_UNARY_OP(bitwise_not, int, int);
 REGISTER_UNARY_OP(bitwise_not, long, long);
@@ -547,7 +564,6 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
-  REGISTER_UNARY_OP(round, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
@@ -560,6 +576,7 @@ REGISTER_UNARY_OP(abs, half, half);
 
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
+REGISTER_UNARY_OP(round, bfloat, bfloat);
 REGISTER_UNARY_OP(abs, bfloat, bfloat);
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
