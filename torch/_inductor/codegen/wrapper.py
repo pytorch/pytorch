@@ -3442,7 +3442,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Stack outputs after loop completion
         if stack_output:
-            self.writeline("# Stack checkpoints after loop completion")
+            self.writeline("# Stack outputs after loop completion")
             for i in range(len(outer_carried_inputs)):
                 self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
