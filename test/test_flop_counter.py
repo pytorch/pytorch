@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 try:
@@ -822,6 +823,63 @@ class TestFlopCounter(TestCase):
 
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
+
+    @requires_cuda_and_triton
+    def test_flop_counter_custom_triton(self):
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import (
+            _FlopCounterMode,
+            register_flop_formula_for_triton_kernel,
+        )
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device="cuda")
+        out = torch.empty(3, device="cuda")
+
+        @register_flop_formula_for_triton_kernel(sin_kernel)
+        def compute_sin_kerenel_flops(*args, **kwargs) -> int:
+            # dummy implementation
+            return 2
+
+        def sin_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode() as m:
+            n_elements = 3
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        self.assertExpectedInline(get_total_flops(m), """2""")
+
+        # Now, wrap in a triton op and do the decomp
+        @torch._library.triton.triton_op("mylib::sin_op", mutates_args=())
+        def op() -> None:
+            n_elements = 3
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        def op_decompose(mode, *args, **kwargs):
+            with mode:
+                n_elements = 3
+                torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        torch.library.register_torch_dispatch(
+            "mylib::sin_op", _FlopCounterMode, op_decompose
+        )
+
+        # Should now output 2 flops; previously would be 0
+        with FlopCounterMode() as m2:
+            torch.ops.mylib.sin_op()
+        self.assertExpectedInline(get_total_flops(m2), """2""")
 
     @skipIfNoTorchVision
     def test_inference_mode(self):

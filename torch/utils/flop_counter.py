@@ -76,7 +76,6 @@ def register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[
         def register(target):
             if target in triton_flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
-            print("Registering flop formula for", target)
             triton_flop_registry[target] = flop_formula
 
         # To handle allowing multiple aten_ops at once
@@ -819,7 +818,6 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        # breakpoint()
         if func is torch.ops.higher_order.triton_kernel_wrapper_mutation:
             # Special case - look in the triton flop registry for the kernel
             return self.counter._count_flops(kwargs["kernel"], None, args, kwargs)
@@ -871,6 +869,7 @@ class _FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+
         # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
         if func in {torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
@@ -891,6 +890,7 @@ class _FlopCounterMode(TorchDispatchMode):
 
         if isinstance(func, torch._ops.HigherOrderOperator):
             return self._handle_higher_order_ops(func, types, args, kwargs)
+
         # If we don't have func in flop_registry, see if it can decompose
         if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
             with self:
