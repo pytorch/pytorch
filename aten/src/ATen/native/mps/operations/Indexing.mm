@@ -282,7 +282,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
       [computeEncoder setComputePipelineState:indexCopyPSO];
       mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
       if (!is_dense) {
-        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides());
+        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides(), index.strides());
       }
       mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
     }

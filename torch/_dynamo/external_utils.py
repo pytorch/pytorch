@@ -251,21 +251,29 @@ def wrap_inline_with_set_fullgraph(
     return wrapper
 
 
-def filter_out_const_values(tup: tuple[Any, ...], mask: list[bool]) -> tuple[Any, ...]:
+def filter_out_const_values(tup: tuple[Any, ...], masks: list[bool]) -> tuple[Any, ...]:
+    """
+    masks is a list of bools, where True means the corresponding element in tup
+    is a const value. Filter out the const values.
+    """
     out = []
-    for mask_idx, m in enumerate(mask):
-        if not m:
+    for mask_idx, mask in enumerate(masks):
+        if not mask:
             out.append(tup[mask_idx])
     return tuple(out)
 
 
 def insert_const_values_with_mask(
-    tup: tuple[Any, ...], mask: list[bool], values: tuple[Any, ...]
+    tup: tuple[Any, ...], masks: list[bool], values: tuple[Any, ...]
 ) -> tuple[Any, ...]:
+    """
+    masks and values are of same length. For indices where the mask is True, use
+    the const_values to fill in.
+    """
     out = []
     idx = 0
-    for mask_idx, m in enumerate(mask):
-        if m:
+    for mask_idx, mask in enumerate(masks):
+        if mask:
             out.append(values[mask_idx])
         else:
             out.append(tup[idx])

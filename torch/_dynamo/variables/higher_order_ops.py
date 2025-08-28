@@ -82,8 +82,20 @@ class OutputSpec:
     """
 
     treespec: pytree.TreeSpec
-    const_mask: Optional[list[bool]] = None
+    # list of True/False to identify the locations of const values in the
+    # subgraph output. True means that value at that index is a constant.
+    masks_to_filter_const_values: Optional[list[bool]] = None
+    # The actual constant values that were present in the subgraph output. Note
+    # that this is the same length as the mask, we just look at the indices
+    # where mask is True.
     const_values: Optional[list[Any]] = None
+
+    def __post_init__(self):
+        if (
+            self.masks_to_filter_const_values is not None
+            or self.const_values is not None
+        ):
+            assert len(self.masks_to_filter_const_values) == len(self.const_values)
 
 
 def raise_hard_error_if_graph_break(reason):
@@ -248,13 +260,13 @@ def _call_function_and_unflatten_output(
         example_value=flat_example_value,
     )
 
-    if ret_spec.const_mask:
+    if ret_spec.masks_to_filter_const_values:
         from torch._dynamo.external_utils import insert_const_values_with_mask
 
         # During flattening, we removed the constant values. To ensure Dynamo
         # can trace correctly, insert back the constant values in the output.
         flat_variable = _make_inlined(tx, insert_const_values_with_mask)(
-            flat_variable, ret_spec.const_mask, ret_spec.const_values
+            flat_variable, ret_spec.masks_to_filter_const_values, ret_spec.const_values
         )
 
     # Transform variable back into a list (previously made into a tuple by
@@ -661,6 +673,8 @@ def speculate_subgraph(
     set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
+    # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
+    # const outputs from the subgraph output.
     remove_consts_from_outputs=True,
     under_activation_checkpoint=False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
@@ -752,7 +766,7 @@ def speculate_subgraph(
                 tx.output.side_effects = prev_side_effects
 
             treespec = None
-            const_mask = None
+            masks_to_filter_const_values = None
             const_values = None
             if should_flatten_outputs:
                 from torch._dynamo.external_utils import filter_out_const_values
@@ -773,7 +787,7 @@ def speculate_subgraph(
                     # inserted back at the right positions for the Dynamo tracing to
                     # continue. This is done by filter_const_spec
                     output_proxies = output.as_proxy()
-                    const_mask = pytree.tree_map(
+                    masks_to_filter_const_values = pytree.tree_map(
                         lambda x: not isinstance(x, torch.fx.Proxy), output_proxies
                     )
                     const_values = pytree.tree_map(
@@ -781,7 +795,7 @@ def speculate_subgraph(
                         output_proxies,
                     )
                     output = _make_inlined(tx, filter_out_const_values)(
-                        output, const_mask
+                        output, masks_to_filter_const_values
                     )
 
             # Register output to graph
@@ -792,7 +806,12 @@ def speculate_subgraph(
             if always_restore:
                 # Nothing left to do here
                 return (
-                    (output, OutputSpec(treespec, const_mask, const_values)),
+                    (
+                        output,
+                        OutputSpec(
+                            treespec, masks_to_filter_const_values, const_values
+                        ),
+                    ),
                     tx.output.graph,
                     subtracer.lifted_freevars,
                 )
@@ -911,7 +930,12 @@ def speculate_subgraph(
                         )
 
                 return (
-                    (output, OutputSpec(treespec, const_mask, const_values)),
+                    (
+                        output,
+                        OutputSpec(
+                            treespec, masks_to_filter_const_values, const_values
+                        ),
+                    ),
                     graph,
                     lifted_freevars,
                 )
