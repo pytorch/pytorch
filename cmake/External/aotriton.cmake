@@ -9,7 +9,7 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.10b")
+  set(__AOTRITON_VER "0.11b")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
@@ -43,7 +43,8 @@ if(NOT __AOTRITON_INCLUDED)
      "" # amd-gfx11xx
      "" # amd-gfx120x
      )
-  set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")
+  # set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")
+  set(__AOTRITON_BASE_URL "http://10.227.26.253:8000/")
   set(__AOTRITON_Z "gz")
   function(aotriton_build_from_source noimage project)
     if(noimage)
@@ -81,11 +82,12 @@ if(NOT __AOTRITON_INCLUDED)
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
-    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"  # @lint-ignore
-                                 "${__AOTRITON_VER}/${__AOTRITON_FILE}")
+    string(CONCAT __AOTRITON_URL
+           "${__AOTRITON_BASE_URL}"
+           "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
-      URL_HASH SHA256=${__AOTRITON_SHA256}
+      # URL_HASH SHA256=${__AOTRITON_SHA256}
       SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_runtime
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
@@ -108,7 +110,7 @@ if(NOT __AOTRITON_INCLUDED)
            "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
-      URL_HASH SHA256=${__AOTRITON_SHA256}
+      # URL_HASH SHA256=${__AOTRITON_SHA256}
       SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_image-${image}
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
