@@ -78,7 +78,7 @@ TEST(LiteTrainerTest, Params) {
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 
-// TODO Renable these tests after parameters are correctly loaded on mobile
+// TODO Re-enable these tests after parameters are correctly loaded on mobile
 /*
 TEST(MobileTest, NamedParameters) {
   Module m("m");

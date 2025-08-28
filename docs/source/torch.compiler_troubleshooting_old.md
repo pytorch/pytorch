@@ -717,5 +717,5 @@ backtrace is slow and very spammy so it is not included by default with extended
 
 In order to measure the cold start compilation time or debug a cache corruption,
 it is possible pass `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1` or set
-`torch._inductor.config.force_disable_caches = True` which will override any
+`torch.compiler.config.force_disable_caches = True` which will override any
 other caching config option and disable all compile time caching.

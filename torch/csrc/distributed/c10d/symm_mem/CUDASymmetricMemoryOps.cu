@@ -134,7 +134,7 @@ static __global__ void multimem_all_reduce_kernel(
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -152,7 +152,7 @@ static __global__ void multimem_all_reduce_kernel(
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
 at::Tensor multimem_all_reduce_(
@@ -219,7 +219,7 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
@@ -230,7 +230,7 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
 at::Tensor multimem_one_shot_all_reduce_out(
@@ -311,7 +311,7 @@ static __global__ void multimem_all_gather_kernel(
     uint32_t** signal_pads,
     size_t rank,
     size_t world_size) {
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t start = bytes_per_rank * rank;
@@ -324,7 +324,7 @@ static __global__ void multimem_all_gather_kernel(
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
 at::Tensor multimem_all_gather_out(
@@ -425,7 +425,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     }
   }
   // TODO make it sync with one block for no-copy case
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   for (size_t i = offset; i < numel; i += stride) {
@@ -435,7 +435,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
 at::Tensor one_shot_all_reduce_out_impl(
@@ -587,7 +587,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   constexpr size_t numel_per_thread = alignment / sizeof(T);
   int32_t N_last_dim =
       last_dim_size / world_size; // used only for split_last_dim reduce_scatter
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -619,7 +619,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   if constexpr (reduce_scatter) {
     return;
   }
@@ -654,7 +654,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   // need to make sure all blocks exit simultaneously so that the data
   // is not corrupted by the subsequent kernels
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
 template <typename T, int alignment, int k_world_size>
@@ -669,7 +669,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -692,7 +692,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
 at::Tensor two_shot_all_reduce_impl(

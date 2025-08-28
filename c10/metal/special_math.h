@@ -1559,7 +1559,7 @@ float chebyshev_polynomial_t_forward(T x, int64_t n) {
   float q = x;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (x + x) * q - p;
     p = q;
     q = r;
@@ -1603,7 +1603,7 @@ float chebyshev_polynomial_u_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2 * x * q - p;
     p = q;
     q = r;
@@ -1656,7 +1656,7 @@ float chebyshev_polynomial_v_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2 * x * q - p;
     p = q;
     q = r;
@@ -1713,7 +1713,7 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2.0 * x * q - p;
     p = q;
     q = r;
@@ -1757,7 +1757,7 @@ float shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
   float q = xpxm1;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (xpxm1 + xpxm1) * q - p;
     p = q;
     q = r;
@@ -1806,7 +1806,7 @@ float shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
   float q = xpxm1 + xpxm1;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (xpxm1 + xpxm1) * q - p;
     p = q;
     q = r;
@@ -1860,7 +1860,7 @@ float shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
   float q = xpxm1 + xpxm1 - 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (xpxm1 + xpxm1) * q - p;
     p = q;
     q = r;
@@ -1914,7 +1914,7 @@ float shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
   float q = xpxm1 + xpxm1 + 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (xpxm1 + xpxm1) * q - p;
     p = q;
     q = r;
