@@ -11,23 +11,23 @@ if(NOT __AOTRITON_INCLUDED)
   # But they must be listed from lower version to higher version
   set(__AOTRITON_VER "0.11b")
   set(__AOTRITON_MANYLINUX_LIST
+      "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
-      "manylinux_2_28"  # rocm6.5
       "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
+      "rocm6.2"
       "rocm6.3"
       "rocm6.4"
-      "rocm6.5"
       "rocm7.0"
       )
-  set(__AOTRITON_CI_COMMIT "f490c8d1bcdf746c685827946e382c46d8f66e50")
+  set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
   set(__AOTRITON_SHA256_LIST
-      "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
-      "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
-      "7e29c325d5bd33ba896ddb106f5d4fc7d715274dca7fe937f724fffa82017838"  # rocm6.5
-      "1e9b3dddf0c7fc07131c6f0f5266129e83ce2331f459fa2be8c63f4ae91b0f5b"  # rocm7.0
+      ""  # rocm6.2
+      ""  # rocm6.3
+      ""  # rocm6.4
+      ""  # rocm7.0
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -52,9 +52,9 @@ if(NOT __AOTRITON_INCLUDED)
     else()
       SET(RECURSIVE "ON")
     endif()
+    message(STATUS "PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}")
     ExternalProject_Add(${project}
-      # GIT_REPOSITORY https://github.com/ROCm/aotriton.git
-      GIT_REPOSITORY https://github.com/xinyazhang/aotriton.git
+      GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_SUBMODULES_RECURSE ${RECURSIVE}
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
@@ -89,7 +89,7 @@ if(NOT __AOTRITON_INCLUDED)
            "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
-      # URL_HASH SHA256=${__AOTRITON_SHA256}
+      URL_HASH SHA256=${__AOTRITON_SHA256}
       SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_runtime
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
@@ -114,7 +114,7 @@ if(NOT __AOTRITON_INCLUDED)
            "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
-      # URL_HASH SHA256=${__AOTRITON_SHA256}
+      URL_HASH SHA256=${__AOTRITON_SHA256}
       SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_image-${image}
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
