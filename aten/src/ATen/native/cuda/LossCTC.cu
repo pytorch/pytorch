@@ -644,7 +644,12 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
-  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads_ = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  int max_threads = max_threads_;
+  // Blackwell launch bounds
+  if (at::cuda::getCurrentDeviceProperties()->major >= 10) {
+    max_threads = 512;
+  }
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;

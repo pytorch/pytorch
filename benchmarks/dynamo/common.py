@@ -9,6 +9,7 @@ import copy
 import csv
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import json
@@ -20,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import weakref
 from contextlib import contextmanager
@@ -40,6 +42,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
+from torch._C._nativert import PyModelRunner
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -201,7 +204,6 @@ BENCHMARK_USE_SGD = {
     "PLBartForCausalLM",
     "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
-    "Speech2Text2ForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
     # TIMM
@@ -1099,6 +1101,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.inductor_compile_mode
             )
+        elif args.export_nativert:
+            frozen_model_iter_fn = export_nativert(model, example_inputs)
+        elif args.torchscript_jit_trace:
+            frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1421,13 +1427,23 @@ class AOTInductorModelCache:
             inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
-            ep = torch.export.export(
-                model_clone,
-                example_args,
-                example_kwargs,
-                dynamic_shapes=dynamic_shapes,
-                strict=False,
-            )
+            # We can't support this in non-strict
+            if hasattr(model_clone, "name") and model.name == "levit_128":
+                ep = torch.export.export(
+                    model_clone,
+                    example_args,
+                    example_kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
+                )
+            else:
+                ep = torch.export.export(
+                    model_clone,
+                    example_args,
+                    example_kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
+                )
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
@@ -1443,6 +1459,60 @@ class AOTInductorModelCache:
     @classmethod
     def get_excess_memory(cls, model) -> float:
         return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
+
+
+class NativeRTCache:
+    cache: dict[weakref.ref, Any] = {}
+
+    @classmethod
+    def load(cls, model, example_inputs):
+        from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
+
+        key = weakref.ref(model)
+        if key not in cls.cache:
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            example_outputs = model(*example_args, **example_kwargs)
+            _register_dataclass_output_as_pytree(example_outputs)
+
+            combined_args = _combine_args(model, example_args, example_kwargs)
+            dynamic_shapes = _tree_map_with_path(
+                _produce_dynamic_shapes_for_export, combined_args
+            )
+
+            ep = torch.export.export(
+                model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+            )
+            ep = ep.run_decompositions({})
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                torch.export.pt2_archive._package.package_pt2(
+                    f, exported_programs={"forward": ep}
+                )
+                filename = f.name
+            cls.cache[key] = PyModelRunner(filename, "forward")
+
+        return cls.cache[key]
+
+
+class JitTracedCache:
+    cache: dict[weakref.ref, Any] = {}
+
+    @classmethod
+    def load(cls, model, example_inputs):
+        key = weakref.ref(model)
+        if key not in cls.cache:
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            if example_args:
+                jit_traced_module = torch.jit.trace(
+                    model, example_inputs=example_args, strict=False
+                )
+            else:
+                jit_traced_module = torch.jit.trace(
+                    model, example_kwarg_inputs=example_kwargs, strict=False
+                )
+
+            cls.cache[key] = jit_traced_module
+
+        return cls.cache[key]
 
 
 def export(model, example_inputs):
@@ -1471,6 +1541,16 @@ def export(model, example_inputs):
     return opt_export
 
 
+def export_nativert(model, example_inputs):
+    optimized = NativeRTCache.load(model, example_inputs)
+
+    def opt_nativert(_, example_inputs, collect_outputs=False):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return optimized.run(*example_args, **example_kwargs)
+
+    return opt_nativert
+
+
 def export_aot_inductor(model, example_inputs, mode):
     optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
@@ -1479,6 +1559,16 @@ def export_aot_inductor(model, example_inputs, mode):
         return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
+
+
+def torchscript_jit_trace(model, example_inputs):
+    optimized = JitTracedCache.load(model, example_inputs)
+
+    def opt_jit_trace(_, example_inputs, collect_outputs=False):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return optimized(*example_args, **example_kwargs)
+
+    return opt_jit_trace
 
 
 def download_retry_decorator(download_fn):
@@ -2227,11 +2317,17 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if self.args.export or self.args.export_aot_inductor:
+                if (
+                    self.args.export
+                    or self.args.export_aot_inductor
+                    or self.args.export_nativert
+                    or self.args.torchscript_jit_trace
+                ):
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast(**self.autocast_arg):
+                        model_copy.name = name
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2387,6 +2483,7 @@ class BenchmarkRunner:
         )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2548,6 +2645,7 @@ class BenchmarkRunner:
                 return experiment(*self.maybe_cast(model, example_inputs))
 
         def warmup(fn, model, example_inputs, mode, niters=5):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2621,7 +2719,11 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if self.args.export_aot_inductor:
+            if (
+                self.args.export_aot_inductor
+                or self.args.export_nativert
+                or self.args.torchscript_jit_trace
+            ):
                 optimized_model_iter_fn = optimize_ctx
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3375,6 +3477,16 @@ def parse_args(args=None):
         help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
+        "--export-nativert",
+        action="store_true",
+        help="Measure pass rate with Export+NativeRT",
+    )
+    group.add_argument(
+        "--torchscript-jit-trace",
+        action="store_true",
+        help="Measure pass rate with TorchScript jit.trace",
+    )
+    group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
@@ -3815,6 +3927,14 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
+    elif args.export_nativert:
+        optimize_ctx = export_nativert
+        experiment = speedup_experiment
+        output_filename = "export_nativert.csv"
+    elif args.torchscript_jit_trace:
+        optimize_ctx = torchscript_jit_trace
+        experiment = speedup_experiment
+        output_filename = "torchscript_jit_trace.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
@@ -4129,7 +4249,7 @@ def run(runner, args, original_dir=None):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
-                        torch._dynamo.mark_dynamic(t, i)
+                        torch._dynamo.maybe_mark_dynamic(t, i)
                         marked = True
                         break
 

@@ -90,7 +90,7 @@ def bench_reduction(
         return reduction_func(t, dim=0)
 
     f.__name__ = reduction_func.__name__
-    f_c = torch.compile(f, dynamic=False)
+    f_c = torch.compile(f, dynamic=False, fullgraph=True)
 
     for size in (512, 1024, 2048, 4096):
         x = torch.testing.make_tensor(size, size, device=device, dtype=dtype)
@@ -116,7 +116,7 @@ def bench_scan(
         def f(t):
             return scan_func(t, dim=dim)
 
-        f_c = torch.compile(f, dynamic=False)
+        f_c = torch.compile(f, dynamic=False, fullgraph=True)
 
         for size in (32, 128, 512, 1024):
             f.__name__ = f"{scan_func.__name__}-dim{dim}-{size}x{size}"
@@ -135,7 +135,7 @@ def bench_scan(
     def f_1d(t):
         return scan_func(t, dim=0)
 
-    f_1d_c = torch.compile(f_1d, dynamic=False)
+    f_1d_c = torch.compile(f_1d, dynamic=False, fullgraph=True)
 
     for size in (100, 10000, 1000000):
         f_1d.__name__ = f"{scan_func.__name__}-1d-{size}"
@@ -154,9 +154,7 @@ def bench_scan(
 
 
 def main() -> None:
-    dtypes = [torch.float16, torch.float32]
-    if torch.backends.mps.is_macos_or_newer(14, 0):
-        dtypes.append(torch.bfloat16)
+    dtypes = [torch.float16, torch.float32, torch.bfloat16]
 
     # Profile index ops
     B = 11
@@ -204,4 +202,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    torch._dynamo.config.cache_size_limit = 2**16
     main()

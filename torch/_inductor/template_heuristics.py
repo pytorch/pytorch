@@ -155,6 +155,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether to scale configs at all
+        # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
+        self.should_scale_configs: bool = True
         # List of dictionaries to store the kernel configs. Configs that evaluate to true
         # will be utilised on the target platform. The configs are as follows:
         # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
@@ -481,6 +484,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Scales and filters matrix multiplication configs based on input size.
         """
+        if not self.should_scale_configs:
+            return configs
         from .runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
@@ -760,7 +765,19 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def __init__(self) -> None:
         super().__init__()
 
-        self.b200_default_flex_config = {
+        self.sm_120_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 2, 4),
+            (torch.float32, 128): FlexConfig(128, 32, 2, 4),
+            (torch.float32, 256): FlexConfig(64, 16, 2, 4),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 256): FlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): FlexConfig(128, 64, 2, 4),
+            (torch.float16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): FlexConfig(32, 64, 2, 4),
+        }
+
+        self.sm_100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
@@ -768,7 +785,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
@@ -810,11 +827,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(128, 64, 3, 4)
-            if capability >= (10, 0):
-                default_config = self.b200_default_flex_config.get(
+            if capability >= (12, 0):
+                default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
-            elif capability >= (9, 0):
+            elif capability >= (10, 0):
+                default_config = self.sm_100_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability == (9, 0):
                 default_config = self.h100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -845,13 +866,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if dtype == torch.float32:
             default_config = FlexConfig(16, 16, 1, 4)
-        elif head_dim <= 256 and capability >= (9, 0):  # H100
+        elif head_dim <= 256 and capability == (9, 0):  # H100
             if head_dim == 64:
                 default_config = FlexConfig(64, 64, 3, 4)
             elif head_dim == 128:
                 default_config = FlexConfig(64, 128, 3, 8)
             else:
                 default_config = FlexConfig(64, 64, 2, 4)
+        elif head_dim <= 256 and capability >= (10, 0):  # B100
+            if head_dim == 64 or head_dim == 128:
+                default_config = FlexConfig(32, 32, 2, 4)
+            else:
+                default_config = FlexConfig(32, 32, 1, 4)
         elif capability >= (8, 0):  # A100
             if head_dim == 64:
                 default_config = FlexConfig(32, 128, 3, 4)
@@ -883,7 +909,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
-        if capability >= (9, 0):  # sm_90+
+        if capability in [(9, 0), (10, 0), (10, 3)]:  # sm_90, sm_100, sm_103
             if head_dim > 128 and dtype == torch.float32:
                 default_config = FlexDecodeConfig(64, 1, 2)
             else:
@@ -1054,6 +1080,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
         ]
+
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1354,6 +1387,19 @@ class INT8MMTemplateConfigMixin(MMTemplateConfigMixin):
         self.has_int8_tensor = True
 
 
+# MMPlusMM specific mixin to avoid running _scale_mm_configs
+class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """
+    Ensure that _should_scale_configs is False
+    """
+
+    # TODO(coconutruben): remove this once all tests work
+    # with proper scaling on mm_plus_mm
+    def __init__(self) -> None:
+        super().__init__()
+        self.should_scale_configs = False
+
+
 # TMA-specific mixin for TMA templates
 class TMAConfigMixin(MMTemplateConfigMixin):
     """
@@ -1448,6 +1494,11 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
 
             return False
 
+        def is_scalar_like(sz: Any) -> bool:
+            return (len(sz) == 0) or all(
+                V.graph.sizevars.statically_known_equals(d, 1) for d in sz
+            )
+
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
         assert are_compatible_scales(size_a, size_b), (
             "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
@@ -1461,8 +1512,9 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
             template_kwargs["ACC_TYPE"] = "tl.float32"
-            # Add SCALING_ROWWISE attribute based on scale_a tensor shape
-            template_kwargs["SCALING_ROWWISE"] = len(size_a) == 2
+            # Add SCALING_ROWWISE attribute based on scale tensor shapes
+            both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
+            template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
 
             yield template_kwargs
 
@@ -1578,7 +1630,9 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic("mm_plus_mm", "cuda", register=torch.version.hip is None)
-class CUDAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+class CUDAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CUDAConfigHeuristic
+):
     """MM Plus MM template heuristic for CUDA"""
 
     def __init__(self) -> None:
@@ -1674,11 +1728,16 @@ class ROCmInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, ROCmConfigHeu
 @register_template_heuristic(
     "mm_plus_mm", "cuda", register=torch.version.hip is not None
 )
-class ROCmMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+class ROCmMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, ROCmConfigHeuristic
+):
     """MM Plus MM template heuristic for ROCm"""
 
     def __init__(self) -> None:
         super().__init__()
+        # self.default_num_stages is used to make sure all configs have that in ROCm land
+        # for mm_plus_mm, we actually just want stages = 1, as pipelining brings no benefits
+        self.default_num_stages = 1
         # Override mm_configs to use mm_plus_mm_configs
         self.mm_configs = self.mm_plus_mm_configs
         # NOTE: overriding exhaustive configs here to be the same as mm_configs
@@ -1728,7 +1787,9 @@ class CPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CPUConfigHeuri
 
 
 @register_template_heuristic("mm_plus_mm", "cpu")
-class CPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+class CPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CPUConfigHeuristic
+):
     """MM Plus MM template heuristic for CPU"""
 
     def __init__(self) -> None:
@@ -1782,7 +1843,9 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
 
 
 @register_template_heuristic("mm_plus_mm", "xpu")
-class XPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+class XPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
+):
     """MM Plus MM template heuristic for XPU"""
 
     def __init__(self) -> None:
@@ -1836,7 +1899,9 @@ class MTIAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, MTIAConfigHeu
 
 
 @register_template_heuristic("mm_plus_mm", "mtia")
-class MTIAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, MTIAConfigHeuristic):
+class MTIAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, MTIAConfigHeuristic
+):
     """MM Plus MM template heuristic for MTIA"""
 
     def __init__(self) -> None:
