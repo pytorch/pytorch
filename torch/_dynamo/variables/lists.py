@@ -1147,18 +1147,13 @@ class NamedTupleVariable(TupleVariable):
                 or attr in self.fields()
             ):
                 raise_observed_exception(AttributeError, tx)
-
-                # Handle mutation tracking based on variable type
-            if self.mutation_type is None:
+            # Subclass of namedtuple type can have dynamic attributes
+            if self.source is None:
                 from .base import AttributeMutationNew
 
                 self.mutation_type = AttributeMutationNew()
-
-            # Always call mutation to mark as modified
             tx.output.side_effects.mutation(self)
             tx.output.side_effects.store_attr(self, attr, value)
-
-            # Always update our internal tracking
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
