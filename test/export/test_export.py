@@ -16415,6 +16415,35 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_is_fx_tracing(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                if torch.fx._symbolic_trace.is_fx_tracing():
+                    return x + y
+                else:
+                    return x * y
+
+        inp = (torch.randn(3), torch.randn(3))
+
+        ep = export(M(), inp)
+        FileCheck().check_count("torch.ops.aten.add", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                if torch.fx._symbolic_trace.is_fx_symbolic_tracing():
+                    return x + y
+                else:
+                    return x * y
+
+        inp = (torch.randn(3), torch.randn(3))
+
+        ep = export(M(), inp)
+        FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
 
 if __name__ == "__main__":
     run_tests()
