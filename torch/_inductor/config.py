@@ -1923,6 +1923,23 @@ class template_config_lookup_table:
     # hash checking is performed.
     check_src_hash: bool = True
 
+    # Enable emitting entries to registered emit backends (e.g., logging)
+    recorder_emit: bool = True
+
+    # Directory to record lookup tables to. If set, enables DirectoryRecordBackend
+    recorder_record_dir: Optional[str] = os.environ.get(
+        "TORCH_INDUCTOR_LOOKUP_TABLE_RECORD_DIR", None
+    )
+
+    # Number of top choices to record. If None or negative, record all choices.
+    # If 0, record nothing. If positive, record only the top k choices.
+    recorder_topk: Optional[int] = None
+
+    # Whether to record template hashes for templates that provide them.
+    # Template hashes make the lookup table more robust but potentially
+    # less portable
+    record_template_hash: bool = True
+
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False

@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import json
+import os
+import tempfile
 import unittest
 from typing import Optional, Union
 from unittest.mock import patch
@@ -7,6 +10,7 @@ import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lookup_table import recorder
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.lookup_table.core import lookup_key_suffix, lookup_template_configs
 from torch._inductor.test_case import run_tests, TestCase
@@ -466,6 +470,362 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertNotIn(
                 64, kept_block_ms
             )  # Config with wrong hash should be filtered
+
+            # template_hash should be removed from returned configs
+            for config in result["triton"]:
+                self.assertNotIn("template_hash", config)
+
+    def test_recorder_topk_config(self):
+        """Test that topk configuration works correctly for recorder"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Test with topk=0 (should record nothing)
+            config_patch = {
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm": True,
+                "template_config_lookup_table.recorder_record_dir": temp_dir,
+                "template_config_lookup_table.recorder_topk": 0,
+            }
+
+            with inductor_config.patch(config_patch):
+                # Create mock choices
+                choices = []
+                timings = {}
+
+                for i in range(3):
+                    choice = type("MockChoice", (), {})()
+                    choice._ktc = type("MockKTC", (), {})()
+                    choice._ktc.template = type(
+                        "MockTemplate", (), {"uid": f"template_{i}"}
+                    )()
+                    choice._ktc.kwargs = {"BLOCK_M": 32 + i * 16}
+                    choice._ktc.inputs = type(
+                        "MockInputs",
+                        (),
+                        {
+                            "device": lambda: torch.device("cuda"),
+                            "key": f"test_key_{i}",
+                        },
+                    )()
+
+                    timing = 1.0 + i * 0.1  # Increasing timings
+                    timings[choice] = timing
+                    choices.append(choice)
+
+                # Mock make_lookup_key to return a valid key
+                original_make_key = recorder.make_lookup_key
+                recorder.make_lookup_key = lambda inputs, op_name: "test_key"
+
+                try:
+                    # Clear recorder and test
+                    recorder.clear()
+
+                    # Record with topk=0
+                    recorder.record_topk_choices(
+                        timings=timings,
+                        op_name="mm",
+                        input_nodes=[],
+                        choices=choices,
+                        profiled_time_fn=dict,
+                        topk=0,
+                    )
+
+                    # Should record nothing
+                    rec = recorder.get_lookup_table_recorder()
+                    self.assertEqual(len(rec.data), 0)
+
+                finally:
+                    # Restore original function
+                    recorder.make_lookup_key = original_make_key
+
+    def test_recorder_backend_registration(self):
+        """Test that recorder backends are properly registered"""
+
+        # Test emit backend registration with different configs
+        with inductor_config.patch(
+            {"template_config_lookup_table.recorder_emit": True}
+        ):
+            # Clear and recreate recorder to test registration
+            recorder.clear()
+            rec = recorder.get_lookup_table_recorder()
+
+            # Should have at least one emit backend registered
+            self.assertGreater(
+                len(rec.emit_backends), 0, "Should have emit backends registered"
+            )
+
+            # Verify it's the LogEmitBackend
+            log_backends = [
+                b for b in rec.emit_backends if isinstance(b, recorder.LogEmitBackend)
+            ]
+            self.assertGreater(
+                len(log_backends), 0, "Should have LogEmitBackend registered"
+            )
+
+        # Test record backend registration with directory config
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with inductor_config.patch(
+                {"template_config_lookup_table.recorder_record_dir": temp_dir}
+            ):
+                # Clear and recreate recorder
+                recorder.clear()
+                rec = recorder.get_lookup_table_recorder()
+
+                # Should have at least one record backend registered
+                self.assertGreater(
+                    len(rec.record_backends),
+                    0,
+                    "Should have record backends registered",
+                )
+
+                # Verify it's the DirectoryRecordBackend
+                dir_backends = [
+                    b
+                    for b in rec.record_backends
+                    if isinstance(b, recorder.DirectoryRecordBackend)
+                ]
+                self.assertGreater(
+                    len(dir_backends),
+                    0,
+                    "Should have DirectoryRecordBackend registered",
+                )
+
+    def test_recorder_topk_logic_detailed(self):
+        """Test detailed topk logic in the feedback function"""
+
+        # Create mock choices with KTC
+        choices = []
+        timings = {}
+
+        for i in range(5):
+            choice = type("MockChoice", (), {})()
+            choice._ktc = type("MockKTC", (), {})()
+            choice._ktc.template = type("MockTemplate", (), {"uid": f"template_{i}"})()
+            choice._ktc.kwargs = {"BLOCK_M": 32 + i * 16}
+            choice._ktc.inputs = type(
+                "MockInputs",
+                (),
+                {"device": lambda: torch.device("cuda"), "key": f"test_key_{i}"},
+            )()
+
+            timing = 1.0 + i * 0.1  # Increasing timings
+            timings[choice] = timing
+            choices.append(choice)
+
+        # Test different topk values
+        for topk_val, expected_count in [(1, 1), (3, 3), (10, 5), (-1, 5), (None, 5)]:
+            with self.subTest(topk=topk_val):
+                # Mock make_lookup_key to return a valid key
+                original_make_key = recorder.make_lookup_key
+                recorder.make_lookup_key = (
+                    lambda inputs, op_name: f"test_key_{topk_val}"
+                )
+
+                try:
+                    # Clear recorder
+                    recorder.clear()
+                    rec = recorder.get_lookup_table_recorder()
+
+                    # Add mock backend to capture recordings
+                    class MockBackend(recorder.EmitBackend):
+                        def __init__(self):
+                            self.entries = []
+
+                        def emit(self, entry):
+                            self.entries.append(entry)
+
+                    backend = MockBackend()
+                    rec.add_backend(backend)
+
+                    # Record with specified topk
+                    recorder.record_topk_choices(
+                        timings=timings,
+                        op_name="mm",
+                        input_nodes=[],
+                        choices=choices,
+                        profiled_time_fn=dict,
+                        topk=topk_val,
+                    )
+
+                    # Verify expected number of entries
+                    if topk_val == 0:
+                        self.assertEqual(len(backend.entries), 0)
+                    else:
+                        self.assertEqual(len(backend.entries), expected_count)
+
+                        # Verify entries are sorted by timing (best first)
+                        if len(backend.entries) > 1:
+                            prev_timing = None
+                            for entry in backend.entries:
+                                timing = entry.metadata["timing"]
+                                if prev_timing is not None:
+                                    self.assertGreater(
+                                        timing,
+                                        prev_timing,
+                                        "Entries should be sorted by timing",
+                                    )
+                                prev_timing = timing
+
+                finally:
+                    # Restore original function
+                    recorder.make_lookup_key = original_make_key
+
+    def test_recorder_backend_functionality(self):
+        """Test that recorder backends work correctly"""
+
+        # Test emit backend registration
+        rec = recorder.get_lookup_table_recorder()
+
+        # Should have at least the default log emit backend when recorder_emit=True
+        with inductor_config.patch(
+            {"template_config_lookup_table.recorder_emit": True}
+        ):
+            # Clear and recreate to test registration
+            recorder.clear()
+            rec = recorder.get_lookup_table_recorder()
+            self.assertGreater(
+                len(rec.emit_backends), 0, "Should have emit backends registered"
+            )
+
+        # Test adding custom backend
+        class TestEmitBackend(recorder.EmitBackend):
+            def __init__(self):
+                self.entries = []
+
+            def emit(self, entry):
+                self.entries.append(entry)
+
+        custom_backend = TestEmitBackend()
+        recorder.add_backend(custom_backend)
+
+        # Test directory record backend
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backend = recorder.DirectoryRecordBackend(temp_dir)
+
+            # Test data to dump
+            test_data = {
+                "key1": [{"template_id": "mm", "BLOCK_M": 32}],
+                "key2": [{"template_id": "tma", "BLOCK_N": 64}],
+            }
+
+            backend.dump(test_data)
+
+            # Verify file was created
+            files = [f for f in os.listdir(temp_dir) if f.startswith("inductor_lut_")]
+            self.assertEqual(len(files), 1)
+
+            # Verify content
+            filepath = os.path.join(temp_dir, files[0])
+            with open(filepath) as f:
+                loaded_data = json.load(f)
+
+            self.assertEqual(loaded_data, test_data)
+
+    def test_recorder_emit_and_record(self):
+        """Test recorder emit and record functionality using real templates"""
+
+        # Create test backends
+        class TestEmitBackend(recorder.EmitBackend):
+            def __init__(self):
+                self.entries = []
+
+            def emit(self, entry):
+                self.entries.append(entry)
+
+        class TestRecordBackend(recorder.RecordBackend):
+            def __init__(self):
+                self.data = None
+
+            def dump(self, data):
+                self.data = data
+
+        # Set up recorder
+        rec = recorder.LookupTableRecorder()
+        emit_backend = TestEmitBackend()
+        record_backend = TestRecordBackend()
+        rec.add_backend(emit_backend)
+        rec.add_backend(record_backend)
+
+        # Create test entry using real template data - avoid direct imports
+        # Get template UID via attribute access like in lookup_table_e2e
+        try:
+            import torch._inductor.kernel.mm as mm_module
+
+            template_uid = mm_module.mm_template.uid
+        except (ImportError, AttributeError):
+            # Fallback for test environments
+            template_uid = "triton_mm_template"
+
+        entry = recorder.LookupTableEntry(
+            key="test_key",
+            value={"template_id": template_uid, "BLOCK_M": 32},
+            metadata={"timing": 1.0, "rank": 0},
+        )
+
+        # Test recording
+        rec.record(entry)
+
+        # Verify emission
+        self.assertEqual(len(emit_backend.entries), 1)
+        self.assertEqual(emit_backend.entries[0], entry)
+
+        # Verify internal data (value stored without metadata)
+        expected_data = {"test_key": [{"template_id": template_uid, "BLOCK_M": 32}]}
+        self.assertEqual(rec.data, expected_data)
+
+        # Test dumping
+        rec.dump()
+        self.assertEqual(record_backend.data, expected_data)
+
+    def test_src_hash_from_template(self):
+        """Test that src_hash is extracted from template correctly"""
+
+        # Get the actual template, avoiding direct imports like in lookup_table_e2e
+        try:
+            import torch._inductor.kernel.mm as mm_module
+
+            template = mm_module.mm_template
+        except ImportError:
+            self.skipTest("MM module not available")
+
+        # Verify template has src_hash
+        self.assertTrue(hasattr(template, "src_hash"))
+        self.assertIsInstance(template.src_hash, str)
+        self.assertGreater(len(template.src_hash), 0)
+
+        # Test entry creation uses src_hash
+        class MockKTC:
+            def __init__(self):
+                self.template = template
+                self.kwargs = {"BLOCK_M": 32, "BLOCK_N": 64}
+                # Mock inputs
+                self.inputs = type(
+                    "MockInputs", (), {"device": lambda: torch.device("cuda")}
+                )()
+
+        # Mock make_lookup_key to return a valid key
+        with inductor_config.patch(
+            {"template_config_lookup_table.record_template_hash": True}
+        ):
+            # Patch make_lookup_key to return a test key
+            original_make_key = recorder.make_lookup_key
+            recorder.make_lookup_key = lambda inputs, op_name: "test_key"
+
+            try:
+                ktc = MockKTC()
+                entry = recorder.LookupTableEntry.from_ktc_and_timing(
+                    ktc=ktc, timing=1.23, rank=0, op_name="mm"
+                )
+
+                self.assertIsNotNone(entry)
+                self.assertIn("template_hash", entry.value)
+                self.assertEqual(entry.value["template_hash"], template.src_hash)
+
+            finally:
+                # Restore original function
+                recorder.make_lookup_key = original_make_key
 
 
 if __name__ == "__main__":

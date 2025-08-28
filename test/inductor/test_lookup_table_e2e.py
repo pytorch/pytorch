@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
+import json
+import os
 import re
+import tempfile
 import unittest
 from functools import partial
 from typing import Any
@@ -8,8 +11,10 @@ import torch
 import torch.nn as nn
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
+from torch._inductor.lookup_table import recorder
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.lookup_table.core import _dev_key
+from torch._inductor.lookup_table.recorder import add_backend, DirectoryRecordBackend
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
     clear_preprocessing_fns,
@@ -409,6 +414,157 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             {"template_config_lookup_table.check_src_hash": True}
         ):
             self.run_model("mm", tensors)
+
+    def _create_simple_matmul_model(self):
+        """Create a simple matmul model for recording tests"""
+
+        class SimpleMatmul(nn.Module):
+            def forward(self, a, b):
+                return torch.mm(a, b)
+
+        return SimpleMatmul()
+
+    def _create_test_inputs(self, device="cuda"):
+        """Create test inputs for matmul"""
+        return [
+            torch.randn(512, 512, device=device, dtype=torch.float32),
+            torch.randn(512, 512, device=device, dtype=torch.float32),
+        ]
+
+    @fresh_cache()
+    def test_recorder_e2e_with_triton_backend_only(self):
+        """End-to-end test with Triton backend only"""
+
+        # Set up recording directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Configure to use only Triton backend and record only top 1 choice
+            config_patch = {
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm": True,
+                "template_config_lookup_table.recorder_topk": 1,
+                "template_config_lookup_table.recorder_emit": True,
+            }
+            add_backend(DirectoryRecordBackend(temp_dir))
+            with inductor_config.patch(config_patch):
+                # Create model and inputs
+                model = self._create_simple_matmul_model()
+                inputs = self._create_test_inputs()
+
+                # Step 1: Compile with autotuning (first run) - this should record choices
+                # Clear any existing state
+                torch._dynamo.reset()
+                recorder.clear()
+
+                # Compile and run
+                compiled_model = torch.compile(model, mode="max-autotune")
+                result1 = compiled_model(*inputs)
+
+                # Dump recorded data
+                recorder.dump()
+
+                # Step 2: Check that lookup table was recorded
+
+                # Find the recorded file
+                json_files = [
+                    f
+                    for f in os.listdir(temp_dir)
+                    if f.startswith("inductor_lut_") and f.endswith(".json")
+                ]
+                self.assertEqual(
+                    len(json_files),
+                    1,
+                    "Expected exactly one recorded lookup table file",
+                )
+
+                recorded_file = os.path.join(temp_dir, json_files[0])
+                with open(recorded_file) as f:
+                    recorded_data = json.load(f)
+
+                # Verify we have entries and they contain the expected fields
+                self.assertGreater(
+                    len(recorded_data), 0, "Should have recorded at least one entry"
+                )
+
+                # Check structure of recorded entries
+                for entries in recorded_data.values():
+                    # Should only have 1 entry due to topk=1
+                    self.assertEqual(
+                        len(entries),
+                        1,
+                        f"Expected exactly 1 entry for topk=1, got {len(entries)}",
+                    )
+
+                    entry = entries[0]
+
+                    # Verify essential fields exist
+                    self.assertIn(
+                        "template_id", entry, "Entry should contain template_id"
+                    )
+
+                    # Verify it's a Triton template - avoid direct imports like in lookup_table_e2e
+                    template_id = entry["template_id"]
+                    self.assertTrue(template_id.startswith("triton"))
+
+                # Step 3: Clear caches and use the recorded lookup table for second run
+                # Clear compilation caches
+                torch._dynamo.reset()
+
+                # Set the lookup table in config
+                with inductor_config.patch(
+                    {"template_config_lookup_table.table": recorded_data}
+                ):
+                    # Compile again - should use lookup table this time
+                    new_compiled_model = torch.compile(model, mode="max-autotune")
+                    result2 = new_compiled_model(*inputs)
+
+                # Step 4: Verify results are the same
+                torch.testing.assert_close(
+                    result1, result2, msg="Results should be identical between runs"
+                )
+
+    @fresh_cache()
+    def test_template_hash_recording_in_e2e(self):
+        """Test that template hashes are recorded when enabled in E2E flow"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Enable template hash recording
+            config_patch = {
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm": True,
+                "template_config_lookup_table.recorder_topk": 1,
+                "template_config_lookup_table.record_template_hash": True,
+            }
+            add_backend(DirectoryRecordBackend(temp_dir))
+            with inductor_config.patch(config_patch):
+                # Create model and inputs
+                model = self._create_simple_matmul_model()
+                inputs = self._create_test_inputs()
+
+                # Clear state
+                torch._dynamo.reset()
+                recorder.clear()
+
+                # Compile model
+                compiled_model = torch.compile(model, mode="max-autotune")
+                compiled_model(*inputs)
+
+                # Dump and check for template hash
+                recorder.dump()
+
+                json_files = [
+                    f for f in os.listdir(temp_dir) if f.startswith("inductor_lut_")
+                ]
+                assert json_files, "No recorded files found"
+                with open(os.path.join(temp_dir, json_files[0])) as f:
+                    data = json.load(f)
+
+                # Check if template hash is present in recorded entries
+                for entries in data.values():
+                    for entry in entries:
+                        if "template_hash" in entry:
+                            # Verify it's a non-empty string
+                            self.assertIsInstance(entry["template_hash"], str)
+                            self.assertGreater(len(entry["template_hash"]), 0)
 
 
 if __name__ == "__main__":
