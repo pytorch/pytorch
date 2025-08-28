@@ -1923,12 +1923,7 @@ def use_ck_template(layout: Layout) -> bool:
         log.warning("Please pip install Composable Kernel package")
         return False
 
-    if not config.rocm.ck_dir:
-        config.rocm.ck_dir = ck_package_dirname
-        log.warning(
-            "TorchInductor's config.rocm.ck_dir was not set. Updating to: %s",
-            ck_package_dirname,
-        )
+    config.rocm.ck_dir = ck_package_dirname
 
     return True
 
