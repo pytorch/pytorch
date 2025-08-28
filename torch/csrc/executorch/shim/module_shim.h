@@ -1,6 +1,6 @@
 #include <cstdint>
-#include "inductor/aoti_torch/c/macros.h"
-#include "inductor/aoti_torch/c/shim.h"
+#include <torch/csrc/inductor/aoti_torch/c/macros.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 
 #ifdef __cplusplus
