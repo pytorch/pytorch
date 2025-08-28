@@ -828,7 +828,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
-        if dtype == torch.half:
+        if dtype == torch.half and not vec_amx.is_amx_fp16_supported():
             self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
@@ -2766,6 +2766,33 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @parametrize("bs", (1, 50))
+    @parametrize("Mdim", (192,))
+    @parametrize("Kdim", (196,))
+    @parametrize("Ndim", (84, 385))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_bmm_with_y_storage_offset(self, dtype, bs, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # y_with_offset: contiguous, but has non-zero storage offset
+                y_with_offset = torch.empty(
+                    (3, *y.shape), dtype=y.dtype, device=y.device
+                )[2].copy_(y)
+                return x @ y_with_offset
+
+        counters.clear()
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @patches
     @torch.no_grad

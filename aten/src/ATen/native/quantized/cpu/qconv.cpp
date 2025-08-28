@@ -1483,6 +1483,8 @@ static at::Tensor _fp8_convolution_onednn_ref(
     }
     y_f32.div_(output_scale);
     if (x1.scalar_type() == at::kFloat8_e4m3fn) {
+      // Avoid NaN
+      y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
       // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
       y_f32 = y_f32.to(at::kHalf);
     }
@@ -1497,6 +1499,8 @@ static at::Tensor _fp8_convolution_onednn_ref(
   y_f32.div_(output_scale);
   auto out_dtype = output_dtype.has_value() ? output_dtype.value() : at::kFloat8_e4m3fn;
   if (out_dtype == at::kFloat8_e4m3fn) {
+    // Avoid NaN
+    y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
     // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
     return y_f32.to(at::kHalf).to(out_dtype);
   }
@@ -1730,12 +1734,13 @@ static at::Tensor _quantized_convolution_onednn(
   output_sizes = at::native::conv_output_size(input_size, kernel_size, padding.vec(), stride.vec(), dilation.vec());
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   // Output is not a quantized tensor but data type is uint8
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : act_dtype;
   at::Tensor output = has_accum_postop_sum ?
     accum.value() :
     at::empty(
       dst_dims,
       at::device(c10::kCPU)
-          .dtype(fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : act_dtype))
+          .dtype(out_dtype)
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
               c10::MemoryFormat::ChannelsLast3d)
@@ -1755,6 +1760,16 @@ static at::Tensor _quantized_convolution_onednn(
     unary_scalars,
     unary_algorithm.has_value() ? unary_algorithm.value() : ""
   );
+  // Avoid NaN if output dtype is fp8
+  if (out_dtype == c10::kFloat8_e4m3fn) {
+    // To avoid NaN, we need to clamp the intermediate results (in fp32) to [-488, 488]
+    // before converting to fp8
+    auto post_ops = op_attr.get_post_ops();
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_linear, 1.0/output_scale, 0.0);
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_clip, -FP8E4M3_MAX, FP8E4M3_MAX);
+    op_attr.set_post_ops(post_ops);
+    output_scale = 1.0f;
+  }
 
 #if IDEEP_PREREQ(3, 1, 0, 0)
   // Use oneDNN's APIs instead of prepare/compute from ideep to reduce integration overhead.
