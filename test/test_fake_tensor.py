@@ -1464,7 +1464,6 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -1526,7 +1525,6 @@ class FakeTensorOperatorInvariants(TestCase):
             torch.tensor(3.14, device=GPU_TYPE)
             torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
         class Repro(torch.nn.Module):

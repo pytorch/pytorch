@@ -3314,10 +3314,10 @@ exit(2)
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
-            subtest((False, False, True), decorators=[skipIfRocm]),
-            subtest((True, False, True), decorators=[skipIfRocm]),
+            subtest((False, False, True)),
+            subtest((True, False, True)),
             subtest((True, True, True), decorators=[unittest.expectedFailure]),
-            subtest((False, False, False), decorators=[skipIfRocm]),
+            subtest((False, False, False)),
         ],
         name_fn=lambda x, y, z: "{}{}{}".format(
             {True: "with_amp", False: "without_amp"}[x],

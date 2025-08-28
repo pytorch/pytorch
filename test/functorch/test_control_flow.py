@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -1862,7 +1861,6 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(grads, expected_grads)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2007,7 +2005,6 @@ def forward(self, pred_1, x_1):
     # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -3747,7 +3744,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3814,7 +3810,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3873,7 +3868,6 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3891,7 +3885,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3984,7 +3977,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4168,7 +4160,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4215,7 +4206,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4264,7 +4254,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4444,7 +4433,6 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["device"] == torch.device("cpu")
             or params["compile_mode"] == "compile_dynamic_shape"
-            or torch.version.hip
         ),
     )
     def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
@@ -4562,7 +4550,6 @@ class GraphModule(torch.nn.Module):
             inputs=x,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4580,7 +4567,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4609,7 +4595,6 @@ class GraphModule(torch.nn.Module):
             inputs=elements,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
