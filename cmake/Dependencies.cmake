@@ -963,8 +963,8 @@ if(NOT TARGET CUDA::nvtx3)
 endif()
 if(NOT nvtx3_dir)
   find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
-  target_include_directories(CUDA::nvtx3 INTERFACE "${nvtx3_dir}")
 endif()
+target_include_directories(CUDA::nvtx3 INTERFACE "${nvtx3_dir}")
 
 
 # ---[ HIP
