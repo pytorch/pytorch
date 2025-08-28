@@ -14,11 +14,11 @@
 
 #  Args passed via stack.
 #  TOS
-#  |-----------|
-#  |c_stride   | 0
-#  |out ch indx| 8
-#  |params     | 16
-#  |-----------|
+#  |------------|
+#  |c_stride    | 0
+#  |out ch index| 8
+#  |params      | 16
+#  |------------|
 
 # void pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon(
 #     size_t mr,

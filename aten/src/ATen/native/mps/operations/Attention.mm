@@ -114,8 +114,22 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
             maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
           }
+
+          // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
+          // Overwrites expected NANs in sm with zeros.
+          auto negInfTensor = [mpsGraph constantWithScalar:-INFINITY shape:maskedMM.shape dataType:maskedMM.dataType];
+          auto elem_neg_inf = [mpsGraph equalWithPrimaryTensor:maskedMM secondaryTensor:negInfTensor name:nil];
+          auto all_neg_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_neg_inf axis:3 name:nil];
+          auto zero_mask = [mpsGraph broadcastTensor:all_neg_infs_along_axis toShape:maskedMM.shape name:nil];
+          auto zeroTensor = [mpsGraph constantWithScalar:0.0 shape:maskedMM.shape dataType:maskedMM.dataType];
+
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
-          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
+          MPSGraphTensor* correctedSM = [mpsGraph selectWithPredicateTensor:zero_mask
+                                                        truePredicateTensor:zeroTensor
+                                                       falsePredicateTensor:sm
+                                                                       name:nil];
+
+          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:correctedSM secondaryTensor:vTensor name:nil];
           graph->qTensor = qTensor;
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;

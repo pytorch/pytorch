@@ -121,6 +121,19 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_cholesky(self):
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
+
+    def test_reduced_max(self):
+        # inductor test do not validate that max of say 16K half elements can be computed
+        self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
