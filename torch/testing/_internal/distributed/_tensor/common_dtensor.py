@@ -378,7 +378,6 @@ class DTensorTestBase(MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if backend is None:
-            print(f"backend: {self.backend}, device_type={self.device_type}")
             backend = self.backend
 
         if backend not in [
@@ -395,7 +394,9 @@ class DTensorTestBase(MultiProcessTestCase):
         device_id = None
         if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
-            torch.accelerator.set_device_index(self.rank % 8)
+            # TODO: if users want to enable testing across hosts, we may need
+            # to change this part.
+            torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
@@ -418,14 +419,18 @@ class DTensorTestBase(MultiProcessTestCase):
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        if device_id is None and self.device_type == "cuda":
+        if device_id is None:
             device_id = (
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
         if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
-            print("self.device_type == cpu and torch._C._get_accelerator().type != cpu")
-            # NOTE:
+            # NOTE: when `device_id` is not None, barrier() will choose the accelerator
+            # of the most pripority, which means if the test specifies to use CPU for
+            # testing while CUDA is available on the host, the barrier() will use CUDA.
+            # To avoid this and better respect `self.device_type`, we add this branch to
+            # enforce barrier() to use CPU when `self.device_type` is CPU and other
+            # accelerator is also available.
             dist.barrier()
         else:
             dist.barrier(device_ids=[device_id])
