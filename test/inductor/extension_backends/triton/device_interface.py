@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 import torch
 from torch._dynamo import device_interface  # noqa: PLC2701 import-private-name
@@ -108,3 +109,7 @@ class DeviceInterface(device_interface.DeviceInterface):
     @staticmethod
     def get_compute_capability(device) -> int:
         return 0
+
+    @staticmethod
+    def inductor_backend() -> Optional[str]:
+        return "triton"
