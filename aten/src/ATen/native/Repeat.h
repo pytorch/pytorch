@@ -34,7 +34,7 @@ static inline Tensor repeat_interleave_common(
   } else {
     total = cumsum[-1].item<int64_t>();
     TORCH_CHECK(
-        repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
+        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
     TORCH_CHECK(
         (cumsum >= 0).all().item<uint8_t>(), "cumulative sum values overflowed. check the repeats tensor values");
   }
