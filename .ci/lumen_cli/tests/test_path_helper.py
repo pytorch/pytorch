@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 from cli.lib.common.path_helper import (
     copy,
-    ensure_dir_exists,
+    ensure_path,
     force_create_dir,
     get_path,
     is_path_exist,
@@ -53,12 +53,12 @@ class TestPathHelper(unittest.TestCase):
         with self.assertRaises(TypeError):
             get_path(123)  # type: ignore[arg-type]
 
-    # -------- ensure_dir_exists / force_create_dir / remove_dir --------
-    def test_ensure_dir_exists_creates_and_is_idempotent(self):
+    # -------- ensure_path / force_create_dir / remove_dir --------
+    def test_ensure_path_creates_and_is_idempotent(self):
         d = self.tmp_path / "made"
-        ensure_dir_exists(d)
+        ensure_path(d)
         self.assertTrue(d.exists() and d.is_dir())
-        ensure_dir_exists(d)
+        ensure_path(d)
 
     def test_force_create_dir_clears_existing(self):
         d = self.tmp_path / "fresh"

@@ -14,7 +14,6 @@ from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
 from cli.lib.common.gh_summary import (
     gh_summary_path,
     summarize_failures_by_test_command,
-    write_gh_step_summary,
 )
 from cli.lib.common.path_helper import copy, remove_dir
 from cli.lib.common.pip_helper import (
@@ -23,8 +22,13 @@ from cli.lib.common.pip_helper import (
     pkg_exists,
     run_python,
 )
-from cli.lib.common.utils import ensure_dir_exists, run_command, working_directory
-from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library, summarize_build_info
+from cli.lib.common.utils import ensure_path, run_command, working_directory
+from cli.lib.core.vllm.lib import (
+    clone_vllm,
+    run_test_plan,
+    sample_vllm_test_library,
+    summarize_build_info,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,11 @@ class VllmTestParameters:
         "VLLM_WHEELS_PATH", "./dist/external/vllm/wheels"
     )
 
+    # generate a file to store test summary
+    test_summary_file: Path = env_path_field(
+        "TEMP_GITHUB_STEP_SUMMARY", "./generated_step_summary.md"
+    )
+
     torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
     def __post_init__(self):
@@ -53,6 +62,8 @@ class VllmTestParameters:
             raise ValueError("missing torch_whls_path")
         if not self.vllm_whls_path.exists():
             raise ValueError("missing vllm_whls_path")
+        if self.test_summary_file:
+            ensure_path(self.test_summary_file, is_file=True)
 
 
 class TestInpuType(Enum):
@@ -113,26 +124,26 @@ class VllmTestRunner(BaseRunner):
 
         # prepare test summary
         test_summary_path = Path("tmp_pytest_report").resolve()
-        ensure_dir_exists(test_summary_path)
+        ensure_path(test_summary_path)
         test_summary_result = []
 
         try:
             with working_directory(self.work_directory):
                 if self.test_type == TestInpuType.TEST_PLAN:
-                    if self.num_shards > 1:
-                        run_test_plan(
-                            self.test_plan,
-                            "vllm",
-                            sample_vllm_test_library(),
-                            self.shard_id,
-                            self.num_shards,
-                            test_summary_path=test_summary_path,
-                            test_summary_result=test_summary_result,
-                        )
+                    run_test_plan(
+                        self.test_plan,
+                        "vllm",
+                        sample_vllm_test_library(),
+                        self.shard_id,
+                        self.num_shards,
+                        test_summary_path=test_summary_path,
+                        test_summary_result=test_summary_result,
+                    )
                 else:
                     raise ValueError(f"Unknown test type {self.test_type}")
         except Exception as e:
             logger.error("Failed to run vllm test: %s", e)
+            raise e
         finally:
             self.vllm_test_gh_summary(vllm_commit, test_summary_result)
 
