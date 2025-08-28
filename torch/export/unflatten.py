@@ -27,7 +27,7 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx._symbolic_trace import is_fx_symbolic_tracing
 from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
@@ -134,6 +134,11 @@ class _SubmoduleBase:
     _ty: Optional[str]
 
     def type_name(self) -> Optional[str]:
+        """
+        Subclass of this class - InterpreterModule, InterpreterModuleDispatcher, represents
+        corresponding model in eager model. To get this type information for those modules
+        in eager model we need to use this method.
+        """
         return self._ty
 
 
@@ -158,7 +163,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if not is_fx_tracing() and (
+        if not is_fx_symbolic_tracing() and (
             torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter
         ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
@@ -595,7 +600,7 @@ class UnflattenedModule(torch.nn.Module):
         )
         flat_args = [x[1] for x in flat_args_with_path]
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return flat_args
 
         if in_spec != signature.in_spec:
@@ -645,13 +650,10 @@ class UnflattenedModule(torch.nn.Module):
         return flat_args
 
     def forward(self, *args, **kwargs):
-        flat_args = torch._dynamo.disable(
-            self.process_forward_inputs,
-            reason="do not trace into preprocessing the inputs",
-        )(*args, **kwargs)
+        flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return_val = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
             )
@@ -770,7 +772,17 @@ def unflatten(
         hierarchy as the original eager module pre-export.
     """
     module = _remove_effect_tokens(module)
-    return UnflattenedModule(module, flat_args_adapter)
+    m = UnflattenedModule(module, flat_args_adapter)
+
+    # Disable process_forward_inputs as the adapter has many
+    # non-dynamo-traceable behavior.
+    m.process_forward_inputs = torch._dynamo.disable(  # type: ignore[method-assign]
+        m.process_forward_inputs,
+        reason="do not trace into preprocessing the inputs",
+        recursive=True,
+    )
+
+    return m
 
 
 def _inplace_buffer_and_input_mutations(

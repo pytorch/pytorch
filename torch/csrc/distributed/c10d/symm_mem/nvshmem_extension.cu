@@ -12,10 +12,18 @@
 // NVSHMEM minimum SM arch
 #define _NVSHMEM_MIN_SM_ARCH 700
 
+// If CUDA_ARCH is less than sm_70, or on sm_110, skip NVSHMEM device APIs
+#define _NVSHMEM_DEVICELIB_SUPPORTED 1
+#if defined(__CUDA_ARCH__)
+#  if (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || (__CUDA_ARCH__ == 1100)
+#    undef _NVSHMEM_DEVICELIB_SUPPORTED
+#  endif
+#endif
+
 // Some NVSHMEM device APIs do not compile on older SM archs
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH)
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
 // Only include host APIs. See nvshmem.h for details.
-#define NVSHMEM_HOSTLIB_ONLY
+#  define NVSHMEM_HOSTLIB_ONLY
 #endif  // Must be done before nvshmem.h is included
 
 #include <nvshmem.h>
@@ -192,8 +200,8 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
-#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
-  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
@@ -221,8 +229,8 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
-#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
-  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
@@ -367,8 +375,8 @@ at::Tensor all_to_all_vdev(
 
 template <bool HAS_IN_OFFSETS>
 __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, int mype, int npes, int ne, size_t input_dim0, bool rank_is_row_in) {
-#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
-  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   int nsplits = npes * ne;
   auto input_splits = in_splits_offsets;
@@ -463,8 +471,8 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // In combine case, rank_is_row_out = true, major_size = npes, minor_size = ne.
 
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_is_row_out) {
-#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
-  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   int nsplits = minor_size * major_size;
   auto output_splits = out_splits_offsets;

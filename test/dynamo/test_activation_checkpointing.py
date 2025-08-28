@@ -182,46 +182,75 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
 
-        # Run original version
-        cloned_args_orig_fn = []
-        for arg in args:
-            cloned_args_orig_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_orig_fn = torch.compile(
-            orig_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
-        result_orig_fn.sum().backward()
+        def clone_args(args):
+            cloned_args = []
+            for arg in args:
+                cloned_args.append(
+                    arg.detach().clone().requires_grad_(arg.requires_grad)
+                )
+            return cloned_args
 
-        # Run checkpointed version
-        cloned_args_checkpointed_fn = []
-        for arg in args:
-            cloned_args_checkpointed_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_checkpointed_fn = torch.compile(
-            checkpointed_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_checkpointed_fn = compiled_checkpointed_fn(*cloned_args_checkpointed_fn)
-        result_checkpointed_fn.sum().backward()
+        def run(compiler):
+            # Run original version
+            cloned_args_orig_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_orig_fn = compiler(orig_fn)
+            result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
+            result_orig_fn.sum().backward()
 
-        # Check that outputs and gradients are equal
-        self.assertEqual(
-            result_orig_fn,
-            result_checkpointed_fn,
-            msg="Output mismatch between the original version and the checkpointed version of the same function",
-        )
-        for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
-            cloned_args_orig_fn, cloned_args_checkpointed_fn
-        ):
+            # Run checkpointed version
+            cloned_args_checkpointed_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_checkpointed_fn = compiler(copy.deepcopy(checkpointed_fn))
+            result_checkpointed_fn = compiled_checkpointed_fn(
+                *cloned_args_checkpointed_fn
+            )
+            result_checkpointed_fn.sum().backward()
+
+            # Check that outputs and gradients are equal
             self.assertEqual(
-                cloned_arg_orig_fn.grad,
-                cloned_arg_checkpointed_fn.grad,
-                msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                result_orig_fn,
+                result_checkpointed_fn,
+                msg="Output mismatch between the original version and the checkpointed version of the same function",
             )
+            for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
+                cloned_args_orig_fn, cloned_args_checkpointed_fn
+            ):
+                self.assertEqual(
+                    cloned_arg_orig_fn.grad,
+                    cloned_arg_checkpointed_fn.grad,
+                    msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                )
+
+        run(functools.partial(torch.compile, fullgraph=fullgraph))
+        if fullgraph:
+
+            def export_compiler(fn):
+                class WrapAsModule(nn.Module):
+                    def forward(self, *args, **kwargs):
+                        return fn(*args, **kwargs)
+
+                mod = WrapAsModule()
+
+                def runtime_wrapper(*runtime_args):
+                    from torch.export import _trace
+
+                    gm = _trace._export_to_torch_ir(
+                        f=mod,
+                        args=tuple(clone_args(args)),
+                        kwargs={},
+                        dynamic_shapes=None,
+                        preserve_module_call_signature=(),
+                        restore_fqn=False,
+                        allow_complex_guards_as_runtime_asserts=False,
+                        _log_export_usage=False,
+                    )
+                    # NOTE: this is necessary for rng to be added to the exported graph
+                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+
+                return runtime_wrapper
+
+            run(export_compiler)
 
     def test_tags_function(self, device):
         def gn(x, y):

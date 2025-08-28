@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import warnings
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, overload, Protocol, Union
+from typing import Optional, overload, Protocol, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -27,6 +28,8 @@ from torch._C import (
 
 _is_in_torch_dispatch_mode = False
 _is_in_non_infra_torch_dispatch_mode = False
+# If inside any mode that has ignore_compile_internals() = False
+_is_in_any_mode_without_ignore_compile_internals = False
 
 
 def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
@@ -35,6 +38,10 @@ def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
         if include_infra_modes
         else _is_in_non_infra_torch_dispatch_mode
     )
+
+
+def is_in_any_mode_without_ignore_compile_internals() -> bool:
+    return _is_in_any_mode_without_ignore_compile_internals
 
 
 class TorchDispatchMode:
@@ -81,6 +88,9 @@ class TorchDispatchMode:
 
         self.old_dispatch_mode_flags: deque[bool] = deque()
         self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()
+        self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[bool] = (
+            deque()
+        )
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
@@ -89,12 +99,21 @@ class TorchDispatchMode:
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
             self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
+        if not hasattr(
+            self, "old_without_ignore_compile_internals_dispatch_mode_flags"
+        ):
+            self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[  # type: ignore[no-redef]
+                bool
+            ] = deque()
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
         global _is_in_non_infra_torch_dispatch_mode
+        global _is_in_any_mode_without_ignore_compile_internals
+
         # Previously, there wasn't any state in this class' constructor
         # super calls were added to existing modes, but for any new modes
         # this will replicate the previous behavior of not strictly needing
@@ -107,6 +126,13 @@ class TorchDispatchMode:
         )
         _is_in_non_infra_torch_dispatch_mode = (
             _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
+        )
+        self.old_without_ignore_compile_internals_dispatch_mode_flags.append(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
+        _is_in_any_mode_without_ignore_compile_internals = (
+            _is_in_any_mode_without_ignore_compile_internals
+            or not self.ignore_compile_internals()
         )
         _push_mode(self)
         return self
@@ -123,6 +149,10 @@ class TorchDispatchMode:
         _is_in_non_infra_torch_dispatch_mode = (
             self.old_non_infra_dispatch_mode_flags.pop()
         )
+        global _is_in_any_mode_without_ignore_compile_internals
+        _is_in_any_mode_without_ignore_compile_internals = (
+            self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
+        )
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -135,6 +165,38 @@ class TorchDispatchMode:
 
     @classmethod
     def is_infra_mode(cls):
+        return False
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        """Ignore operators that are compiled via torch.compile.
+
+        If ``True``, then this TorchDispatchMode ignores operators that
+        are optimized by :func:`torch.compile`. Mechanically, this involves
+        turning off the TorchDispatchMode throughout the whole compilation process,
+        and turning it back on for the runtime of the compiled artifact(s).
+        For example,
+
+        @torch.compile
+        def f(x):
+            return x.sin().cos()
+
+        with LoggingMode():
+            f(x)
+
+        The above example will not log anything if
+        ``LoggingMode.ignore_compile_internals()`` is True.
+        torch.compile will fuse sin() and cos() into a single operation
+        and this TorchDispatchMode will not be passed sin and cos.
+
+        If ``False`` (default), :func:`torch.compile` will respect
+        the eager semantics of passing this TorchDispatchMode all
+        operators that would have run during eager execution.
+        The way this will usually happen is that :func:`torch.compile`
+        will just fallback to eager-mode PyTorch.
+        """
+        if cls.is_infra_mode():
+            return True
         return False
 
 
@@ -527,15 +589,10 @@ class SchemaInfo:
     outs: list[AliasInfo]
 
 
-# Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: dict[Any, SchemaInfo] = {}
-
-
 # Given an OpOverload, returns schema information on it.
 # This is cached for efficiency, since it can involve running torchgen
+@functools.cache
 def get_alias_info(func) -> SchemaInfo:
-    if func in parsed_schema_map:
-        return parsed_schema_map[func]
     # For ATen ops: use torchgen (since torchscript parser doesn't handle alias annotations
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
@@ -598,7 +655,6 @@ def get_alias_info(func) -> SchemaInfo:
             for a in func._schema.returns
         ]
     schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
-    parsed_schema_map[func] = schema_info
     return schema_info
 
 

@@ -165,6 +165,9 @@ jobs:
     name: cuda12.8-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
+    # The pull_request trigger is used in PR to bump transformers pin which always
+    # needs one round of benchmark
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-cudagraphs_low_precision-${{ inputs.cudagraphs || 'false' }}
