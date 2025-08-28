@@ -3241,6 +3241,7 @@ class InstructionTranslatorBase(
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
 
+    @break_graph_if_unsupported(push=1)
     def LOAD_BUILD_CLASS(self, inst: Instruction) -> None:
         unimplemented_v2(
             gb_type="LOAD_BUILD_CLASS bytecode not supported",
