@@ -152,24 +152,27 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self._init_process(set_device)
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
+        alloc_id = 42 + int(set_device)
         alloc_args = self._get_test_alloc_args()
 
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
         data_ptr = t.data_ptr()
 
         # Verify that persistent allocation would fail if there's an active
         # allocation with the same alloc_id.
         with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+
 
         # Verify that persistent allocation would succeed in lieu of activate
         # allocations with the same alloc_id, and the returned tensor would
         # have the same data pointer.
         del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
         self.assertEqual(t.data_ptr(), data_ptr)
 
         symm_mem_hdl = _SymmetricMemory.rendezvous(t)
+
         self._verify_symmetric_memory(symm_mem_hdl)
 
     @runOnRocmArch(MI300_ARCH)
