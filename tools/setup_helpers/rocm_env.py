@@ -3,8 +3,11 @@ from pathlib import Path
 
 
 def check_if_rocm() -> bool:
-    if os.environ.get("USE_ROCM"):
-        return True
+    # If user defines USE_ROCM during PyTorch build, respect their intention
+    use_rocm_env = os.environ.get("USE_ROCM")
+    if use_rocm_env:
+        return bool(use_rocm_env)
+    # otherwise infer existence of ROCm installation as indication of ROCm build
     if os.path.exists("/opt/rocm"):
         return True
     if os.environ.get("ROCM_PATH") is not None:
