@@ -69,12 +69,16 @@ _TPL_TABLE = Template(
 """)
 )
 
-
 def gh_summary_path() -> Path | None:
-    """Return the Path to the GitHub step summary file,
-    if TEMP_GITHUB_STEP_SUMMARY is set, use that instead,
-    this happens when run jobs in docker container
-    the github flow need to make sure to output the summary to github step summary after
+    """Resolve the writable step summary file path.
+
+    - Prefer TEMP_GITHUB_STEP_SUMMARY if set (used inside docker jobs to write
+      a temporary file mounted into the workspace).
+    - Otherwise use GITHUB_STEP_SUMMARY (created by GitHub Actions runner).
+    - Return None if no path is set or the path does not exist.
+
+    Note: if TEMP_GITHUB_STEP_SUMMARY is used, the workflow must append its
+    content back to $GITHUB_STEP_SUMMARY on the host after the container step.
     """
     p = get_env("GITHUB_STEP_SUMMARY")
     overrides = get_env("TEMP_GITHUB_STEP_SUMMARY")
@@ -82,8 +86,7 @@ def gh_summary_path() -> Path | None:
         p = overrides
     if not p or not Path(p).exists():
         return None
-    return Path(p) if p else None
-
+    return Path(p)
 
 def write_gh_step_summary(md: str, *, append_content: bool = True) -> bool:
     """
