@@ -51,12 +51,16 @@ from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
 from .symbolic_convert import TensorifyState
 from .utils import (
+    amp_autocast_modules,
     create_nested_fn_cache,
+    custom_backend_name,
     graph_break_reasons,
     guard_failures,
+    is_custom_backend_available,
     orig_code_map,
     register_hook_for_recompile_user_context,
     reset_frame_count,
+    torch_custom_backend,
 )
 
 
