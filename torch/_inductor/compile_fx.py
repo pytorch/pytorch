@@ -1063,29 +1063,6 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Dump provenance artifacts for debugging trace
-    if config.trace.provenance_tracking_level != 0:
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(
-                torch._inductor.debug.dump_inductor_provenance_info()
-            ),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_kernel_stack_traces",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(
-                torch._inductor.debug._inductor_kernel_stack_trace
-            ),
-        )
-
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
@@ -1528,6 +1505,33 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
+                    # Dump provenance artifacts for debugging trace
+                    inductor_provenance_tracking_node_mappings = None
+                    inductor_kernel_stack_trace_str = None
+                    if config.trace.provenance_tracking_level != 0:
+                        inductor_provenance_tracking_node_mappings = json.dumps(
+                            torch._inductor.debug.dump_inductor_provenance_info()
+                        )
+                        inductor_kernel_stack_trace_str = json.dumps(
+                            torch._inductor.debug._inductor_kernel_stack_trace
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "inductor_provenance_tracking_node_mappings",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: inductor_provenance_tracking_node_mappings,
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: inductor_kernel_stack_trace_str,
+                        )
+
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -1635,6 +1639,8 @@ class _InProcessFxCompile(FxCompile):
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,
+                        inductor_provenance_tracking_node_mappings,
+                        inductor_kernel_stack_trace_str,
                     )
 
 

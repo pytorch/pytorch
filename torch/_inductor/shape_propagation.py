@@ -139,7 +139,3 @@ class ShapePropagationOpsHandler:
 
     def __getattr__(self, name: str) -> Callable[..., BlockShapeType]:
         return lambda *args, **kwargs: broadcast_shapes_for_args(args)
-
-    @staticmethod
-    def device_assert_async(cond: ShapeArg, msg: str) -> None:
-        return None
