@@ -1189,7 +1189,7 @@ class cpp:
 
 class triton:
     """
-    Config specific to codegen/triton.py
+    Settings specific to the Triton backend.
     """
 
     # Use cudagraphs on output code
@@ -1393,6 +1393,7 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1910,6 +1911,12 @@ _cache_config_ignore_prefix: list[str] = [
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+
+
+# Please see the README inside lookup_table for details on the knobs
+class template_config_lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
 
 
 class test_configs:
