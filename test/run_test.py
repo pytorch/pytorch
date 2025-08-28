@@ -174,7 +174,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "inductor/test_flex_attention",
 ]
 
 S390X_BLOCKLIST = [
