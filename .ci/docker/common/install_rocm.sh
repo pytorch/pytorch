@@ -39,8 +39,8 @@ EOF
 
     # Special case for ROCM_VERSION == 7.0
     if [[ $(ver "$ROCM_VERSION") -eq $(ver 7.0) ]]; then
-        rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_alpha2"
-        amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_alpha2/ubuntu"
+        rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_rc1"
+        amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_rc1/ubuntu"
     fi
 
     # Add amdgpu repository
