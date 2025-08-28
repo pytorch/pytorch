@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import Callable, TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from ..kernel_template_choice import KernelTemplateChoice
@@ -13,8 +14,8 @@ PerformanceModelFunction = Callable[
 
 
 def predict(
-    choices: list["KernelTemplateChoice"], op_name: str
-) -> list["KernelTemplateChoice"]:
+    choices: list[KernelTemplateChoice], op_name: str
+) -> list[KernelTemplateChoice]:
     """
     Predict the performance of a list of kernel template choices.
 

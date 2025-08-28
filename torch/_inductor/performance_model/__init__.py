@@ -11,6 +11,7 @@ from .registry import (
     register_performance_model_fn,
 )
 
+
 __all__ = [
     "PerformanceModelFunction",
     "predict",

@@ -1,7 +1,4 @@
-"""
-Tests for the performance model interface and registry system.
-"""
-
+# Owner(s): ["module: inductor"]
 import unittest
 from unittest.mock import MagicMock
 
@@ -14,6 +11,7 @@ from torch._inductor.performance_model.registry import (
     register_performance_model,
     register_performance_model_fn,
 )
+from torch._inductor.test_case import run_tests
 
 
 # Mock performance model functions for testing
@@ -153,7 +151,7 @@ class TestPerformanceModelInterface(unittest.TestCase):
         result = get_functions_for_templates(template_ids, "mm", "cuda")
 
         self.assertEqual(len(result), 1)  # Only mock_model_a
-        func_a = list(result.keys())[0]
+        func_a = next(iter(result.keys()))
         self.assertEqual(func_a, mock_model_a)
         self.assertEqual(set(result[func_a]), {"mm", "addmm", "baddbmm"})
 
@@ -428,4 +426,4 @@ class TestFilterAndSortChoices(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

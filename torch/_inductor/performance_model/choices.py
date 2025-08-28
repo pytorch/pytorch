@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, override, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._inductor.config as config
 
 from ..kernel_template_choice import make_ktc_generator
 from ..lookup_table.choices import LookupTableChoices
 from ..template_heuristics.registry import get_template_heuristic
-
 from .core import predict_and_filter_choices
 from .registry import get_model_function_for_key
 
@@ -38,7 +37,7 @@ class PerformanceModelChoices(LookupTableChoices):
         layout: Layout,
         op_name: str,
         kwarg_overrides: dict[str, dict[str, Any]],
-    ) -> tuple[list[KernelTemplateChoice], dict[str, int]]:
+    ) -> tuple[list[KernelTemplateChoice], int]:
         """
         Expand templates to exhaustive search when performance models exist and return the full list.
 
@@ -53,31 +52,29 @@ class PerformanceModelChoices(LookupTableChoices):
             - Flattened list of all KernelTemplateChoice objects
             - Dictionary mapping template UIDs to original generator sizes
         """
-        all_choices = []
-        original_sizes = {}
+        all_choices: list[KernelTemplateChoice] = []
+        original_sizes = 0
         hardware_name = kernel_inputs.device_name
 
         # Assert that hardware_name is not None
-        assert (
-            hardware_name is not None
-        ), f"hardware_name must not be None, got {hardware_name}"
+        assert hardware_name is not None, (
+            f"hardware_name must not be None, got {hardware_name}"
+        )
 
         for template_uid, generator in template_choices.items():
             # Check if performance model exists for this template
             model_function = get_model_function_for_key(
                 template_uid, op_name, hardware_name
             )
-
+            # Actualize original generator to count size
+            original_choices = list(generator)
+            original_sizes += len(original_choices)
             if model_function is not None:
                 log.debug(
-                    f"Performance model found for template '{template_uid}', "
-                    f"op '{op_name}', hardware '{hardware_name}'. "
-                    "Expanding to exhaustive search space."
+                    "Performance model found for template_id=%r op_name=%r, expanding search space",
+                    template_uid,
+                    op_name,
                 )
-
-                # Actualize original generator to count size
-                original_choices = list(generator)
-                original_sizes[template_uid] = len(original_choices)
 
                 # Create exhaustive generator by patching config
                 with config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
@@ -117,14 +114,11 @@ class PerformanceModelChoices(LookupTableChoices):
 
             else:
                 log.debug(
-                    f"No performance model found for template '{template_uid}', "
-                    f"op '{op_name}', hardware '{hardware_name}'. "
-                    "Keeping original generator."
+                    "No performance model found for template_id=%r op_name=%r, keeping original search space",
+                    template_uid,
+                    op_name,
                 )
-
                 # Keep original choices - add directly to list
-                original_choices = list(generator)
-                original_sizes[template_uid] = len(original_choices)
                 all_choices.extend(original_choices)
 
         return all_choices, original_sizes
@@ -166,7 +160,7 @@ class PerformanceModelChoices(LookupTableChoices):
             )
         # Validate topk configuration
         topk = config.performance_model.topk
-        assert topk >= -1, f"performance_model.topk must be >= -1, got {topk}"
+        assert topk >= -1, "performance_model.topk must be >= -1, got " + str(topk)
 
         # If topk == 0, performance model is disabled
         if topk == 0:
@@ -191,22 +185,16 @@ class PerformanceModelChoices(LookupTableChoices):
         )
 
         # Handle topk normalization: if topk == -1, set to total original size
-        total_original_size = sum(original_sizes.values())
         if topk == -1:
-            topk = total_original_size
-            log.debug(f"Set topk=-1 to total original size: {topk}")
+            topk = original_sizes
+            log.debug("Set topk=-1 to original size")
 
         # Create template_uid_to_ktc mapping for predict_and_filter_choices
-        template_uid_to_ktc = {}
+        template_uid_to_ktc: dict[str, list[KernelTemplateChoice]] = {}
         for choice in actualized_choices:
-            template_uid = (
-                choice.template.uid
-                if hasattr(choice.template, "uid")
-                else str(choice.template)
-            )
-            if template_uid not in template_uid_to_ktc:
-                template_uid_to_ktc[template_uid] = []
-            template_uid_to_ktc[template_uid].append(choice)
+            if choice.template.uid not in template_uid_to_ktc:
+                template_uid_to_ktc[choice.template.uid] = []
+            template_uid_to_ktc[choice.template.uid].append(choice)
 
         # Apply performance model prediction and filtering
         filtered_choices = predict_and_filter_choices(
@@ -218,14 +206,11 @@ class PerformanceModelChoices(LookupTableChoices):
         )
 
         log.info(
-            f"Performance model processing complete: "
-            f"input={kernel_inputs.key}, "
-            f"op={op_name}, "
-            f"original={total_original_size}, "
-            f"expanded={len(actualized_choices)}, "
-            f"filtered={len(filtered_choices)}, "
-            f"topk={topk}, "
-            f"discard_unranked={config.performance_model.discard_unranked}"
+            "Performance model complete: orig=%d exp=%d filt=%d topk=%d",
+            original_sizes,
+            len(actualized_choices),
+            len(filtered_choices),
+            topk,
         )
 
         return filtered_choices

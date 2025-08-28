@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING, Union
 
+
 if TYPE_CHECKING:
     from .base import PerformanceModelFunction
 
 # Registry mapping: (hardware, template, op) -> function
-_PERFORMANCE_MODEL_REGISTRY: dict[tuple[str, str, str], "PerformanceModelFunction"] = {}
+_PERFORMANCE_MODEL_REGISTRY: dict[tuple[str, str, str], PerformanceModelFunction] = {}
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def register_performance_model(
             return choices
     """
 
-    def decorator(func: "PerformanceModelFunction") -> "PerformanceModelFunction":
+    def decorator(func: PerformanceModelFunction) -> PerformanceModelFunction:
         register_performance_model_fn(func, template_id, op, hardware_name)
         return func
 
@@ -48,7 +49,7 @@ def register_performance_model(
 
 
 def register_performance_model_fn(
-    func: "PerformanceModelFunction",
+    func: PerformanceModelFunction,
     template_id: str,
     op: str,
     hardware_name: str,
@@ -66,20 +67,22 @@ def register_performance_model_fn(
 
     # If overriding an existing registration, log it
     if key in _PERFORMANCE_MODEL_REGISTRY:
-        log.debug(f"Replacing existing performance model for key {key}")
+        log.debug("Replacing existing performance model for key %r", key)
 
     # Update registry
     _PERFORMANCE_MODEL_REGISTRY[key] = func
 
     log.info(
-        f"Registered performance model function for "
-        f"hardware_name='{hardware_name}', template_id='{template_id}', op='{op}'"
+        "Registered performance model function for hardware_name=%r template_id=%r op=%r",
+        hardware_name,
+        template_id,
+        op,
     )
 
 
 def get_model_function_for_key(
     template_id: str, op: str, hardware_name: str
-) -> Union["PerformanceModelFunction", None]:
+) -> Union[PerformanceModelFunction, None]:
     """
     Get a performance model function for a specific (hardware, template, op) key.
 
@@ -92,7 +95,7 @@ def get_model_function_for_key(
 
 def get_functions_for_templates(
     template_ids: list[str], op_name: str, hardware_name: str
-) -> dict["PerformanceModelFunction", list[str]]:
+) -> dict[PerformanceModelFunction, list[str]]:
     """
     Get performance model functions mapped to the template_ids they can handle.
 
@@ -105,7 +108,7 @@ def get_functions_for_templates(
         Dictionary mapping function instances to lists of template_ids
         they can handle. Only includes template_ids that have registered functions.
     """
-    function_to_templates: dict["PerformanceModelFunction", list[str]] = {}
+    function_to_templates: dict[PerformanceModelFunction, list[str]] = {}
 
     # Group template_ids by which function handles them
     for template_id in template_ids:

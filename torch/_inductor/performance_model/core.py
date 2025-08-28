@@ -8,9 +8,12 @@ and choice filtering in the inductor kernel selection process.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
+
+from torch.utils._ordered_set import OrderedSet
 
 from .registry import get_functions_for_templates
+
 
 if TYPE_CHECKING:
     from ..kernel_template_choice import KernelTemplateChoice
@@ -36,8 +39,8 @@ def filter_and_sort_choices(
         Filtered and sorted list of KernelTemplateChoice objects
     """
     # Separate choices with predictions from those without
-    ranked_choices = []
-    unranked_choices = []
+    ranked_choices: list[KernelTemplateChoice] = []
+    unranked_choices: list[KernelTemplateChoice] = []
 
     for ktc in ktc_stack:
         if ktc.performance_prediction is not None:
@@ -46,11 +49,17 @@ def filter_and_sort_choices(
             unranked_choices.append(ktc)
 
     log.debug(
-        f"Found {len(ranked_choices)} ranked choices and {len(unranked_choices)} unranked choices"
+        "Found %d ranked choices and %d unranked choices",
+        len(ranked_choices),
+        len(unranked_choices),
     )
 
     # Sort ranked choices by performance prediction (lower is better - shorter runtime)
-    ranked_choices.sort(key=lambda x: x.performance_prediction)
+    def key(ktc: KernelTemplateChoice) -> float:
+        assert ktc.performance_prediction is not None
+        return ktc.performance_prediction
+
+    ranked_choices.sort(key=key)
 
     # Apply topk filtering
     filtered_choices = []
@@ -66,17 +75,22 @@ def filter_and_sort_choices(
     if not discard_unranked:
         filtered_choices.extend(unranked_choices)
         log.debug(
-            f"Keeping {len(unranked_choices)} unranked choices (discard_unranked=False)"
+            "Keeping %d unranked choices (discard_unranked=False)",
+            len(unranked_choices),
         )
     else:
         log.debug(
-            f"Discarding {len(unranked_choices)} unranked choices (discard_unranked=True)"
+            "Discarding %d unranked choices (discard_unranked=True)",
+            len(unranked_choices),
         )
 
     log.info(
-        f"Performance model filtering: "
-        f"original={len(ktc_stack)}, ranked={len(ranked_choices)}, "
-        f"filtered={len(filtered_choices)}, topk={topk}, discard_unranked={discard_unranked}"
+        "Performance model filtering: orig=%d ranked=%d filtered=%d topk=%d discard_unranked=%r",
+        len(ktc_stack),
+        len(ranked_choices),
+        len(filtered_choices),
+        topk,
+        discard_unranked,
     )
 
     return filtered_choices
@@ -125,10 +139,10 @@ def predict_and_filter_choices(
     assert topk > 0 or topk == -1, f"topk must be > 0 or -1, got {topk}"
 
     # Assert that all KTCs have the same device name
-    device_names = {ktc.inputs.device_name for ktc in ktc_stack}
-    assert (
-        len(device_names) == 1
-    ), f"All KTCs must have the same device_name, but found: {device_names}"
+    device_names = OrderedSet([ktc.inputs.device_name for ktc in ktc_stack])
+    assert len(device_names) == 1, (
+        f"All KTCs must have the same device_name, but found: {device_names}"
+    )
     hardware_name = next(iter(device_names))
 
     assert hardware_name, "device_name must be non-empty"
@@ -136,8 +150,10 @@ def predict_and_filter_choices(
     # Get all template UIDs that have KTCs
     template_uids = list(template_uid_to_ktc.keys())
     log.debug(
-        f"Processing {len(ktc_stack)} KTCs across {len(template_uids)} template UIDs: {template_uids} "
-        f"for device '{hardware_name}'"
+        "Processing %d KTCs across %d template UIDs for device %r",
+        len(ktc_stack),
+        len(template_uids),
+        hardware_name,
     )
 
     # Get functions that can handle these template UIDs
@@ -147,19 +163,21 @@ def predict_and_filter_choices(
 
     if not functions_to_templates:
         log.debug(
-            f"No performance model functions found for templates {template_uids} "
-            f"with op_name='{op_name}', hardware_name='{hardware_name}'. "
-            "Returning original KTC stack without predictions."
+            "No performance model functions found for op_name=%r hardware_name=%r, returning original KTC stack",
+            op_name,
+            hardware_name,
         )
         return ktc_stack
 
     log.info(
-        f"Found {len(functions_to_templates)} performance model functions for "
-        f"op_name='{op_name}', hardware_name='{hardware_name}'"
+        "Found %d performance model functions for op_name=%r hardware_name=%r",
+        len(functions_to_templates),
+        op_name,
+        hardware_name,
     )
 
     # Step 1: Send KTCs to the right functions and call them for predictions
-    ktcs_processed = set()
+    ktcs_processed: OrderedSet[KernelTemplateChoice] = OrderedSet()
 
     for func, template_uids_for_func in functions_to_templates.items():
         # Collect all KTCs that this function should handle
@@ -172,8 +190,9 @@ def predict_and_filter_choices(
 
         if ktcs_for_func:
             log.debug(
-                f"Calling function "
-                f"with {len(ktcs_for_func)} KTCs for templates {template_uids_for_func}"
+                "Calling function with %d KTCs for templates %r",
+                len(ktcs_for_func),
+                template_uids_for_func,
             )
 
             try:
@@ -193,12 +212,13 @@ def predict_and_filter_choices(
                     1 for ktc in ktcs_for_func if ktc.performance_prediction is not None
                 )
                 log.debug(
-                    f"Function made predictions for "
-                    f"{successful_predictions}/{len(ktcs_for_func)} KTCs"
+                    "Function made predictions for %d/%d KTCs",
+                    successful_predictions,
+                    len(ktcs_for_func),
                 )
 
             except Exception as e:
-                log.error(f"Performance model function failed during prediction: {e}")
+                log.error("Performance model function failed during prediction: %s", e)
                 # Continue with other functions even if one fails
                 continue
 
@@ -210,8 +230,9 @@ def predict_and_filter_choices(
 
     if unprocessed_ktcs:
         log.debug(
-            f"{len(unprocessed_ktcs)}/{len(ktc_stack)} KTCs were not processed "
-            "by any performance model (no matching template UID or no registered model)"
+            "%d/%d KTCs not processed by any performance model",
+            len(unprocessed_ktcs),
+            len(ktc_stack),
         )
 
     # Step 2: Apply filtering and reordering based on performance predictions
