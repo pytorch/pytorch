@@ -18,6 +18,7 @@
 #include <thrust/pair.h>
 
 #include <ATen/native/cuda/jit_utils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 namespace at::native {
 
@@ -796,15 +797,25 @@ struct ReduceOp {
     bool should_store = config.should_store(output_idx);
     if (should_store) {
       index_t offset = config.staging_memory_offset(blockIdx.y);
+#ifndef USE_ROCM
       reduce_buffer[offset] = value;
+#else // [CMTSTRS]
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore(&reduce_buffer[offset], value);
+#endif
     }
 
+#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
     __threadfence(); // make sure writes are globally visible
+#endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
       __threadfence(); // complete the acquire pattern after atomic
+#endif
       for (auto &v : value) {
         v = ident;
       }
@@ -822,6 +833,23 @@ struct ReduceOp {
       } else {
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
+#ifdef USE_ROCM // Prefetch loads to better hide their latency
+        #define PRFCH 4
+        for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
+         arg_vec_t next[PRFCH];
+         #pragma unroll
+         for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
+          index_t idx = config.staging_memory_offset(input_offset + u*step);
+          next[u] = reduce_buffer[idx];
+         }
+         for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
+          #pragma unroll
+          for (int i = 0; i < output_vec_size; i++) {
+            value[i] = ops.combine(value[i], next[u][i]);
+          }
+         }
+        }
+#else
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -830,6 +858,7 @@ struct ReduceOp {
             value[i] = ops.combine(value[i], next[i]);
           }
         }
+#endif
       }
       value = block_y_reduce<output_vec_size>(value, shared_memory);
       if (config.should_block_x_reduce()) {
