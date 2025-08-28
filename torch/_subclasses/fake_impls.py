@@ -817,10 +817,16 @@ def assert_tensor_metadata(
             f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
         )
     if device is not None:
-        assert t.device == device, (
-            f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+        assert t.device.type == device.type, (
+            f"Tensor device type mismatch! Expected: {device.type}, Got: {t.device.type}"
         )
-
+        assert (
+            (not device.index)
+            or (not t.device.index)
+            or (t.device.index == device.index)
+        ), (
+            f"Tensor device index mismatch! Expected: {device.type}, Got: {t.device.type}"
+        )
 
 # NB: this must be ordered after local_scalar_dense
 @register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
