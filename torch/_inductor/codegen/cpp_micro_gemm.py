@@ -963,6 +963,15 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     return k % vnni_size == 0 and alpha == 1
 
 
+def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    # We need avx512_bf16 to dequant int8 to bf16
+    vec_isa = kwargs.get("vec_isa", None)
+    assert vec_isa is not None
+    return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
+        config, m, n, k, alpha, num_threads, **kwargs
+    )
+
+
 # amx_fp16 need to be checked separately since it is not always supported when amx is supported
 def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
     assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
@@ -989,7 +998,7 @@ def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
-        extra_check=check_amx_extra,
+        extra_check=check_int8_bf16_amx_extra,
     ),
     *generate_gemm_config(
         VecAMX,
