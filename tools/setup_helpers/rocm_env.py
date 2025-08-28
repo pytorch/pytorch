@@ -43,13 +43,14 @@ def get_ck_dependency_string() -> str:
     Generates a PEP 508-compliant dependency string for the ROCm Composable Kernel
     to be used in setuptools' install_requires.
 
-    The returned string is in the format:
+    The returned string is EITHER in the format:
         " @ git+<repo_url>@<commit_hash>#egg=rocm-composable-kernel"
     where:
         - <repo_url> is the URL for ROCm Composable Kernel
         - <commit_hash> is read from the commit pin file
         - "#egg=rocm-composable-kernel" specifies the package name for setuptools
-
+    OR an empty string, making use of the existing rocm-composable-kernel installation.
+    
     Returns:
         str: The formatted dependency string for use in install_requires.
     """
