@@ -1089,6 +1089,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
+
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
