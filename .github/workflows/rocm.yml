@@ -61,6 +61,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-gfx1100-test:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       id-token: write
       contents: read
