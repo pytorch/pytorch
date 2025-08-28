@@ -912,6 +912,9 @@ class OutputGraph(OutputGraphGuardsState):
     def is_empty_graph(self) -> bool:
         return len(list(self.graph.nodes)) == 0
 
+    def has_outputs(self) -> bool:
+        return len([x for x in self.graph.nodes if x.op == "output"]) > 0
+
     def get_submodule(self, keys: str) -> Union[torch.nn.Module, Any]:
         assert keys
         obj: Union[torch.nn.Module, dict[str, torch.nn.Module]] = self.nn_modules

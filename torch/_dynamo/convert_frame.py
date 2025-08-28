@@ -1432,7 +1432,12 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
-            log_frame_dynamic_whitelist(code)
+            if (
+                tracer_output
+                and (output_graph := tracer_output.output_graph)
+                and output_graph.has_outputs()
+            ):
+                log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
