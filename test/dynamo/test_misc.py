@@ -1787,10 +1787,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         @torch.compile(backend="eager")
         def f():
             # Create namedtuple inside function (sourceless)
-            tup = MyNamedTupleSubclass(
-                a=torch.tensor([1.0]), 
-                b=torch.tensor(2.0)
-            )
+            tup = MyNamedTupleSubclass(a=torch.tensor([1.0]), b=torch.tensor(2.0))
             # Add dynamic attribute
             tup.c = torch.tensor(3.0)
             return tup
