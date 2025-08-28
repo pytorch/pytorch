@@ -1137,18 +1137,11 @@ class NamedTupleVariable(TupleVariable):
             + create_call_function(1, False)
         )
 
-        # Handle dynamic attributes through store_attr_mutations
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
-        if tx.output.side_effects.has_pending_mutation(self):
-            for name, value in tx.output.side_effects.store_attr_mutations[
-                self
-            ].items():
-                codegen.dup_top()
-                codegen(value)
-                codegen.extend_output(create_rot_n(2))
-                codegen.store_attr(name)
+        for name, value in self.dynamic_attributes.items():
+            codegen.dup_top()
+            codegen(value)
+            codegen.extend_output(create_rot_n(2))
+            codegen.store_attr(name)
 
     def call_method(
         self,
