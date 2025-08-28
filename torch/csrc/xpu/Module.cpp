@@ -298,7 +298,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
   // Wrapper class for XPU UUID
   struct XPUuuid {
     explicit XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
-    const std::array<unsigned char, 16>& bytes;
+    const std::array<unsigned char, 16> bytes;
   };
   auto m = py::handle(module).cast<py::module>();
 
