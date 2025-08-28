@@ -384,7 +384,9 @@ def _get_param_buffer_mapping(
     param_lookup: dict[int, str] = {}
     buffer_lookup: dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup[id(param)] = name
+        if param_lookup.get(id(param)) is None:
+            # we only want to keep the first occurrence of a parameter to guarantee parity of original and traced module.
+            param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup[id(buffer)] = name
 
@@ -810,7 +812,7 @@ def _export_to_torch_ir(
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
                     # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
@@ -1850,6 +1852,11 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
 
+def _is_invalid_const_name(name: str):
+    splitted_names = name.split(".")
+    return splitted_names[-1].startswith("lifted_tensor")
+
+
 def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -2025,6 +2032,43 @@ def _non_strict_export(
     )
 
 
+def emit_bogus_const_warning(constants, gs, gm):
+    bogus_constants: set[str] = set()
+    for const, val in constants.items():
+        if isinstance(
+            val, torch._subclasses.fake_tensor.FakeTensor
+        ) and _is_invalid_const_name(const):
+            bogus_constants.add(const)
+
+    if len(bogus_constants) == 0:
+        return
+
+    bogus_constant_names: set[str] = set()
+    for inp in gs.input_specs:
+        if inp.kind == InputKind.CONSTANT_TENSOR and inp.target in bogus_constants:
+            bogus_constant_names.add(inp.arg.name)
+
+    placeholders = {
+        node.name: node for node in gm.graph.nodes if node.op == "placeholder"
+    }
+    for name in bogus_constant_names:
+        placeholder_node = placeholders[name]
+        dependencies: list[str] = []
+        for user in placeholder_node.users:
+            if user.meta.get("stack_trace", None) is not None:
+                dependencies.append(user.meta["stack_trace"])
+        if len(placeholder_node.users) > 0:
+            raise RuntimeError(
+                f"We found a fake tensor in the exported program constant's list. "
+                f"This typically means our tracing system encountered an op that "
+                f"we can't trace through. For the potential source, you can refer to "
+                f"following model attribute: {name}. We found following stacktrace might "
+                f"be helpful: \n\n"
+                f"{dependencies if dependencies else '<unknown>'} \n\n"
+                f"Please file an issue on github if you need further help.\n"
+            )
+
+
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export_for_training(
@@ -2035,6 +2079,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    allow_complex_guards_as_runtime_asserts: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2049,6 +2094,11 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
+    has_ambient_mode = False
+    if not strict:
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
+
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
@@ -2059,11 +2109,20 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
     export_graph_signature = export_artifact.aten.sig
+
+    # If we are tracing with fake inputs, it is expected to
+    # see fake tensor constants.
+    if not strict and not has_ambient_mode:
+        emit_bogus_const_warning(
+            export_artifact.aten.constants,
+            export_graph_signature,
+            export_artifact.aten.gm,
+        )
 
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
     inline_constraints = _get_inline_constraints(export_artifact.fake_mode)
@@ -2196,6 +2255,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep
