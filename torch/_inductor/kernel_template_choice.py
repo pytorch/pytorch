@@ -54,6 +54,11 @@ class KernelTemplateChoice:
                 input_nodes=self.inputs.nodes(),
                 **self.extra_kwargs,
             )
+            # provide the ChoiceCaller with a reference back to oneself
+            # this allows ChoiceCaller uses to understand how the choice was
+            # constructed and reenable things like recording choices
+            if self._choice is not None:
+                self._choice.set_ktc(self)
         return self._choice
 
 
