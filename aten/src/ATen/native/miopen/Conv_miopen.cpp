@@ -153,7 +153,6 @@ at::Tensor miopen_convolution_relu(
 
 #include <functional>
 #include <iterator>
-#include <sstream>
 #include <algorithm>
 #include <memory>
 #include <mutex>
@@ -193,19 +192,6 @@ struct ConvolutionParams
   // forward and backward, so you can reuse the benchmark entry,
 };
 
-std::ostream& operator<<(std::ostream& out, const ConvolutionParams& params) {
-  out << "ConvolutionParams \n"
-      << "    memory_format = " << params.memory_format << "\n"
-      << "    data_type = " << miopenTypeToString(params.dataType) << "\n"
-      << "    padding = " << ArrayRef<int>{params.padding} << "\n"
-      << "    stride = " << ArrayRef<int>{params.stride} << "\n"
-      << "    dilation = " << ArrayRef<int>{params.dilation} << "\n"
-      << "    groups = " << params.groups << "\n"
-      << "    deterministic = " << (params.deterministic ? "true" : "false") << "\n";
-
-  return out;
-}
-
 void setConvolutionParams(
     ConvolutionParams* params,
     miopenHandle_t handle,
@@ -241,65 +227,6 @@ void setConvolutionParams(
   params->device_id = at::cuda::current_device();
 }
 
-std::string repro_from_args(const ConvolutionParams& params) {
-  auto pybool = [](bool b) -> const char* { return b ? "True" : "False"; };
-  std::string partial_dtype;
-  switch (params.dataType) {
-    case miopenFloat:
-      partial_dtype = "float";
-      break;
-    case miopenHalf:
-      partial_dtype = "half";
-      break;
-    case miopenBFloat16:
-      partial_dtype = "bfloat16";
-      break;
-    default:
-      partial_dtype = "unsupported";
-  }
-  const std::string full_dtype = "torch." + partial_dtype;
-  const int out_channels = params.weight_size[0];
-  const int in_channels = params.weight_size[1] * params.groups;
-  const size_t dim = params.input_dim;
-  const std::string channels_last_xd =
-      dim == 4 ? "channels_last" : "channels_last_3d";
-  const std::string to_channels_last =
-      ((params.memory_format == at::MemoryFormat::ChannelsLast) ||
-       (params.memory_format == at::MemoryFormat::ChannelsLast3d))
-      ? ".to(memory_format=torch." + channels_last_xd + ")"
-      : "";
-
-  std::ostringstream ss;
-  ss << "You can try to repro this exception using the following code snippet. ";
-  ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n\n";
-  ss << "import torch\n";
-  ss << "torch.backends.cuda.matmul.allow_tf32 = "
-     << pybool(at::globalContext().float32Precision("cuda", "matmul") == "tf32")
-     << "\n";
-  ss << "torch.backends.cudnn.benchmark = "
-     << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
-  ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic)
-     << "\n";
-  ss << "data = torch.randn(" << ArrayRef<int>(params.input_size, dim)
-     << ", dtype=" << full_dtype << ", ";
-  ss << "device='cuda', requires_grad=True)" << to_channels_last << "\n";
-  ss << "net = torch.nn.Conv" << dim - 2 << "d(" << in_channels << ", "
-     << out_channels << ", ";
-  ss << "kernel_size=" << ArrayRef<int>(&params.weight_size[2], dim - 2)
-     << ", ";
-  ss << "padding=" << ArrayRef<int>(params.padding, dim - 2) << ", ";
-  ss << "stride=" << ArrayRef<int>(params.stride, dim - 2) << ", ";
-  ss << "dilation=" << ArrayRef<int>(params.dilation, dim - 2) << ", ";
-  ss << "groups=" << params.groups << ")\n";
-  ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last
-     << "\n";
-  ss << "out = net(data)\n";
-  ss << "out.backward(torch.randn_like(out))\n";
-  ss << "torch.cuda.synchronize()\n\n";
-
-  return ss.str();
-}
-
 // Convenience struct for passing around descriptors and data
 // pointers
 struct ConvolutionArgs {
@@ -313,21 +240,6 @@ struct ConvolutionArgs {
   ConvolutionArgs(const Tensor& input, const Tensor& output, const Tensor& weight) : input(input), output(output), weight(weight) {
   }
 };
-
-std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
-  out << repro_from_args(args.params) // already has a trailing newline
-      << args.params // already has a trailing newline
-      << "input: " << args.idesc // already has a trailing newline
-      << "output: " << args.odesc // already has a trailing newline
-      << "weight: " << args.wdesc // already has a trailing newline
-      << "Pointer addresses: "
-      << "\n"
-      << "    input: " << args.input.const_data_ptr() << "\n"
-      << "    output: " << args.output.const_data_ptr() << "\n"
-      << "    weight: " << args.weight.const_data_ptr() << "\n";
-
-  return out;
-}
 
 // ---------------------------------------------------------------------
 //

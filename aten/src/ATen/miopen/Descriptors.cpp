@@ -139,30 +139,4 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   set(getDataType(t), static_cast<int>(dim), size, stride);
 }
 
-std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
-  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims = 0;
-  int dimA[MIOPEN_DIM_MAX];
-  int strideA[MIOPEN_DIM_MAX];
-  miopenDataType_t dtype;
-  miopenGetTensorDescriptorSize(d.desc(), &nbDims);
-  miopenGetTensorDescriptor(d.desc(), &dtype, dimA, strideA);
-  out << "    type = " << miopenTypeToString(dtype) << "\n";
-  out << "    nbDims = " << nbDims << "\n";
-  // Read out only nbDims of the arrays!
-  out << "    dimA = ";
-  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
-    out << i << ", ";
-  }
-  out << "\n";
-  out << "    strideA = ";
-  for (auto i : ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}) {
-    out << i << ", ";
-  }
-  out << "\n";
-  return out;
-}
-
-void FilterDescriptor::print() { std::cout << *this; }
-
 }}

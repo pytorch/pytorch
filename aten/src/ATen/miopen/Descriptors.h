@@ -133,14 +133,11 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
 
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
-  void print();
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
-
-std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct TORCH_HIP_CPP_API ConvolutionDescriptor
     : public Descriptor<
