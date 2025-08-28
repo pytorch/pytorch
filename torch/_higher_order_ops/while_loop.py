@@ -647,7 +647,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #         |      |      |      |      |
 # gx <── gy0 <─ gy1 <─ gy2 <─ gy3 <─ gy4
 #
-# Given gy4 i.e. the input to backward of while_loop, we can compute gx using chain rule:
+# We can compute gx using chain rule:
 #
 #     gx = gy0 * bw(y0, x),
 #
@@ -667,16 +667,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # g_additional_inputs = gy0 * bw(y0, addi) + gy1 * bw(y1, addi) + gy2 * bw(y2, addi) + ... + gy4 * bw(y4, addi)
 #
-# Notice that gy0 = gy4 * bw43210, gy1 = gy4 * bw4321 ...
-#
-# g_additioanl_inputs can be represented as a vector inner product:
-#
-# gy4 * [1, bw43, bw432, bw4321, bw43210] dot [bw(y4, addi),
-#                                              bw(y3, addi),
-#                                              bw(y2, addi),
-#                                              bw(y1, addi),
-#                                              bw(y0, addi)].
-# Let acc = [1, bw43, bw432, bw4321, bw43210]. acc can be efficiently computed with cumprod[1, bw43, bw32, bw21, bw10].
+# Notice that gy0 = gy4 * bw43210, gy1 = gy4 * bw4321 etc
 #
 # Implementation:
 # The idea of implementation is to compute the cumprod and cumsum  in the body_fn.
@@ -688,7 +679,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 # def body_fn(idx, grad_carries, grad_additional_inputs, fw_additional_inputs, fw_inps):
 #     reversed_idx = fw_inps.size(0) - 1 - idx
 #     next_grad_carry, next_grad_additional_inputs  = bw(fw_inps[reversed_idx], fw_additional_inputs, grad_carries)
-#     return idx - 1, next_grad_carry, next_grad_additional_inputs + grad_additional_inputs
+#     return idx + 1, next_grad_carry, next_grad_additional_inputs + grad_additional_inputs
 #
 # idx = 0
 # init_grad_carries = grads
@@ -747,7 +738,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
 
         # Even when body function is not executed, we clone and unsqueeze the input
-        # this avoids the aliasing
+        # to avoid the aliasing, therefore loop_count is always >= 1
         torch._check(loop_count >= 1)
         # We snapshot the dispatch keys in forward for materializing the
         # the bw_graph in backward.
