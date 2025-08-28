@@ -116,6 +116,7 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _set_fullgraph_dict,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -4176,7 +4177,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
         try:
-            with strict_ctx:
+            func_obj = self.funcvar.get_function()
+        except NotImplementedError:
+            func_obj = None
+        fullgraph_ctx = contextlib.nullcontext()
+        if (
+            func_obj
+            and (fullgraph := _set_fullgraph_dict.get(func_obj, None)) is not None
+        ):
+            breakpoint()
+            fullgraph_ctx = torch._dynamo.set_fullgraph(fullgraph)
+        try:
+            with strict_ctx, fullgraph_ctx:
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"

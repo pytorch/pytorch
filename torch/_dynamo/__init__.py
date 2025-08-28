@@ -31,6 +31,8 @@ from .decorators import (
     patch_dynamo_config,
     run,
     set_fullgraph,
+    set_fullgraph_clear,
+    set_fullgraph_register,
     set_stance,
     skip_frame,
     substitute_in_graph,
@@ -92,6 +94,8 @@ __all__ = [
     "reset",
     "run",
     "set_fullgraph",
+    "set_fullgraph_clear",
+    "set_fullgraph_register",
     "set_stance",
     "skip_frame",
     "substitute_in_graph",
@@ -146,6 +150,7 @@ def reset() -> None:
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
         create_nested_fn_cache.clear()
+        set_fullgraph_clear()
 
 
 def reset_code_caches() -> None:
