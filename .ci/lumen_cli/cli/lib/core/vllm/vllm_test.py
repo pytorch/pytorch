@@ -63,6 +63,8 @@ class VllmTestParameters:
         if not self.vllm_whls_path.exists():
             raise ValueError("missing vllm_whls_path")
         if self.test_summary_file:
+            os.environ["TEMP_GITHUB_STEP_SUMMARY"] = str(self.test_summary_file)
+            logger.info("test summary file: %s", self.test_summary_file)
             ensure_path(self.test_summary_file, is_file=True)
 
 

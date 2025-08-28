@@ -69,6 +69,7 @@ _TPL_TABLE = Template(
 """)
 )
 
+
 def gh_summary_path() -> Path | None:
     """Resolve the writable step summary file path.
 
@@ -87,6 +88,7 @@ def gh_summary_path() -> Path | None:
     if not p or not Path(p).exists():
         return None
     return Path(p)
+
 
 def write_gh_step_summary(md: str, *, append_content: bool = True) -> bool:
     """
