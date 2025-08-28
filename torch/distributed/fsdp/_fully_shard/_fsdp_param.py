@@ -694,6 +694,7 @@ class FSDPParam:
                 ), (
                     f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
                     "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
+                    "outer_size: torch.Size, outer_stride: tuple[int, ...], "
                     "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
                 )
                 if num_fn_params == 1:

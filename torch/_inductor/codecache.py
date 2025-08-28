@@ -1233,6 +1233,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
+        )
         return graph, cache_info
 
     @staticmethod
@@ -2398,9 +2414,44 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
-                    import resource
 
-                    page_size_ = resource.getpagesize()
+                    def get_page_size() -> int:
+                        # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
+                        # as seen in https://docs.python.org/2/library/resource.html
+                        if _IS_WINDOWS:
+                            from ctypes import (  # type: ignore[attr-defined]
+                                byref,
+                                Structure,
+                                windll,
+                            )
+                            from ctypes.wintypes import DWORD, LPVOID, WORD
+
+                            class SYSTEM_INFO(Structure):
+                                _fields_ = [
+                                    ("wProcessorArchitecture", WORD),
+                                    ("wReserved", WORD),
+                                    ("dwPageSize", DWORD),
+                                    ("lpMinimumApplicationAddress", LPVOID),
+                                    ("lpMaximumApplicationAddress", LPVOID),
+                                    ("dwActiveProcessorMask", DWORD),
+                                    ("dwNumberOfProcessors", DWORD),
+                                    ("dwProcessorType", DWORD),
+                                    ("dwAllocationGranularity", DWORD),
+                                    ("wProcessorLevel", WORD),
+                                    ("wProcessorRevision", WORD),
+                                ]
+
+                            si = SYSTEM_INFO()
+                            windll.kernel32.GetSystemInfo(byref(si))
+                            sys_page_size = si.dwPageSize
+                        else:
+                            import resource
+
+                            sys_page_size = resource.getpagesize()
+
+                        return sys_page_size
+
+                    page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
                     with open(output_so, "a+b") as f_so:
@@ -2414,6 +2465,15 @@ end
                     generated_files.append(output_so)
 
         if config.aot_inductor.package:
+            if config.trace.provenance_tracking_level != 0:
+                kernel_info = torch._inductor.debug.create_kernel_information_json()
+                kernel_info_json = os.path.join(
+                    wrapper_path_operator.parent, "kernel_information.json"
+                )
+                with open(kernel_info_json, "w") as f:
+                    f.write(json.dumps(kernel_info, indent=4))
+                generated_files.append(kernel_info_json)
+
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -4213,28 +4273,24 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(
-        self, static_autotuner: CachingAutotuner, kernel_name: str, source_code: str
-    ) -> None:
+    def __init__(self, static_autotuner: CachingAutotuner) -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
-        self.kernel_name = kernel_name
-        # The python source code of the kernel is relatively small and stored by StaticallyLaunchedAutotuner.
-        # We do not store the compiled cuda code here as it's very large,
-        # it's stored via the regular TritonBundler
-        self.source_code = source_code
+        # This needs to be set in AsyncCompile.triton, in case
+        # we need to reload the CachingAutotuner from its source code
+        # We don't store the source code on the CachingAutotuner itself
+        # since it can be very large.
+        self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
 
     def result(self) -> CachingAutotuner:
+        assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
-            reload_kernel_from_src = functools.partial(
-                _load_triton_kernel_from_source, self.kernel_name, self.source_code
-            )
             self.static_autotuner.recheck_autotune_cache(
-                reload_kernel_from_src=reload_kernel_from_src
+                reload_kernel_from_src=self.reload_kernel_from_src
             )
             self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
-                reload_kernel=reload_kernel_from_src,
-                source_code=None,  # no need to save again
+                reload_kernel=self.reload_kernel_from_src,
+                static_triton_bundle_key=None,  # no need to save again
             )
             return self.static_autotuner

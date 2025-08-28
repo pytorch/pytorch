@@ -800,7 +800,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   Tensor indices_dim1 = indices[1].to(ScalarType::Int);
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
-  auto mat_el_end_indices_host = std::make_unique<int64_t[]>(num_matrices);
+  std::vector<int64_t> mat_el_end_indices_host(num_matrices);
 
   {
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -809,14 +809,14 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
     search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
     AT_CUDA_CHECK(cudaMemcpy(
-      mat_el_end_indices_host.get(),
+      mat_el_end_indices_host.data(),
       mat_el_end_indices_device,
       num_matrices*sizeof(int64_t),
       cudaMemcpyDeviceToHost
     ));
   }
   // Need a pointer to an array to access within a lambda
-  int64_t* mat_el_end_indices = &mat_el_end_indices_host[0];
+  int64_t* mat_el_end_indices = mat_el_end_indices_host.data();
 
   Scalar beta = 0;
   Scalar alpha = 1;
