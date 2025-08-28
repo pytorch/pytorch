@@ -702,30 +702,22 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices += list(
-            V.choices.get_mm_configs(kernel_inputs, aten_layout, [aten_mm], "mm")
-        )
+        choices += V.choices.get_mm_configs(kernel_inputs, aten_layout, [aten_mm], "mm")
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout):
         # Get template choices using the new unified function
-        choices += list(
-            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], "mm")
-        )
+        choices += V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], "mm")
 
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template choices using the new unified function
-            choices += list(
-                V.choices.get_mm_configs(
-                    kernel_inputs, layout, [persistent_tma_mm_template], "mm"
-                )
+            choices += V.choices.get_mm_configs(
+                kernel_inputs, layout, [persistent_tma_mm_template], "mm"
             )
 
         if use_decompose_k_choice(m, n, k):
-            choices += list(
-                V.choices.get_mm_configs(
-                    kernel_inputs, layout, [decompose_k_subgraph_template], "mm"
-                )
+            choices += V.choices.get_mm_configs(
+                kernel_inputs, layout, [decompose_k_subgraph_template], "mm"
             )
 
     if (
@@ -761,16 +753,14 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        choices += list(
-            V.choices.get_mm_configs(
-                # TODO(coconutruben): remove once we deprecate ah
-                # mm-extra is a hack to keep the ah functionality alive
-                # while we transition to the unified kwargs retrieval
-                kernel_inputs,
-                layout,
-                [mm_template],
-                "mm-ah",
-            )
+        choices += V.choices.get_mm_configs(
+            # TODO(coconutruben): remove once we deprecate ah
+            # mm-extra is a hack to keep the ah functionality alive
+            # while we transition to the unified kwargs retrieval
+            kernel_inputs,
+            layout,
+            [mm_template],
+            "mm-ah",
         )
 
         # using AutoHeuristic for ranking
@@ -845,13 +835,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     # Create MMKernelInputs for Int MM
     kernel_inputs = MMKernelInputs([mat1, mat2])
     if use_aten_gemm_kernels():
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                layout,
-                [aten__int_mm],
-                name,
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [aten__int_mm],
+            name,
         )
 
     if use_cutlass and _use_cutlass_for_op(name):
@@ -860,9 +848,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        choices += list(
-            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], name)
-        )
+        choices += V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], name)
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
@@ -908,55 +894,45 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         kernel_inputs = MMKernelInputs(
             [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
         )
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                aten_layout,
-                [aten_addmm],
-                name,
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            [aten_addmm],
+            name,
         )
         return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
     if use_aten_gemm_kernels():
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                aten_layout,
-                [aten_bias_addmm],
-                name,
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            [aten_bias_addmm],
+            name,
         )
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                aten_layout,
-                [aten_addmm],
-                name,
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            [aten_addmm],
+            name,
         )
 
     if is_nonzero and use_triton_template(layout):
         # all the triton templates use the extra_kwargs
         # Get template choices using the new unified function
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                layout,
-                [mm_template],
-                name,
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [mm_template],
+            name,
         )
 
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template choices using the new unified function
-            choices += list(
-                V.choices.get_mm_configs(
-                    kernel_inputs,
-                    layout,
-                    [persistent_tma_mm_template],
-                    name,
-                )
+            choices += V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [persistent_tma_mm_template],
+                name,
             )
 
     if (
@@ -1137,25 +1113,21 @@ def tuned_scaled_mm(
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
             # Get TMA template choices using the new unified function
-            choices += list(
-                V.choices.get_mm_configs(
-                    kernel_inputs,
-                    layout,
-                    [scaled_mm_device_tma_template],
-                    name,
-                    kwarg_overrides={scaled_mm_device_tma_template.uid: overriders},
-                )
+            choices += V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [scaled_mm_device_tma_template],
+                name,
+                kwarg_overrides={scaled_mm_device_tma_template.uid: overriders},
             )
 
         # Get template choices using the new unified function
-        choices += list(
-            V.choices.get_mm_configs(
-                kernel_inputs,
-                layout,
-                [mm_template],
-                name,
-                kwarg_overrides={mm_template.uid: overriders},
-            )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [mm_template],
+            name,
+            kwarg_overrides={mm_template.uid: overriders},
         )
 
     if (

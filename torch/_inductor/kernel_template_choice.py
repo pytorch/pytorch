@@ -79,10 +79,10 @@ def make_ktc_generator(
     Yields:
         KernelTemplateChoice objects
     """
-    for c in cs:
+    for ckwargs in cs:
         yield KernelTemplateChoice(
             template=template,
-            kwargs={**c, **overrides},
+            kwargs={**ckwargs, **overrides},
             extra_kwargs=extra_kwargs,
             layout=layout,
             inputs=inputs,
