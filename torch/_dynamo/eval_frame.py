@@ -105,6 +105,7 @@ from .mutation_guard import install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
+    _set_fullgraph_dict,
     common_constant_types,
     compile_times,
 )
@@ -698,6 +699,11 @@ class _TorchDynamoContext:
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
 
         fn = innermost_fn(fn)
+
+        # TODO this is currently run on construction. Should it run every invocation?
+        # The latter would cause additional overhead
+        if (fullgraph := _set_fullgraph_dict.get(fn, None)) is not None:
+            self.error_on_graph_break = fullgraph
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):

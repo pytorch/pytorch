@@ -1981,6 +1981,114 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f2(inp), inp + 3)
 
+    def test_set_fullgraph_register(self):
+        inp = torch.ones(3)
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        # test torch.compile applied directly to a registered function
+        torch._dynamo.set_fullgraph_register(True, f1)
+        with self.assertRaises(Unsupported):
+            torch.compile(f1, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_register(
+            False, f1
+        )  # note: also tests re-registration
+        self.assertEqual(
+            f1(inp), torch.compile(f1, backend="eager", fullgraph=True)(inp)
+        )
+
+        torch._dynamo.set_fullgraph_register(
+            True, f1
+        )  # note: also tests re-registration
+        with self.assertRaises(Unsupported):
+            torch.compile(f1, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_clear()  # test clear
+        with self.assertRaises(Unsupported):
+            torch.compile(f1, backend="eager", fullgraph=True)(inp)
+
+        # test inlined call to registered function
+        def f2(x):
+            return f1(x)
+
+        torch._dynamo.set_fullgraph_register(True, f1)
+        with self.assertRaises(Unsupported):
+            torch.compile(f2, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_register(
+            False, f1
+        )  # note also tests re-registration
+        self.assertEqual(
+            f2(inp), torch.compile(f2, backend="eager", fullgraph=True)(inp)
+        )
+
+        torch._dynamo.set_fullgraph_register(
+            True, f1
+        )  # note also tests re-registration
+        with self.assertRaises(Unsupported):
+            torch.compile(f2, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_clear()  # test clear
+        with self.assertRaises(Unsupported):
+            torch.compile(f2, backend="eager", fullgraph=True)(inp)
+
+        # test nested registered function that calls function w/ graph break
+        def f3(x):
+            return f2(x)
+
+        torch._dynamo.set_fullgraph_register(True, f2)
+        with self.assertRaises(Unsupported):
+            torch.compile(f3, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_register(
+            False, f2
+        )  # note also tests re-registration
+        self.assertEqual(
+            f3(inp), torch.compile(f3, backend="eager", fullgraph=True)(inp)
+        )
+
+        torch._dynamo.set_fullgraph_register(
+            True, f2
+        )  # note also tests re-registration
+        with self.assertRaises(Unsupported):
+            torch.compile(f3, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_clear()  # test clear
+        with self.assertRaises(Unsupported):
+            torch.compile(f3, backend="eager", fullgraph=True)(inp)
+
+        # test nested function that is forced to be a top-level frame
+        def f4(x):
+            torch._dynamo.skip_frame()
+            return f1(x)
+
+        torch._dynamo.set_fullgraph_register(True, f1)
+        with self.assertRaises(Unsupported):
+            torch.compile(f4, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_register(
+            False, f1
+        )  # note also tests re-registration
+        self.assertEqual(
+            f4(inp), torch.compile(f4, backend="eager", fullgraph=True)(inp)
+        )
+
+        torch._dynamo.set_fullgraph_register(
+            True, f1
+        )  # note also tests re-registration
+        with self.assertRaises(Unsupported):
+            torch.compile(f4, backend="eager", fullgraph=False)(inp)
+
+        torch._dynamo.set_fullgraph_clear()  # test clear
+        with self.assertRaises(Unsupported):
+            torch.compile(f4, backend="eager", fullgraph=True)(inp)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -4824,6 +4824,9 @@ def _set_error_on_graph_break(value: bool) -> None:
     _error_on_graph_break = value
 
 
+_set_fullgraph_dict = ExactWeakKeyDictionary()
+
+
 @torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (

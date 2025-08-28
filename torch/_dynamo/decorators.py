@@ -30,7 +30,12 @@ from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
-from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
+from .utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    _set_fullgraph_dict,
+    is_function,
+)
 
 
 if TYPE_CHECKING:
@@ -945,3 +950,18 @@ def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
     or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
     """
     return SetFullgraphDecoratorContextManager(fullgraph)
+
+
+def set_fullgraph_register(fullgraph: bool, fn: Callable[..., Any]) -> None:
+    # TODO what aboue wrapped functions, like lru_cache wrapped functions?
+    _set_fullgraph_dict[fn] = fullgraph
+
+
+set_fullgraph_register._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+def set_fullgraph_clear() -> None:
+    _set_fullgraph_dict.clear()
+
+
+set_fullgraph_clear._dynamo_forbidden = True  # type: ignore[attr-defined]
