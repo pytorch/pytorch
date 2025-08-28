@@ -56,9 +56,9 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
 
 
 triton_flop_registry: dict[Any, Any] = {}
-def register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+def _register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
-    This API is used to register flop formula for triton kernel in `targets`
+    This experimental API is used to register flop formula for triton kernel in `targets`
 
     This is separate from `register_flop_formula` because triton kernel
     currently gets decomposed into `triton_kernel_wrapper_functional(kernel)`

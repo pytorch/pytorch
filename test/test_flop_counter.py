@@ -831,7 +831,7 @@ class TestFlopCounter(TestCase):
 
         from torch.utils.flop_counter import (
             _FlopCounterMode,
-            register_flop_formula_for_triton_kernel,
+            _register_flop_formula_for_triton_kernel,
         )
 
         @triton.jit
@@ -847,7 +847,7 @@ class TestFlopCounter(TestCase):
         x = torch.randn(3, device="cuda")
         out = torch.empty(3, device="cuda")
 
-        @register_flop_formula_for_triton_kernel(sin_kernel)
+        @_register_flop_formula_for_triton_kernel(sin_kernel)
         def compute_sin_kerenel_flops(*args, **kwargs) -> int:
             # dummy implementation
             return 2
