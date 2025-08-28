@@ -2756,6 +2756,22 @@ Call this whenever a new thread is created in order to propagate values from
   torch::set_disabled_torch_dispatch_impl(
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
+
+  // DTensor acceleration.
+  py_module.def(
+      "_dispatch_key_set_with_conjugate_and_negative_corresponding_to_tensor",
+      [](const at::Tensor& local_tensor) {
+        c10::DispatchKeySet dks;
+        const auto tensor_keys = local_tensor.key_set();
+        if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
+          dks = dks.add(c10::DispatchKey::Conjugate);
+        }
+        if (tensor_keys.has(c10::DispatchKey::Negative)) {
+          dks = dks.add(c10::DispatchKey::Negative);
+        }
+        return dks;
+      });
+
   // init kineto here
 #ifdef USE_KINETO
   torch::global_kineto_init();
