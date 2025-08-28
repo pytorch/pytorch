@@ -50,7 +50,7 @@ def get_ck_dependency_string() -> str:
         - <commit_hash> is read from the commit pin file
         - "#egg=rocm-composable-kernel" specifies the package name for setuptools
     OR an empty string, making use of the existing rocm-composable-kernel installation.
-    
+
     Returns:
         str: The formatted dependency string for use in install_requires.
     """
