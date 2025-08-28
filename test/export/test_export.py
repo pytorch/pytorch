@@ -5609,11 +5609,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dim0_x = torch.export.Dim("dim0_x", min=3)
         dim1_x = torch.export.Dim("dim1_x", max=8000)
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
-        em = torch.export.export(
+        em = torch.export._trace._export(
             m,
             (a,),
             dynamic_shapes=dynamic_shapes,
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
@@ -13497,7 +13497,7 @@ def forward(self, x, y):
 
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
-        # with prefer_deferred_runtime_asserts_over_guards=True to successfully export
+        # with allow_complex_guards_as_runtime_asserts=True to successfully export
         # case 1: modulo guards
         from torch.export import dims
 
@@ -13507,11 +13507,11 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(8, 7))
         self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
@@ -13541,11 +13541,11 @@ def forward(self, x, y):
 
         for private_api in (True, False):
             if private_api:
-                ep = torch.export.export(
+                ep = torch.export._trace._export(
                     FreeReshape(),
                     inputs,
                     dynamic_shapes=dynamic_shapes,
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=True,
                 )
             else:
                 ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
@@ -13582,11 +13582,11 @@ def forward(self, x, y):
             "x": (Dim("dx0", min=2), Dim("dx1", min=2), Dim("dx2", min=2)),
             "y": (Dim("dy", min=8),),
         }
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             Reshape3d(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(9, 7, 2), torch.randn(126))
         self.assertEqual(out1.shape, torch.ones(126).shape)
@@ -13708,11 +13708,11 @@ def forward(self, x, y):
         model = Model()
         x = torch.rand(1024, 20, 16)
         dynamic_shapes = {"x": {0: Dim("batch")}}
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             model,
             (x,),
             dynamic_shapes=dynamic_shapes,
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -13785,11 +13785,11 @@ def forward(self, x, y):
 
         inputs = (torch.randn(6), torch.randn(12))
         dynamic_shapes = {"x": [Dim("dx", min=4)], "y": [Dim("dy", min=4)]}
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             Foo(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # check forward pass
         out0, out1 = ep.module()(torch.randn(9), torch.randn(27))
@@ -13824,7 +13824,7 @@ def forward(self, x, y):
                 Foo(),
                 inputs,
                 dynamic_shapes=dynamic_shapes,
-                prefer_deferred_runtime_asserts_over_guards=True,
+                allow_complex_guards_as_runtime_asserts=True,
             ).run_decompositions()
 
         self.assertEqual(
@@ -14236,11 +14236,11 @@ graph():
 
         inputs = (torch.randn(5), torch.randn(3))
         shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-            prefer_deferred_runtime_asserts_over_guards=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # count 2 pow nodes, 2 sym_size.int nodes
         self.assertEqual(
@@ -15039,11 +15039,11 @@ def forward(self, x):
 
         for private_api in (True, False):
             if private_api:
-                ep = torch.export.export(
+                ep = torch.export._trace._export(
                     ModConstraint(),
                     (torch.randn(3, 4),),
                     dynamic_shapes={"x": (dynamic, dynamic)},
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=True,
                 )
             else:
                 ep = export(
@@ -15057,7 +15057,7 @@ def forward(self, x):
                 for node in ep.graph.nodes
             ].count(True)
             if private_api:
-                self.assertEqual(num_asserts, 6)
+                self.assertEqual(num_asserts, 7)
                 with self.assertRaisesRegex(
                     RuntimeError,
                     r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
