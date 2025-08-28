@@ -225,7 +225,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
             if torch.cpu._is_avx512_bf16_supported() and not _IS_WINDOWS:
                 # save _arch_flags
                 base_flags = self._arch_flags
-                # temporarily change _arch_flags for amx-fp16 check_build
+                # temporarily change _arch_flags for avx512_bf16 check_build
                 self._arch_flags += " -mavx512bf16"
                 if self.check_build(VecAMX._avx512_bf16_code):
                     self._is_avx512_bf16_supported = True
