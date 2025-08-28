@@ -1804,6 +1804,24 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
 
 
 @functools.cache
+def use_contiguous() -> bool:
+    """
+    Check if we should use the contiguous subgraph transform.
+    This transform makes the second matrix contiguous before the matmul.
+    """
+    # Only enable for non-contiguous second matrix
+
+    # Similar conditions to decompose_k but for contiguous transform
+    from torch._inductor.virtualized import V
+
+    return (
+        bool(torch.version.hip)  # Only relevant on AMD
+        and not V.graph.aot_mode  # TODO: Support AOTI for contiguous transform
+        and not V.graph.cpp_wrapper
+    )
+
+
+@functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
     k_splits_limit = config.triton.num_decompose_k_splits

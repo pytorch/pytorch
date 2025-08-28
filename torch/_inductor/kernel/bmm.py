@@ -4,8 +4,10 @@ import logging
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch.fx.experimental.proxy_tensor import make_fx
 
 from .. import ir, lowering as L
+from ..codegen.subgraph import SubgraphTemplate
 from ..kernel_inputs import MMKernelInputs
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -17,6 +19,7 @@ from ..utils import (
     _use_cutlass_for_op,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
+    use_contiguous,
     use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
@@ -125,6 +128,14 @@ aten_baddbmm = ExternKernelChoice(
 )
 
 
+def contiguous_bmm(a, b):
+    return torch.bmm(a, b.contiguous())
+
+
+def contiguous_baddbmm(inp, a, b):
+    return torch.baddbmm(inp, a, b.contiguous())
+
+
 @L.register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
@@ -214,6 +225,45 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
                 layout=layout,
                 **kwargs,
             )
+
+        # Add contiguous subgraph decomposition
+        from torch._inductor.ir import get_free_symbols
+
+        # Only do contiguous optimization if mat2 is not contiguous and there aren't any unbacked symbols
+        unbacked_symbols = any(
+            len(get_free_symbols(itr, unbacked_only=True)) > 0
+            for itr in (
+                mat1.get_size(),
+                mat1.get_stride(),
+                mat2.get_size(),
+                mat2.get_stride(),
+            )
+        )
+        if (
+            not mat2.get_layout().is_contiguous()
+            and use_contiguous()
+            and not unbacked_symbols
+        ):
+            from torch._dispatch.python import enable_python_dispatcher
+
+            from ..decomposition import select_decomp_table
+
+            with enable_python_dispatcher():
+                decompositions = select_decomp_table()
+
+                contiguous_subgraph_template = SubgraphTemplate(
+                    name="contiguous_bmm",
+                    make_fx_graph=make_fx(
+                        contiguous_bmm,
+                        decompositions,
+                    ),
+                    recursive=True,
+                )
+            contiguous_subgraph_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+            )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -245,6 +295,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
 @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    """
+    Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
@@ -285,6 +338,45 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
+            )
+
+        # Add contiguous subgraph decomposition
+        from torch._inductor.ir import get_free_symbols
+
+        # Only do contiguous optimization if mat2 is not contiguous and there aren't any unbacked symbols
+        unbacked_symbols = any(
+            len(get_free_symbols(itr, unbacked_only=True)) > 0
+            for itr in (
+                mat1.get_size(),
+                mat1.get_stride(),
+                mat2.get_size(),
+                mat2.get_stride(),
+            )
+        )
+        if (
+            not mat2.get_layout().is_contiguous()
+            and use_contiguous()
+            and not unbacked_symbols
+        ):
+            from torch._dispatch.python import enable_python_dispatcher
+
+            from ..decomposition import select_decomp_table
+
+            with enable_python_dispatcher():
+                decompositions = select_decomp_table()
+
+                contiguous_subgraph_template = SubgraphTemplate(
+                    name="contiguous_baddbmm",
+                    make_fx_graph=make_fx(
+                        contiguous_baddbmm,
+                        decompositions,
+                    ),
+                    recursive=True,
+                )
+            contiguous_subgraph_template.maybe_append_choice(
+                choices,
+                input_nodes=(inp, mat1, mat2),
+                layout=layout,
             )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

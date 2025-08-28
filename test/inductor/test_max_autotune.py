@@ -76,6 +76,7 @@ from torch.testing._internal.inductor_utils import (
 
 
 torch.set_float32_matmul_precision("high")
+
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -1294,6 +1295,243 @@ class TestMaxAutotune(TestCase):
             ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
                 code[0]
             )
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform(self, sizes, dtype, dynamic):
+        """
+        Test the contiguous subgraph transform with A * transpose(B) pattern.
+        This transform makes the second matrix contiguous before the matmul.
+        """
+        M, N, K = sizes
+
+        def mm_transpose(a, b):
+            return a @ b.transpose(0, 1)
+
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Force only contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose, dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness
+            expected = mm_transpose(a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((32, 64, 128), (64, 128, 256), (128, 256, 512)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform_bmm(self, sizes, dtype, dynamic):
+        """
+        Test the contiguous subgraph transform for bmm with non-contiguous second matrix.
+        """
+        B, M, N, K = 8, *sizes
+
+        def bmm_transpose(a, b):
+            return torch.bmm(a, b.transpose(-2, -1))
+
+        a = torch.randn(B, M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(B, N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Force contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.bmm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(bmm_transpose, dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness
+            expected = bmm_transpose(a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_bmm").run(code[0])
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((32, 64, 128), (64, 128, 256), (128, 256, 512)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform_baddbmm(self, sizes, dtype, dynamic):
+        """
+        Test the contiguous subgraph transform for baddbmm with non-contiguous second matrix.
+        """
+        B, M, N, K = 8, *sizes
+
+        def baddbmm_transpose(inp, a, b):
+            return torch.baddbmm(inp, a, b.transpose(-2, -1))
+
+        inp = torch.randn(B, M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        a = torch.randn(B, M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(B, N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Force contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.bmm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(baddbmm_transpose, dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, inp, a, b)
+
+            # Verify correctness
+            expected = baddbmm_transpose(inp, a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_baddbmm").run(code[0])
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform_addmm(self, sizes, dtype, dynamic):
+        """
+        Test the contiguous subgraph transform for addmm with non-contiguous second matrix.
+        """
+        M, N, K = sizes
+
+        def addmm_transpose(inp, a, b):
+            return torch.addmm(inp, a, b.transpose(0, 1))
+
+        inp = torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Force contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(addmm_transpose, dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, inp, a, b)
+
+            # Verify correctness
+            expected = addmm_transpose(inp, a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_addmm").run(code[0])
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
+        self, dynamic
+    ):
+        """
+        Test that contiguous transform is only applied when the second matrix is non-contiguous.
+        """
+        M, N, K = 64, 128, 64
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b_contiguous = torch.randn(K, N, dtype=torch.float32, device=GPU_TYPE)
+        b_non_contiguous = torch.randn(
+            N, K, dtype=torch.float32, device=GPU_TYPE
+        ).transpose(0, 1)
+
+        # Compute fp64 baselines without max_autotune (since fp64 doesn't work with max_autotune=True)
+        a_fp64 = a.to(torch.float64)
+        b_contiguous_fp64 = b_contiguous.to(torch.float64)
+        b_non_contiguous_fp64 = b_non_contiguous.to(torch.float64)
+
+        expected1_fp64 = mm(a_fp64, b_contiguous_fp64)
+        expected2_fp64 = mm(a_fp64, b_non_contiguous_fp64)
+
+        with config.patch(
+            max_autotune=True,
+        ):
+            # Test with contiguous second matrix - should not use contiguous transform
+            compiled_func_contiguous = torch.compile(mm, dynamic=dynamic)
+            out1, code1 = run_and_get_code(compiled_func_contiguous, a, b_contiguous)
+
+            # Should not contain contiguous transform
+            try:
+                FileCheck().check("contiguous_mm").run(code1[0])
+                self.fail(
+                    "Contiguous transform should not be used for contiguous matrices"
+                )
+            except RuntimeError:
+                pass  # Expected - contiguous transform should not be used
+
+            # Test with non-contiguous second matrix - should use contiguous transform
+            with (
+                mock.patch(
+                    "torch._inductor.kernel.mm.use_contiguous"
+                ) as contiguous_mock,
+            ):
+                contiguous_mock.return_value = True
+
+                compiled_func_non_contiguous = torch.compile(mm, dynamic=dynamic)
+                out2, code2 = run_and_get_code(
+                    compiled_func_non_contiguous, a, b_non_contiguous
+                )
+
+                # Should contain contiguous transform
+                FileCheck().check("contiguous_mm").run(code2[0])
+
+        # Verify correctness against fp64 baselines
+        torch.testing.assert_close(
+            out1, expected1_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_max_autotune_contiguous_transform_with_epilogue(self):
+        """
+        Test contiguous transform with epilogue operations like relu.
+        """
+        M, N, K = 128, 256, 512
+
+        def mm_transpose_relu(a, b):
+            return (a @ b.transpose(0, 1)).relu()
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(N, K, dtype=torch.float32, device=GPU_TYPE)
+
+        # Force contiguous transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose_relu)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness
+            expected = mm_transpose_relu(a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
 
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(

@@ -35,6 +35,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         layout: Layout,
         description: str,
         make_fx_graph: Callable[..., Any],
+        recursive: bool = False,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
@@ -52,6 +53,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         gm_original_output_strides(self.gm)
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
+        self.recursive = recursive
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -108,11 +110,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+
+            if not self.recursive:
+                patch_dict = {
+                    "max_autotune": False,
+                    "max_autotune_gemm": False,
+                    "max_autotune_gemm_backends": "ATEN",
+                }
+            else:
+                patch_dict = {}
+
+            with inductor_config.patch(patch_dict):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
@@ -169,6 +177,7 @@ class SubgraphTemplate(KernelTemplate):
         self,
         name: str,
         make_fx_graph: Callable[..., Any],
+        recursive: bool = False,
     ):
         """
         Initialize a subgraph template.
@@ -179,6 +188,7 @@ class SubgraphTemplate(KernelTemplate):
         """
         self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
         self.make_fx_graph = make_fx_graph
+        self.recursive = recursive
 
     def generate(  # type: ignore[override]
         self,
@@ -205,4 +215,5 @@ class SubgraphTemplate(KernelTemplate):
             layout=layout,
             description="",
             make_fx_graph=self.make_fx_graph,
+            recursive=self.recursive,
         )
