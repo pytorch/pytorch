@@ -490,9 +490,8 @@ Tensor& _weight_fp8pack_mm_out_xpu(
 
   // A should be [b, m, k] or [m, k]
   TORCH_CHECK(
-      A.dim() == 2 || A.dim() == 3,
-      "A must be 2D or
-      3D matrix but got ",
+      (A.dim() == 2 || A.dim() == 3),
+      "A must be 2D or 3D matrix but got ",
       A.dim());
   TORCH_CHECK(B.dim() == 2, "B must be a 2D matrix but got ", B.dim());
   int64_t k_dim = (A.dim() == 2) ? 1 : 2;
@@ -516,7 +515,7 @@ Tensor& _weight_fp8pack_mm_out_xpu(
   }
 
   TORCH_CHECK(
-      A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      (A.dtype() == kBFloat16 || A.dtype() == kHalf),
       __func__,
       " : expect A to be 16-bit tensor, but got ",
       A.dtype());
