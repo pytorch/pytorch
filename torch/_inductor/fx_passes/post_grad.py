@@ -1512,6 +1512,13 @@ def native_matmul_pass(graph: torch.fx.Graph):
         if not config.triton.enable_native_matmul:
             return False
 
+        # If tma matmul is on, don't do native matmul 
+        if (
+            config.triton.enable_persistent_tma_matmul 
+            and torch.utils._triton.has_triton_tma_device()
+        ):
+            return False
+
         # Currently only enable native matmul for default indexing
         # TODO : support block ptr
         if config.triton.use_block_ptr:

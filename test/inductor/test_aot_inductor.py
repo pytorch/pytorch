@@ -331,7 +331,10 @@ class AOTInductorTestsTemplate:
             # We should have 1 input, 1 output, 2 constants for the model.
             FileCheck().check_count("AOTInductorModelBase(1,", 1).check_next(
                 "1,"
-            ).check_next("2,").run(code)
+            ).check_next(
+                "3," if config.triton.enable_native_matmul
+                else "2,"
+            ).run(code)
 
     def test_constant_folding(self):
         class Model(torch.nn.Module):
