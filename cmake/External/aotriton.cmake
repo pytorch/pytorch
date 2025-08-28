@@ -58,11 +58,10 @@ if(NOT __AOTRITON_INCLUDED)
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
       INSTALL_DIR ${__AOTRITON_INSTALL_DIR}
-      -DAOTRITON_TARGET_ARCH:STRING=${PYTORCH_ROCM_ARCH}
+      -DAOTRITON_TARGET_ARCH="${PYTORCH_ROCM_ARCH}"
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_GPU_BUILD_TIMEOUT=0
       -DAOTRITON_NO_PYTHON=ON
-      -DAOTRITON_NO_SHARED=OFF
       -DAOTRITON_NOIMAGE_MODE=${noimage}
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
       USES_TERMINAL_DOWNLOAD TRUE
@@ -80,7 +79,7 @@ if(NOT __AOTRITON_INCLUDED)
 
     string(CONCAT __AOTRITON_FILE "aotriton-"
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
-                                  "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
+                                  "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
            "${__AOTRITON_BASE_URL}"
@@ -96,6 +95,8 @@ if(NOT __AOTRITON_INCLUDED)
       "${__AOTRITON_INSTALL_DIR}"
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
     )
+    message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
+    Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
   endfunction()
 
   function(aotriton_download_image image project)
@@ -139,13 +140,11 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
     if (${__AOTRITON_RUNTIME_INDEX} LESS 0)
-      aotriton_download_runtime(${__AOTRITON_RUNTIME_INDEX} aotriton_runtime)
-      message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
-      Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
-    else()
       aotriton_build_from_source(ON aotriton_runtime)
-      message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
-      Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
+      message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
+      Build runtime from source")
+    else()
+      aotriton_download_runtime(${__AOTRITON_RUNTIME_INDEX} aotriton_runtime)
     endif()
     add_dependencies(__caffe2_aotriton aotriton_runtime)
     set(__AOTRITON_CHAINED_IMAGE "aotriton_runtime")
