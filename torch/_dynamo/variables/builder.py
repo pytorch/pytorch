@@ -44,7 +44,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dispatch.python import wrap_python_dispatch
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -3466,7 +3465,6 @@ def _automatic_dynamic(
 # have no way to know (purely based off of global state) if they are currently being run under compile or not.
 # we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
 # can check it to know if they are running in an eager context or not
-@wrap_python_dispatch
 def wrap_to_fake_tensor_and_record(
     e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
 ):

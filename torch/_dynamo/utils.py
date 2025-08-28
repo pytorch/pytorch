@@ -73,7 +73,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
-from torch._dispatch.python import enable_python_dispatcher, wrap_python_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
@@ -2860,10 +2860,10 @@ def get_unique_name_wrt(
 
 
 # See Note [enable_python_dispatcher in dynamo]
-@wrap_python_dispatch
 def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
-        return fn()
+        with enable_python_dispatcher():
+            return fn()
     except UnsupportedFakeTensorException as e:
         from .exc import unimplemented_v2
 

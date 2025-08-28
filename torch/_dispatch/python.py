@@ -191,12 +191,3 @@ def enable_crossref_functionalize():
     finally:
         for op in all_py_loaded_overloads():
             op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
-
-
-def wrap_python_dispatch(fn: Callable):
-    @wraps(fn)
-    def wrap_fn(*args, **kwargs):
-        with enable_python_dispatcher():
-            return fn(*args, **kwargs)
-
-    return wrap_fn
