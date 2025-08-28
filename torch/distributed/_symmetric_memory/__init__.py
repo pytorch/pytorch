@@ -1647,11 +1647,10 @@ def _all_to_all_vdev_2d_offset_meta(
 from collections.abc import Sequence
 from typing import overload, TYPE_CHECKING, Union
 
-from torch.types import _device, _dtype, _int
-
 
 if TYPE_CHECKING:
     from torch._C._distributed_c10d import ProcessGroup
+    from torch.types import _device, _dtype, _int
 
 
 @overload
