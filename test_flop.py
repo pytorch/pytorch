@@ -3,6 +3,7 @@ import triton.language as tl
 
 import torch
 from torch.utils.flop_counter import (
+    _FlopCounterMode,
     FlopCounterMode,
     register_flop_formula_for_triton_kernel,
 )
@@ -94,4 +95,21 @@ with FlopCounterMode() as m:
     n_elements = 3
     torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
 
-# desired API
+
+# Now, wrap in a triton op and do the decomp
+@torch._library.triton.triton_op("mylib::sin_op", mutates_args=())
+def op() -> None:
+    n_elements = 3
+    torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+
+def op_decompose(mode, *args, **kwargs):
+    with mode:
+        n_elements = 3
+        torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+torch.library.register_torch_dispatch("mylib::sin_op", _FlopCounterMode, op_decompose)
+
+# Should now output 2 flops; previously would be 0
+with FlopCounterMode() as m:
+    torch.ops.mylib.sin_op()
