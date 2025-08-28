@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from cli.lib.common.path_helper import ensure_dir_exists
+from cli.lib.common.path_helper import ensure_path
 
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ def attach_junitxml_if_pytest(
         return cmd, None
     if dir is None:
         return cmd, None
-    ensure_dir_exists(dir)
+    ensure_path(dir)
 
     file_name_prefix = f"{prefix}"
     if ensure_unique:

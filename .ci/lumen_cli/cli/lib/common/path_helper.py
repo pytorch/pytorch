@@ -17,11 +17,17 @@ def get_path(path: Union[str, Path], resolve: bool = False) -> Path:
     return result.resolve() if resolve else result
 
 
-def ensure_dir_exists(path: Union[str, Path]) -> Path:
-    """Create directory if it doesn't exist."""
-    path_obj = get_path(path)
-    path_obj.mkdir(parents=True, exist_ok=True)
-    return path_obj
+def ensure_path(path: Union[str, Path], is_file: bool = False) -> Path:
+    """Ensure directory or file exists.
+    If is_file=True, create parent dirs and touch the file.
+    """
+    p = Path(path)
+    if is_file:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch(exist_ok=True)
+    else:
+        p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def remove_dir(path: Union[str, Path, None]) -> None:
@@ -36,7 +42,7 @@ def remove_dir(path: Union[str, Path, None]) -> None:
 def force_create_dir(path: Union[str, Path]) -> Path:
     """Remove directory if exists, then create fresh empty directory."""
     remove_dir(path)
-    return ensure_dir_exists(path)
+    return ensure_path(path)
 
 
 def copy(src: Union[str, Path], dst: Union[str, Path]) -> None:
