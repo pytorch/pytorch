@@ -318,7 +318,9 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     """
     Copy cpu scalar if doesn't not match with given `device`
     """
-    if not isinstance(x.data, ir.ReinterpretView):
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
         return x
     size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
     cur_device = x.get_device()
