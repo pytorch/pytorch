@@ -8279,7 +8279,6 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         mod = Mod()
         compiled_out = torch.compile(mod, backend=backend, dynamic=dynamic)(x)
-        # 2 checkpoints
         self.assertEqual(len(compiled_out), 2)
         self.assertEqual(compiled_out[0].size(0), 3)
         self.assertEqual(compiled_out[1].size(0), 3)
