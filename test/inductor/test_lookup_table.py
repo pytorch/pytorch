@@ -340,6 +340,133 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(result["triton"][0]["BLOCK_M"], 128)
             self.assertEqual(result["tma"][0]["BLOCK_M"], 256)
 
+    @parametrize(
+        "config_hash,template_hash,expected_kept",
+        [
+            # Hash matching (config kept)
+            ("hash123", "hash123", True),
+            # Hash mismatch (config filtered)
+            ("hash123", "hash456", False),
+            # Config without hash (config kept)
+            (None, "hash123", True),
+            # Template without hash (config kept)
+            ("hash123", None, True),
+            # Both None (config kept)
+            (None, None, True),
+        ],
+    )
+    def test_template_hash_checking(self, config_hash, template_hash, expected_kept):
+        """Test template hash validation behavior"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
+        config = self.create_config("triton", BLOCK_M=128, BLOCK_N=64)
+        if config_hash is not None:
+            config["template_hash"] = config_hash
+
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): [config]}
+
+        template_hash_map = (
+            {"triton": template_hash} if template_hash is not None else {}
+        )
+
+        with (
+            patch.object(
+                inductor_config.template_config_lookup_table, "table", lookup_table_data
+            ),
+            patch.object(
+                inductor_config.template_config_lookup_table, "check_src_hash", True
+            ),
+        ):
+            result = lookup_template_configs(
+                kernel_inputs, "mm", ["triton"], template_hash_map
+            )
+
+            if expected_kept:
+                assert result is not None, "Result should not be None"
+                self.assertIn("triton", result)
+                self.assertEqual(len(result["triton"]), 1)
+                # template_hash should be removed from returned config
+                self.assertNotIn("template_hash", result["triton"][0])
+            else:
+                # Config was filtered out due to hash mismatch
+                self.assertEqual(result, {})
+
+    def test_template_hash_checking_disabled(self):
+        """Test that hash checking is skipped when config flag is disabled"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
+        # Create config with mismatching hash
+        config = self.create_config("triton", BLOCK_M=128, template_hash="hash123")
+
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): [config]}
+
+        # Provide different template hash that would normally cause filtering
+        template_hash_map = {"triton": "hash456"}
+
+        with (
+            patch.object(
+                inductor_config.template_config_lookup_table, "table", lookup_table_data
+            ),
+            patch.object(
+                inductor_config.template_config_lookup_table,
+                "check_src_hash",
+                False,
+            ),
+        ):
+            result = lookup_template_configs(
+                kernel_inputs, "mm", ["triton"], template_hash_map
+            )
+
+            # Should keep config even with mismatching hash since checking is disabled
+            assert result is not None, "Result should not be None"
+            self.assertIn("triton", result)
+            self.assertEqual(len(result["triton"]), 1)
+            # template_hash should still be removed from returned config
+            self.assertNotIn("template_hash", result["triton"][0])
+
+    def test_template_hash_mixed_scenarios(self):
+        """Test mixed hash scenarios with multiple configs"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
+        config_list = [
+            self.create_config(
+                "triton", BLOCK_M=128, template_hash="correct_hash"
+            ),  # Should be kept
+            self.create_config(
+                "triton", BLOCK_M=64, template_hash="wrong_hash"
+            ),  # Should be filtered
+            self.create_config("triton", BLOCK_M=32),  # No hash, should be kept
+        ]
+
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): config_list}
+
+        template_hash_map = {"triton": "correct_hash"}
+
+        with (
+            patch.object(
+                inductor_config.template_config_lookup_table, "table", lookup_table_data
+            ),
+            patch.object(
+                inductor_config.template_config_lookup_table, "check_src_hash", True
+            ),
+        ):
+            result = lookup_template_configs(
+                kernel_inputs, "mm", ["triton"], template_hash_map
+            )
+
+            assert result is not None, "Result should not be None"
+            self.assertIn("triton", result)
+            # Should keep 2 configs: the one with correct hash and the one without hash
+            self.assertEqual(len(result["triton"]), 2)
+
+            # Check that kept configs have expected BLOCK_M values
+            kept_block_ms = [config["BLOCK_M"] for config in result["triton"]]
+            self.assertIn(128, kept_block_ms)  # Config with correct hash
+            self.assertIn(32, kept_block_ms)  # Config without hash
+            self.assertNotIn(
+                64, kept_block_ms
+            )  # Config with wrong hash should be filtered
+
 
 if __name__ == "__main__":
     if HAS_CUDA_AND_TRITON:

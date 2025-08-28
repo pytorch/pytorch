@@ -370,10 +370,45 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         tma_config.update({"BLOCK_M": 256, "num_warps": 4})
 
         self.setup_lookup_table("mm", tensors, [triton_config, tma_config])
-        add_preprocessing_fn(
-            partial(verify_choice_names, pattern="triton_", expected_count=2)
+
+    @fresh_cache()
+    def test_template_hash_filtering_e2e(self):
+        """Test end-to-end template hash filtering in real MM operation"""
+        tensors = self.create_tensors("mm")
+
+        # Get the actual src_hash from the template
+        actual_hash = torch._inductor.kernel.mm.mm_template.src_hash
+
+        # Create configs - one with correct hash, one with wrong hash
+        correct_config = self.create_basic_config(
+            torch._inductor.kernel.mm.mm_template.uid
         )
-        self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
+        correct_config.update(
+            {"BLOCK_M": 128, "template_hash": actual_hash}  # Use actual hash
+        )
+
+        wrong_config = self.create_basic_config(
+            torch._inductor.kernel.mm.mm_template.uid
+        )
+        wrong_config.update(
+            {
+                "BLOCK_M": 64,
+                "template_hash": "definitely_wrong_hash_12345",  # Wrong hash
+            }
+        )
+
+        self.setup_lookup_table("mm", tensors, [correct_config, wrong_config])
+
+        # Should only get 1 choice since the wrong hash config gets filtered
+        add_preprocessing_fn(
+            partial(verify_choice_names, pattern="triton_", expected_count=1)
+        )
+
+        # Ensure hash checking is enabled
+        with inductor_config.patch(
+            {"template_config_lookup_table.check_src_hash": True}
+        ):
+            self.run_model("mm", tensors)
 
 
 if __name__ == "__main__":

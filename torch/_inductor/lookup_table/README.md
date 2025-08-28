@@ -90,6 +90,32 @@ table = {
 }
 ```
 
+## Source Hashing Safety
+
+The lookup table system includes source hashing to prevent using stale configurations when template code changes.
+
+### Configuration
+- **Enabled by default**: `torch._inductor.config.template_config_lookup_table.check_src_hash = True`
+- **Optional field**: Add `"template_hash"` to table entries for enhanced safety
+
+### Behavior
+When source hash checking is enabled:
+- Template configurations with `"template_hash"` fields are validated against current template source hashes
+- Mismatched hashes indicate the template code has changed since the configuration was created
+- Stale configurations are automatically filtered out with a warning message
+- Configurations without hash fields are preserved for backward compatibility or if the user wants to fly looser
+
+### Example with Template Hash
+```python
+{
+  "template_id": "triton::mm",
+  "BLOCK_M": 32,
+  "BLOCK_N": 32,
+  "BLOCK_K": 16,
+  "template_hash": "0717af5834e39dcca7ea817f896b8d85b4886422da7a3ab5f6911b4cfe568896"
+}
+```
+
 ## Performance Impact
 
 - **Lookup Hit**: Eliminates heuristic choice generation and autotuning overhead (if a single choice)
