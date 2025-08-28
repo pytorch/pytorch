@@ -1555,7 +1555,7 @@ def get_selected_tests(options) -> list[str]:
     if options.einops:
         selected_tests = list(
             filter(
-                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
                 selected_tests,
             )
         )

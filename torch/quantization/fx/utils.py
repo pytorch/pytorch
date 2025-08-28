@@ -6,6 +6,7 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate files under `torch/ao/quantization/fx/`, while adding an import statement
 here.
 """
+
 from torch.ao.quantization.fx.utils import (
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,

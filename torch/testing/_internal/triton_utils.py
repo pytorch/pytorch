@@ -2,16 +2,71 @@
 
 import unittest
 
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda_and_triton = unittest.skipUnless(
+    HAS_CUDA_AND_TRITON, "requires cuda and triton"
+)
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
 if has_triton():
     import triton
     from triton import language as tl
+
+    import torch
+
+    def _get_strange_configs() -> list[triton.Config]:
+        if torch.version.hip:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        else:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 32,
+                        "GROUP_SIZE_M": 8,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        return configs
 
     # Define here so that multiple tests can take advantage of it
     @triton.jit
@@ -784,28 +839,7 @@ if has_triton():
         tl.store(out_ptr + offsets, output, mask=mask)
 
     @triton.autotune(
-        configs=[
-            triton.Config(
-                {
-                    "BLOCK_SIZE_M": 16,
-                    "BLOCK_SIZE_N": 16,
-                    "BLOCK_SIZE_K": 16,
-                    "GROUP_SIZE_M": 4,
-                },
-                num_stages=4,
-                num_warps=4,
-            ),
-            triton.Config(
-                {
-                    "BLOCK_SIZE_M": 128,
-                    "BLOCK_SIZE_N": 64,
-                    "BLOCK_SIZE_K": 32,
-                    "GROUP_SIZE_M": 8,
-                },
-                num_stages=4,
-                num_warps=4,
-            ),
-        ],
+        configs=_get_strange_configs(),
         key=["M_ptr", "N", "K"],
     )
     @triton.jit
