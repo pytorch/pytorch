@@ -14,7 +14,7 @@ from torch._utils_internal import signpost_event
 
 __all__ = [
     "AffinityMode",
-    "maybe_temporarily_apply_numa_binding_to_current_process",
+    "maybe_temporarily_apply_numa_binding_to_current_thread",
     "NumaOptions",
 ]
 
@@ -48,11 +48,11 @@ class NumaOptions:
 
 
 @contextmanager
-def maybe_temporarily_apply_numa_binding_to_current_process(
+def maybe_temporarily_apply_numa_binding_to_current_thread(
     *, gpu_index: int, numa_options: Optional[NumaOptions]
 ) -> Iterator[None]:
     """
-    1. Applies NUMA binding to the current process, suitable for the process
+    1. Applies NUMA binding to the current thread, suitable for the thread
     which will be interacting with GPU gpu_index.
     2. Resets to the original CPU affinity before exiting the context manager.
     """
@@ -60,17 +60,17 @@ def maybe_temporarily_apply_numa_binding_to_current_process(
         yield
         return
 
-    original_logical_cpu_indices = _get_allowed_cpu_indices_for_current_process()
-    _apply_numa_binding_to_current_process(
+    original_logical_cpu_indices = _get_allowed_cpu_indices_for_current_thread()
+    _apply_numa_binding_to_current_thread(
         gpu_index=gpu_index, numa_options=numa_options
     )
     yield
-    _bind_current_process_to_logical_cpus(
+    _bind_current_thread_to_logical_cpus(
         logical_cpu_indices=original_logical_cpu_indices
     )
 
 
-def _apply_numa_binding_to_current_process(
+def _apply_numa_binding_to_current_thread(
     *, gpu_index: int, numa_options: NumaOptions
 ) -> None:
     kwargs = {
@@ -94,9 +94,9 @@ def _apply_numa_binding_to_current_process(
             _get_ranges_str_from_ints(logical_cpu_indices),
         )
 
-        _bind_current_process_to_logical_cpus(logical_cpu_indices=logical_cpu_indices)
+        _bind_current_thread_to_logical_cpus(logical_cpu_indices=logical_cpu_indices)
         logger.info(
-            "Successfully bound to logical_cpu_indices=%r for NUMA binding",
+            "Successfully bound to logical_cpu_indices=%s for NUMA binding",
             _get_ranges_str_from_ints(logical_cpu_indices),
         )
 
@@ -132,8 +132,8 @@ def _raise_if_logical_cpu_indices_invalid(*, logical_cpu_indices: set[int]) -> N
         raise RuntimeError("Must bind to a non-empty set of CPU indices")
 
 
-def _bind_current_process_to_logical_cpus(*, logical_cpu_indices: set[int]) -> None:
-    # 0 represents the current process
+def _bind_current_thread_to_logical_cpus(*, logical_cpu_indices: set[int]) -> None:
+    # 0 represents the current thread
     os.sched_setaffinity(0, logical_cpu_indices)
 
 
@@ -383,7 +383,7 @@ def _get_allowed_logical_cpu_indices_for_numa_node(*, numa_node_index: int) -> s
     all_cpu_indices = _get_cpu_indices_for_numa_node_MAYBE_NOT_ALLOWED(
         numa_node_index=numa_node_index
     )
-    allowed_cpu_indices = _get_allowed_cpu_indices_for_current_process()
+    allowed_cpu_indices = _get_allowed_cpu_indices_for_current_thread()
     return all_cpu_indices & allowed_cpu_indices
 
 
@@ -393,7 +393,7 @@ def _get_cpu_indices_for_numa_node_MAYBE_NOT_ALLOWED(
     """
     Returns:
         Indices of all CPUs associated with numa_node_index. However, the list
-        is not filtered based on whether the process is allowed to use them.
+        is not filtered based on whether the thread is allowed to use them.
     """
     cpulist_absolute_path = f"/sys/devices/system/node/node{numa_node_index}/cpulist"
     try:
@@ -542,6 +542,6 @@ def _get_numa_node_indices_for_socket_index(*, socket_index: int) -> set[int]:
     return matching_numa_node_indices
 
 
-def _get_allowed_cpu_indices_for_current_process() -> set[int]:
-    # 0 denotes current process
+def _get_allowed_cpu_indices_for_current_thread() -> set[int]:
+    # 0 denotes current thread
     return os.sched_getaffinity(0)
