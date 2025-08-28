@@ -357,6 +357,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
             )
             res = opt_fn(x)
         self.assertEqual(res, ref)
+
     def test_dtensor_dynamic_cat(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
