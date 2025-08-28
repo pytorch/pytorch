@@ -48,6 +48,7 @@ runs:
         BASE_IMAGE: ${{ inputs.docker-image }}
         BUILD_TARGETS: ${{ inputs.build-targets }}
         PARENT_OUTPUT_DIR: ${{ inputs.output-dir}}
+
       shell: bash
       run: |
         set -euo pipefail
