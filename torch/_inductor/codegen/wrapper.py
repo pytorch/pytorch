@@ -3352,7 +3352,7 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
-    def codegen_while_loop(self, while_loop, with_checkpoint):
+    def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""
 
         def codegen_subgraph(subgraph, outer_inputs, outer_outputs):
@@ -3374,7 +3374,7 @@ class PythonWrapperCodegen(CodeGen):
 
         ckp_offset = len(outer_carried_inputs)
         self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
-        if with_checkpoint:
+        if stack_output:
             self.writeline(
                 f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
             )
@@ -3401,8 +3401,8 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"should_loop = {cond_outer_outputs[0]}")
         self.writeline("if not should_loop:")
-        if with_checkpoint:
-            # Handle the case when loop never executes with checkpointing
+        if stack_output:
+            # Handle the case when loop never executes
             for i, (carried_input, carried_buf) in enumerate(
                 zip(outer_carried_inputs, while_loop.carried_inputs)
             ):
@@ -3425,8 +3425,8 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
 
-        # Collect checkpoints if enabled
-        if with_checkpoint:
+        # Collect outputs if enabled
+        if stack_output:
             self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
             for i in range(len(outer_carried_inputs)):
                 self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
@@ -3440,8 +3440,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExitSubgraphLine(self))
         self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
 
-        # Stack checkpoints after loop completion
-        if with_checkpoint:
+        # Stack outputs after loop completion
+        if stack_output:
             self.writeline("# Stack checkpoints after loop completion")
             for i in range(len(outer_carried_inputs)):
                 self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")

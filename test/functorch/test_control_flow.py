@@ -8256,7 +8256,7 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
-    def test_compile_while_loop_with_checkpoint(self, dynamic, backend):
+    def test_compile_while_loop_stack_output(self, dynamic, backend):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8272,7 +8272,7 @@ class GraphModule(torch.nn.Module):
                     return c + 1, self.linear(x)
 
                 checkpoint_c, checkpoint_x = (
-                    torch.ops.higher_order.while_loop_with_checkpoint(
+                    torch.ops.higher_order.while_loop_stack_output(
                         cond_fn, body_fn, (c, x), tuple()
                     )
                 )

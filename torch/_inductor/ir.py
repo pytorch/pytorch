@@ -8625,8 +8625,8 @@ class WhileLoop(ExternKernel):
         additional_inputs: Sequence[IRNode],
         stack_output: bool,
     ) -> Union[IRNode, Sequence[IRNode]]:
-        """create the while_loop IR node. stack_output controls whether it outputs
-        input checkpoints, which is necessary for training.
+        """create the while_loop IR node. stack_output controls whether it stack
+        each iterations' output, which is necessary for training.
         """
         from torch._higher_order_ops.utils import check_input_alias_and_mutation
 

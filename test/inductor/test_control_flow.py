@@ -1088,7 +1088,7 @@ class WhileLoopModels:
                 (c, x),
             )
 
-    class WhileLoopWithCheckpointSimple(torch.nn.Module):
+    class WhileLoopStackOutputSimple(torch.nn.Module):
         def __init__(self, device):
             super().__init__()
             self.linear = torch.nn.Linear(3, 3, device=device)
@@ -1100,12 +1100,10 @@ class WhileLoopModels:
             def body_fn(c, x):
                 return c + 1, self.linear(x)
 
-            checkpoint_c, checkpoint_x = (
-                torch.ops.higher_order.while_loop_with_checkpoint(
-                    cond_fn, body_fn, (c, x), tuple()
-                )
+            stacked_c, stacked_x = torch.ops.higher_order.while_loop_stack_output(
+                cond_fn, body_fn, (c, x), tuple()
             )
-            return checkpoint_c, checkpoint_x
+            return stacked_c, stacked_x
 
 
 class WhileLoopTests(TestCase):
@@ -1429,9 +1427,9 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_checkpoint_simple(self, device, dynamic):
+    def test_while_loop_stack_output_simple(self, device, dynamic):
         self._run_test(
-            model=WhileLoopModels.WhileLoopWithCheckpointSimple(device),
+            model=WhileLoopModels.WhileLoopStackOutputSimple(device),
             inputs=(torch.randn(3, 3, dtype=torch.float32),),
             device=device,
             dynamic=dynamic,
