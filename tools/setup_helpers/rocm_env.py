@@ -55,4 +55,8 @@ def get_ck_dependency_string() -> str:
     """
     egg_name = "#egg=rocm-composable-kernel"
     commit_pin = f"@{read_ck_pin()}"
+    if os.getenv("TORCHINDUCTOR_CK_DIR"):
+        # we take non-empty env as an indicator that the package has already been installed and doesn't need to be re-installed
+        # this comes with a caveat that the pinned version is known to work while the preinstalled version might not
+        return ""
     return f"@ git+https://github.com/ROCm/composable_kernel.git{commit_pin}{egg_name}"
