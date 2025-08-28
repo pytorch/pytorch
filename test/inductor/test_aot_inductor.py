@@ -312,7 +312,7 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.SkipIf(
+    @unittest.skipIf(
         config.triton.enable_native_matmul, 
         "different # of input/output/constants in native matmul"
     )
