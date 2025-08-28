@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cli.lib.common.envs_helper import get_env
 from cli.lib.common.utils import get_wheels
 from jinja2 import Template
 
@@ -71,8 +71,17 @@ _TPL_TABLE = Template(
 
 
 def gh_summary_path() -> Path | None:
-    """Return the Path to the GitHub step summary file, or None if not set."""
-    p = os.environ.get("GITHUB_STEP_SUMMARY")
+    """Return the Path to the GitHub step summary file,
+    if TEMP_GITHUB_STEP_SUMMARY is set, use that instead,
+    this happens when run jobs in docker container
+    the github flow need to make sure to output the summary to github step summary after
+    """
+    p = get_env("GITHUB_STEP_SUMMARY")
+    overrides = get_env("TEMP_GITHUB_STEP_SUMMARY")
+    if overrides:
+        p = overrides
+    if not p or not Path(p).exists():
+        return None
     return Path(p) if p else None
 
 
@@ -161,7 +170,6 @@ def render_content(
     return md
 
 
-
 def summarize_failures_by_test_command(
     xml_and_labels: Iterable[tuple[str | Path, str]],
     *,
@@ -177,10 +185,8 @@ def summarize_failures_by_test_command(
     for xml_path, label in xml_and_labels:
         xmlp = Path(xml_path)
         if not xmlp.exists():
-            # optional: your logger
-            # logger.warning("XML %s not found, skipping", xmlp)
+            logger.warning("XML %s not found, skipping", xmlp)
             continue
-
         failed = _parse_failed(xmlp)
         if dedupe_within_command:
             failed = sorted(set(failed))
