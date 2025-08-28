@@ -162,6 +162,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+        # Used when we materialize class.__dict__ to a MappingProxyObject. In
+        # this case, we don't want to allow mutation in the class because there
+        # is no way to reflect it in the created MappingProxyVariable.
+        self.ban_mutation = False
 
     def as_python_constant(self):
         return self.value
@@ -420,6 +424,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
@@ -448,6 +454,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 args[1:],
+            )
+        elif name == "__setattr__" and self.ban_mutation:
+            unimplemented_v2(
+                gb_type="Class attribute mutation when the __dict__ was already materialized",
+                context=str(self.value),
+                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                hints=graph_break_hints.SUPPORTABLE,
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1915,7 +1928,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 "dict_vt must be constructed by builder.py when source is present"
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
@@ -1954,6 +1967,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
 
     @property
     def items(self):
