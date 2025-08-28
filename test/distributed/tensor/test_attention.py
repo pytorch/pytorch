@@ -40,7 +40,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     ModelArgs,
@@ -62,44 +62,6 @@ rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
 }  # mapping from _RotateMethod enum to string
-
-
-class LoadBalanceTest(TestCase):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @property
-    def device_type(self) -> str:
-        return "cuda"
-
-    @skip_if_lt_x_gpu(1)
-    def test_per_document_headtail_load_balance(self):
-        # In document mask, we apply per-document sharding to the QKV tensor:
-        # chunk 0, N-1 are sharded on rank 0, chunk 1, N-2 are sharded on rank 1, etc.
-
-        # TODO: block size, ... ???
-        batch_size = 2
-        doc_count = 4
-        max_seq_len = 28
-
-        # initialize document mask
-        lengths = [
-            generate_random_lengths_in_chunks(
-                max_seq_len, doc_count, chunk_size=self.world_size * 2
-            )
-            for _ in range(batch_size)
-        ]
-        print(f"lengths={lengths}")
-
-        # instantiate the load balancer object
-        lb = PerDocumentHeadTailLoadBalancer(
-            lengths, self.world_size, torch.device(self.device_type)
-        )
-        indices_per_batch = lb.generate_indices(restore=False)
-
-        print(indices_per_batch)
-        print(lb.generate_indices(restore=True))
 
 
 class RingAttentionTest(DTensorTestBase):
@@ -686,7 +648,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             Q_LEN=query_tokens,
             KV_LEN=context_tokens,
             device_mesh=device_mesh,
-            lb=lb,
+            load_balancer=lb,
         )
 
         # shard qkv on seq_dim
@@ -696,9 +658,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
             buffer_seq_dims=[shard_dim] * 3,
-            load_balance_indices=(
-                None if lb is None else lb.generate_indices(restore=False)
-            ),
+            load_balancer=lb,
         ):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
@@ -730,7 +690,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_mesh,
             buffers=[cp_out, cp_lse],
             seq_dims=[2, 2],
-            restore_indices=None if lb is None else lb.generate_indices(restore=True),
+            load_balancer=lb,
         )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_lse, expect_lse, atol=atol, rtol=rtol)
@@ -740,7 +700,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_mesh,
             buffers=[cp_q.grad, cp_k.grad, cp_v.grad],
             seq_dims=[2, 2, 2],
-            restore_indices=None if lb is None else lb.generate_indices(restore=True),
+            load_balancer=lb,
         )
         torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
@@ -754,25 +714,34 @@ class RingFlexAttentionTest(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_ring_flex_attention(self) -> None:
-        self.run_subtests(
-            {"qkv_size": [128 * self.world_size, 2048]},
-            self._test_ring_flex_attention,
-        )
+        restore_enable_load_balance = _cp_options.enable_load_balance
 
-        # NOTE: we do not test load balance here
-        _cp_options.enable_load_balance = False
+        for enable_load_balance in [
+            False,  # test w/o load-balancing
+            True,  # test w/ the default load-balancing
+        ]:
+            _cp_options.enable_load_balance = enable_load_balance
 
-        # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             self.run_subtests(
-                {"qkv_size": [64 * self.world_size]},
+                {"qkv_size": [128 * self.world_size, 2048]},
                 self._test_ring_flex_attention,
             )
+
+            # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
+            with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+                self.run_subtests(
+                    {"qkv_size": [64 * self.world_size]},
+                    self._test_ring_flex_attention,
+                )
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
     # TODO: merge with the above test
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_ring_flex_attention_document_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
         random.seed(10)
 
         # parameters for testing
@@ -804,6 +773,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         for enable_load_balance, batch_size, max_seq_len in itertools.product(
             enable_load_balance_list, batch_size_list, max_seq_len_list
         ):
+            _cp_options.enable_load_balance = enable_load_balance
+
             # initialize document mask
             lengths = [
                 (
@@ -817,8 +788,6 @@ class RingFlexAttentionTest(DTensorTestBase):
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
-
-            _cp_options.enable_load_balance = enable_load_balance
 
             # generate load balancer
             load_balancer = (
@@ -840,6 +809,8 @@ class RingFlexAttentionTest(DTensorTestBase):
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
 
 if __name__ == "__main__":
