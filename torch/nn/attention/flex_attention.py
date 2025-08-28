@@ -1629,35 +1629,34 @@ def flex_attention(
         return_aux,
     )
 
-    def _build_flex_attention_return(out, lse, max_scores, return_lse):
-        """Build return tuple with optional lse and max_scores values."""
-        # Scale from ln2 space
-        if lse is not None and lse.numel() > 0:
-            lse = lse * math.log(2)
-        else:
-            lse = None
+    def _finalize_outputs(
+        out,
+        lse,
+        max_scores,
+        *,
+        return_aux: Optional[FlexAttentionAuxRequest],
+        return_lse: bool,
+    ):
+        """Normalize stats and build return value (aux-aware, legacy-compatible)."""
+        ln2 = math.log(2.0)
+        return_lse = return_lse or return_aux is not None and return_aux.lse
+        return_max = return_aux is not None and return_aux.max_scores
 
-        if max_scores is not None and max_scores.numel() > 0:
-            max_scores = max_scores * math.log(2)
-        else:
-            max_scores = None
+        lse_scaled = lse * ln2 if (return_lse and lse.numel() > 0) else None
+        max_scaled = (
+            max_scores * ln2 if (return_max and max_scores.numel() > 0) else None
+        )
 
         if return_aux is not None:
-            # Build output with only requested fields
-            aux_lse = lse if return_aux.lse else None
-            aux_max = max_scores if return_aux.max_scores else None
+            return out, FlexAttentionAuxOutput(
+                lse=lse_scaled,
+                max_scores=max_scaled,
+            )
 
-            aux_output = FlexAttentionAuxOutput(lse=aux_lse, max_scores=aux_max)
-            return out, aux_output
-        else:
-            # Legacy return format
-            result = [out]
+        if return_lse:
+            return out, lse_scaled
 
-            if return_lse:
-                result.append(lse)
-
-            # if we have no flags set it is not a tuple
-            return result[0] if len(result) == 1 else tuple(result)
+        return out
 
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
@@ -1674,7 +1673,9 @@ def flex_attention(
             scale,
             kernel_options,  # type: ignore[union-attr]
         )
-        return _build_flex_attention_return(out, lse, max_scores, return_lse)
+        return _finalize_outputs(
+            out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+        )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
         _warn_once(
@@ -1727,4 +1728,6 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-    return _build_flex_attention_return(out, lse, max_scores, return_lse)
+    return _finalize_outputs(
+        out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+    )
