@@ -314,6 +314,24 @@ def in_namespace(op, namespace):
     return False
 
 
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and isinstance(x.data, ir.ReinterpretView)
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -352,26 +370,11 @@ def transform_args(
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
 
-        def _is_copy_cpu_scalar(x: TensorBox) -> TensorBox:
-            size = x.get_size()
-            cur_device = x.get_device()
-            if (
-                cur_device is not None
-                and cur_device.type == "cpu"
-                and cur_device != device
-                and isinstance(x.data, ir.ReinterpretView)
-                and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
-            ):
-                return TensorBox(
-                    ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False))
-                )
-            return x
-
         for i in args_indices:
-            args[i] = _is_copy_cpu_scalar(args[i])
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
 
         for k in kwargs_indices:
-            kwargs[k] = _is_copy_cpu_scalar(kwargs[k])
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
