@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
@@ -615,6 +616,8 @@ def _tuned_grouped_mm_common(
     if (
         is_nonzero
         and use_triton_template(layout)
+        # TODO(coconutruben): replace with V.choices.get_mm_configs() once that supports grouped
+        and (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
     ):
         scaled = scale_a is not None
