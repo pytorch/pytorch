@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
-from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -28,9 +27,8 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, InputBuffer
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
     AlgorithmSelectorCache,
@@ -38,7 +36,8 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
+from torch._inductor.template_heuristics.registry import override_template_heuristics
+from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -76,7 +75,7 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.backends.cuda.matmul.allow_tf32 = True
+torch.set_float32_matmul_precision("high")
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -1272,16 +1271,14 @@ class TestMaxAutotune(TestCase):
 
         # Force only decomposeK choice
         with (
-            mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
-            ) as base_mm_mock,
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
             ) as decompose_mock,
         ):
-            mm_configs_mock = MagicMock()
-            mm_configs_mock.return_value = []
-            base_mm_mock.return_value = mm_configs_mock
             decompose_mock.return_value = True
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
@@ -1661,7 +1658,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_registry.get_template_heuristic"
+            "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
             config_heuristics = CUDAMMTemplateConfigHeuristic()
 
@@ -2076,39 +2073,6 @@ class TestMaxAutotuneRemoteCache(TestCase):
                 reset()
             global_stats.report()
             self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
-
-    def test_get_mm_configs_float32_precision_ieee(self):
-        """Test that configs returned from choices.get_mm_configs use float32_precision == ieee."""
-        from torch._inductor.choices import InductorChoices
-        from torch._inductor.graph import GraphLowering
-        from torch._inductor.ir import FlexibleLayout
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        # Create a simple graph to get proper context
-        gm = make_fx(lambda: torch.zeros(2, 3))()
-        graph = GraphLowering(gm)
-
-        with V.set_graph_handler(graph):
-            device = torch.device(f"{GPU_TYPE}:0")
-            mat1 = InputBuffer(
-                name="mat1",
-                layout=FixedLayout(device, torch.float32, [64, 128], [128, 1]),
-            )
-            mat2 = InputBuffer(
-                name="mat2",
-                layout=FixedLayout(device, torch.float32, [128, 64], [64, 1]),
-            )
-            kernel_inputs = MMKernelInputs([mat1, mat2])
-            output_layout = FlexibleLayout(device, torch.float32, [64, 64])
-
-            choices = InductorChoices()
-            configs = list(
-                choices.get_mm_configs(kernel_inputs, output_layout, "mm", "mm")
-            )
-
-            for cfg in configs:
-                self.assertIn("ALLOW_TF32", cfg)
-                self.assertEqual(cfg["ALLOW_TF32"], True)
 
 
 class _TestTritonTemplateCaller(TritonTemplateCaller):

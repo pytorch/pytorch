@@ -159,6 +159,10 @@ class OpDispatcher:
                 return out
             else:
                 raise
+        except Exception as e:
+            raise RuntimeError(
+                f"Sharding propagation failed for {op_info.schema}"
+            ) from e
 
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
