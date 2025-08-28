@@ -312,6 +312,10 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
+    @unittest.SkipIf(
+        config.triton.enable_native_matmul, 
+        "different # of input/output/constants in native matmul"
+    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -331,10 +335,7 @@ class AOTInductorTestsTemplate:
             # We should have 1 input, 1 output, 2 constants for the model.
             FileCheck().check_count("AOTInductorModelBase(1,", 1).check_next(
                 "1,"
-            ).check_next(
-                "3," if config.triton.enable_native_matmul
-                else "2,"
-            ).run(code)
+            ).check_next("2,").run(code)
 
     def test_constant_folding(self):
         class Model(torch.nn.Module):
