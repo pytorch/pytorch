@@ -25,7 +25,11 @@ import torch
 import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+)
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
@@ -1114,12 +1118,7 @@ class NamedTupleVariable(TupleVariable):
         return self.python_type()(*self._as_proxy())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # If we have dynamic attributes, we need to use constant loading
-        if self.dynamic_attributes:
-            codegen.append_output(
-                codegen.create_load_const_unchecked(self.as_python_constant())
-            )
-            return
+        # Always reconstruct the NamedTuple normally first
         # Constructors:
         #   StructSequenceType(iterable)
         #   NamedTupleType(*iterable)
@@ -1137,6 +1136,19 @@ class NamedTupleVariable(TupleVariable):
             ]
             + create_call_function(1, False)
         )
+
+        # Handle dynamic attributes through store_attr_mutations
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if tx.output.side_effects.has_pending_mutation(self):
+            for name, value in tx.output.side_effects.store_attr_mutations[
+                self
+            ].items():
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
 
     def call_method(
         self,
