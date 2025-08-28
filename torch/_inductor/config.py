@@ -408,8 +408,10 @@ sink_iterative_use_runtime_estimations: bool = False
 reorder_sink_runtime_estimations_comm_mult: float = 1.0
 reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
 # Ratio of comm_time to cover deviations of comm_time from estimations
-reorder_iterative_extra_comm_comp_overlap: float = 0.1
-sink_iterative_extra_comm_comp_overlap: float = 0.2
+reorder_iterative_extra_comm_comp_overlap: float = 0.5
+sink_iterative_extra_comm_comp_overlap: float = 1.0
+reorder_iterative_peak_memory_budget: float = 0.2
+sink_iterative_peak_memory_budget: float = 0.2
 
 # Experimental unsafe configuration that allows changing relative collectives order,
 # No guarantees for now that all the rank will do the same order of collectives,
@@ -431,8 +433,8 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
 
-runtime_estimations_use_nccl_lib_estimations: bool = False
-runtime_estimations_mms_benchmark: bool = False
+runtime_estimations_use_nccl_lib_estimations: bool = True
+runtime_estimations_mms_benchmark: bool = True
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
