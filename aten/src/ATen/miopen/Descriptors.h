@@ -1,13 +1,16 @@
 #pragma once
 
-#include <ATen/miopen/Exceptions.h>
+#include <string>
 
+#include <ATen/miopen/Exceptions.h>
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <c10/macros/Export.h>
 
-namespace at { namespace native {
+namespace at::native {
+
+std::string miopenTypeToString(miopenDataType_t dtype);
 
 inline int dataSize(miopenDataType_t dataType)
 {
@@ -16,6 +19,43 @@ inline int dataSize(miopenDataType_t dataType)
     case miopenFloat: return 4;
     case miopenBFloat16: return 2;
     default: return 8;
+  }
+}
+
+// The stride for a size-1 dimensions is not uniquely determined; in
+// fact, it can be anything you want, because the fact that the
+// tensor is size 1 at this dimension means that you will never actually
+// try advancing your pointer by this stride.
+//
+// We duplicate the CuDNN restriction here for MIOpen.
+//
+// However, CuDNN has a much more stringent requirement on strides:
+// if you are passing a contiguous input, it better be the case
+// that the stride for dim i is the product of the sizes of dims
+// i+1 to the end.  This stride is indeed uniquely determined.  This
+// function modifies 'stride' in place so this invariant holds.
+template <typename T>
+static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
+  int64_t z = 1;
+  int index = 0;
+  std::vector<int> permutation(dim);
+
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (int d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (int d : permutation) {
+    if (size[d] == 1) {
+      stride[d] = z;
+    } else {
+      z *= size[d];
+    }
   }
 }
 
@@ -41,6 +81,8 @@ template <typename T, miopenStatus_t (*ctor)(T**), miopenStatus_t (*dtor)(T*)>
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_HIP_CPP_API Descriptor {
  public:
+  // TODO: Figure out why const-correctness doesn't work here
+
   // Use desc() to access the underlying descriptor pointer in
   // a read-only fashion.  Most client code should use this.
   // If the descriptor was never initialized, this will return
@@ -75,14 +117,32 @@ class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
     set(t, pad);
   }
 
+  // Note [MIOpen broadcast padding]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // pad specifies the minimum dimensionality of the tensor descriptor
+  // we produce (it doesn't have anything to do with, e.g., convolution
+  // padding).  If 't' is lower-dimensional than 'pad', the remaining
+  // dimensions (on the right) are padded with ones.  This doesn't
+  // affect the underlying data layout.  This is particularly useful for
+  // dealing with a peculiarity of the MIOpen API, which is that broadcasting in MIOpen is
+  // done in two steps: first, the client code is expected to pad out
+  // (the dimensions) input tensors to be the same dimension as the
+  // target broadcast, and then second, MIOpen takes of actually
+  // broadcasting size 1 dimensions.
+
   void set(const at::Tensor &t, size_t pad = 0);
+  void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
+
+  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -99,11 +159,14 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
 
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
+  void print();
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
+
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct TORCH_HIP_CPP_API ConvolutionDescriptor
     : public Descriptor<
@@ -166,4 +229,4 @@ union Constant
   }
 };
 
-}}  // namespace
+} // namespace

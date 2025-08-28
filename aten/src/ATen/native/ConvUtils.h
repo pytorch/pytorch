@@ -353,19 +353,21 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
-inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
-    return false;
+    return at::MemoryFormat::Contiguous;
   }
 
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
-  static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
-  static bool suggest_nhwc = PYTORCH_MIOPEN_SUGGEST_NHWC && *PYTORCH_MIOPEN_SUGGEST_NHWC;
+  // See https://github.com/pytorch/pytorch/issues/64427.
+  // non static variable is used to be able to change environment variable in runtime for testing
+  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
+  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
+  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(is_miopen_3_5);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
@@ -375,13 +377,24 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
+  if (can_use_miopen_channels_last_2d) {
+    return at::MemoryFormat::ChannelsLast;
+  }
 
   bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
   );
+  if (can_use_miopen_channels_last_3d) {
+    return at::MemoryFormat::ChannelsLast3d;
+  }
 
-  return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
+  return at::MemoryFormat::Contiguous;
+}
+
+// deprecated, but to remove would be BC-breaking
+inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+  return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
 }
 
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
