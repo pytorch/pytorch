@@ -224,7 +224,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 )
 
     def _compare_orig_and_checkpointed_fns(
-        self, orig_fn, checkpointed_fn, *args, fullgraph=True,
+        self, orig_fn, checkpointed_fn, *args, fullgraph=True
     ):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
