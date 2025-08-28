@@ -302,13 +302,13 @@ def while_loop_dense(
                 for val in carried_vals
             )
 
-    fw_outputs: list[list[torch.Tensor]] = [[] for _ in carried_vals]
+    outputs: list[list[torch.Tensor]] = [[] for _ in carried_vals]
 
     while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
         if stack_output:
             for i, o in enumerate(out):
-                fw_outputs[i].append(o)
+                outputs[i].append(o)
 
         assert isinstance(out, tuple), (
             f"body_fn should return a tuple but got {type(out)}"
@@ -322,8 +322,8 @@ def while_loop_dense(
 
     if stack_output:
         outs: list[torch.Tensor] = []
-        for i, checkpoint in enumerate(fw_outputs):
-            outs.append(torch.stack(checkpoint, dim=0))
+        for i, out in enumerate(outputs):
+            outs.append(torch.stack(out, dim=0))
         return tuple(outs)
 
     return carried_vals
@@ -548,7 +548,7 @@ def while_loop_fake_tensor_mode(
         if stack_output:
             n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
             assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
-            fake_fw_outputs = tuple(
+            fake_outputs = tuple(
                 out.clone()
                 .unsqueeze(0)
                 .repeat((n_iter,) + tuple(1 for _ in range(out.dim())))
@@ -561,7 +561,7 @@ def while_loop_fake_tensor_mode(
                 lambda _: _create_unbacked_symint(
                     mode, ignore_fresh_unbacked_symbols=False
                 ),
-                fake_fw_outputs,
+                fake_outputs,
             )
 
         # See NOTE [unspecialize int carry with unbacked symints]
@@ -605,7 +605,7 @@ def while_loop_func(
         return ctx.wrap_tensors(ret)
 
 
-class WhileLoopWithCheckpointOp(HigherOrderOperator):
+class WhileLoopStackOutputOp(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("while_loop_stack_output")
 
@@ -902,7 +902,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         )
 
 
-while_loop_stack_output_op = WhileLoopWithCheckpointOp()
+while_loop_stack_output_op = WhileLoopStackOutputOp()
 
 while_loop_stack_output_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
     functools.partial(while_loop_dense, stack_output=True)
