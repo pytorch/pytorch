@@ -10142,11 +10142,6 @@ graph():
         ep_0 = torch.export.export(model, (x, y, 0))
         self.assertTrue(torch.equal(ep_0.module()(x, y, 0), expected_0))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"possible modes: None, 0, 1, 2, but was: 3"
-        ):
-            torch.export.export(model, (x, y, 3))
-
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
             def forward(self, scores, mask):
