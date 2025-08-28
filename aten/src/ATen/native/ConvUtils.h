@@ -392,6 +392,11 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
   return at::MemoryFormat::Contiguous;
 }
 
+// deprecated, but to remove would be BC-breaking
+inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+  return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
+}
+
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // disable NHWC for float64 input.
