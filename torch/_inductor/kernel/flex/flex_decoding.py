@@ -215,6 +215,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
+    # Calculate the maximum valid KV index to prevent invalid memory access
+    # This is based on the actual number of KV blocks available
+    max_kv_blocks = V.graph.sizevars.size_hint(kv_indices.get_size()[-1], fallback=5)
+    kernel_options.setdefault("MAX_VALID_KV_IDX", max_kv_blocks - 1)
+
     # create config dependent intermediate buffers
     buf_ACC_shape = [B, MAX_SPLIT_KV, Hq, seq_len_q, v_head_dim]
     buf_ML_shape = buf_ACC_shape[:-1]
