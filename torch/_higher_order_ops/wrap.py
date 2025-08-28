@@ -170,6 +170,13 @@ class WrapActivationCheckpoint(HigherOrderOperator):
 wrap_activation_checkpoint = WrapActivationCheckpoint()
 
 
+def _is_compiling():
+    import torch
+    # Check if we are under AOTAutograd tracing
+    # Checking that a functional mode is active should always do what we want
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
+
+
 class TagActivationCheckpoint(HigherOrderOperator):
     """
     This operator is supposed to be used only with torch.compile stack. This
@@ -264,6 +271,15 @@ tag_activation_checkpoint = TagActivationCheckpoint()
 def tag_activation_checkpoint_impl(gmod, *args, **kwargs):
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
+
+    if not _is_compiling():
+        # If backend=eager, the partitioner won't run, so fallback to eager
+        # checkpointing.
+        from torch.utils.checkpoint import checkpoint
+
+        if "_checkpoint_context_fn" in gmod.meta:
+            kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
+        return checkpoint(gmod, *args, **kwargs)
 
     if "_checkpoint_context_fn" in gmod.meta:
         warning_once(
