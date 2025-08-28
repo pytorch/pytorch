@@ -146,7 +146,9 @@ class _RNGStateTracker:
         )
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
-    def _distribute_region(self, spec: DTensorSpec):
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+    ):
         pass
 
     def _manual_seed(self, parallel_seed: int) -> None:
@@ -191,7 +193,17 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         self.set_seed("parallel-rng", parallel_seed)
 
     @contextlib.contextmanager
-    def _distribute_region(self, spec: DTensorSpec):
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+    ):
+        g_name = "parallel-rng"
+        if generator is not None:
+            # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
+            # not because we need to keep a copy of it but because its the easiest way to make it work with the
+            # existing set/get APIs. We also ensure we remove it from rng_states after each _distribute_region.
+            g_name = "user-passed-generator"
+            assert g_name not in self.rng_states
+            self.rng_states[g_name] = generator.get_state()
         # check if the parallel rng state has been synchronized or not
         if not self.rng_state_is_sync("parallel-rng"):
             raise RuntimeError(
@@ -202,22 +214,28 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             if self._device.type == "hpu":
                 self._device_handle.set_rng_ctx("philox")
-            old_offset = self.get_offset("parallel-rng")
-            self._set_pre_op_offset(spec)
+            old_offset = self.get_offset(g_name)
+            self._set_pre_op_offset(g_name, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
                 assert self._device_handle is not None
-                self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
+                self._device_handle.set_rng_state(self.rng_states[g_name])
                 try:
                     yield  # execute the region code
                 finally:
                     # update offset to synchronize among ranks
-                    self._set_post_op_offset(spec, old_offset)
+                    self._set_post_op_offset(g_name, spec, old_offset)
             if self._device.type == "hpu":
                 self._device_handle.unset_rng_ctx("philox")
         else:
             yield
+
+        if generator is not None:
+            # ensure we (a) propagate the state advancement back to the user's RNG so its visible and impacts any future
+            # usage of that RNG (dtensor or non-dtensor), (b) drop it from our own cache so that if the user updates
+            # the seed value in their rng and uses it with DTensor again, we always use the latest value
+            generator.set_state(self.rng_states.pop(g_name))
 
     def get_offset(self, name: str) -> int:
         if name not in self.rng_states:
@@ -240,7 +258,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         )
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
-    def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
+    def _set_pre_op_offset(self, name: str, spec: DTensorSpec) -> None:
         """Set the starting RNG offset for current device's local shard before actual
         op execution. The pre_op_offset value should start from the current RNG offset
         and increment by the size of local shard until it reaches the size of the whole
@@ -248,6 +266,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         will be the same.
 
         Args:
+            name (str): The name of the generator to use (should be a key in self.rng_states)
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we prepare the offset for running random ops.
 
@@ -350,20 +369,23 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         local_size = prod(local_size_on_rank_0)
 
         # get current RNG offset
-        current_offset = self.get_offset("parallel-rng")
+        current_offset = self.get_offset(name)
 
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        self.set_offset("parallel-rng", current_offset + offset_incr)
+        self.set_offset(name, current_offset + offset_incr)
 
-    def _set_post_op_offset(self, spec: DTensorSpec, old_offset: int) -> None:
+    def _set_post_op_offset(
+        self, name: str, spec: DTensorSpec, old_offset: int
+    ) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
         rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
         the offset before calling `set_pre_op_offset` i.e. the offset before running DTensor
         random ops.
 
         Args:
+            name (str): The name of the generator to use (should be a key in self.rng_states)
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we post-process the offset for running random ops.
 
@@ -378,7 +400,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         numel = (numel + 3) // 4 * 4
-        self.set_offset("parallel-rng", old_offset + numel)
+        self.set_offset(name, old_offset + numel)
 
     def _calc_shard_linear_idx(
         self, shard_coord: list[int], shard_size: list[int]

@@ -1760,17 +1760,44 @@ class ConstructorMoverPass:
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
         target_device = next(iter(target_devices))
-        for node in movable_constructors:
-            if node in cpu_placeholders:
-                with graph.inserting_after(node):
-                    gpu_node = graph.call_function(
-                        torch.ops.prims.device_put.default, (node, target_device)
+        movable_cpu_placeholders = movable_constructors & cpu_placeholders
+        if movable_cpu_placeholders:
+            node = next(iter(reversed(movable_cpu_placeholders)))
+            last_node = node
+            unsqueezed_nodes = []
+            for elem in movable_cpu_placeholders:
+                with graph.inserting_after(last_node):
+                    unsqueezed_nodes.append(
+                        graph.call_function(torch.ops.aten.unsqueeze.default, (elem, 0))
                     )
-                node.replace_all_uses_with(
-                    gpu_node,
-                    lambda x: x != gpu_node
-                    and x.target != torch.ops.aten.copy_.default,
+                    last_node = unsqueezed_nodes[-1]
+            with graph.inserting_after(last_node):
+                cpu_concat = graph.call_function(
+                    torch.ops.aten.cat.default, (unsqueezed_nodes,)
                 )
+                last_node = cpu_concat
+            with graph.inserting_after(last_node):
+                gpu_concat = graph.call_function(
+                    torch.ops.prims.device_put.default,
+                    (cpu_concat, target_device, True),
+                )
+                last_node = gpu_concat
+            with graph.inserting_after(last_node):
+                gpu_split = graph.call_function(
+                    torch.ops.aten.unbind.int, (gpu_concat,)
+                )
+                last_node = gpu_split
+            for idx, node in enumerate(movable_cpu_placeholders):
+                with graph.inserting_after(last_node):
+                    gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
+                    node.replace_all_uses_with(
+                        gpu_node,
+                        lambda x: x
+                        not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
+                        + unsqueezed_nodes
+                        and x.target != torch.ops.aten.copy_.default,
+                    )
+                    last_node = gpu_node
 
                 # noop elimination if there are other device_put for gpu_node to
                 # target device. Alternatively, we could just move the other device_put
@@ -1784,10 +1811,12 @@ class ConstructorMoverPass:
                 for noop in noop_device_puts:
                     noop.replace_all_uses_with(gpu_node)
                     graph.erase_node(noop)
-            else:
-                kwargs = node.kwargs.copy()
-                kwargs["device"] = target_device
-                node.kwargs = kwargs
+
+        movable_constructors -= movable_cpu_placeholders
+        for node in movable_constructors:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = target_device
+            node.kwargs = kwargs
 
     def find_movable_constructors(
         self, graph: fx.Graph, constructors: list[fx.Node]

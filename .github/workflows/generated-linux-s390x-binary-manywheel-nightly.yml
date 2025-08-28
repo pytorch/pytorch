@@ -60,7 +60,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -84,7 +83,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -107,7 +105,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
     secrets:
@@ -127,7 +124,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -151,7 +147,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -174,7 +169,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
     secrets:
@@ -194,7 +188,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -218,7 +211,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -241,7 +233,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
     secrets:
@@ -261,7 +252,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -285,7 +275,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -308,7 +297,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
     secrets:
@@ -328,7 +316,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -352,7 +339,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -375,7 +361,6 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
     secrets:

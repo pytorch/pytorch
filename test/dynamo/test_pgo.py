@@ -12,7 +12,9 @@ import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
 from torch._dynamo.testing import CompileCounter
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -55,6 +57,10 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f(torch.randn(2, 6))
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(
+        force_parameter_static_shapes=False,
+        force_nn_module_property_static_shapes=False,
+    )
     def test_whitelist_suggestion(self):
         cnts = CompileCounter()
 
@@ -194,14 +200,16 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
 
         # parameter static shapes are forced static, so we recompile once
-        run()
-        self.assertEqual(cnts.frame_count, 2)
+        with torch._dynamo.config.patch(
+            force_parameter_static_shapes=False,
+            force_nn_module_property_static_shapes=False,
+        ):
+            run()
+            self.assertEqual(cnts.frame_count, 2)
 
-        # flags are flipped, PGO records dynamism, so params are dynamically compiled to start
-        torch._dynamo.config.force_parameter_static_shapes = False
-        torch._dynamo.config.force_nn_module_property_static_shapes = False
-        run()
-        self.assertEqual(cnts.frame_count, 1)
+            # because flags were flipped, params were included in PGO
+            run()
+            self.assertEqual(cnts.frame_count, 1)
 
     def test_njt(self):
         cnts = CompileCounter()
@@ -322,8 +330,9 @@ def run(cnt):
         temp_dir1 = tempfile.TemporaryDirectory()
         temp_dir2 = tempfile.TemporaryDirectory()
 
-        path1 = os.path.join(temp_dir1.name, "example.py")
-        path2 = os.path.join(temp_dir2.name, "example.py")
+        # We need normalize_path_separator for Windows file path.
+        path1 = normalize_path_separator(os.path.join(temp_dir1.name, "example.py"))
+        path2 = normalize_path_separator(os.path.join(temp_dir2.name, "example.py"))
         cnts = CompileCounter()
 
         assert path1 != path2
@@ -341,13 +350,85 @@ def run(cnt):
         write_load_and_run(path1)
         self.assertEqual(cnts.frame_count, 2)
         state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
-        self.assertTrue("hash(390fe689)" in state)
+
+        # Windows can't create unification temp path:
+        #   hash(a18a3259)C:/Users/Xuhan/AppData/Local/Temp/tmpx3hfkuqa/example.py
+        # Skip hash check
+        self.assertTrue("hash" if IS_WINDOWS else "hash(390fe689)" in state)
         self.assertTrue("/example.py:4:func:" in state)
         self.assertTrue(" L['x']: tensor size=[?] stride=[1]" in state)
         # We should compile this only once due to PGO.
         cnts.clear()
         write_load_and_run(path2)
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_remote_pgo=True, automatic_dynamic_local_pgo=False
+    )
+    def test_sticky_pgo_read_write(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            return x * 2, y * 3
+
+        def t(x, y):
+            return torch.randn(x, y)
+
+        with mock_cache.PatchCaches():
+            # we pretend to disable the default remote cache, by keying different job ids per run
+            with torch.compiler.config.patch(job_id="a"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 2)
+
+            # first test we're not reading from local/default remote cache;
+            # we should recompile when x wobbles
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(
+                job_id="b", pgo_extra_write_key="sticky_0"
+            ):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 2)
+
+            # now with the extra sticky_0 key, we start with dynamic x;
+            # no recompiles
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(job_id="c", pgo_extra_read_key="sticky_0"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 1)
+
+            # last test: wobble y and write to sticky_1 key
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(
+                job_id="d", pgo_extra_write_key="sticky_1"
+            ):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 2), t(2, 4))
+                f(t(2, 2), t(4, 4))
+                self.assertEqual(cnts.frame_count, 3)
+
+            # start using default remote PGO, create run that wobbles y
+            self.reset()
+            cnts.clear()
+            f(t(2, 2), t(2, 2))
+            f(t(2, 4), t(2, 2))
+            f(t(4, 2), t(2, 2))
+
+            # with default remote (dynamic x) + extra remote (dynamic y),
+            # we should be able to wobble x & y with no recompiles.
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(4, 2))
+                f(t(4, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":
