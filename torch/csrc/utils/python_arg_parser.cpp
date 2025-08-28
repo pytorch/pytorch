@@ -872,7 +872,11 @@ static bool is_float_or_complex_list(PyObject* obj) {
 }
 
 static bool is_int_or_symint(PyObject* obj) {
-  if (THPUtils_checkIndex(obj)) {
+  // THPUtils_checkIndex may call __index__ or __int__
+  // which may have side effects if obj is a symint node
+  // so we do `is_symint` check first
+  // TODO: maybe we should be using checkLong here?
+  if (torch::is_symint(py::handle(obj))) {
     return true;
   }
 
@@ -891,6 +895,10 @@ static bool is_int_or_symint(PyObject* obj) {
     }
   }
 
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -903,12 +911,12 @@ static bool is_int_or_symint_list(
     if (PyTuple_GET_SIZE(obj) == 0) {
       return true;
     }
-    item = py::reinterpret_steal<py::object>(PyTuple_GET_ITEM(obj, 0));
+    item = py::reinterpret_borrow<py::object>(PyTuple_GET_ITEM(obj, 0));
   } else if (PyList_Check(obj)) {
     if (PyList_GET_SIZE(obj) == 0) {
       return true;
     }
-    item = py::reinterpret_steal<py::object>(PyList_GET_ITEM(obj, 0));
+    item = py::reinterpret_borrow<py::object>(PyList_GET_ITEM(obj, 0));
   }
   if (item) {
     if (is_int_or_symint(item.ptr())) {
