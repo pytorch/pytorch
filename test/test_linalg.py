@@ -9838,6 +9838,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
         self.assertEqual(expect, res)
 
+    def test_norm_dtype_propagation(self):
+        devices = ["cpu", "cuda"]
+        for device in devices:
+            for dtype in (torch.float16, torch.float32):
+                x = torch.randn(4, 5, device=device, dtype=dtype)
+
+                # Without explicit dtype → should match input dtype
+                n = torch.linalg.norm(x)
+                self.assertEqual(n.dtype, dtype)
+
+                # With explicit dtype
+                n_cast = torch.linalg.norm(x, dtype=torch.float64)
+                self.assertEqual(n_cast.dtype, torch.float64)
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':

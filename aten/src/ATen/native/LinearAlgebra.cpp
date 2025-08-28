@@ -3002,7 +3002,15 @@ Tensor& linalg_matrix_norm_out(
 }
 
 // Numerical or None norms
-Tensor linalg_norm(const Tensor& X, const std::optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& X_, const std::optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+  // New dtype handling: align CUDA with CPU by respecting dtype argument
+  Tensor X;
+  if (opt_dtype.has_value()) {
+    X = X_.to(opt_dtype.value());
+  } else {
+    // don’t promote to float64 on CUDA, preserve input dtype
+    X = X_;
+  }
   if (opt_dim.has_value()) {
     TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
               "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
