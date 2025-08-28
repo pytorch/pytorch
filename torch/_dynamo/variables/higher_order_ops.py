@@ -295,7 +295,6 @@ def _call_while_loop(
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
     from . import TensorVariable
-    from .builder import wrap_fx_proxy
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -514,30 +513,14 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
-    if stack_output:
-        # No need to call _call_function_and_unflatten_output because
-        # the outputs of while_loop_with_checkpoint is guaranteed to be a flat tuple
-        flat_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                torch.ops.higher_order.while_loop_stack_output,
-                args=p_args,
-                kwargs={},
-            ),
-            example_value=None,
-        )
-        assert isinstance(flat_variable, TupleVariable), flat_variable
-        return flat_variable
-    else:
-        return _call_function_and_unflatten_output(
-            tx,
-            self.value,
-            p_args,
-            {},
-            None,
-            body_treespec,
-        )
+    return _call_function_and_unflatten_output(
+        tx,
+        self.value,
+        p_args,
+        {},
+        None,
+        body_treespec,
+    )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
