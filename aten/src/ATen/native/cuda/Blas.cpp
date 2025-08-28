@@ -38,7 +38,6 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
-#include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
@@ -46,7 +45,6 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
-#include <ATen/ops/mm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
