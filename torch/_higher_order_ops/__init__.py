@@ -29,7 +29,7 @@ from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._higher_order_ops.while_loop import (
     while_loop,
-    while_loop_with_checkpoint_op as while_loop_with_checkpoint,
+    while_loop_stack_output_op as while_loop_stack_output,
 )
 from torch._higher_order_ops.wrap import (
     dynamo_bypassing_wrapper,
@@ -72,5 +72,5 @@ __all__ = [
     "strict_mode",
     "aoti_call_delegate",
     "map",
-    "while_loop_with_checkpoint",
+    "while_loop_stack_output",
 ]
