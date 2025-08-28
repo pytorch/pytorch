@@ -770,6 +770,10 @@ def slice_forward(
         return self.as_strided(sizes, strides, storage_offset)
 
 
+@register_decomposition(aten.expand_copy)
+def _expand_copy_decomp(self, size, *, implicit=False):
+    return aten.expand(self, size).clone()
+
 def _normalize_start_end(
     x: Tensor, dim: int, start: Optional[int], end: Optional[int]
 ) -> tuple[int, int]:
