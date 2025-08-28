@@ -208,7 +208,7 @@ ALLOCATE_BUFFER = r"""
   {{buffer_dtype}}* {{buffer_name}} = ({{buffer_dtype}}*){{buffer_name}}_data_ptr;
 """
 
-FLEX_ATTENTION_TEMPLATE = r"""
+INIT_PARAMS = r"""
 {{template.header().getvalue()}}
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
@@ -225,16 +225,18 @@ extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
   {{ kernel.maybe_codegen_profile() }}
-  int64_t qBlockSize = {{qBlockSize}};
-  int64_t kvBlockSize = {{kvBlockSize}};
-  int64_t num_thread = {{num_thread}};
 
-  // dtypes of kernel and internal buffers
+  // dtypes
   using scalar_t = {{kernel.dtype(query)}};
   constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
+
+  // sizes
+  int64_t qBlockSize = {{qBlockSize}};
+  int64_t kvBlockSize = {{kvBlockSize}};
+  int64_t num_thread = {{num_thread}};
   int64_t batchSize = {{kernel.size(query, 0)}};
   int64_t qSize = {{kernel.size(query, 1)}};
   int64_t num_head = {{kernel.size(query, 2)}};
@@ -255,6 +257,18 @@ extern "C"
   int64_t gqa_shards_kvi = num_head / num_head_kvi;
   int64_t bs_shards_kvi = batchSize / batchSize_kvi;
 
+  int64_t kvSize = {{kernel.size(key, 1)}};
+
+  int64_t qSplitSize = qBlockSize;
+  int64_t kvSplitSize = kvBlockSize;
+
+  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
+  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
+  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
+  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
+  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
+
+  // Strides
   int64_t kviStrideB = {{kernel.stride(kv_indices, 0)}};
   int64_t kviStrideH = {{kernel.stride(kv_indices, 1)}};
   int64_t kviStrideQ = {{kernel.stride(kv_indices, 2)}};
@@ -276,7 +290,6 @@ extern "C"
   auto kv_num_blocks_data = kv_num_blocks;
   auto kv_indices_data = kv_indices;
 
-  // Strides
   int64_t qStrideB = {{kernel.stride(query, 0)}};
   int64_t qStrideM = {{kernel.stride(query, 1)}};
   int64_t qStrideH = {{kernel.stride(query, 2)}};
@@ -290,18 +303,15 @@ extern "C"
   int64_t oStrideM = {{kernel.stride(output, 2)}};
   int64_t oStrideH = {{kernel.stride(output, 1)}};
 
-  int64_t kvSize = {{kernel.size(key, 1)}};
+  // Inputs/outputs buffers
+  const scalar_t* q_data = query;
+  const scalar_t* k_data = key;
+  const scalar_t* v_data = value;
+  scalar_t* out_data = output;
 
-  int64_t qSplitSize = qBlockSize;
-  int64_t kvSplitSize = kvBlockSize;
+"""
 
-
-  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
-  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
-  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
-  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
-  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
-
+FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
   // Whether pack is needed for BFloat16/Half
   if (is_reduced_type) {
@@ -334,12 +344,6 @@ extern "C"
       /* qk_max */ qSplitSize +
       /* qk_sum */ qSplitSize +
       /* dst    */ qSplitSize * headSize_v;
-
-  // Inputs/outputs buffers
-  const scalar_t* q_data = query;
-  const scalar_t* k_data = key;
-  const scalar_t* v_data = value;
-  scalar_t* out_data = output;
 
   // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
@@ -683,105 +687,8 @@ extern "C"
 }
 """
 
-
 FLEX_DECODING_TEMPLATE = r"""
-{{template.header().getvalue()}}
-#include <ATen/native/cpu/utils.h>
-#include <ATen/native/CPUBlas.h>
-#include <ATen/Context.h>
-{{template.codegen_micro_gemm(kernel.kernel_name)}}
-{{template.codegen_softmax_fusion(kernel.kernel_name)}}
-{%- set kernel_args = {"query": query, "key": key, "value": value,
-                       "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices,
-                       "full_kv_num_blocks": full_kv_num_blocks, "full_kv_indices": full_kv_indices } %}
-{%- set kernel_args = template.update_kernel_args(kernel_args) %}
-
-extern "C"
-{{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
-{
-  {{ kernel.maybe_codegen_profile() }}
-  int64_t qBlockSize = {{qBlockSize}};
-  int64_t kvBlockSize = {{kvBlockSize}};
-  int64_t num_thread = {{num_thread}};
-
-  // dtypes of kernel and internal buffers
-  using scalar_t = {{kernel.dtype(query)}};
-  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
-  using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
-  using Vec = at::vec::Vectorized<accum_t>;
-  accum_t scaling_factor = {{scale}};
   int64_t PARTITION_SIZE = {{partition_size}};
-  int64_t batchSize = {{kernel.size(query, 0)}};
-  int64_t qSize = {{kernel.size(query, 1)}};
-  int64_t num_head = {{kernel.size(query, 2)}};
-  int64_t headSize = {{kernel.size(query, 3)}};
-  int64_t batchSize_k = {{kernel.size(key, 0)}};
-  int64_t num_head_k = {{kernel.size(key, 2)}};
-  int64_t headSize_v = {{kernel.size(value, 3)}};
-  bool is_broadcast_bs_kv = batchSize != batchSize_k;
-  bool is_broadcast_head_kv = num_head != num_head_k;
-  int64_t gqa_shards = num_head / num_head_k;
-  int64_t bs_shards = batchSize / batchSize_k;
-
-  int64_t batchSize_kvi = {{kernel.size(kv_indices, 0)}};
-  int64_t num_head_kvi = {{kernel.size(kv_indices, 1)}};
-  int64_t block_num_kvi = {{kernel.size(kv_indices, 3)}};
-  bool is_broadcast_bs_kvi = batchSize != batchSize_kvi;
-  bool is_broadcast_head_kvi = num_head != num_head_kvi;
-  int64_t gqa_shards_kvi = num_head / num_head_kvi;
-  int64_t bs_shards_kvi = batchSize / batchSize_kvi;
-
-  int64_t kviStrideB = {{kernel.stride(kv_indices, 0)}};
-  int64_t kviStrideH = {{kernel.stride(kv_indices, 1)}};
-  int64_t kviStrideQ = {{kernel.stride(kv_indices, 2)}};
-
-  int64_t num_kviStrideB = {{kernel.stride(kv_num_blocks, 0)}};
-  int64_t num_kviStrideH = {{kernel.stride(kv_num_blocks, 1)}};
-
-{%- if has_full_kv_block %}
-  int64_t full_kviStrideB = {{kernel.stride(full_kv_indices, 0)}};
-  int64_t full_kviStrideH = {{kernel.stride(full_kv_indices, 1)}};
-  int64_t full_kviStrideQ = {{kernel.stride(full_kv_indices, 2)}};
-
-  int64_t full_num_kviStrideB = {{kernel.stride(full_kv_num_blocks, 0)}};
-  int64_t full_num_kviStrideH = {{kernel.stride(full_kv_num_blocks, 1)}};
-  auto full_kv_indices_data = full_kv_indices;
-  auto full_kv_num_blocks_data = full_kv_num_blocks;
-{%- endif %}
-
-  auto kv_num_blocks_data = kv_num_blocks;
-  auto kv_indices_data = kv_indices;
-
-  // Strides
-  int64_t qStrideB = {{kernel.stride(query, 0)}};
-  int64_t qStrideM = {{kernel.stride(query, 1)}};
-  int64_t qStrideH = {{kernel.stride(query, 2)}};
-  int64_t kStrideB = {{kernel.stride(key, 0)}};
-  int64_t kStrideN = {{kernel.stride(key, 1)}};
-  int64_t kStrideH = {{kernel.stride(key, 2)}};
-  int64_t vStrideB = {{kernel.stride(value, 0)}};
-  int64_t vStrideN = {{kernel.stride(value, 1)}};
-  int64_t vStrideH = {{kernel.stride(value, 2)}};
-  int64_t oStrideB = {{kernel.stride(output, 0)}};
-  int64_t oStrideM = {{kernel.stride(output, 2)}};
-  int64_t oStrideH = {{kernel.stride(output, 1)}};
-
-  int64_t kvSize = {{kernel.size(key, 1)}};
-
-  int64_t qSplitSize = qBlockSize;
-  int64_t kvSplitSize = kvBlockSize;
-
-  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
-  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
-  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
-  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
-  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
-
-  // Inputs/outputs buffers
-  const scalar_t* q_data = query;
-  const scalar_t* k_data = key;
-  const scalar_t* v_data = value;
-  scalar_t* out_data = output;
 
   // TODO: Support score / mask mod dependent on batch_size / num_head
   int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
@@ -1502,7 +1409,7 @@ class CppFlexAttentionTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
-            return self._template_from_string(FLEX_TEMPLATE).render(**options)
+            return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(**options)
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
