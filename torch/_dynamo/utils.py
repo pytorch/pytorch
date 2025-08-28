@@ -2859,7 +2859,11 @@ def get_unique_name_wrt(
     raise AssertionError("unreachable")
 
 
-# See Note [enable_python_dispatcher in dynamo]
+# Note [enable_python_dispatcher in dynamo]
+# Dynamo disables itself when it runs fake tensor prop, which means that tensor subclasses
+# have no way to know (purely based off of global state) if they are currently being run under compile or not.
+# we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
+# can check it to know if they are running in an eager context or not
 def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
         with enable_python_dispatcher():

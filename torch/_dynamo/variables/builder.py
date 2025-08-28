@@ -3460,11 +3460,6 @@ def _automatic_dynamic(
 
 
 # See note [Tensor Fakification and Symbol Caching]
-# Note [enable_python_dispatcher in dynamo]
-# Dynamo disables itself when it runs fake tensor prop, which means that tensor subclasses
-# have no way to know (purely based off of global state) if they are currently being run under compile or not.
-# we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
-# can check it to know if they are running in an eager context or not
 def wrap_to_fake_tensor_and_record(
     e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
 ):

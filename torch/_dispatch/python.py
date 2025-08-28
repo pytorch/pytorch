@@ -3,7 +3,6 @@ import itertools
 import unittest.mock
 from collections.abc import Iterator
 from contextlib import contextmanager
-from functools import wraps
 from typing import Callable, TypeVar, Union
 from typing_extensions import ParamSpec
 
