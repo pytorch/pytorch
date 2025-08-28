@@ -1460,7 +1460,7 @@ def configure_extension_build() -> tuple[
         )
 
     # Adding extra requirements for ROCm builds
-    if IS_ROCM:
+    if IS_ROCM and platform.system() == "Linux":
         extra_install_requires.append(
             f"rocm-composable-kernel {get_ck_dependency_string()}"
         )
