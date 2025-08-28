@@ -20,27 +20,15 @@ if TYPE_CHECKING:
 from .registry import register_template_heuristic
 
 
-@register_template_heuristic(aten_mm.uid, "cuda")
-@register_template_heuristic(aten_mm.uid, "cpu")
-@register_template_heuristic(aten_mm.uid, "xpu")
-@register_template_heuristic(aten_mm.uid, "mtia")
-@register_template_heuristic(aten__fp8_mm.uid, "cuda")
-@register_template_heuristic(aten__fp8_mm.uid, "cpu")
-@register_template_heuristic(aten__fp8_mm.uid, "xpu")
-@register_template_heuristic(aten__fp8_mm.uid, "mtia")
-@register_template_heuristic(aten__int_mm.uid, "cuda")
-@register_template_heuristic(aten__int_mm.uid, "cpu")
-@register_template_heuristic(aten__int_mm.uid, "xpu")
-@register_template_heuristic(aten__int_mm.uid, "mtia")
+# These are all labeled as device type None to indicate that they
+# are valid for all device types
+@register_template_heuristic(aten_mm.uid, None)
+@register_template_heuristic(aten__fp8_mm.uid, None)
+@register_template_heuristic(aten__int_mm.uid, None)
+@register_template_heuristic(aten_bmm.uid, None)
+@register_template_heuristic(aten_mm_plus_mm.uid, None)
+# bmm dtype is only valid on cuda
 @register_template_heuristic(aten_bmm_dtype.uid, "cuda")
-@register_template_heuristic(aten_bmm.uid, "cuda")
-@register_template_heuristic(aten_bmm.uid, "cpu")
-@register_template_heuristic(aten_bmm.uid, "xpu")
-@register_template_heuristic(aten_bmm.uid, "mtia")
-@register_template_heuristic(aten_mm_plus_mm.uid, "cuda")
-@register_template_heuristic(aten_mm_plus_mm.uid, "cpu")
-@register_template_heuristic(aten_mm_plus_mm.uid, "xpu")
-@register_template_heuristic(aten_mm_plus_mm.uid, "mtia")
 class ATenConfigHeuristics(TemplateConfigHeuristics):
     """
     Pseudo heuristic to make ATen choices go through the same flow as other templates
@@ -60,14 +48,10 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         yield dict()
 
 
-@register_template_heuristic(aten_addmm.uid, "cuda", op_name="addmm")
-@register_template_heuristic(aten_addmm.uid, "cpu", op_name="addmm")
-@register_template_heuristic(aten_addmm.uid, "xpu", op_name="addmm")
-@register_template_heuristic(aten_addmm.uid, "mtia", op_name="addmm")
-@register_template_heuristic(aten_baddbmm.uid, "cuda", op_name="baddbmm")
-@register_template_heuristic(aten_baddbmm.uid, "cpu", op_name="baddbmm")
-@register_template_heuristic(aten_baddbmm.uid, "xpu", op_name="baddbmm")
-@register_template_heuristic(aten_baddbmm.uid, "mtia", op_name="baddbmm")
+# None here indicates that this is valid for all device types on that op
+# Note (None, op) takes precedence over (device_type, None)
+@register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+@register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
@@ -113,10 +97,7 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         )
 
 
-@register_template_heuristic(aten_bias_addmm.uid, "cuda", op_name="addmm")
-@register_template_heuristic(aten_bias_addmm.uid, "cpu", op_name="addmm")
-@register_template_heuristic(aten_bias_addmm.uid, "xpu", op_name="addmm")
-@register_template_heuristic(aten_bias_addmm.uid, "mtia", op_name="addmm")
+@register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")
 class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
     def get_template_configs(
         self,
