@@ -229,23 +229,23 @@ def call_accumulate_grad(
     variable.grad = updated_grad[0]
 
 
-def wrap_inline_with_set_fullgraph(
-    fn: Callable[_P, _R], fullgraph: bool
+def wrap_inline_with_error_on_graph_break(
+    fn: Callable[_P, _R], error_on_graph_break: bool
 ) -> Callable[_P, _R]:
     # NB: need multiple definitions in order to prevent `fullgraph` from
     # being a freevar of wrapper
-    if fullgraph:
+    if error_on_graph_break:
 
         @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 return fn(*args, **kwargs)
 
     else:
 
         @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 return fn(*args, **kwargs)
 
     return wrapper

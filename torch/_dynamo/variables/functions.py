@@ -521,15 +521,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
-        elif self.fn is torch._dynamo.set_fullgraph:
+        elif self.fn is torch._dynamo.error_on_graph_break:
             try:
                 bound = inspect.signature(self.fn).bind(*args, **kwargs)
-                fullgraph = bound.arguments["fullgraph"].as_python_constant()
-                assert isinstance(fullgraph, bool)
-                return variables.SetFullgraphVariable(fullgraph)
+                error_on_graph_break = bound.arguments[
+                    "error_on_graph_break"
+                ].as_python_constant()
+                assert isinstance(error_on_graph_break, bool)
+                return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
-                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
         # Handle a `nonstrict_trace(fn)` call

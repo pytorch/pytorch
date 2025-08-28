@@ -97,7 +97,7 @@ class TupleTest(seq_tests.CommonTest):
             tuple(sequence=())
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass(tuple):
                 pass
         u = subclass([1, 2])
@@ -106,7 +106,7 @@ class TupleTest(seq_tests.CommonTest):
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_init(tuple):
                 def __init__(self, arg, newarg=None):
                     self.newarg = newarg
@@ -115,7 +115,7 @@ class TupleTest(seq_tests.CommonTest):
         self.assertEqual(list(u), [1, 2])
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_new(tuple):
                 def __new__(cls, arg, newarg=None):
                     self = super().__new__(cls, arg)
@@ -408,7 +408,7 @@ class TupleTest(seq_tests.CommonTest):
     @support.cpython_only
     def test_track_subtypes(self):
         # Tuple subtypes must always be tracked
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyTuple(tuple):
                 pass
         self.check_track_dynamic(MyTuple, True)
@@ -462,7 +462,7 @@ class TupleTest(seq_tests.CommonTest):
         # Issue 8847: In the PGO build, the MSVC linker's COMDAT folding
         # optimization causes failures in code that relies on distinct
         # function addresses.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class T(tuple): pass
         with self.assertRaises(TypeError):
             [3,] + T((1,2))

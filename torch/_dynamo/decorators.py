@@ -918,15 +918,15 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
-class SetFullgraphDecoratorContextManager:
-    def __init__(self, fullgraph: bool) -> None:
-        self.fullgraph = fullgraph
+class ErrorOnGraphBreakDecoratorContextManager:
+    def __init__(self, error_on_graph_break: bool) -> None:
+        self.error_on_graph_break = error_on_graph_break
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_fullgraph = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.fullgraph)
+        self.prev_error_on_graph_break = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.error_on_graph_break)
 
     def __exit__(
         self,
@@ -934,14 +934,16 @@ class SetFullgraphDecoratorContextManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        _set_error_on_graph_break(self.prev_fullgraph)
+        _set_error_on_graph_break(self.prev_error_on_graph_break)
 
 
-def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+def error_on_graph_break(
+    error_on_graph_break: bool,
+) -> ErrorOnGraphBreakDecoratorContextManager:
     """
-    Context manager/decorator to toggle fullgraph setting.
+    Context manager/decorator to toggle error_on_graph_break (i.e. torch.compile's fullgraph) setting.
 
     More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
     or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
     """
-    return SetFullgraphDecoratorContextManager(fullgraph)
+    return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)

@@ -1721,13 +1721,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ):
             f4(torch.randn(3))
 
-    def test_set_fullgraph(self):
+    def test_error_on_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
         def f1(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1738,7 +1738,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts)
         def f2(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1748,7 +1748,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts, fullgraph=True)
         def f3(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 torch._dynamo.graph_break()
                 x = x + 2
                 torch._dynamo.graph_break()
@@ -1766,7 +1766,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts, fullgraph=True)
         def f4(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 torch._dynamo.skip_frame()
                 return inner_f4(x)
 
@@ -1774,11 +1774,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_set_fullgraph_nested(self):
-        # set_fullgraph in a nested frame
+    def test_error_on_graph_break_nested(self):
+        # error_on_graph_break in a nested frame
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.set_fullgraph(False)
+        @torch._dynamo.error_on_graph_break(False)
         def inner_f5(x):
             x = x + 2
             torch._dynamo.graph_break()
@@ -1795,7 +1795,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner_f6(x):
             x = x + 2
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 torch._dynamo.graph_break()
             return x + 4
 
@@ -1810,7 +1810,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner_f7(x):
             x = x + 2
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 4
 
@@ -1822,18 +1822,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             f7(inp)
 
-    def test_set_fullgraph_nested_with_skip(self):
-        # set_fullgraph in a nested frame with a skipped frame in between
+    def test_error_on_graph_break_nested_with_skip(self):
+        # error_on_graph_break in a nested frame with a skipped frame in between
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.set_fullgraph(False)
+        @torch._dynamo.error_on_graph_break(False)
         def inner2_f8(x):
             x = x + 2
             torch._dynamo.graph_break()
             return x + 4
 
         def inner1_f8(x):
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 torch._dynamo.skip_frame()
             return inner2_f8(x)
 
@@ -1848,7 +1848,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner2_f9(x):
             x = x + 2
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 4
 
@@ -1864,10 +1864,10 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             f9(inp)
 
-        # test export with set_fullgraph(False) still errors
+        # test export with error_on_graph_break(False) still errors
 
-    def test_set_fullgraph_export(self):
-        @torch._dynamo.set_fullgraph(False)
+    def test_error_on_graph_break_export(self):
+        @torch._dynamo.error_on_graph_break(False)
         def inner(x):
             x = x + 2
             torch._dynamo.graph_break()
@@ -1880,7 +1880,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             torch._dynamo.export(f)(torch.ones(3))
 
-    def test_set_fullgraph_nested_deep(self):
+    def test_error_on_graph_break_nested_deep(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
         def inner1_f1(x):
@@ -1892,7 +1892,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return inner1_f1(x)
 
         def inner3_f1(x):
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 return inner2_f1(x)
 
         def inner4_f1(x):
@@ -1916,7 +1916,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return inner1_f2(x)
 
         def inner3_f2(x):
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 return inner2_f2(x)
 
         def inner4_f2(x):
@@ -1930,20 +1930,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             f2(inp)
 
-    def test_set_fullgraph_error(self):
+    def test_error_on_graph_break_error(self):
         @torch.compile(backend="eager")
         def f1():
-            with torch._dynamo.set_fullgraph(foo="bar"):
+            with torch._dynamo.error_on_graph_break(foo="bar"):
                 pass
 
         @torch.compile(backend="eager")
         def f2():
-            with torch._dynamo.set_fullgraph():
+            with torch._dynamo.error_on_graph_break():
                 pass
 
         @torch.compile(backend="eager")
         def f3():
-            with torch._dynamo.set_fullgraph("foo"):
+            with torch._dynamo.error_on_graph_break("foo"):
                 pass
 
         with self.assertRaises(Exception):
