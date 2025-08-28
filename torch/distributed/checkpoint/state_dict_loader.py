@@ -5,13 +5,17 @@ import logging
 import os
 import warnings
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
+from torch.distributed.checkpoint.metadata import (
+    BytesStorageMetadata,
+    TensorStorageMetadata,
+)
 from torch.distributed.checkpoint.stateful import Stateful
+from typing_extensions import deprecated
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
@@ -200,6 +204,25 @@ def load(
                 # Otherwise, replace the state_dict with the loaded state_dict.
                 state_dict[key] = statetful_sd[key]
 
+@_dcp_method_logger(log_exceptions=True)
+def list_stored_sd_metadata(
+    checkpoint_id: Union[str, os.PathLike, None] = None, 
+    storage_reader: Optional[StorageReader]=None,
+) -> dict[str, Union[TensorStorageMetadata, BytesStorageMetadata]]:
+    """
+    List the stored checkpoint metadata. 
+    """
+    storage_reader = cast(
+            StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
+        )
+    md = storage_reader.read_metadata()
+    sd = md.state_dict_metadata # flattened dict.
+    for _,v in sd.items():
+        if isinstance(v, TensorStorageMetadata):
+            v.chunks = [] # Limit exposing storage/impl details.
+
+    return sd
+        
 
 def _load_state_dict(
     state_dict: dict[str, Any],
