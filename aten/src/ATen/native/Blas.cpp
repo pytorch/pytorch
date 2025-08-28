@@ -9,6 +9,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/GroupedMMUtils.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -21,10 +22,12 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/addmv.h>
 #include <ATen/ops/addmv_native.h>
+#include <ATen/ops/bmm.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/mm.h>
 #include <ATen/ops/mul_cpu_dispatch.h>
 #include <ATen/ops/mv_native.h>
 #include <ATen/ops/scalar_tensor_native.h>
@@ -330,6 +333,16 @@ _scaled_mm_cpu(const Tensor& mat_a, const Tensor& mat_b,
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cpu(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+}
+
+Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
 }
 
 }  // namespace at::native
