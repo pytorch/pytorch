@@ -611,6 +611,9 @@ class BaseSchedulerNode:
                     + stack_trace_last_line.replace("{", "{{")
                     .replace("}", "}}")
                     .replace("\n", "\\")
+                    .replace(
+                        "\\", "\\\\"
+                    )  # For windows safe path, avoid for example \x, \U.
                 )
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
@@ -2160,6 +2163,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2556,7 +2565,7 @@ class Scheduler:
             )
 
         graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-        buf_info_list, _ = compute_memory_timeline(
+        buf_info_list, _, _ = compute_memory_timeline(
             self.nodes,
             name_to_freeable_input_buf,
             graph_outputs,
@@ -2749,10 +2758,10 @@ class Scheduler:
             node.max_order = order
 
     def merge_loops(self) -> None:
-        for node in self.nodes:
-            if not config.loop_ordering_after_fusion:
-                continue
+        if not config.loop_ordering_after_fusion:
+            return
 
+        for node in self.nodes:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
