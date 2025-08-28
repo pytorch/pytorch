@@ -1623,6 +1623,8 @@ class GraphLowering(torch.fx.Interpreter):
                 debug("")
                 result = super().run_node(n)
 
+            print(n.target, result)
+
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
             # output different strides than eager
