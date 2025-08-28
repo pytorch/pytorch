@@ -1080,17 +1080,17 @@ class NamedTupleVariable(TupleVariable):
         else:
             # NamedTupleType(*iterable)
             result = self.python_type()(*[x.as_python_constant() for x in self.items])
-        
+
         # Apply dynamic attributes if any were set
         if self.dynamic_attributes:
             for attr_name, attr_value in self.dynamic_attributes.items():
                 # Convert VariableTracker to Python constant if needed
-                if hasattr(attr_value, 'as_python_constant'):
+                if hasattr(attr_value, "as_python_constant"):
                     python_value = attr_value.as_python_constant()
                 else:
                     python_value = attr_value
                 setattr(result, attr_name, python_value)
-        
+
         return result
 
     def as_proxy(self):
@@ -1147,16 +1147,17 @@ class NamedTupleVariable(TupleVariable):
                 or attr in self.fields()
             ):
                 raise_observed_exception(AttributeError, tx)
-            
-                  # Handle mutation tracking based on variable type
+
+                # Handle mutation tracking based on variable type
             if self.mutation_type is None:
                 from .base import AttributeMutationNew
+
                 self.mutation_type = AttributeMutationNew()
-            
+
             # Always call mutation to mark as modified
             tx.output.side_effects.mutation(self)
             tx.output.side_effects.store_attr(self, attr, value)
-            
+
             # Always update our internal tracking
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
