@@ -52,7 +52,6 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
-    addmm_epilogue,
     mm_args,
     mm_grid,
     persistent_mm_grid,
@@ -923,7 +922,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     static_shape, is_nonzero = _is_static_problem(layout)
 
     # Create MMKernelInputs for AddMM at the top
-    kernel_inputs = MMKernelInputs([inp_expanded, mat1, mat2])
+    kernel_inputs = MMKernelInputs(
+        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
@@ -1002,9 +1003,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout):
+        # all the triton templates use the extra_kwargs
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template.name, "addmm"
+            kernel_inputs,
+            layout,
+            mm_template.name,
+            "addmm",
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1012,15 +1017,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 layout=layout,
                 **kwargs,
                 **extra_kwargs,
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template params using the new unified function
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, persistent_tma_mm_template.name, "addmm"
+                kernel_inputs,
+                layout,
+                persistent_tma_mm_template.name,
+                "addmm",
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -1028,8 +1033,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     layout=layout,
                     **kwargs,
                     **extra_kwargs,
-                    prefix_args=1,
-                    epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
     if (

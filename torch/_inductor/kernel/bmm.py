@@ -22,12 +22,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import (
-    _is_static_problem,
-    addmm_epilogue,
-    is_batch_stride_largest_or_zero,
-    mm_args,
-)
+from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
 
 
 log = logging.getLogger(__name__)
@@ -250,7 +245,9 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
     # Create MMKernelInputs for BadDBMM at the top
-    kernel_inputs = MMKernelInputs([inp, mat1, mat2])
+    kernel_inputs = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]
@@ -276,7 +273,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
+            kernel_inputs,
+            layout,
+            bmm_template.name,
+            name,
         ):
             bmm_template.maybe_append_choice(
                 choices,
@@ -284,9 +284,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 layout=layout,
                 **kwargs,
                 **extra_kwargs,
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
