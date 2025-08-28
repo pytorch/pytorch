@@ -8237,12 +8237,10 @@ class GraphModule(torch.nn.Module):
                 def body_fn(c, x):
                     return c + 1, self.linear(x)
 
-                checkpoint_c, checkpoint_x = (
-                    torch.ops.higher_order.while_loop_stack_output(
-                        cond_fn, body_fn, (c, x), tuple()
-                    )
+                stacked_c, stacked_x = torch.ops.higher_order.while_loop_stack_output(
+                    cond_fn, body_fn, (c, x), tuple()
                 )
-                return checkpoint_c, checkpoint_x
+                return stacked_c, stacked_x
 
         x = torch.randn(3, 3)
         mod = Mod()
