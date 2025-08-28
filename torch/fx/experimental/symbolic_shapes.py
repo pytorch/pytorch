@@ -1026,6 +1026,24 @@ def find_symbol_binding_fx_nodes(
 
 
 @dataclass(frozen=True)
+class SymIntToken:
+    val: int
+
+
+@dataclass(frozen=True)
+class SymFloatToken:
+    val: float
+
+
+def sym_wrap(val: Union[int, float]) -> Union[SymIntToken, SymFloatToken]:
+    assert isinstance(val, (int, float))
+    if isinstance(val, int):
+        return SymIntToken(val)
+    else:
+        return SymFloatToken(val)
+
+
+@dataclass(frozen=True)
 class Specialization:
     """
     This class is used in multi-graph compilation contexts where we generate

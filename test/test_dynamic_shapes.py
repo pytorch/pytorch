@@ -626,6 +626,18 @@ class TestPySymInt(TestCase):
             """Eq(FloorToInt(3.0*ToFloat(s97)), 15)""",
         )
 
+    @unittest.expectedFailure
+    def test_sym_wrap(self):
+        from torch.fx.experimental.symbolic_shapes import sym_wrap
+
+        def f(x, y, z):
+            return x + y + z, torch.randn(x, y, z)
+
+        fn = torch.compile(f, fullgraph=True, backend="eager")
+        s0 = sym_wrap(4)
+        s1 = sym_wrap(5)
+        fn(s0, s0, s1)
+
     def test_sym_ite(self):
         shape_env = ShapeEnv()
         t = create_symint(shape_env, 5)
