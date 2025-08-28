@@ -224,7 +224,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 )
 
     def _compare_orig_and_checkpointed_fns(
-        self, orig_fn, checkpointed_fn, *args, fullgraph=True, skip_export=False
+        self, orig_fn, checkpointed_fn, *args, fullgraph=True,
     ):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
@@ -270,7 +270,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 )
 
         run(functools.partial(torch.compile, fullgraph=fullgraph))
-        if fullgraph and not skip_export:
+        if fullgraph:
 
             def export_compiler(fn):
                 class WrapAsModule(nn.Module):
@@ -293,7 +293,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+                    return torch.compile(gm, fullgraph=False)(*runtime_args)
 
                 return runtime_wrapper
 
@@ -897,7 +897,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        self._compare_orig_and_checkpointed_fns(gn, fn, x, y, skip_export=True)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
