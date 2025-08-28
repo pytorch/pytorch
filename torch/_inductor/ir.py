@@ -8684,8 +8684,6 @@ class WhileLoop(ExternKernel):
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    if subgraph is body_fn:
-                        print("start lowering body_fn")
                     subgraph.graph.run(*fake_all_inputs)
                     # For body_fn, we require its output to have the exact same stride
                     # as inputs because the previous output is the input of next iteration.

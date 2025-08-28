@@ -409,8 +409,6 @@ def trace_scan(
     from torch._dynamo.utils import clone_input
 
     with disable_proxy_modes_tracing():
-        if any(t is None for t in init):
-            breakpoint()
         sample_inits = [clone_input(x_init) for x_init in init]
         sample_inputs = [first_slice_copy(x) for x in xs]
         sample_additional_inputs = [

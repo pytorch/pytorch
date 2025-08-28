@@ -1772,6 +1772,8 @@ class ScanTests(TestCase):
         model2 = copy.deepcopy(model)
         model3 = copy.deepcopy(model)
         model4 = copy.deepcopy(model)
+        model3.compile(fullgraph=True, dynamic=dynamic)
+        model4.compile(fullgraph=True, dynamic=dynamic)
 
         def _run_model(model, inputs):
             cloned_inputs = [
@@ -1796,11 +1798,9 @@ class ScanTests(TestCase):
 
         result_exp = _run_model(model1, [_fake_scan] + inputs)
         result_eager = _run_model(model2, [scan] + inputs)
-        result_compiled = _run_model(
-            torch.compile(fullgraph=True, dynamic=dynamic)(model3), [scan] + inputs
-        )
+        result_compiled = _run_model(model3, [scan] + inputs)
         result_compiled_exp = _run_model(
-            torch.compile(fullgraph=True, dynamic=dynamic)(model4),
+            model4,
             [_fake_scan] + inputs,
         )
 
