@@ -521,7 +521,7 @@ def _call_while_loop(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                torch.ops.higher_order.while_loop_with_checkpoint,
+                torch.ops.higher_order.while_loop_stack_output,
                 args=p_args,
                 kwargs={},
             ),
