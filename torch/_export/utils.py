@@ -331,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, GetAttrKey)
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
