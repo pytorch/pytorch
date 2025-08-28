@@ -181,9 +181,7 @@ class PagedAttention:
         logical_block_offset = input_pos % self.page_size  # [B, S]
         physical_block_idx = torch.gather(
             self.page_table[batch_idx], 1, logical_block_idx.to(torch.int64)
-        ).to(
-            torch.int32
-        )  # [B, S]
+        ).to(torch.int32)  # [B, S]
 
         addr = (physical_block_idx * self.page_size + logical_block_offset).view(
             -1
@@ -315,7 +313,9 @@ class PagedAttention:
         return new_mask_mod
 
     def get_score_mod(
-        self, score_mod: Optional[_score_mod_signature]
+        self,
+        score_mod: Optional[_score_mod_signature],
+        kv_len: Optional[torch.Tensor] = None,
     ) -> _score_mod_signature:
         """
         Converts a score_mod based on mapping from the physical block index to the logical
@@ -323,6 +323,8 @@ class PagedAttention:
 
         Args:
             score_mod (_score_mod_signature): score_mod based on the logical block index.
+                        kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
+
         """
         if score_mod is None:
             score_mod = _identity
@@ -338,8 +340,15 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            live_block = logical_block_idx >= 0
+            within_upper_bound = (
+                logical_kv_idx < kv_len[b] if kv_len is not None else True
+            )
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
             return torch.where(
-                logical_block_idx >= 0,
+                is_valid,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
                 float("-inf"),
             )
