@@ -1166,25 +1166,46 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def dot(a, b):
         assert V.kernel.is_native_matmul 
-        
-        if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            input_precision = "tf32"
-        else:
-            input_precision = "ieee"
-        a_shape, b_shape = a.shape, b.shape
 
-        # When computing expressions like ((A+1) @ (B+2)), 
-        # native codegen will do 
-        #
-        # a = tl.load(..., r0_mask, other=0.0) 
-        # b = tl.load(..., r0_mask, other=0.0) 
-        # tmp0 = a+1
-        # tmp1 = b+2
-        # tmp2 = tl.dot(tmp0, tmp1)
-        #
-        # This produces incorrect results because outside of r0_mask is not zero. 
-        # So before calling tl.dot, apply tl.where to zero out values properly.
-        # TODO: Optimize - We don't need both operands to be zeroed except NaN * 0
+        orig_a, orig_b = a, b
+
+        # Downcast if we upcasted to fp32 before
+        for node in V.kernel.features.node_schedule:
+            if not isinstance(node, SchedulerNode):
+                continue
+            if not isinstance(node.node, ir.ComputedBuffer):
+                continue
+            if not node.node.get_reduction_type() == "dot":
+                continue
+            
+            matmul_dtype = node.node.dtype
+            # TODO : float8 support?
+            if (
+                not (a.dtype == matmul_dtype)
+                and matmul_dtype in (torch.float16, torch.bfloat16)
+            ):
+                a = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    TritonKernelOverrides.to_dtype(
+                      a, matmul_dtype, use_compute_types=False
+                    ),
+                    dtype=matmul_dtype,
+                    shape=a.shape,
+                )
+
+                b = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    TritonKernelOverrides.to_dtype(
+                      b, matmul_dtype, use_compute_types=False
+                    ),
+                    dtype=matmul_dtype,
+                    shape=b.shape,
+                )
+            
+            # can multiple matmuls in horizontal fusion have different dtypes?
+            break
+
+
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
             if not any(map(prefix_is_reduction, var.mask_vars)):
@@ -1212,36 +1233,41 @@ class TritonOverrides(OpOverrides):
         
         def where_cond(var):
             default = ir.Reduction.default_value("dot", var.dtype)
-            return TritonKernelOverrides.where("r0_mask", var, default)
-        
+            reduction_mask = [
+                f"{tree.prefix}mask" 
+                for tree in V.kernel.range_trees 
+                if tree.is_reduction
+            ]
 
-        if is_where_needed(a):
+            assert len(reduction_mask) == 1, "don't tile reduction when native matmul"
+
+            where_var = TritonKernelOverrides.where(reduction_mask[0], var, default)
+            return V.kernel.cse.generate(
+                V.kernel.compute,
+                where_var,
+                dtype = var.dtype,
+                shape = var.shape
+            )
+
+        # When computing expressions like ((A+1) @ (B+2)), 
+        # native codegen will do 
+        #
+        # a = tl.load(..., r0_mask, other=0.0) 
+        # b = tl.load(..., r0_mask, other=0.0) 
+        # tmp0 = a+1
+        # tmp1 = b+2
+        # tmp2 = tl.dot(tmp0, tmp1)
+        #
+        # This produces incorrect results because outside of r0_mask is not zero. 
+        # So before calling tl.dot, apply tl.where to zero out values properly.
+        # TODO: Optimize - We don't need both operands to be zeroed except NaN * 0
+        if is_where_needed(orig_a):
             a = where_cond(a)
-        if is_where_needed(b):
+        if is_where_needed(orig_b):
             b = where_cond(b)
 
-        # downcast if we upcasted to fp32 before
-        for node in V.kernel.features.node_schedule:
-            if not isinstance(node, SchedulerNode):
-                continue
-            if not isinstance(node.node, ir.ComputedBuffer):
-                continue
-            if not node.node.get_reduction_type() == "dot":
-                continue
-            
-            matmul_dtype = node.node.dtype
-            # recover the upcasted dtype to original dtype before tl.dot
-            if matmul_dtype in (torch.float16, torch.bfloat16):
-                triton_dtype = triton_store_type(matmul_dtype)
-                a = f"{a}.to({triton_dtype})"
-                b = f"{b}.to({triton_dtype})"
-            
-            # can multiple matmuls in horizontal fusion have different dtypes?
-            break
-
-
         def reshape_transpose_broadcast_for_dot(
-            value: str,
+            value,
             initial_shape: Sequence[sympy.Expr],
             final_shape: Sequence[sympy.Expr],
         ) -> str:
@@ -1318,10 +1344,26 @@ class TritonOverrides(OpOverrides):
         ZBLOCK = str(TritonSymbols.block_sizes[SymT.ZBLOCK])
         RBLOCK = str(TritonSymbols.block_sizes[SymT.R0_INDEX])
         
-        a_prepared = reshape_transpose_broadcast_for_dot(str(a), list(a_shape), [YBLOCK,RBLOCK])
-        b_prepared = reshape_transpose_broadcast_for_dot(str(b), list(b_shape), [RBLOCK,XBLOCK])
+        a = V.kernel.cse.generate(
+            V.kernel.compute,
+            reshape_transpose_broadcast_for_dot(a, list(a.shape), [YBLOCK,RBLOCK]),
+            dtype = a.dtype,
+            shape = tuple([YBLOCK, RBLOCK])
+        )
+            
+        b = V.kernel.cse.generate(
+            V.kernel.compute,
+            reshape_transpose_broadcast_for_dot(b, list(b.shape), [RBLOCK,XBLOCK]),
+            dtype = b.dtype,
+            shape = tuple([RBLOCK, XBLOCK])
+        )
+         
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
+            input_precision = "tf32"
+        else:
+            input_precision = "ieee"
 
-        return f"tl.dot({a_prepared}, {b_prepared}, input_precision=\"{input_precision}\")"
+        return f"tl.dot({a}, {b}, input_precision=\"{input_precision}\")"
 
 
     @staticmethod

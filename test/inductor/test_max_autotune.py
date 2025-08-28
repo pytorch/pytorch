@@ -2449,6 +2449,7 @@ class TestPrologueFusion(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @config.patch({"triton.enable_native_matmul": False})
     def test_low_precision(self):
         M = K = N = 128
 
