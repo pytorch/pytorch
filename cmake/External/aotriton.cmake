@@ -22,7 +22,7 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm6.5"
       "rocm7.0"
       )
-  set(__AOTRITON_CI_COMMIT "6fca155f4deeb8d9529326f7b69f350aeeb93477")
+  set(__AOTRITON_CI_COMMIT "f490c8d1bcdf746c685827946e382c46d8f66e50")
   set(__AOTRITON_SHA256_LIST
       "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
       "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
@@ -53,12 +53,15 @@ if(NOT __AOTRITON_INCLUDED)
       SET(RECURSIVE "ON")
     endif()
     ExternalProject_Add(${project}
-      GIT_REPOSITORY https://github.com/ROCm/aotriton.git
+      # GIT_REPOSITORY https://github.com/ROCm/aotriton.git
+      GIT_REPOSITORY https://github.com/xinyazhang/aotriton.git
       GIT_SUBMODULES_RECURSE ${RECURSIVE}
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
-      INSTALL_DIR ${__AOTRITON_INSTALL_DIR}
-      -DAOTRITON_TARGET_ARCH="${PYTORCH_ROCM_ARCH}"
+      CMAKE_CACHE_ARGS
+      -DAOTRITON_TARGET_ARCH:STRING=${PYTORCH_ROCM_ARCH}
+      -DCMAKE_INSTALL_PREFIX:FILEPATH=${__AOTRITON_INSTALL_DIR}
+      CMAKE_ARGS
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_GPU_BUILD_TIMEOUT=0
       -DAOTRITON_NO_PYTHON=ON
