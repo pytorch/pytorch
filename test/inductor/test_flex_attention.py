@@ -663,7 +663,9 @@ class TestFlexAttention(InductorTestCase):
         converted_block_mask = paged_attention.convert_logical_block_mask(
             block_mask, kv_len=kv_len_tensor
         )
-        converted_score_mod = paged_attention.get_score_mod(score_mod)
+        converted_score_mod = paged_attention.get_score_mod(
+            score_mod, kv_len=kv_len_tensor
+        )
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
     def run_paged_attention(
@@ -5418,13 +5420,18 @@ class TestPagedAttention(InductorTestCase):
         )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
         new_block_mask = paged_cache.convert_logical_block_mask(
-            block_mask, kv_len=max_seq_len
+            block_mask, kv_len=kv_len_tensor
         )
 
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+                paged_cache.get_score_mod(score_mod, kv_len=kv_len_tensor),
+                block_mask,
+                enable_gqa=False,
             )
         )
         paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)

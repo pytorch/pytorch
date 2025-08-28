@@ -544,7 +544,9 @@ class TestFlexDecoding(InductorTestCase):
         converted_block_mask = paged_attention.convert_logical_block_mask(
             block_mask, kv_len=kv_len_tensor
         )
-        converted_score_mod = paged_attention.get_score_mod(score_mod)
+        converted_score_mod = paged_attention.get_score_mod(
+            score_mod, kv_len=kv_len_tensor
+        )
 
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
@@ -2018,7 +2020,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod), new_block_mask, enable_gqa=False
+                paged_cache.get_score_mod(score_mod, kv_len=kv_len_tensor),
+                new_block_mask,
+                enable_gqa=False,
             )
         )
         paged_out = compiled_sdpa(

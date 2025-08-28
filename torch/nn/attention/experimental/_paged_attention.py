@@ -116,6 +116,7 @@ class PagedAttention:
         Args:
             batch_idx (Tensor): batch index to be removed; shape :math:`(1)`.
         """
+
         # find allocated pages
         allocated_page_idx = self.page_table[batch_idx] != -1
         allocated_pages = self.page_table[batch_idx][allocated_page_idx]
@@ -186,6 +187,7 @@ class PagedAttention:
         addr = (physical_block_idx * self.page_size + logical_block_offset).view(
             -1
         )  # [B*S]
+
         k_val = k_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, K_D)
         v_val = v_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, V_D)
 
@@ -323,7 +325,7 @@ class PagedAttention:
 
         Args:
             score_mod (_score_mod_signature): score_mod based on the logical block index.
-                        kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
+            `kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
 
         """
         if score_mod is None:
