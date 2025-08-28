@@ -28,6 +28,7 @@ class DTensorSpec:
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
+    tensor_sharding: Optional[dict[int, list[int]]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
