@@ -12,6 +12,7 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import try_import_ck_lib
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -49,10 +50,7 @@ class TestCKBackend(TestCase):
 
         torch.random.manual_seed(1234)
         try:
-            import ck4inductor  # @manual
-
-            self.ck_dir = os.path.dirname(ck4inductor.__file__)
-            os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
+            self.ck_dir, _, _, _ = try_import_ck_lib()
         except ImportError as e:
             raise unittest.SkipTest("Composable Kernel library not installed") from e
 
