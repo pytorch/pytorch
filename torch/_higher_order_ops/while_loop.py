@@ -262,7 +262,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(
-    cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+    cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
     carried_vals = carried_inputs
 
@@ -288,9 +288,9 @@ def while_loop_dense(
     _validate_cond_output(should_loop)
 
     if not should_loop:
-        if with_checkpoint:
+        if stack_output:
             return tuple(
-                val.unsqueeze(0) if isinstance(val, torch.Tensor) else val
+                val.unsqueeze(0).clone() if isinstance(val, torch.Tensor) else val
                 for val in carried_vals
             )
         else:
@@ -303,7 +303,7 @@ def while_loop_dense(
 
     while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
-        if with_checkpoint:
+        if stack_output:
             for i, o in enumerate(out):
                 checkpoints[i].append(o)
 
@@ -317,7 +317,7 @@ def while_loop_dense(
 
         should_loop = cond_fn(*carried_vals, *additional_inputs)
 
-    if with_checkpoint:
+    if stack_output:
         outs: list[torch.Tensor] = []
         for i, checkpoint in enumerate(checkpoints):
             outs.append(torch.stack(checkpoint, dim=0))
@@ -363,9 +363,9 @@ def while_loop_tracing(
     body_fn,
     carried_inputs,
     additional_inputs,
-    with_checkpoint=False,
+    stack_output=False,
 ):
-    op = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
+    op = while_loop_stack_output_op if stack_output else while_loop_op
 
     def _trace_while_loop(
         proxy_mode, op, cond_fn, body_fn, carried_inputs, additional_inputs
@@ -489,7 +489,7 @@ def while_loop_tracing(
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
-    mode, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+    mode, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -535,7 +535,7 @@ def while_loop_fake_tensor_mode(
                 include_contiguity=False,
             )
 
-        if with_checkpoint:
+        if stack_output:
             n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
             assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
             fake_checkpoints = tuple(
@@ -568,11 +568,11 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(
-    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
 
-    op = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
+    op = while_loop_stack_output_op if stack_output else while_loop_op
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -597,7 +597,7 @@ def while_loop_func(
 
 class WhileLoopWithCheckpointOp(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("while_loop_with_checkpoint")
+        super().__init__("while_loop_stack_output")
 
     def __call__(
         self,
@@ -621,24 +621,24 @@ class WhileLoopWithCheckpointOp(HigherOrderOperator):
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
-while_loop_with_checkpoint_op = WhileLoopWithCheckpointOp()
+while_loop_stack_output_op = WhileLoopWithCheckpointOp()
 
-while_loop_with_checkpoint_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
-    functools.partial(while_loop_dense, with_checkpoint=True)
+while_loop_stack_output_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
+    functools.partial(while_loop_dense, stack_output=True)
 )
 
-while_loop_with_checkpoint_op.py_impl(ProxyTorchDispatchMode)(
-    functools.partial(while_loop_tracing, with_checkpoint=True)
+while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
+    functools.partial(while_loop_tracing, stack_output=True)
 )
 
-while_loop_with_checkpoint_op.py_impl(FakeTensorMode)(
-    functools.partial(while_loop_fake_tensor_mode, with_checkpoint=True)
+while_loop_stack_output_op.py_impl(FakeTensorMode)(
+    functools.partial(while_loop_fake_tensor_mode, stack_output=True)
 )
 
-while_loop_with_checkpoint_op.py_functionalize_impl(
-    functools.partial(while_loop_func, with_checkpoint=True)
+while_loop_stack_output_op.py_functionalize_impl(
+    functools.partial(while_loop_func, stack_output=True)
 )
 
-while_loop_with_checkpoint_op.py_autograd_impl(
-    autograd_not_implemented(while_loop_with_checkpoint_op, deferred_error=True)
+while_loop_stack_output_op.py_autograd_impl(
+    autograd_not_implemented(while_loop_stack_output_op, deferred_error=True)
 )

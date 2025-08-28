@@ -290,7 +290,7 @@ def _call_while_loop(
     tx: "InstructionTranslator",
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
-    with_checkpoint: bool,
+    stack_output: bool,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
@@ -1453,15 +1453,15 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return _call_while_loop(self, tx, args, kwargs, with_checkpoint=False)
+        return _call_while_loop(self, tx, args, kwargs, stack_output=False)
 
 
-class WhileLoopWithCheckpointHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = False
     supports_aliasing = False
 
     @raise_hard_error_if_graph_break(
-        reason="while_loop_with_checkpoint doesn't work unless it is captured completely with torch.compile."
+        reason="while_loop_stack_output doesn't work unless it is captured completely with torch.compile."
     )
     def _call_function(
         self,
@@ -1469,7 +1469,7 @@ class WhileLoopWithCheckpointHigherOrderVariable(TorchHigherOrderOperatorVariabl
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return _call_while_loop(self, tx, args, kwargs, with_checkpoint=True)
+        return _call_while_loop(self, tx, args, kwargs, stack_output=True)
 
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -3460,7 +3460,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
-    "while_loop_with_checkpoint": WhileLoopWithCheckpointHigherOrderVariable,
+    "while_loop_stack_output": WhileLoopStackOutputHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
