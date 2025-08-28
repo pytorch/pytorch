@@ -632,7 +632,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
 
 # Note [while_loop autograd]
-# Consider we have the following while_loop that can be visualized as:
+# Consider wthe following while_loop that can be visualized as:
 #           additional_inputs
 #       ┌─────┬─────┼─────┬─────┐
 #       |     |     |     |     |
@@ -653,7 +653,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # where gy0 denotes the graident of loss with respect to y0, and bw(y0, x) denotes the graident of y0 with
 # respect to x. Note that bw can be computed from forward body_fn easily using torch.autograd.grad.
-# We could unroll the loop a few steps to remove the unknowns:
+# We could substitute the unknowns gy0, gy1, ..., with chain rule until gy4:
 #
 #     gx = gy1 * bw(y1, y0) * bw(y0, x)
 #        = gy2 * bw(y2, y1) * bw(y1, y0) * bw(y0, x)
@@ -667,10 +667,10 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # g_additional_inputs = gy0 * bw(y0, addi) + gy1 * bw(y1, addi) + gy2 * bw(y2, addi) + ... + gy4 * bw(y4, addi)
 #
-# Notice that gy0 = gy4 * bw43210, gy1 = gy4 * bw4321 etc
+# Notice that gy0 = gy4 * bw43210, gy1 = gy4 * bw4321 etc, we now also get a formula for g_additional_inputs.
 #
 # Implementation:
-# The idea of implementation is to compute the cumprod and cumsum  in the body_fn.
+# The idea of implementation is to construct a while_loop to calculate both gx and g_additional_inputs.
 # Specifically, we can implement the backward of while_loop with as follows:
 #
 # def cond_fn(idx, grad_carries, grad_additional_inputs, fw_additional_inputs, fw_inps):
@@ -684,7 +684,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 # idx = 0
 # init_grad_carries = grads
 # init_grad_additional_inputs = torch.zeros_like(g_additioanl_inputs)
-# fw_inps = torch.cat([ctx.carried_inputs, fw_outputs[:-1]])
+# fw_inps = torch.cat([ctx.fw_carried_inputs, fw_outputs[:-1]])
 # while_loop(cond_fn, body_fn, (idx, init_grad_carries, init_grad_additional_inputs,), (fw_additional_inputs, fw_inps))
 
 
