@@ -1562,14 +1562,12 @@ def native_matmul_pass(graph: torch.fx.Graph):
     def addmm_to_mm_and_add(match: Match, inp, mat1, mat2, beta, alpha):
         # constant propagation does not work well, so manually simplify it.
         def repl(inp, x1, x2, beta, alpha):
-            if beta == 1 and alpha == 1:
-                return inp + x1 @ x2
-            elif beta == 1 and alpha != 1:
-                return inp + alpha * (x1 @ x2)
-            elif beta != 1 and alpha == 1:
-                return beta * inp + x1 @ x2
-            else:
-                return beta * inp + alpha * (x1 @ x2)
+            result = 0
+            if beta != 0:
+                result = result + (inp if beta == 1 else beta * inp)
+            if alpha != 0:
+                result = result + ((x1 @ x2) if alpha == 1 else alpha * (x1 @ x2))
+            return result
 
         match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
 
@@ -1585,14 +1583,12 @@ def native_matmul_pass(graph: torch.fx.Graph):
     def baddbmm_to_bmm_and_badd(match: Match, inp, mat1, mat2, beta, alpha):
         # constant propagation does not work well, so manually simplify it.
         def repl(inp, x1, x2, beta, alpha):
-            if beta == 1 and alpha == 1:
-                return inp + x1 @ x2
-            elif beta == 1 and alpha != 1:
-                return inp + alpha * (x1 @ x2)
-            elif beta != 1 and alpha == 1:
-                return beta * inp + x1 @ x2
-            else:
-                return beta * inp + alpha * (x1 @ x2)
+            result = 0
+            if beta != 0:
+                result = result + (inp if beta == 1 else beta * inp)
+            if alpha != 0:
+                result = result + ((x1 @ x2) if alpha == 1 else alpha * (x1 @ x2))
+            return result
 
         match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
 
