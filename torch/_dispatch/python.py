@@ -3,6 +3,7 @@ import itertools
 import unittest.mock
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import wraps
 from typing import Callable, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -190,3 +191,10 @@ def enable_crossref_functionalize():
     finally:
         for op in all_py_loaded_overloads():
             op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
+
+def wrap_python_dispatch(fn):
+    @wraps(fn)
+    def wrap_fn(*args, **kwargs):
+        with enable_python_dispatcher():
+            return fn(*args, **kwargs)
+    return wrap_fn
