@@ -140,7 +140,7 @@ std::vector<c10::IValue> ModelRunner::runWithFlatInputsAndOutputs(
 
 uint64_t ModelRunner::numOutputs() const {
   TORCH_CHECK(executor_, "ModelRunner not initialized");
-  return executor_->graphSignature().userOutputs().size(); 
+  return executor_->graphSignature().userOutputs().size();
 }
 
 ModelRunnerHandle::ModelRunnerHandle(
