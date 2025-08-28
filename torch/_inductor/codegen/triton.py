@@ -1166,7 +1166,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def dot(a, b):
         dense_sizes = V.kernel.dense_size_list()
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
+            input_precision = "tf32"
+        else:
+            input_precision = "ieee"
         a_shape, b_shape = a.shape, b.shape
         assert V.kernel.is_native_matmul 
 
@@ -1319,7 +1322,7 @@ class TritonOverrides(OpOverrides):
         a_prepared = reshape_transpose_broadcast_for_dot(str(a), list(a_shape), [YBLOCK,RBLOCK])
         b_prepared = reshape_transpose_broadcast_for_dot(str(b), list(b_shape), [RBLOCK,XBLOCK])
 
-        return f"tl.dot({a_prepared}, {b_prepared}, allow_tf32={allow_tf32})"  # (Y,X)
+        return f"tl.dot({a_prepared}, {b_prepared}, input_precision=\"{input_precision}\")"
 
 
     @staticmethod
