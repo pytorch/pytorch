@@ -1409,7 +1409,9 @@ class CppFlexAttentionTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
-            return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(**options)
+            return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
+                **options
+            )
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
