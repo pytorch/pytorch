@@ -1695,7 +1695,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, rs_0_out, rs_1_out
 
-
         # test "fsdp" mode to allow convert_element_type after wait
         def func2(x, w, rs_0, rs_1, tag, ranks, group_size):
             y, rs_0_out, rs_1_out = func(x, w, rs_0, rs_1, tag, ranks, group_size)
