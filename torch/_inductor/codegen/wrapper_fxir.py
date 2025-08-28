@@ -468,10 +468,11 @@ class FxConverter:
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
 
-            def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+            def replace_floor_div(orig_expr: sympy.Expr) -> sympy.Expr:
                 """
                 Converts floor(x / c) to x // c.
                 """
+                expr = sympy.together(orig_expr, deep=False)
                 if isinstance(expr, sympy.core.mul.Mul) and isinstance(
                     expr.args[0], sympy.Rational
                 ):
@@ -488,7 +489,7 @@ class FxConverter:
                     # Undo the python division trick and replace with explicit CeilDiv
                     return -CeilDiv(-numerator, denominator)
                 else:
-                    return sympy.floor(expr)
+                    return sympy.floor(orig_expr)
 
             s = s.replace(sympy.floor, replace_floor_div)
             return self._sympy_interp(s).node
