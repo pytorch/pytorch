@@ -231,6 +231,7 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 };
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
+TORCH_API int genNcclSplitColor(const std::vector<int>& ranks);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
@@ -290,8 +291,7 @@ class NCCLComm {
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
+      ncclConfig_t& config);
 #endif // NCCL_HAS_COMM_SPLIT
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)

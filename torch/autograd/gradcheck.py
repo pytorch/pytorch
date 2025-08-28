@@ -1947,7 +1947,7 @@ def _fast_gradcheck(
 
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
+# 'func' accepts a vararg of tensors, which isn't expressible in the type system at the moment.
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
@@ -2036,15 +2036,15 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    assert (
-        check_forward_ad or check_backward_ad
-    ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    assert not (
-        check_batched_grad and not check_backward_ad
-    ), "Setting check_batched_grad=True requires check_backward_ad to be True"
-    assert not (
-        check_batched_forward_grad and not check_forward_ad
-    ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+    assert check_forward_ad or check_backward_ad, (
+        "Expected at least one of check_forward_ad or check_backward_ad to be True"
+    )
+    assert not (check_batched_grad and not check_backward_ad), (
+        "Setting check_batched_grad=True requires check_backward_ad to be True"
+    )
+    assert not (check_batched_forward_grad and not check_forward_ad), (
+        "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+    )
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -2189,15 +2189,15 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    assert (
-        check_fwd_over_rev or check_rev_over_rev
-    ), "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
-    assert not (
-        check_undefined_grad and not check_rev_over_rev
-    ), "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
-    assert not (
-        check_batched_grad and not check_rev_over_rev
-    ), "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+    assert check_fwd_over_rev or check_rev_over_rev, (
+        "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+    )
+    assert not (check_undefined_grad and not check_rev_over_rev), (
+        "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+    )
+    assert not (check_batched_grad and not check_rev_over_rev), (
+        "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+    )
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")

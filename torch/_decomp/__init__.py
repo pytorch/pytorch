@@ -418,6 +418,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.native_dropout_backward,
             aten.native_group_norm_backward,
             aten.native_layer_norm_backward,
+            aten._fused_rms_norm_backward,
             aten.new_empty,
             aten.new_full,
             aten.new_ones,

@@ -17,13 +17,9 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    SM90OrLater,
-)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -32,7 +28,6 @@ from torch.utils.checkpoint import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -187,46 +182,75 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
 
-        # Run original version
-        cloned_args_orig_fn = []
-        for arg in args:
-            cloned_args_orig_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_orig_fn = torch.compile(
-            orig_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
-        result_orig_fn.sum().backward()
+        def clone_args(args):
+            cloned_args = []
+            for arg in args:
+                cloned_args.append(
+                    arg.detach().clone().requires_grad_(arg.requires_grad)
+                )
+            return cloned_args
 
-        # Run checkpointed version
-        cloned_args_checkpointed_fn = []
-        for arg in args:
-            cloned_args_checkpointed_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_checkpointed_fn = torch.compile(
-            checkpointed_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_checkpointed_fn = compiled_checkpointed_fn(*cloned_args_checkpointed_fn)
-        result_checkpointed_fn.sum().backward()
+        def run(compiler):
+            # Run original version
+            cloned_args_orig_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_orig_fn = compiler(orig_fn)
+            result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
+            result_orig_fn.sum().backward()
 
-        # Check that outputs and gradients are equal
-        self.assertEqual(
-            result_orig_fn,
-            result_checkpointed_fn,
-            msg="Output mismatch between the original version and the checkpointed version of the same function",
-        )
-        for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
-            cloned_args_orig_fn, cloned_args_checkpointed_fn
-        ):
+            # Run checkpointed version
+            cloned_args_checkpointed_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_checkpointed_fn = compiler(copy.deepcopy(checkpointed_fn))
+            result_checkpointed_fn = compiled_checkpointed_fn(
+                *cloned_args_checkpointed_fn
+            )
+            result_checkpointed_fn.sum().backward()
+
+            # Check that outputs and gradients are equal
             self.assertEqual(
-                cloned_arg_orig_fn.grad,
-                cloned_arg_checkpointed_fn.grad,
-                msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                result_orig_fn,
+                result_checkpointed_fn,
+                msg="Output mismatch between the original version and the checkpointed version of the same function",
             )
+            for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
+                cloned_args_orig_fn, cloned_args_checkpointed_fn
+            ):
+                self.assertEqual(
+                    cloned_arg_orig_fn.grad,
+                    cloned_arg_checkpointed_fn.grad,
+                    msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                )
+
+        run(functools.partial(torch.compile, fullgraph=fullgraph))
+        if fullgraph:
+
+            def export_compiler(fn):
+                class WrapAsModule(nn.Module):
+                    def forward(self, *args, **kwargs):
+                        return fn(*args, **kwargs)
+
+                mod = WrapAsModule()
+
+                def runtime_wrapper(*runtime_args):
+                    from torch.export import _trace
+
+                    gm = _trace._export_to_torch_ir(
+                        f=mod,
+                        args=tuple(clone_args(args)),
+                        kwargs={},
+                        dynamic_shapes=None,
+                        preserve_module_call_signature=(),
+                        restore_fqn=False,
+                        allow_complex_guards_as_runtime_asserts=False,
+                        _log_export_usage=False,
+                    )
+                    # NOTE: this is necessary for rng to be added to the exported graph
+                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+
+                return runtime_wrapper
+
+            run(export_compiler)
 
     def test_tags_function(self, device):
         def gn(x, y):
@@ -247,7 +271,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_function_via_global_checkpoint(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -266,7 +290,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_function_with_kwargs(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -286,7 +310,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_sequential_layers(self, device):
         def gn(x):
             x = x.cos()
@@ -311,7 +335,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_multiple_checkpoints(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -333,7 +357,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_module(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -361,7 +385,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_tags_decomps(self, device):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
@@ -396,7 +420,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_recomputed_rand(self, device):
         def gn(x, y):
@@ -420,7 +444,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self, device):
         def gn(x, y):
@@ -447,7 +471,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self, device):
         # Figure out a way to test the number of inductor_random calls
@@ -555,7 +579,7 @@ Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_n
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
         )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_fallback(self, device):
         def gn(x, y):
             torch._dynamo.graph_break()
@@ -583,7 +607,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_kwargs(self, device):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -617,7 +641,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_symints_location(self, device):
         def gn(x, y):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
@@ -647,7 +671,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_recompute(self, device):
         def context_fn_must_recompute_mm():
@@ -714,7 +738,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             ),
         )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device):
         def selective_checkpointing_context_fn():
@@ -761,7 +785,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_tensor_subclass(self, device):
         def selective_checkpointing_context_fn():
@@ -811,7 +835,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_custom_rule(self, device):
         def _get_custom_policy(meta):
@@ -876,7 +900,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_partial_ctx_fn(self, device):
         def selective_checkpointing_context_fn(no_recompute_list):
@@ -922,7 +946,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_outplace_op(self, device):
         def selective_checkpointing_context_fn():
@@ -967,7 +991,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_list_ops(self, device):
         def selective_checkpointing_context_fn():
@@ -1015,7 +1039,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
     )
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_compile_selective_checkpoint_inplace_op(self, device):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -1061,7 +1085,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
     def test_compile_selective_checkpoint_random_op(self, device):
@@ -1121,7 +1145,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_invalid_context(self):
         def gn(x, y):
@@ -1159,7 +1183,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_compile_selective_checkpoint_parametrization(self):
         def sac_policy():
@@ -1253,7 +1277,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(input.grad, input_compiled.grad)
 
     @skipIfRocm
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_autocast_flash_attention(self, device):
         def fn(primals_1, primals_2, primals_3):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(
@@ -1277,7 +1301,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_error_msg(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1301,7 +1325,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             opt_fn(x)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_list_inputs(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1326,7 +1350,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
         # tests percolate_tags
@@ -1368,21 +1392,24 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         opt_fn(*args1).sum().backward()
-        if PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        else:
-            op = torch.ops.aten._scaled_dot_product_flash_attention.default
 
         fwd_graph = aot_graphs[0]
+        op1 = torch.ops.aten._scaled_dot_product_flash_attention.default
+        op2 = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         self.assertTrue(
             count_ops(
                 fwd_graph,
                 [],
                 freq=1,
-                op=op,
+                op=op1,
+            )
+            or count_ops(
+                fwd_graph,
+                [],
+                freq=1,
+                op=op2,
             )
         )
-
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
@@ -1392,12 +1419,18 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 bwd_graph,
                 [],
                 freq=1,
-                op=op,
+                op=op1,
+            )
+            or count_ops(
+                bwd_graph,
+                [],
+                freq=1,
+                op=op2,
             )
         )
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
@@ -1423,7 +1456,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
         # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.

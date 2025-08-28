@@ -21,6 +21,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     PatternMatcherPass,
@@ -33,7 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -555,7 +556,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):
@@ -619,6 +620,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         res.sum().backward()
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_dropout_checks_joint_graph(self):
         # `dropout` tests that joint graph passes (not just partitioner) is ran
         # on the hop graphs. Inductor rng functionalization happens in the joint
@@ -675,9 +677,9 @@ class GraphModule(torch.nn.Module):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
 
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
+
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
-
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  sin = None
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
@@ -690,6 +692,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_dropout_checks_joint_graph_inference(self):
         # Checks that joint graph results in inductor seeds for just the inference graph
         @nested_compile_region
@@ -719,9 +722,9 @@ class <lambda>(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]"):
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
+
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
-
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  gt = sin = None
@@ -917,6 +920,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_view_to_reshape(self):
         @nested_compile_region
         def gn(x):
@@ -1079,7 +1083,7 @@ class GraphModule(torch.nn.Module):
 
         fake_prop_count = 0
 
-        def _mock_invoke_subgraph(mode, subgraph, identifer, *operands):
+        def _mock_invoke_subgraph(mode, subgraph, identifier, *operands):
             nonlocal fake_prop_count
             fake_prop_count += 1
             return (operands[0].clone(),)
@@ -1191,16 +1195,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_input_input_aliasing(self):
         @nested_compile_region
@@ -1215,16 +1213,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_output_output_aliasing(self):
         @nested_compile_region
@@ -1240,16 +1232,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_mod_attr_aliasing(self):
         class MutateParam(torch.nn.Module):
@@ -1443,7 +1429,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_return_none(self):
         from torch.nn import functional as F
 
@@ -1823,6 +1809,35 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         res.sum().backward()
 
+    @requires_gpu
+    def test_ac_rng_cudagraphs(self):
+        def fn1(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.5, is_causal=True
+            )
+
+        @nested_compile_region
+        def fn1_checkpoint(q, k, v):
+            return torch.utils.checkpoint.checkpoint(fn1, q, k, v, use_reentrant=False)
+
+        def fn(q, k, v):
+            return fn1_checkpoint(q, k, v) + fn1_checkpoint(q.cos(), k, v)
+
+        q = torch.randn(
+            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+
+        res = torch.compile(
+            fn, backend="inductor", fullgraph=True, mode="reduce-overhead"
+        )(q, k, v)
+        res.sum().backward()
+
     def test_fake_tensor_checking(self):
         @nested_compile_region
         def gn(x):
@@ -2077,7 +2092,7 @@ class GraphModule(torch.nn.Module):
 
         # NOTE THAT THIS TEST DOES NOT REALLY WORK
         # We wanted one invoke_subgraph called twice, but because of
-        # constant_args_idx changing in the grpah, the graph equivalence fails
+        # constant_args_idx changing in the graph, the graph equivalence fails
 
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
