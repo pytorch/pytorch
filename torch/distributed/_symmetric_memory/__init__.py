@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import os
 import socket
@@ -1643,7 +1645,7 @@ def _all_to_all_vdev_2d_offset_meta(
 
 
 from collections.abc import Sequence
-from typing import Any, overload, TYPE_CHECKING, Union
+from typing import overload, TYPE_CHECKING, Union
 
 from torch.types import _device, _dtype, _int
 
@@ -1711,7 +1713,7 @@ def empty(  # type: ignore[misc]
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: Union[str, "ProcessGroup"]
+    tensor: torch.Tensor, group: Union[str, ProcessGroup]
 ) -> _SymmetricMemory:
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
@@ -1779,6 +1781,16 @@ def get_backend(device: _device) -> str | None:
         backend.
     """
     return _SymmetricMemory.get_backend(torch.device(device))
+
+
+def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
+    r"""
+    Get the MemPool allocator for symmetric memory for a given device.
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        MemPool allocator.
+    """
+    return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
 __all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
