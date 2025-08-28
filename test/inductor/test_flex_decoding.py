@@ -364,9 +364,9 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
         device="cuda",
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
+        assert score_mod is not None or block_mask is not None, (
+            "Must provide score_mod or block_mask"
+        )
         assert Q_H % KV_H == 0
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
@@ -1524,20 +1524,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        # self.run_test(
-        #     score_mod,
-        #     dtype=torch.bfloat16,
-        #     Q_B=1,
-        #     Q_H=1,
-        #     Q_S=1,
-        #     Q_D=16,
-        #     KV_B=1,
-        #     KV_H=1,
-        #     KV_S=64,
-        #     V_D=16,
-        #     device=device,
-        # )
-        # self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test(score_mod, device=device)
+        self.run_test_with_paged_attention(score_mod, device=device)
         self.run_test_with_paged_attention(
             score_mod=score_mod,
             dtype=torch.bfloat16,
