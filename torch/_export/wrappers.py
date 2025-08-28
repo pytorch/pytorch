@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
+import functools
 
 import torch
 import torch._custom_ops
@@ -178,8 +179,16 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
             f"If __init__ doesn't exist on your subclass, please add it. Look at DTensor.__init__ implementation for example"
         )
 
+    # Caching _python_dispatch.is_traceable_wrapper_subclass_type itself seems wrong,
+    # because it would cause us to stop being responsive to monkey-patching. In this
+    # particular context, we are checking for a programming error (applying this
+    # decorator to a non-traceable subclass), so caching seems appropriate.
+    @functools.cache
+    def _is_traceable_wrapper_subclass_type(sometype):
+        return is_traceable_wrapper_subclass_type(sometype)
+
     def wrapper(*args, **kwargs):
-        if not is_traceable_wrapper_subclass_type(type(args[0])):
+        if not _is_traceable_wrapper_subclass_type(type(args[0])):
             assert constructor_subclass.__qualname__.endswith("__init__")
             obj_name = constructor_subclass.__qualname__[: -len("__init__")]
             raise RuntimeError(
