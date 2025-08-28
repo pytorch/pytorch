@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Union
 
 import torch
 
 from ..kernel_inputs import MMKernelInputs
-from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -17,6 +16,10 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid
 
+
+if TYPE_CHECKING:
+    from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.select_algorithm import KernelTemplate
 
 log = logging.getLogger(__name__)
 
@@ -151,38 +154,22 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     kernel_inputs = MMKernelInputs([mat1, mat2, mat3, mat4], mat1_idx=0, mat2_idx=1)
 
     assert layout1 == layout2
-    # Get template configs directly from the lookup table
-    aten_params = lookup_template_configs(kernel_inputs.nodes(), "mm_plus_mm", "aten")
-
     # options to tune from
-    def add_aten():
-        return [aten_mm_plus_mm.bind(kernel_inputs.nodes(), layout1)]
+    choices: list[ChoiceCaller] = []
 
-    choices: list[Any] = []
+    # Collect all templates for unified call
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        if aten_params is None or len(aten_params) > 0:
-            # Either the lookup table asked for ATEN, or the lookup table is not
-            # in use in which case, we should add ATEN
-            choices = choices + add_aten()
+        templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1):
-        # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
-        ):
-            # Apply BLOCK_K constraint specific to mm_plus_mm
-            # see https://github.com/triton-lang/triton/issues/1298
-            # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
-                mm_plus_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout1,
-                    **kwargs,
-                )
+        templates_to_use.append(mm_plus_mm_template)
 
-    # Safe noop if lookup table is not in use
-    choices = lookup_table_extract_choices(choices, add_aten)
+    # Single unified call for all templates
+    choices += V.choices.get_mm_configs(
+        kernel_inputs, layout1, templates_to_use, "mm_plus_mm"
+    )
+
     return autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
     )

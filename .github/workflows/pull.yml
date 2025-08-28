@@ -156,13 +156,13 @@ jobs:
       sync-tag: asan-test
     secrets: inherit
 
-  linux-jammy-py3_9-clang12-onnx-build:
-    name: linux-jammy-py3.9-clang12-onnx
+  linux-jammy-py3_10-clang12-onnx-build:
+    name: linux-jammy-py3.10-clang12-onnx
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-clang12-onnx
+      build-environment: linux-jammy-py3.10-clang12-onnx
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang12-onnx
       test-matrix: |
         { include: [
@@ -171,16 +171,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-clang12-onnx-test:
-    name: linux-jammy-py3.9-clang12-onnx
+  linux-jammy-py3_10-clang12-onnx-test:
+    name: linux-jammy-py3.10-clang12-onnx
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_9-clang12-onnx-build
+      - linux-jammy-py3_10-clang12-onnx-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.9-clang12-onnx
-      docker-image: ${{ needs.linux-jammy-py3_9-clang12-onnx-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-onnx-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-clang12-onnx
+      docker-image: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3_9-clang12-build:
