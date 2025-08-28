@@ -13,6 +13,12 @@
 
 using namespace torch;
 
+// Wrapper class for XPU UUID
+struct XPUuuid {
+  explicit XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
+  const std::array<unsigned char, 16>& bytes;
+};
+
 // XPU management methods
 
 static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
@@ -298,6 +304,16 @@ static void registerXpuDeviceProperties(PyObject* module) {
 
   auto m = py::handle(module).cast<py::module>();
 
+  py::class_<XPUuuid>(m, "_XPUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const XPUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes.begin(), uuid.bytes.end());
+          })
+      .def("__str__", [](const XPUuuid& uuid) {
+        return uuid_to_string(reinterpret_cast<const char*>(uuid.bytes.data()));
+      });
+
 #define DEFINE_READONLY_MEMBER(member) \
   def_readonly(#member, &DeviceProp::member)
 
@@ -330,10 +346,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #endif
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
-          "uuid",
-          [](const DeviceProp& prop) {
-            uuid_to_string(reinterpret_cast<const char*>(prop.uuid.data()));
-          })
+          "uuid", [](const DeviceProp& prop) { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
