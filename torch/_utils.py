@@ -382,6 +382,16 @@ def _rebuild_device_tensor_from_cpu_tensor(data, dtype, device, requires_grad):
     return tensor
 
 
+def _rebuild_device_tensor_from_cpu_tensor_with_strides(data, dtype, device, strides, storage_offset, requires_grad):
+    device = _get_restore_location(device)
+    tensor = data.to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    try: 
+        tensor.as_strided_(data.size(), strides, storage_offset)
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to restore strides for tensor {data.size()}") from e
+    return tensor
+
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
     device = _get_restore_location(device)
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
