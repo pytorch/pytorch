@@ -252,11 +252,14 @@ def math_attention(
     masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
     logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
-    # Compute max for each query (row-wise maximum)
     max_scores = torch.max(post_mod_scores, dim=-1)[0]
+    # working precision will be used so no need to cast to fp32
     max_scores = torch.where(masked_rows, -float("inf"), max_scores)
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
+
+    # NB: kernel computes in ln2 space, we always convert back at the top level op, so
+    # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
         post_mod_scores.to(query.dtype) @ value,
@@ -507,7 +510,7 @@ def flex_attention_fake_impl(
     if query.is_nested:
         out = torch.empty_like(query, memory_format=torch.contiguous_format)
         logsumexp = query.sum(dim=-1)
-        max_scores = query.sum(dim=-1)  # Same shape as logsumexp
+        max_scores = query.sum(dim=-1)
         return out, logsumexp, max_scores
 
     v_head_dim = value.size(-1)
@@ -665,7 +668,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 score_mod_other_buffers,
                 mask_mod_other_buffers,
             )
-
+        # no grads for you sir
+        ctx.mark_non_differentiable(max_scores)
         save_tensors_and_symints_for_backward(
             ctx,
             (

@@ -1464,7 +1464,8 @@ def flex_attention(
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
         lse (Tensor): Log-sum-exp of attention scores; shape :math:`(B, Hq, L)`. Only returned if ``return_lse=True``.
-        max_scores (Tensor): Maximum attention scores for each query; shape :math:`(B, Hq, L)`. Only returned if ``return_max_scores=True``.
+        max_scores (Tensor): Maximum attention scores most score_mod for each query; shape :math:`(B, Hq, L)`.
+            Only returned if ``return_max_scores=True``.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -1578,6 +1579,21 @@ def flex_attention(
         return_max_scores,
     )
 
+    def _build_flex_attention_return(
+        out, lse, max_scores, return_lse, return_max_scores
+    ):
+        """Build return tuple with optional lse and max_scores values."""
+        result = [out]
+
+        if return_lse:
+            result.append(lse * math.log(2))
+
+        if return_max_scores:
+            result.append(max_scores * math.log(2))
+
+        # if we have no flags set it is not a tuple
+        return result[0] if len(result) == 1 else tuple(result)
+
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
         for x in [query, key, value]:
@@ -1593,14 +1609,9 @@ def flex_attention(
             scale,
             kernel_options,  # type: ignore[union-attr]
         )
-        if return_lse and return_max_scores:
-            return out, lse * math.log(2), max_scores * math.log(2)
-        elif return_lse:
-            return out, lse * math.log(2)
-        elif return_max_scores:
-            return out, max_scores * math.log(2)
-        else:
-            return out
+        return _build_flex_attention_return(
+            out, lse, max_scores, return_lse, return_max_scores
+        )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
         _warn_once(
@@ -1653,11 +1664,6 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-    if return_lse and return_max_scores:
-        return out, lse * math.log(2), max_scores * math.log(2)
-    elif return_lse:
-        return out, lse * math.log(2)
-    elif return_max_scores:
-        return out, max_scores * math.log(2)
-    else:
-        return out
+    return _build_flex_attention_return(
+        out, lse, max_scores, return_lse, return_max_scores
+    )
