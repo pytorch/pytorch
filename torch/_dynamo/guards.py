@@ -1546,7 +1546,6 @@ class GuardBuilder(GuardBuilderBase):
                 )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
-            assert base_source_name
             assert callable(base_example_value)
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
@@ -2177,7 +2176,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
+                _get_closure_vars()["__math_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2190,7 +2189,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
+                _get_closure_vars()["__numpy_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2798,14 +2797,14 @@ class GuardBuilder(GuardBuilderBase):
                         size,
                         stride,
                         pytype,
-                        dispatch_keys,
+                        dispatch_keys,  # type: ignore[arg-type]
                     ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
                     value,
-                    size,  # type: ignore[arg-type]
-                    stride,  # type: ignore[arg-type]
+                    size,
+                    stride,
                     tensor_name,
                     verbose_code_parts,
                     pytype,
