@@ -7,6 +7,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/LinearCrossEntropyLoss.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -17,6 +18,8 @@
 #else
 #include <ATen/ops/cross_entropy_loss_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/linear_cross_entropy_loss_native.h>
 #include <ATen/ops/log_softmax.h>
 #include <ATen/ops/nll_loss.h>
 #include <ATen/ops/nll_loss2d.h>
@@ -656,6 +659,49 @@ Tensor cross_entropy_loss_symint(
         std::move(ignore_index));
   }
   return ret;
+}
+
+Tensor linear_cross_entropy_loss_symint(
+    Tensor const& input,
+    Tensor const& target,
+    Tensor const& linear_weight,
+    std::optional<Tensor> const& bias,
+    std::optional<Tensor> const& cross_entropy_weight,
+    std::string_view chunking_strategy,
+    int64_t reduction,
+    c10::SymInt ignore_index,
+    double label_smoothing) {
+  Tensor result;
+  auto chunking_strategy_ = LinearCrossEntropyChecker::check(
+      input, target, linear_weight, bias, cross_entropy_weight, chunking_strategy, label_smoothing);
+
+  switch (chunking_strategy_) {
+    case LinearCrossEntropyChecker::ChunkingStrategy::Unfused: {
+      auto linear = ::at::native::linear(input, linear_weight, bias);
+
+      // TODO: move these checks up so we can use them in all paths:
+      // can we pre-compute what linear.sym_sizes() would be?
+      if (linear.sym_sizes() == target.sym_sizes()) {
+        // Assume soft targets when input and target shapes are the same
+        TORCH_CHECK(
+          at::isFloatingType(target.scalar_type()),
+          "linear_cross_entropy_loss: Expected floating point type for target with class probabilities, got ", target.scalar_type()
+        );
+        TORCH_CHECK(ignore_index < 0, "linear_cross_entropy_loss: ignore_index is not supported for floating point target");
+      }
+      result = ::at::native::cross_entropy_loss_symint(linear, target, cross_entropy_weight, reduction, ignore_index, label_smoothing);
+      break;
+    }
+
+    case LinearCrossEntropyChecker::ChunkingStrategy::InputsOnBatch:
+      TORCH_CHECK(false, "Not yet implemented: inputs_on_batch");
+      break;
+
+    case LinearCrossEntropyChecker::ChunkingStrategy::WeightsOnVocabulary:
+      TORCH_CHECK(false, "Not yet implemented: weights_on_vocabulary");
+      break;
+  }
+  return result;
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {

@@ -2,10 +2,12 @@
 from typing import Callable, Optional, Union
 from typing_extensions import deprecated
 
+import torch
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
 
 from .distance import PairwiseDistance
+from .linear import Linear
 from .module import Module
 
 
@@ -25,6 +27,7 @@ __all__ = [
     "HuberLoss",
     "SoftMarginLoss",
     "CrossEntropyLoss",
+    "LinearCrossEntropyLoss",
     "MultiLabelSoftMarginLoss",
     "CosineEmbeddingLoss",
     "MarginRankingLoss",
@@ -1389,6 +1392,75 @@ class CrossEntropyLoss(_WeightedLoss):
             ignore_index=self.ignore_index,
             reduction=self.reduction,
             label_smoothing=self.label_smoothing,
+        )
+
+
+class LinearCrossEntropyLoss(Module):
+    __constants__ = [
+        *Linear.__constants__,  # type: ignore[has-type]
+        "chunking_strategy",
+        *CrossEntropyLoss.__constants__,
+    ]
+
+    def __init__(
+        self,
+        #
+        # Required arguments for Linear
+        #
+        in_features: int,
+        out_features: int,
+        #
+        # Optional arguments for Linear
+        #
+        bias: bool = True,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+        #
+        # Argument for LinearCrossEntropyLoss
+        #
+        chunking_strategy: Optional[str] = None,
+        #
+        # Arguments for CrossEntropyLoss
+        #
+        ignore_index: int = -100,
+        label_smoothing: float = 0.0,
+        reduce: Optional[bool] = None,
+        reduction: str = "mean",
+        size_average: Optional[bool] = None,
+        cross_entropy_weight: Optional[Tensor] = None,
+    ) -> None:
+        super().__init__()
+        self.linear = Linear(
+            in_features,
+            out_features,
+            bias=bias,
+            device=device,
+            dtype=dtype,
+        )
+        self.chunking_strategy = chunking_strategy
+        self.cross_entropy = CrossEntropyLoss(
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            reduce=reduce,
+            reduction=reduction,
+            size_average=size_average,
+            weight=cross_entropy_weight,
+        )
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert isinstance(self.cross_entropy.reduction, (Tensor, type(None)))
+        return F.linear_cross_entropy(
+            input,
+            target,
+            self.linear.weight,
+            bias=self.linear.bias,
+            cross_entropy_weight=self.cross_entropy.weight,
+            reduce=self.cross_entropy.reduce,
+            size_average=self.cross_entropy.size_average,
+            chunking_strategy=self.chunking_strategy,
+            ignore_index=self.cross_entropy.ignore_index,
+            label_smoothing=self.cross_entropy.label_smoothing,
+            reduction=self.cross_entropy.reduction,
         )
 
 

@@ -163,6 +163,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linear);
+  m.impl("linear_cross_entropy_loss", native::linear_cross_entropy_loss_symint);
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
