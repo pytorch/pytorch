@@ -45,6 +45,30 @@ struct OffsetCalculator {
 
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     offset_type offsets;
+
+#if defined(USE_ROCM)
+    if (dims <= 3) {
+      auto divmod = sizes_[0].divmod(linear_idx);
+#pragma unroll
+      for (int arg = 0; arg < NARGS; arg++)
+        offsets[arg] = divmod.mod * strides_[0][arg];
+      if (dims >= 2) {
+        divmod = sizes_[1].divmod(divmod.div);
+#pragma unroll
+        for (int arg = 0; arg < NARGS; arg++)
+          offsets[arg] += divmod.mod * strides_[1][arg];
+      }
+      if (dims >= 3) {
+        divmod = sizes_[2].divmod(divmod.div);
+#pragma unroll
+        for (int arg = 0; arg < NARGS; arg++)
+          offsets[arg] += divmod.mod * strides_[2][arg];
+      }
+      // [...]
+      return offsets;
+    }
+#endif
+
     #pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {
       offsets[arg] = 0;
