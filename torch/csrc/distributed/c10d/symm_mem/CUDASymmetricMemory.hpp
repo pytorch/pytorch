@@ -52,24 +52,13 @@ class CUDASymmetricMemory : public SymmetricMemory {
   bool has_multicast_support() override;
   void* get_multicast_ptr() override;
 
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override;
-
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override;
-
   void barrier(int channel, size_t timeout_ms) override;
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override;
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
   int get_world_size() override;
+  c10::Device get_device() override;
 
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
@@ -115,7 +104,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      const at::Tensor& tensor,
+      void* ptr,
       const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
   c10::DeviceType supported_device_type() override;

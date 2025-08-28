@@ -266,11 +266,11 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
             old_module_attrs = snapshot.get(module_name, {})
             new_module_attrs = new_attrs.get(module_name, {})
 
+            module_prefix = f"self.{module_name}." if module_name else "self."
+
             if len(new_module_attrs) != len(old_module_attrs):
                 added_attrs = new_module_attrs.keys() - old_module_attrs.keys()
                 deleted_attrs = old_module_attrs.keys() - new_module_attrs.keys()
-
-                module_prefix = f"self.{module_name}." if module_name else "self."
 
                 if len(added_attrs) > 0:
                     formatted_attrs = [f"{module_prefix}{attr}" for attr in added_attrs]
@@ -291,6 +291,27 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                         f"API and must be initialized at model.__init__ "
                         f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
                     )
+
+            # Tensors could have leaked at container attributes
+            for k, new_v in new_module_attrs.items():
+                assert k in old_module_attrs
+                if isinstance(new_v, (tuple, list, dict)):
+                    flat_new_v, _ = pytree.tree_flatten(new_v)
+                    flat_old_v, _ = pytree.tree_flatten(old_module_attrs[k])
+                    if len(flat_new_v) != len(flat_old_v):
+                        leaked_values = [
+                            v
+                            for v in flat_new_v
+                            if v not in flat_old_v and isinstance(v, torch.Tensor)
+                        ]
+                        if len(leaked_values) > 0:
+                            raise ValueError(
+                                f"During torch.export, following tensors were leaked at {module_prefix}{k}: {leaked_values} "
+                                f"Such attributes must be registered as buffers using the `register_buffer` "
+                                f"API and must be initialized at model.__init__ "
+                                f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer). "  # noqa: 950
+                                f"Alternatively, consider using `torch.export.export(strict=True)` to export the model."
+                            )
 
         pytree.tree_map_with_path(
             _collect_assigned_tensor_attributes, snapshot, new_attrs
