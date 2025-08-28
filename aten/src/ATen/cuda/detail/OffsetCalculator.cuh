@@ -47,7 +47,7 @@ struct OffsetCalculator {
     offset_type offsets;
 
 #if defined(USE_ROCM)
-    if (dims <= 3) {
+    if ((dims > 0) && (dims <= 3)) {
       auto divmod = sizes_[0].divmod(linear_idx);
 #pragma unroll
       for (int arg = 0; arg < NARGS; arg++)
