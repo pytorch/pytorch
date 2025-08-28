@@ -48,10 +48,7 @@ Tensor flatten_indices_mps(const Tensor& indices, IntArrayRef size) {
     row_muls[i] = row_muls[i + 1] * size[i + 1];
   }
 
-  Tensor flat_indices = at::empty({nnz}, indices.options().dtype(kLong));
-
-  const int64_t idx_stride0 = indices.stride(0);
-  const int64_t idx_stride1 = indices.stride(1);
+  auto flat_indices = at::empty({nnz}, indices.options().dtype(kLong));
 
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -64,9 +61,8 @@ Tensor flatten_indices_mps(const Tensor& indices, IntArrayRef size) {
                   row_muls,
                   flat_indices,
                   static_cast<uint>(sparse_dim),
-                  static_cast<uint>(nnz),
-                  static_cast<int64_t>(idx_stride0),
-                  static_cast<int64_t>(idx_stride1));
+                  indices.strides()
+      );
 
       mtl_dispatch1DJob(encoder, pipeline, nnz);
     }

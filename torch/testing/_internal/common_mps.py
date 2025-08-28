@@ -632,6 +632,11 @@ if torch.backends.mps.is_available():
             # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
+        SKIPLIST_SPARSE = {
+            # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
+            # and does basically a no-op op(positive), which leads to unexpected success
+            "positive": [torch.complex128],
+        }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
@@ -644,15 +649,25 @@ if torch.backends.mps.is_available():
             addDecorator(
                 op,
                 DecorateInfo(
-                    unittest.skip(
-                        "MPS does not support float64 (double) or complex128 (cdouble)"
-                    ),
+                    unittest.expectedFailure,
                     dtypes=[
                         torch.double,
                         torch.cdouble,
                     ],
                 ),
             )
+            if sparse and op.name in SKIPLIST_SPARSE:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.skip(
+                            "Skipped due to MPS not supporting complex128 tensors"
+                        ),
+                        dtypes=[
+                            torch.complex128,
+                        ],
+                    ),
+                )
             if key in EMPTY_OPS_SKIPLIST:
                 addDecorator(
                     op,
