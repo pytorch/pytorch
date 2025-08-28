@@ -1564,6 +1564,16 @@ def get_max_num_sms() -> int:
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10
+
+
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
@@ -1637,7 +1647,6 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1730,7 +1739,8 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        can_use_tma(*matrices, add_guards=add_guards)
+        all(len(m.get_size()) == 2 for m in matrices)
+        and can_use_tma(*matrices, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 

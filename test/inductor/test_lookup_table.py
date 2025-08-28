@@ -1,12 +1,16 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from typing import Optional, Union
 from unittest.mock import patch
 
 import torch
-import torch._inductor.lookup_table
 from torch._inductor import config as inductor_config
-from torch._inductor.lookup_table import lookup_key_suffix, lookup_template_configs
+from torch._inductor.choices import InductorChoices
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lookup_table.choices import LookupTableChoices
+from torch._inductor.lookup_table.core import lookup_key_suffix, lookup_template_configs
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -14,31 +18,55 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-class MockInputNode:
-    """Simplified mock input node for testing"""
+class MockTensorNode:
+    """Mock input node that wraps a real tensor for testing"""
 
-    def __init__(self, device_type="cuda", dtype=torch.float32, size_hint=None):
-        self.device_type = device_type
-        self.dtype = dtype
-        self.size_hint = size_hint or [128, 128]
-        self.stride_hint = [128, 1]
+    def __init__(self, tensor: torch.Tensor):
+        self.tensor = tensor
 
-    def get_device(self):
-        class Device:
-            def __init__(self, device_type, index=0):
-                self.type = device_type
-                self.index = index
+    def get_device(self) -> torch.device:
+        return self.tensor.device
 
-        return Device(self.device_type)
+    def get_dtype(self) -> torch.dtype:
+        return self.tensor.dtype
 
-    def get_dtype(self):
-        return self.dtype
+    def get_size(self) -> tuple[int, ...]:
+        return tuple(self.tensor.shape)
 
-    def get_size(self):
-        return self.size_hint
+    def get_stride(self) -> tuple[int, ...]:
+        return tuple(self.tensor.stride())
 
-    def get_stride(self):
-        return self.stride_hint
+
+class MockMMKernelInputs(MMKernelInputs):
+    """Mock MMKernelInputs that subclasses the real class and uses real tensors"""
+
+    def __init__(
+        self,
+        tensors: list[torch.Tensor],
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+        mat1_idx: int = -2,
+        mat2_idx: int = -1,
+    ):
+        """Initialize with real tensors, creating mock nodes for the base class"""
+        mock_nodes = [MockTensorNode(t) for t in tensors]
+        super().__init__(mock_nodes, scalars, mat1_idx=mat1_idx, mat2_idx=mat2_idx)
+        self.tensors = tensors  # Keep reference to original tensors
+
+    def shapes_hinted(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int shapes"""
+        return self.shapes_symbolic()
+
+    def strides_hinted(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int strides"""
+        return self.strides_symbolic()
+
+    def mnk_hinted(self) -> tuple[int, int, int]:
+        """Delegate to symbolic since real tensors already have int dimensions"""
+        return self.mnk_symbolic()
+
+    @property
+    def device_type(self) -> Optional[str]:
+        return self.tensors[0].device.type
 
 
 class BaseLookupTableTest(TestCase):
@@ -46,22 +74,42 @@ class BaseLookupTableTest(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.original_table = torch._inductor.config.template_lookup_table
+        self.original_table = torch._inductor.config.template_config_lookup_table.table
         self.original_max_autotune = getattr(inductor_config, "max_autotune", False)
         inductor_config.max_autotune = True
+        # Set the lookup table choices handler
+        V.set_choices_handler(LookupTableChoices())
 
     def tearDown(self):
-        torch._inductor.config.template_lookup_table = self.original_table
+        torch._inductor.config.template_config_lookup_table.table = self.original_table
         inductor_config.max_autotune = self.original_max_autotune
+        # Restore original choices handler
+        V.set_choices_handler(InductorChoices())
         super().tearDown()
 
-    def create_mock_input_nodes(self, count=2, **kwargs):
-        """Create mock input nodes with default or custom properties"""
-        return [MockInputNode(**kwargs) for _ in range(count)]
+    def create_mock_mm_kernel_inputs(
+        self,
+        shapes: Optional[list[tuple[int, ...]]] = None,
+        device: torch.device = torch.device("cuda:0"),
+        dtype: torch.dtype = torch.float32,
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+    ) -> MockMMKernelInputs:
+        """Create MockMMKernelInputs with real tensors"""
+        if shapes is None:
+            shapes = [(128, 128), (128, 128)]  # Default MM shapes
 
-    def create_lookup_key(self, device_key, method, lookup_key):
-        """Create a lookup key"""
-        flat_key = f"{device_key}+{method}+{lookup_key}+{lookup_key_suffix()}"
+        tensors = []
+        for shape in shapes:
+            # Create a real tensor with the specified shape, device, and dtype
+            tensor = torch.randn(shape, device=device, dtype=dtype)
+            tensors.append(tensor)
+
+        return MockMMKernelInputs(tensors, scalars)
+
+    def create_lookup_key(self, method, kernel_inputs):
+        """Create a lookup key that matches core.py's make_lookup_key"""
+        # This matches exactly what make_lookup_key does in core.py
+        flat_key = f"{kernel_inputs.key}+{method}+{lookup_key_suffix()}"
         return flat_key
 
     def create_config(self, template_id, **kwargs):
@@ -113,140 +161,95 @@ class TestLookupTable(BaseLookupTableTest):
 
     def test_lookup_mismatch(self):
         """Test mismatch scenario in lookup table"""
-        # Test device key mismatch
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
+        # Mock a different device to create mismatch
         lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): [
-                self.create_config("triton")
-            ]
+            self.create_lookup_key("mm", kernel_inputs): [self.create_config("triton")]
         }
 
-        input_nodes = self.create_mock_input_nodes(2)
-
-        with (
-            patch(
-                "torch._inductor.lookup_table._dev_key", return_value="NVIDIA RTX 3080"
-            ),
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
-            result = lookup_template_configs(input_nodes, "mm", "triton")
-            self.assertEqual(result, [])
+            # looking for addmm but created the entry with mm - should mismatch the key and return
+            # an empty result
+            result = lookup_template_configs(kernel_inputs, "addmm", ["triton"])
+            self.assertEqual(result, {})
 
     def test_successful_lookup_with_template_filtering(self):
         """Test successful lookup that filters configs by template_id"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
         config_list = [
             self.create_config("triton", BLOCK_M=128, BLOCK_N=128),
             self.create_config("triton", BLOCK_M=64, BLOCK_N=64),
             self.create_config("tma", BLOCK_M=256, BLOCK_N=128),
-            self.create_config("decompose_k", k=4),
+            self.create_config("decompose_k", k_split=4),
         ]
 
-        lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): config_list
-        }
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): config_list}
 
-        input_nodes = self.create_mock_input_nodes(2)
-
-        with (
-            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
             # Test triton template filtering
-            result = lookup_template_configs(input_nodes, "mm", "triton")
+            result = lookup_template_configs(kernel_inputs, "mm", ["triton"])
             assert result is not None, "Result should not be None"
-            self.assertEqual(len(result), 2)
-            for config in result:
+            self.assertEqual(len(result["triton"]), 2)
+            for config in result["triton"]:
                 self.assertNotIn("template_id", config)
                 self.assertIn("BLOCK_M", config)
 
             # Test tma template filtering
-            result = lookup_template_configs(input_nodes, "mm", "tma")
+            result = lookup_template_configs(kernel_inputs, "mm", ["tma"])
             assert result is not None, "Result should not be None"
-            self.assertEqual(len(result), 1)
-            self.assertNotIn("template_id", result[0])
-            self.assertEqual(result[0]["BLOCK_M"], 256)
+            self.assertEqual(len(result["tma"]), 1)
+            self.assertNotIn("template_id", result["tma"][0])
+            self.assertEqual(result["tma"][0]["BLOCK_M"], 256)
 
             # Test decompose_k template filtering
-            result = lookup_template_configs(input_nodes, "mm", "decompose_k")
+            result = lookup_template_configs(kernel_inputs, "mm", ["decompose_k"])
             assert result is not None, "Result should not be None"
-            self.assertEqual(len(result), 1)
-            self.assertNotIn("template_id", result[0])
-            self.assertEqual(result[0]["k"], 4)
+            self.assertEqual(len(result["decompose_k"]), 1)
+            self.assertNotIn("template_id", result["decompose_k"][0])
+            self.assertEqual(result["decompose_k"][0]["k_split"], 4)
 
     def test_empty_table(self):
         """Test when template lookup table is empty"""
-        with patch.object(inductor_config, "template_lookup_table", {}):
-            result = lookup_template_configs(
-                self.create_mock_input_nodes(2), "mm", "triton"
-            )
-            self.assertEqual(result, [])
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        with patch.object(inductor_config.template_config_lookup_table, "table", {}):
+            result = lookup_template_configs(kernel_inputs, "mm", ["triton"])
+            self.assertEqual(result, {})
 
     def test_validation_error(self):
         """Test validation error for invalid config"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
         invalid_config = {"BLOCK_M": 128}  # missing template_id
         lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): [invalid_config]
+            self.create_lookup_key("mm", kernel_inputs): [invalid_config]
         }
 
-        input_nodes = self.create_mock_input_nodes(2)
-
-        with (
-            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
             with self.assertRaises(ValueError) as cm:
-                lookup_template_configs(input_nodes, "mm", "triton")
+                lookup_template_configs(kernel_inputs, "mm", ["triton"])
             self.assertIn("missing required 'template_id' field", str(cm.exception))
 
-    def test_cpu_input_returns_none(self):
-        """Test that CPU tensor input returns None"""
-        cpu_input_nodes = [MockInputNode(device_type="cpu")]
+    def test_cpu_input_returns_empty(self):
+        """Test that CPU tensor input returns empty dict"""
+        # Create kernel inputs with CPU tensors
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=torch.device("cpu"))
 
         lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): [
-                self.create_config("triton")
-            ]
+            self.create_lookup_key("mm", kernel_inputs): [self.create_config("triton")]
         }
 
-        with (
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
-            result = lookup_template_configs(cpu_input_nodes, "mm", "triton")
-            self.assertIsNone(result)
-
-    def test_in_use_functionality(self):
-        """Test _in_use() function behavior"""
-        # Test with data
-        inductor_config.template_lookup_table = {"test": "data"}
-        inductor_config.max_autotune = True
-        result = torch._inductor.lookup_table._in_use()
-        self.assertTrue(result)
-
-        # Test with empty table
-        inductor_config.template_lookup_table = {}
-        result = torch._inductor.lookup_table._in_use()
-        self.assertTrue(result)
-
-        # Test error when max_autotune disabled
-        inductor_config.max_autotune = False
-        with self.assertRaises(RuntimeError) as cm:
-            torch._inductor.lookup_table._in_use()
-        self.assertIn("template lookup table requires max-autotune", str(cm.exception))
+            result = lookup_template_configs(kernel_inputs, "mm", ["triton"])
+            self.assertEqual(result, {})  # Should return empty dict for CPU
 
     @parametrize(
         "allow_tf32,tf32_configs,expected_count",
@@ -259,68 +262,83 @@ class TestLookupTable(BaseLookupTableTest):
     def test_tf32_filtering(self, allow_tf32, tf32_configs, expected_count):
         """Test TF32 filtering scenarios"""
         torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
 
         configs = [
             self.create_config("triton", BLOCK_M=128, ALLOW_TF32=tf32_val)
             for tf32_val in tf32_configs
         ]
 
-        lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): configs
-        }
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): configs}
 
-        input_nodes = self.create_mock_input_nodes(2)
-
-        with (
-            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
-            result = lookup_template_configs(input_nodes, "mm", "triton")
+            result = lookup_template_configs(kernel_inputs, "mm", ["triton"])
             if expected_count > 0:
                 assert result is not None, "Result should not be None"
-                self.assertEqual(len(result), expected_count)
+                self.assertEqual(len(result["triton"]), expected_count)
             else:
-                self.assertEqual(result, [])
+                self.assertEqual(result, {})
 
     def test_multiple_calls_work(self):
         """Test that calling lookup functions multiple times works correctly"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
         config_list = [
             self.create_config("triton", BLOCK_M=128),
             self.create_config("tma", BLOCK_M=256),
         ]
-        lookup_table_data = {
-            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): config_list
-        }
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): config_list}
 
-        input_nodes = self.create_mock_input_nodes(2)
-
-        with (
-            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
-            patch(
-                "torch._inductor.lookup_table._inputs_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
         ):
             # First calls
-            result1 = lookup_template_configs(input_nodes, "mm", "triton")
-            result2 = lookup_template_configs(input_nodes, "mm", "tma")
+            result1 = lookup_template_configs(kernel_inputs, "mm", ["triton"])
+            result2 = lookup_template_configs(kernel_inputs, "mm", ["tma"])
             assert result1 is not None, "Result1 should not be None"
             assert result2 is not None, "Result2 should not be None"
-            self.assertEqual(len(result1), 1)
-            self.assertEqual(len(result2), 1)
+            self.assertEqual(len(result1["triton"]), 1)
+            self.assertEqual(len(result2["tma"]), 1)
 
             # Second calls should work the same
-            result3 = lookup_template_configs(input_nodes, "mm", "triton")
-            result4 = lookup_template_configs(input_nodes, "mm", "tma")
+            result3 = lookup_template_configs(kernel_inputs, "mm", ["triton"])
+            result4 = lookup_template_configs(kernel_inputs, "mm", ["tma"])
             assert result3 is not None, "Result3 should not be None"
             assert result4 is not None, "Result4 should not be None"
-            self.assertEqual(len(result3), 1)
-            self.assertEqual(len(result4), 1)
+            self.assertEqual(len(result3["triton"]), 1)
+            self.assertEqual(len(result4["tma"]), 1)
+
+    def test_batch_lookup_mixed_entries(self):
+        """Test batch lookup where some templates have entries and others don't"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs()
+
+        config_list = [
+            self.create_config("triton", BLOCK_M=128),
+            self.create_config("tma", BLOCK_M=256),
+            # No decompose_k config in lookup table
+        ]
+        lookup_table_data = {self.create_lookup_key("mm", kernel_inputs): config_list}
+
+        with patch.object(
+            inductor_config.template_config_lookup_table, "table", lookup_table_data
+        ):
+            # Test batch lookup with mixed results
+            result = lookup_template_configs(
+                kernel_inputs, "mm", ["triton", "tma", "decompose_k"]
+            )
+            assert result is not None, "Result should not be None"
+
+            # Should have entries for triton and tma, but not decompose_k
+            self.assertIn("triton", result)
+            self.assertIn("tma", result)
+            self.assertNotIn("decompose_k", result)
+
+            self.assertEqual(len(result["triton"]), 1)
+            self.assertEqual(len(result["tma"]), 1)
+            self.assertEqual(result["triton"][0]["BLOCK_M"], 128)
+            self.assertEqual(result["tma"][0]["BLOCK_M"], 256)
 
 
 if __name__ == "__main__":
