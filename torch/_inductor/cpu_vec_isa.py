@@ -248,7 +248,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 
 @dataclasses.dataclass
 class VecAMX(VecAVX512):
-    _arch_flags = VecAVX512().build_arch_flags() + " -mamx-tile -mamx-bf16 -mamx-int8"
+    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
     # check amx_fp16 separately since it is not always supported when amx is supported
     # amx_fp16 intrinsic compilation need gcc >=13 on platforms which support amx_fp16
     _is_amx_fp16_supported = False
@@ -306,10 +306,14 @@ extern "C" void __amx_chk_kernel() {
         return self._is_amx_fp16_supported
 
     def build_arch_flags(self) -> str:
+        extra_flags = ""
+        if self._is_avx512_bf16_supported:
+            # avx512_bf16 is not among the base flags, so we need to check and add it here
+            # And we need this flag in the WOQ case for dequantization
+            extra_flags += " -mavx512bf16"
         if self._is_amx_fp16_supported:
-            return self._arch_flags + " -mamx-fp16"
-        else:
-            return self._arch_flags
+            extra_flags += " -mamx-fp16"
+        return self._arch_flags + extra_flags
 
 
 @dataclasses.dataclass
