@@ -6,9 +6,14 @@ import torch
 import torch.fx
 from torch.fx.experimental import const_fold
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
+@skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
 class TestConstFold(TestCase):
     def _get_attr(self, node):
         mod = node.graph.owning_module
