@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -8,7 +8,6 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 
 from .. import ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
-from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -24,13 +23,12 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import (
-    _is_static_problem,
-    addmm_epilogue,
-    is_batch_stride_largest_or_zero,
-    mm_args,
-)
+from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
 
+
+if TYPE_CHECKING:
+    from ..ir import ChoiceCaller
+    from ..select_algorithm import KernelTemplate
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -192,41 +190,36 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         layout,
     )
 
+    aten_handler: ExternKernelChoice = aten_bmm
+    aten_extra_kwargs = {}
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
-        aten_func = aten_bmm_dtype.bind(
-            kernel_inputs.nodes(), layout, out_dtype=out_dtype
-        )
-    else:
-        aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
+        aten_handler = aten_bmm_dtype
+        aten_extra_kwargs = {"out_dtype": out_dtype}
 
-    # Get template configs directly from the lookup table
-    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
-    # options to tune from
-    choices: list[Any] = []
+    choices: list[ChoiceCaller] = []
+
+    # Collect all templates for unified call
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    kwarg_overrides = {}
+
     if use_aten_gemm_kernels():
-        if aten_params is None or len(aten_params) > 0:
-            # Either the lookup table asked for ATEN, or the lookup table is not
-            # in use in which case, we should add ATEN
-            choices = choices + [aten_func]
+        templates_to_use.append(aten_handler)
+        kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
+        templates_to_use.append(bmm_template)
 
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            op_name=name,
-            template_name=bmm_template.name,
-            template_hash=bmm_template.src_hash,
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **kwargs,
-            )
+    # Single unified call for all templates
+    choices += V.choices.get_mm_configs(
+        kernel_inputs,
+        layout,
+        templates_to_use,
+        name,
+        kwarg_overrides=kwarg_overrides,
+    )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -253,9 +246,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    # Safe noop if lookup table is not in use
-    choices = lookup_table_extract_choices(choices, lambda: [aten_func])
-
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
@@ -265,7 +255,9 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
     # Create MMKernelInputs for BadDBMM at the top
-    kernel_inputs = MMKernelInputs([inp, mat1, mat2])
+    kernel_inputs = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]
@@ -283,28 +275,17 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
     name = "baddbmm"
     # options to tune from
-    choices = (
-        [aten_baddbmm.bind(kernel_inputs.nodes(), layout, alpha=alpha, beta=beta)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[ChoiceCaller] = []
+
+    # Collect all templates for unified call
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    if use_aten_gemm_kernels():
+        templates_to_use.append(aten_baddbmm)
 
     if use_triton_template(layout):
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            op_name=name,
-            template_name=bmm_template.name,
-            template_hash=bmm_template.src_hash,
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **kwargs,
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
-            )
+        templates_to_use.append(bmm_template)
+
+    # Single unified call for all templates
+    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

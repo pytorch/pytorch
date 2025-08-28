@@ -187,6 +187,8 @@ cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
 
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -387,6 +389,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -538,6 +550,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -1162,6 +1179,11 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
 
 
@@ -1833,10 +1855,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
+    # Levels:
+    #   0 - disabled (default)
+    #   1 - normal
+    #   2 - basic
+    # Backward compatibility:
+    #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
+    #   If INDUCTOR_PROVENANCE is set, use its integer value.
+    provenance_tracking_level: int = int(
+        os.environ.get(
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+        )
     )
 
 
@@ -1882,87 +1912,15 @@ _cache_config_ignore_prefix: list[str] = [
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
-# Template config lookup table system for pre-configured kernel template parameters.
-#
-# Replaces default choice generation with pre-configured template parameters for
-# specific operations and input configurations.
-#
-# Behavior:
-# The following behavior happens when the table is set at all, for all operations that support it
-#
-# - Match found: Uses pre-configured choices instead of generating default choices
-# - No match: Skips Triton choice generation entirely, falls back to the provided fallback (now: ATEN)
-#
-# The lookup table sits behind existing settings, specifically backends, and max-autotune. Notably
-# - it will only work when max_autotune(_gemm) is enabled
-#     - it is an error to provide a table when max_autotune is disabled
-# - it will only work if the backend (and template) requested is enabled e.g. triton, decompose_k, etc.
-#     - if the backend/template is not enabled, the lookup table is not consulted for that backend/template
-#
-# Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
-#
-# Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
-
-
-# Template lookup table for overriding autotune configs based on input configuration
-# Format: {device_key+op_name+input_key: [{template_id: ..., params...}, ...]}
-#
-# The key is a flattened string with format: "device_key+op_name+input_key"
-# - device_key: CUDA device architecture name (e.g., "NVIDIA H100")
-# - op_name: Operation name (e.g., "mm", "addmm", "bmm")
-# - input_key: String representation of input tensor properties
-#
-# Each value is a list of configuration dictionaries, where each dictionary must contain:
-# - template_id: Identifier for the template (e.g., "mm", "tma", "decompose_k")
-# - Various template-specific parameters (BLOCK_M, BLOCK_N, etc.)
-#
-# If you want to make sure your lookup table is as stable as possible, you can
-# add 'template_hash' with a hash of the source code for templates that support it
-# e.g. TritonTemplate. The Inductor logs will print the hash of the template source
-# when using the lookup table. If you add a `template_hash` to the config, and it
-# does not match the template source hash at runtime, the config will be filtered out
-#
-# Example:
-# table = {
-#   "NVIDIA H100+mm+((torch.bfloat16, [1024, 1024], [1024, 1]), (torch.bfloat16, [1024, 1024], [1024, 1]))+tf32=False": [
-#     {
-#       "template_id": "mm",
-#       "EVEN_K": True,
-#       "ALLOW_TF32": False,
-#       "USE_FAST_ACCUM": False,
-#       "ACC_TYPE": "tl.float32",
-#       "num_stages": 1,
-#       "num_warps": 2,
-#       "BLOCK_M": 32,
-#       "BLOCK_N": 32,
-#       "BLOCK_K": 16,
-#       "hint_override": None,
-#       "GROUP_M": 8,
-#       "template_hash": "0717af5834e39dcca7ea817f896b8d85b4886422da7a3ab5f6911b4cfe568896"
-#     },
-#     {
-#       "template_id": "mm_persistent_tma",
-#       "EVEN_K": True,
-#       "ALLOW_TF32": False,
-#       "USE_FAST_ACCUM": False,
-#       "ACC_TYPE": "tl.float32",
-#       "num_stages": 3,
-#       "num_warps": 8,
-#       "BLOCK_M": 128,
-#       "BLOCK_N": 128,
-#       "BLOCK_K": 128,
-#       "hint_override": None,
-#       "GROUP_M": 8,
-#       "A_ROW_MAJOR": True,
-#       "B_ROW_MAJOR": True,
-#       "NUM_SMS": 132,
-#       "TMA_SIZE": 128,
-#       "TMA_EXPERIMENTAL_API": True,
-#       "template_hash": "88ec6cbe557df819512c09fa9094e91d1c631130be236800fa695acabfc96996"
-#     }
-#   ]
-# }
-template_lookup_table: Optional[dict[str, list[dict[str, Any]]]] = None
+# Please see the README inside lookup_table for details on the knobs
+class template_config_lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False or None, no
+    # hash checking is performed.
+    check_src_hash: bool = True
 
 
 class test_configs:

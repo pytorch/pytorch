@@ -299,7 +299,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -415,7 +415,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -527,7 +527,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
@@ -549,7 +549,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -665,7 +665,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -777,7 +777,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
@@ -799,7 +799,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -915,7 +915,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
@@ -1027,7 +1027,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
