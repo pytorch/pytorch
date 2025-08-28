@@ -1557,9 +1557,14 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
 
     keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
-    inductor_config_copy = (
-        torch._inductor.config.get_config_copy() if torch._inductor.config else None
-    )
+    inductor_config_copy = None
+
+    if torch._inductor.config:
+        try:
+            inductor_config_copy = torch._inductor.config.get_config_copy()
+        except (TypeError, AttributeError):
+            inductor_conf_str = "Inductor Config cannot be pickled"
+
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
@@ -4725,6 +4730,11 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+class CompileCounterInt(int):
+    def __add__(self, other: Any) -> CompileCounterInt:
+        return CompileCounterInt(super().__add__(other))
 
 
 def set_feature_use(feature: str, usage: bool) -> None:
