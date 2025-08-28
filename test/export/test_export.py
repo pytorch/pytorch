@@ -13647,6 +13647,28 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    def test_expand_copy_export_handles_implicit_true(self):
+        class ExpandModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, implicit):
+                return torch.expand_copy(x, [3, 3], implicit=implicit)
+
+        model = ExpandModel()
+        x = torch.ones([3])
+
+        # These should succeed
+        model(x, False)
+        model(x, True)
+        torch.export.export(model, (x, False))
+
+        # This used to fail with TypeError; now should succeed
+        try:
+            torch.export.export(model, (x, True))
+        except TypeError as e:
+            self.fail(f"expand_copy export with implicit=True raised TypeError: {e}")
+
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")

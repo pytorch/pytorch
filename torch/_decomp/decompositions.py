@@ -773,15 +773,9 @@ def slice_forward(
 @register_decomposition(aten.expand_copy)
 @out_wrapper()
 def expand_copy(self, size, *, implicit: bool = False):
-    out = aten.expand(self, size).clone()
-    try:
-        proxy = getattr(out, "_proxy", None)
-        node = getattr(proxy, "node", None)
-        if node is not None and hasattr(node, "meta"):
-            node.meta["implicit"] = implicit  # preserve meta
-    except Exception:
-        pass # not a node = explicit eager call = won't affect aliasing metadata
-    return out
+    _expand = torch.ops.aten.expand.default
+    return _expand(self, size).clone()
+
 
 def _normalize_start_end(
     x: Tensor, dim: int, start: Optional[int], end: Optional[int]
