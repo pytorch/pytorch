@@ -137,7 +137,7 @@ class PagedAttention:
     ) -> None:
         """
         Assigns new contents `val` to the storage `cache` at the location
-        `batch_idx` and `input_pos`.`
+        `batch_idx` and `input_pos`.
 
         Args:
             batch_idx (Tensor): batch index; shape :math:`(B)`.
