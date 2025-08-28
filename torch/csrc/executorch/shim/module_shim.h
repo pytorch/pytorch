@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstdint>
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
