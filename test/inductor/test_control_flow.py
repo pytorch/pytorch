@@ -1527,7 +1527,7 @@ class ScanModels:
             super().__init__()
             self.reverse = reverse
             self.dim = dim
-            self.linear = torch.nn.Linear(4, 4)
+            self.linear = torch.nn.Linear(4, 4, dtype=torch.float64)
 
         def forward(self, scan_op, init, xs):
             def combine_fn(carry, x):
@@ -1852,8 +1852,8 @@ class ScanTests(TestCase):
     def test_scan_nn_modules(
         self, device, dynamic, reverse, dim, scan_length, autograd
     ):
-        init = torch.randn(20, 16, 4, 4)
-        xs = torch.randn(scan_length, 20, 16, 4, 4)
+        init = torch.randn(20, 16, 4, 4, dtype=torch.float64)
+        xs = torch.randn(scan_length, 20, 16, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)
         self._run_test(
             model=ScanModels.ScanLinearWithView(reverse=reverse, dim=dim),
