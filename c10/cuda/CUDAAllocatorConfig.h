@@ -146,8 +146,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedUseBackgroundThreads(
       const std::vector<std::string>& config,
       size_t i);
-  size_t parseReclaimMemoryInGraphCapture(
-      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+  size_t parseGraphCaptureRecordStreamReuse(
+      const std::vector<std::string>& config,
       size_t i);
 
   std::atomic<size_t> m_max_split_size;
