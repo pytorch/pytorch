@@ -58,16 +58,39 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
 triton_flop_registry: dict[Any, Any] = {}
 def register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
-    This API is used to register flop formula for triton kernel specifically
+    This API is used to register flop formula for triton kernel in `targets`
 
-    This API needs to fork because triton kernel currently gets decomposed into
-    `triton_kernel_wrapper_functional(kernel)` in aot autograd. This func then
-    specifcaly will search for this wrapper function and requires an additional
-    `register_torch_dispatch` to register the flop formula for the triton kernel
+    This is separate from `register_flop_formula` because triton kernel
+    currently gets decomposed into `triton_kernel_wrapper_functional(kernel)`
+    in aot autograd; so this function requires
+    1) The user to write decomposition of the custom operator with mode:
+        `
+            op_decompose(mode, ...):
+                with mode:
+                    <op implementation>
+                    kernel
+                    <...>
+        `
+    2) The decomposition registered with the operator's flop counter mode
+    torch dispatch
+        `
+            torch.library.register_torch_dispatch(
+                "mylib::op", _FlopCounterMode, op_decompose
+            )
+        `
+    3) The user to register the flop formula for the triton kernel in this API
+        `
+            @register_flop_formula_for_triton_kernel(kernel)
+            def compute_fn(*args, **kwargs) -> int:
+                <impl>
+        `
 
-    For BC purposes; if there is a flop formula registered for the triton kernel,
-    we will attempt to map this 1:1 with the wrapper function.  In the event it further
-    decomposes, we will throw an error and suggest moving to this API instead
+    We then use the `triton_flop_registry` to get the flop formula for the kernel name
+    when we encounter `triton_kernel_wrapper_functional(kernel)` in the graph.
+
+    NOTE: This API is unstable and subject to change.  We expect to streamline
+    steps 1) and 2) in the future, as well as default support for this
+    registration in the case of 1:1 op to kernel mapping.
     """
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
