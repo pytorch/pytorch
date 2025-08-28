@@ -80,16 +80,6 @@ torch.set_float32_matmul_precision("high")
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
-@contextmanager
-def temp_float32_matmul_precision(precision: str):
-    original_precision = torch.get_float32_matmul_precision()
-    try:
-        torch.set_float32_matmul_precision(precision)
-        yield
-    finally:
-        torch.set_float32_matmul_precision(original_precision)
-
-
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -795,6 +785,7 @@ class TestMaxAutotune(TestCase):
 
     @config.patch("trace.enabled", True)
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
+    @config.patch("triton.enable_native_matmul", False)
     def test_mutation_rename(self):
         torch._logging.set_logs(ir_post_fusion=True)
         
@@ -828,8 +819,7 @@ class TestMaxAutotune(TestCase):
                 ) as cm,
                 ctx(),
             ):
-                with temp_float32_matmul_precision("highest"):
-                    out = fn(*inps)
+                out = fn(*inps)
 
         self.assertEqual(f(*inps), out)
 
@@ -838,13 +828,12 @@ class TestMaxAutotune(TestCase):
 
         # before and after finalizing multi template buffer, deps should have the same normalization
         # wrt writes
-        if not config.triton.enable_native_matmul:
-            FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(
-                pre_fusion_stream
-            )
-            FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same(
-                "buf1"
-            ).run(post_fusion_stream)
+        FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(
+            pre_fusion_stream
+        )
+        FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same(
+            "buf1"
+        ).run(post_fusion_stream)
 
         torch._logging.set_logs()
 

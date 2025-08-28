@@ -1165,14 +1165,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def dot(a, b):
-        dense_sizes = V.kernel.dense_size_list()
+        assert V.kernel.is_native_matmul 
+        
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
             input_precision = "tf32"
         else:
             input_precision = "ieee"
         a_shape, b_shape = a.shape, b.shape
-        assert V.kernel.is_native_matmul 
-
 
         # When computing expressions like ((A+1) @ (B+2)), 
         # native codegen will do 
@@ -1194,7 +1193,7 @@ class TritonOverrides(OpOverrides):
             reduction_range = V.kernel.range_trees[-1]
             assert reduction_range.is_reduction
             
-            # Skip if reduction mask (r0_mask) was already constant
+            # Skip if reduction mask was already constant
             if V.kernel._has_constant_mask(reduction_range):
                 return False
 
@@ -1312,7 +1311,7 @@ class TritonOverrides(OpOverrides):
 
             return value
 
-        assert len(dense_sizes) >= 3, "tl.dot can only do mm and bmm"
+        assert len(V.kernel.dense_size_list()) >= 3, "tl.dot can only do mm and bmm"
         
         XBLOCK = str(TritonSymbols.block_sizes[SymT.XBLOCK])
         YBLOCK = str(TritonSymbols.block_sizes[SymT.YBLOCK])
@@ -2922,7 +2921,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape = ()
             else:
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
-
+                
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
                 # Inferring from indexing.expand_shape alone may also fail when dense indexing is absent.
