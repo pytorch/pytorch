@@ -1777,7 +1777,7 @@ def select(x, dim, idx):
             del new_stride[dim]
             return as_strided(x, new_size, new_stride, new_storage_offset)
         else:
-            slice_result = slice_(x, dim, actual_index, actual_index + 1)
+            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
             return squeeze(slice_result, dim)
 
     # Unbacked Semantics:
@@ -1909,8 +1909,8 @@ def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
-    a = slice_(x, dim, 0, new_len)
-    b = slice_(x, dim, new_len, new_len * 2)
+    a = slice_(x, dim, 0, new_len, clamp=False)
+    b = slice_(x, dim, new_len, new_len * 2, clamp=False)
     return mul(a, sigmoid(b))
 
 
@@ -4267,7 +4267,7 @@ def inplace_constant_pad_nd(
         layout.offset,
     )
 
-    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
     fill_(sliced_x, fill_value)
 
     counters["inductor"]["inplace_padding"] += 1
