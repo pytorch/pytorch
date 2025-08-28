@@ -212,6 +212,16 @@ class MMKernelInputs(KernelInputs):
         V.graph.sizevars.check_equals(k, k0)
         return (m, n, k)
 
+    def mat1mat2(self) -> tuple[Any, Any]:
+        """
+        Get the mat1 and mat2 nodes.
+
+        Returns:
+            A tuple of (mat1, mat2) nodes
+        """
+        nodes = self.nodes()
+        return nodes[self._mat1_idx], nodes[self._mat2_idx]
+
     def mnk_hinted(self) -> tuple[int, int, int]:
         """
         Get the hinted M, N, K dimensions for matrix multiplication.

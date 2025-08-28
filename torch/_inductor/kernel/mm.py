@@ -41,7 +41,6 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
-    get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
@@ -756,10 +755,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     choices,
                     input_nodes=kernel_inputs.nodes(),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **kwargs,
                     **extra_kwargs,
                 )
@@ -1031,10 +1026,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     choices,
                     input_nodes=kernel_inputs.nodes(),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
                     **kwargs,
                     **extra_kwargs,
                     prefix_args=1,
@@ -1252,10 +1243,6 @@ def tuned_scaled_mm(
                     choices,
                     input_nodes=kernel_inputs.nodes(),
                     layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat_a.get_device(),
-                    ),
                     **kwargs,
                     **extra_kwargs,
                 )
