@@ -304,7 +304,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(
         !pin_memory,
         "Can't pin tensor constructed from __cuda_array_interface__");
-    auto tensor = tensor_from_cuda_array_interface(data);
+    auto tensor = tensor_from_cuda_array_interface(data, device_opt);
     const auto& inferred_scalar_type =
         type_inference ? tensor.scalar_type() : scalar_type;
 
@@ -670,11 +670,13 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
       if (ctor_or_new == CtorOrNew::CTOR) {
-        throw TypeError(
+        TORCH_CHECK_TYPE(
+            false,
             "torch.sparse.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       } else {
-        throw TypeError(
+        TORCH_CHECK_TYPE(
+            false,
             "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       }

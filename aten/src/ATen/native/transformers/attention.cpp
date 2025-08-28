@@ -207,7 +207,7 @@ Tensor qkv_projection(
     } else {
       // encoder-decoder attention
       // TODO: is there a more efficient way to set this up?
-      // TODO: can we stay nested insted of using cat? Probably just make a
+      // TODO: can we stay nested instead of using cat? Probably just make a
       // NestedTensor out of the matmul results or something?
       auto q_kv_weight_s =
           at::native::split_with_sizes(qkv_weight, {embed_dim, embed_dim * 2}, 0);

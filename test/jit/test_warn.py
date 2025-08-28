@@ -135,12 +135,14 @@ class TestWarn(JitTestCase):
             bar()
 
         FileCheck().check_count(
-            str="UserWarning: I am warning you from foo", count=1, exactly=True
+            str="UserWarning: I am warning you from foo",
+            count=1,
+            exactly=True,
         ).check_count(
-            str="UserWarning: I am warning you from bar", count=1, exactly=True
-        ).run(
-            f.getvalue()
-        )
+            str="UserWarning: I am warning you from bar",
+            count=1,
+            exactly=True,
+        ).run(f.getvalue())
 
 
 if __name__ == "__main__":

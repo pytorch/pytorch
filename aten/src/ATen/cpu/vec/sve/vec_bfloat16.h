@@ -5,6 +5,7 @@
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/bit_cast.h>
 #include <cmath>
 namespace at {
 namespace vec {
@@ -36,7 +37,7 @@ class Vectorized<BFloat16> {
     return VECTOR_WIDTH / sizeof(BFloat16);
   }
 
-  Vectorized() {}
+  Vectorized();
   Vectorized(svbfloat16_t v) : values(v) {}
   Vectorized(int val);
   Vectorized(BFloat16 val);
@@ -163,6 +164,9 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> exp_u20() const {
     return exp();
   }
+  Vectorized<BFloat16> fexp_u20() const {
+    return exp();
+  }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
   Vectorized<BFloat16> hypot(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> i0() const;
@@ -220,8 +224,12 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> le(const Vectorized<BFloat16>& other) const;
 };
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
-    const Vectorized<c10::BFloat16>& a) {
+#if defined(__GNUC__) && __GNUC__ == 14
+// Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE
+__attribute__((optimize("no-tree-vectorize")))
+#endif
+inline std::tuple<Vectorized<float>, Vectorized<float>>
+convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   static_assert(
       Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   auto zero = svreinterpret_bf16_f32(svdup_n_f32(0.0f));
@@ -297,6 +305,11 @@ Vectorized<c10::BFloat16> inline operator/(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
+}
+
+inline Vectorized<BFloat16>::Vectorized() {
+  const short zero = 0;
+  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {
