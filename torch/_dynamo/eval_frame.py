@@ -1734,6 +1734,7 @@ def export(
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
@@ -1960,6 +1961,7 @@ def export(
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             _compiling_state_context(),
         ):
