@@ -343,7 +343,6 @@ def flex_attention(
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        # import transformer_nuggets; transformer_nuggets.vscode_breakpoint()
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
