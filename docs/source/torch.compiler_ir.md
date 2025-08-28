@@ -1,3 +1,5 @@
+(torch.compiler_ir)=
+
 # IRs
 
 PyTorch 2.0 offers two set of IRs for backends to interface with: Core Aten IR and Prims IR.

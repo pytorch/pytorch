@@ -1531,7 +1531,7 @@ class TestTensorCreation(TestCase):
         expected = torch.empty(0, 5, dtype=a.dtype, device=device)
         self.assertEqual(c, expected)
 
-        # test empty imput
+        # test empty input
         a = torch.empty(0, device=device)
         c1 = torch.combinations(a)
         c2 = torch.combinations(a, with_replacement=True)

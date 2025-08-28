@@ -98,7 +98,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset) {
+      int64_t storage_offset) override {
     // TODO: deduplicate
     const size_t numel = std::accumulate(
         sizes.begin(),
@@ -229,8 +229,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     auto group_info = get_group_info("0");
     auto store = group_info.store;
-    int rank = group_info.rank;
-    int world_size = group_info.world_size;
     c10::cuda::CUDAGuard guard(device_idx);
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
@@ -278,7 +276,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     ncclWindow_t signal_handle;
 
     auto group_info = get_group_info(group_name.value());
-    auto global_rank = get_group_info("0").rank;
     auto buffer_size_map =
         storeExchange.all_gather(group_info.store, group_info.rank, group_info.world_size, it->second->buffer_size);
 
