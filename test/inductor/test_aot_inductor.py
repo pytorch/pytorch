@@ -5685,7 +5685,12 @@ class AOTInductorTestsTemplate:
             pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
             loaded1 = pt2_contents.aoti_runners["model"]
 
-        self.assertEqual(loaded1(a), model(a))
+        if config.triton.enable_native_matmul:
+            atol, rtol = 3e-4, 3e-4 
+        else :
+            atol, rtol = None, None 
+
+        self.assertEqual(loaded1(a), model(a), atol=atol, rtol=rtol)
 
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):

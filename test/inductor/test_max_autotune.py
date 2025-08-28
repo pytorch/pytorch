@@ -732,8 +732,8 @@ class TestMaxAutotune(TestCase):
             m_c = torch.compile(mode="max-autotune")(mod)
             out, code = run_and_get_code(m_c, x)
             self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
-
-            FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
+            if not config.triton.enable_native_matmul:
+                FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
