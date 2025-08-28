@@ -55,10 +55,4 @@ def get_ck_dependency_string() -> str:
     """
     egg_name = "#egg=rocm-composable-kernel"
     commit_pin = f"@{read_ck_pin()}"
-    if user_provided_ck_dir := os.getenv("TORCHINDUCTOR_CK_DIR"):
-        if not os.path.exists(user_provided_ck_dir):
-            raise AssertionError(
-                f"user provided Composable Kernel directory {user_provided_ck_dir} doesn't exist"
-            )
-        return f"@ git+file://{user_provided_ck_dir}{commit_pin}{egg_name}"
     return f"@ git+https://github.com/ROCm/composable_kernel.git{commit_pin}{egg_name}"
