@@ -318,14 +318,14 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     """
     Copy cpu scalar if doesn't not match with given `device`
     """
+    if not isinstance(x.data, ir.ReinterpretView):
+        return x
     size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
     cur_device = x.get_device()
-
     if (
         cur_device is not None
         and cur_device.type == "cpu"
         and cur_device != device
-        and isinstance(x.data, ir.ReinterpretView)
         and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
     ):
         return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
