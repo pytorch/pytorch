@@ -199,7 +199,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, aten_handler.uid, name, aten_extra_kwargs
+            kernel_inputs, layout, aten_handler, name, aten_extra_kwargs
         ):
             aten_handler.maybe_append_choice(
                 choices,
@@ -212,7 +212,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.uid, name
+            kernel_inputs, layout, bmm_template, name
         ):
             bmm_template.maybe_append_choice(
                 choices,
@@ -277,7 +277,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, aten_baddbmm.uid, name
+            kernel_inputs, layout, aten_baddbmm, name
         ):
             aten_baddbmm.maybe_append_choice(
                 choices,
@@ -289,7 +289,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs,
             layout,
-            bmm_template.uid,
+            bmm_template,
             name,
         ):
             bmm_template.maybe_append_choice(

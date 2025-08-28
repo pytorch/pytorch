@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -33,8 +33,10 @@ if TYPE_CHECKING:
 
     from torch.utils._ordered_set import OrderedSet
 
+    from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .select_algorithm import ExternKernelChoice
 
 
 class Sortable(typing.Protocol):
@@ -104,7 +106,7 @@ class InductorChoices:
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
-        template_name: str,
+        template: Union[KernelTemplate, ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, Any]] = None,
     ) -> Generator[tuple[dict[str, Any], dict[str, Any]], None, None]:
@@ -114,7 +116,7 @@ class InductorChoices:
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
             layout: Output layout
-            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
+            template: Template object (KernelTemplate or ExternKernelChoice)
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
             kwarg_overrides: Optional dict of kwargs to override for the template heuristic
                              these only override the per config kwargs, not the extra kwargs
@@ -124,6 +126,9 @@ class InductorChoices:
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
+
+        # Extract template_name from the template object
+        template_name = template.uid
 
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
