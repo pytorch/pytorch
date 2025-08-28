@@ -124,7 +124,7 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.force = force
             self.pr_num = 76123
             self.dry_run = True
-            self.comment_id = 0
+            self.comment_id = 12345  # Set to non-zero value
             self.reason = "this is for testing"
             self.ignore_current = False
             self.check_mergeability = False
@@ -152,9 +152,9 @@ def mock_revert(
 def mock_merge(
     pr: GitHubPR,
     repo: GitRepo,
+    comment_id: int,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
-    comment_id: Optional[int] = None,
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
@@ -470,9 +470,9 @@ class TestTryMerge(TestCase):
         mock_merge.assert_called_once_with(
             mock.ANY,
             mock.ANY,
+            comment_id=mock.ANY,
             dry_run=mock.ANY,
             skip_mandatory_checks=True,
-            comment_id=mock.ANY,
             ignore_current=False,
         )
 
@@ -485,9 +485,9 @@ class TestTryMerge(TestCase):
         mock_merge.assert_called_once_with(
             mock.ANY,
             mock.ANY,
+            comment_id=mock.ANY,
             dry_run=mock.ANY,
             skip_mandatory_checks=False,
-            comment_id=mock.ANY,
             ignore_current=False,
         )
 
