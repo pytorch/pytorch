@@ -16,6 +16,7 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
@@ -37,7 +38,6 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
-#include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
@@ -45,7 +45,6 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
-#include <ATen/ops/mm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
@@ -1552,70 +1551,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 }
 
 namespace {
-  at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
-  const Tensor& mat_b,
-  const std::optional<at::Tensor>& offs,
-  std::optional<c10::ScalarType> out_dtype
-  ) {
-    c10::SmallVector<int64_t, 3> out_size;
-    const bool a_is_2d = mat_a.dim() == 2;
-    const bool b_is_2d = mat_b.dim() == 2;
-    if (a_is_2d) {
-      if (b_is_2d) {
-        out_size = {offs->size(0), mat_a.size(0), mat_b.size(1)};
-      } else {
-        TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
-        out_size = {mat_a.size(0), mat_b.size(-1)};
-      }
-    } else {
-      if (b_is_2d) {
-        // this case is not actually encountered for MoE gemms
-        TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
-        out_size = {mat_a.size(1), mat_b.size(1)};
-      } else { // regular bmm
-        TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
-        out_size = {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
-      }
-    }
-
-    const auto out_dtype_ = out_dtype.value_or(kBFloat16);
-    TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-
-    #ifndef USE_ROCM
-    // For TMA transfers, strides of output tensor have to be either
-    // 1, or aligned to 16 bytes.
-    const auto last_dim = out_size.size() - 1;
-    const auto alignment = 16 / c10::elementSize(out_dtype_);
-    const int64_t size_padded = (out_size[last_dim] + alignment - 1) / alignment * alignment;
-    std::vector<int64_t> out_stride;
-    if (a_is_2d != b_is_2d) {
-      out_stride = {size_padded, 1};
-    } else {
-      out_stride = {out_size[1] * size_padded, size_padded, 1};
-    }
-    return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
-    #else
-    return at::empty(out_size, mat_a.options().dtype(out_dtype_));
-    #endif
-  }
-
-  bool check_valid_strides_and_return_transposed(const Tensor& mat) {
-    IntArrayRef tensor_strides = mat.strides();
-    IntArrayRef tensor_sizes = mat.sizes();
-    int end_dim = mat.dim() - 1;
-    int alignment = 16 / mat.element_size();
-    TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
-    if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
-      TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
-      return true;
-    } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
-      TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
-      return false;
-    } else {
-      TORCH_CHECK(false, "Invalid strides/sizes, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
-    }
-  }
-
   void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
     if (mat.dim() == 2) {
       TORCH_CHECK(
@@ -1762,81 +1697,15 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-  bool allowed_device = _grouped_mm_allowed_device();
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
   bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability >= 8.0");
-
-  TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
-  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
-  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
-  const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
-  if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
-  }
-
-  // check that the strides are valid, the fn will throw an error if not
-  check_valid_strides_and_return_transposed(mat_a);
-  check_valid_strides_and_return_transposed(mat_b);
-  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d");
-
-  if (offs.has_value()) {
-    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
-    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
-  }
-  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
-
-  // TODO(before land): clean up the if statement, naming, etc
   if (use_fast_path) {
     // fast path, no d2h sync needed
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
   } else {
-    // fallback path, using for loops or bmm
-    TORCH_WARN("fallback path for `torch._grouped_mm`, performance may not be optimal");
-    if (a_is_2d && !b_is_2d) {
-      // 2d x 3d with offsets
-      int group_start_idx = 0;
-      auto offs_cpu = offs.value().cpu();
-      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
-        int group_end_idx = offs_cpu[group_idx].item<int>();
-        auto mat_a_slice = mat_a.slice(0, group_start_idx, group_end_idx);
-        auto out_slice = out.slice(0, group_start_idx, group_end_idx);
-        at::mm_out(out_slice, mat_a_slice, mat_b[group_idx]);
-        group_start_idx = group_end_idx;
-      }
-
-    } else if (!a_is_2d && b_is_2d) {
-      // 3d x 2d with offsets
-      int group_start_idx = 0;
-      auto offs_cpu = offs.value().cpu();
-      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
-        int group_end_idx = offs_cpu[group_idx].item<int>();
-        auto mat_b_slice = mat_b.slice(1, group_start_idx, group_end_idx);
-        auto out_slice = out.slice(1, group_start_idx, group_end_idx);
-        at::mm_out(out_slice, mat_a[group_idx], mat_b_slice);
-        group_start_idx = group_end_idx;
-      }
-
-    } else if (a_is_2d && b_is_2d) {
-      // 2d x 2d with offsets
-      int group_start_idx = 0;
-      auto offs_cpu = offs.value().cpu();
-      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
-        int group_end_idx = offs_cpu[group_idx].item<int>();
-        auto mat_a_slice = mat_a.slice(1, group_start_idx, group_end_idx);
-        auto mat_b_slice = mat_b.slice(0, group_start_idx, group_end_idx);
-        auto out_slice = out[group_idx];
-        at::mm_out(out_slice, mat_a_slice, mat_b_slice);
-        group_start_idx = group_end_idx;
-      }
-
-    } else {
-      // 3d x 3d without offsets - regular bmm
-      at::bmm_out(out, mat_a, mat_b);
-    }
+    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
   return out;
 #else
