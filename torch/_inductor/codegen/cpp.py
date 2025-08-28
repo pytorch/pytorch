@@ -5392,10 +5392,6 @@ class CppScheduling(BaseScheduling):
             else ""
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        # below add provenance tracing info for cpu CppKernel types
-        if config.trace.provenance_tracking_level != 0:
-            set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
-
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
         src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
@@ -5434,7 +5430,15 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
-            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+            # below add provenance tracing info for cpu CppKernel types
+            debug_handle: Optional[int] = None
+            if config.trace.provenance_tracking_level != 0:
+                debug_handle = set_kernel_post_grad_provenance_tracing(
+                    self.kernel_group.scheduled_nodes, kernel_name
+                )
+            self.kernel_group.call_kernel(
+                V.graph.wrapper_code, kernel_name, debug_handle=debug_handle
+            )
         self.reset_kernel_group()
         self._set_flush_status(False)
 
@@ -5509,10 +5513,14 @@ class KernelGroup:
             code.splice(self.loops_code)
         return code.getvalue()
 
-    def call_kernel(self, wrapper, kernel_name):
+    def call_kernel(self, wrapper, kernel_name, debug_handle: Optional[int] = None):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, triton=False, arg_types=arg_types
+            kernel_name,
+            call_args,
+            triton=False,
+            arg_types=arg_types,
+            debug_handle=debug_handle,
         )
 
 
