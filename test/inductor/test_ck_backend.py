@@ -49,10 +49,10 @@ class TestCKBackend(TestCase):
         )
 
         torch.random.manual_seed(1234)
-        try:
-            self.ck_dir, _, _, _ = try_import_ck_lib()
-        except ImportError as e:
-            raise unittest.SkipTest("Composable Kernel library not installed") from e
+
+        self.ck_dir, _, _, _ = try_import_ck_lib()
+        if not self.ck_dir:
+            raise unittest.SkipTest("Composable Kernel library is not installed")
 
         try:
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
