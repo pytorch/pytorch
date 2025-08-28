@@ -858,7 +858,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        [inp_expanded, mat1, mat2],
+        scalars=dict(alpha=alpha, beta=beta),
+        views=dict(inp_unexpanded=inp),
     )
     choices: list[ChoiceCaller] = []
 
@@ -873,31 +875,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
-    aten_layout = layout
-    if (not is_nonzero) or (
-        not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
-    ):
-        # Use a FlexibleLayout if we are not autotuning.
-        # This allows padding strides for the output.
-        from torch._inductor.ir import FixedLayout, FlexibleLayout
-
-        if isinstance(layout, FixedLayout):
-            aten_layout = FlexibleLayout(
-                device=layout.device, dtype=layout.dtype, size=layout.size
-            )
-        # TODO(coconutruben): combine this with the main flow of addmm through
-        # a subgraph or something as inp vs inp_expanded causes some slight numeric
-        # differences
-        kernel_inputs = MMKernelInputs(
-            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
-        )
-        choices += V.choices.get_mm_configs(
-            kernel_inputs,
-            aten_layout,
-            [aten_addmm],
-            name,
-        )
-        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []

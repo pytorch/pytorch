@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor import config as inductor_config
+from torch._inductor.kernel_inputs import MMKernelInputs
 
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
@@ -82,6 +83,34 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
             "alpha": alpha,
             "beta": beta,
         }
+
+    def adjust_kernel_inputs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> KernelInputs:
+        # This is a compatibility layer, as the previous implementation relied on this
+        # and it yields sometimes slightly different numerics
+        # TODO: figure out if this can be handled cleaner e.g. through a subgraph or
+        # through a different decomposition
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"MMKernelInputs expected for {op_name}"
+        )
+        nodes = kernel_inputs.nodes()
+        max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
+        if op_name == "addmm" and not max_autotune:
+            inp_unexpanded = kernel_inputs.views().get("inp_unexpanded")
+            assert inp_unexpanded is not None, (
+                f"inp_unexpanded needs to be available for {op_name}"
+            )
+            nodes = [inp_unexpanded, *nodes[1:]]
+        return MMKernelInputs(
+            nodes,
+            scalars=kernel_inputs.scalars(),
+            views=kernel_inputs.views(),
+            mat1_idx=kernel_inputs._mat1_idx,
+            mat2_idx=kernel_inputs._mat2_idx,
+        )
 
 
 @register_template_heuristic(aten_bias_addmm.uid, "cuda", op_name="addmm")
