@@ -880,9 +880,14 @@ cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  OFF
-  "USE_CUDA OR USE_ROCM"
+  ON
+  "USE_ROCM"
   OFF)
+
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
