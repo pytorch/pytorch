@@ -706,9 +706,6 @@ class OpsHandler(Generic[T]):
         """This is a fake op used in analysis but not codegen"""
         raise NotImplementedError
 
-    def device_assert_async(self, cond: T, msg: str) -> T:
-        raise NotImplementedError
-
 
 _ignore_op_re = re.compile(r"_.*|paren").fullmatch
 
@@ -790,9 +787,6 @@ class DefaultHandler(OpsHandler[Any]):
         for target, impl in ctx.items():
             if target in OP_NAMES:
                 setattr(cls, target, impl)
-
-    def device_assert_async(self, cond, msg):
-        return None
 
 
 DefaultHandler._init_cls()
@@ -939,9 +933,6 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
-    def device_assert_async(self, cond, msg):
-        return None
-
 
 class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler: OpsHandler[Any]):
@@ -1007,9 +998,6 @@ class KernelFormatterHandler(DefaultHandler):
     def getvalue(self, result):
         self._output.writeline(f"return {result}")
         return self._output.getvalue()
-
-    def device_assert_async(self, cond, msg: str):
-        return f"ops.device_assert_async({cond}, {msg})"
 
 
 class WrapperHandler(DefaultHandler):
