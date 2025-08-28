@@ -594,6 +594,7 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 libtorch_nativert_sources = [
     "torch/nativert/ModelRunner.cpp",
+    "torch/nativert/executorch/module_shim_impl.cpp",
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",

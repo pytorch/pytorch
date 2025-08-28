@@ -39,7 +39,7 @@ namespace {
 
   TypedStableIValue from_ivalue(const c10::IValue& v) {
     if (v.isNone()) {
-      return TypedStableIValue{from(v.toNone()), StableIValueTag::None};
+      return TypedStableIValue{from(std::nullopt), StableIValueTag::None};
     } else if (v.isInt()) {
       return TypedStableIValue{from(v.toInt()), StableIValueTag::Int};
     } else if (v.isBool()) {
