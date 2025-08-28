@@ -13,11 +13,11 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
 
-from . import config, config as inductor_config
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .template_registry import register_template_heuristic
-from .utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
-from .virtualized import V
+from .. import config, config as inductor_config
+from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
+from ..virtualized import V
+from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
@@ -486,7 +486,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         if not self.should_scale_configs:
             return configs
-        from .runtime.runtime_utils import next_power_of_2
+        from ..runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
