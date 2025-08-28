@@ -7,11 +7,7 @@
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import (
-    requires_cuda_p2p_access,
-    run_tests,
-    skipIfRocm,
-)
+from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
 
 
 # So that tests are written in device-agnostic way

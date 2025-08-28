@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
     xfailIfLinux,
@@ -95,7 +94,7 @@ TEST_CUDA_IPC = (
     and sys.platform != "darwin"
     and sys.platform != "win32"
     and not IS_JETSON
-#    and not TEST_WITH_ROCM
+    #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1

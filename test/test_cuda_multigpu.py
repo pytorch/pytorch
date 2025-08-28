@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
-    skipIfRocm,
     TEST_CUDA,
     TestCase,
 )
