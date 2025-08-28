@@ -13,6 +13,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
+from torch._inductor.utils import OrderedSet
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.custom_graph_pass import CustomGraphModulePass
 from torch._inductor.codegen.common import (
@@ -305,6 +306,24 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
+
+class MockGraphHandler(GraphLowering):
+    """Minimal mock graph handler for testing virtualized context."""
+
+    def __init__(self, name_to_buffer=None):
+        import torch._inductor.sizevars
+
+        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
+        self.name_to_buffer = name_to_buffer or {}
+        self.graph_inputs = {}
+        self.mutated_buffers = OrderedSet()
+        self.removed_buffers = OrderedSet()
+        self.constants = {}
+        self.scheduler = None
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+        """Return default dtype for any buffer (for testing)."""
+        return torch.float32
 
 @contextlib.contextmanager
 def patch_inductor_backend(

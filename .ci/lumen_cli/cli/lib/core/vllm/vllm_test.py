@@ -61,6 +61,9 @@ class VllmTestRunner(BaseRunner):
         self.test_plan = ""
         self.test_type = TestInpuType.UNKNOWN
 
+        self.shard_id = args.shard_id
+        self.num_shards = args.num_shards
+
         if args.test_plan:
             self.test_plan = args.test_plan
             self.test_type = TestInpuType.TEST_PLAN
@@ -75,7 +78,7 @@ class VllmTestRunner(BaseRunner):
 
         # Match the structure of the artifacts.zip from vllm external build
         self.VLLM_TEST_WHLS_REGEX = [
-            "xformers/xformers*.whl",
+            "xformers/*.whl",
             "vllm/vllm*.whl",
             "flashinfer-python/flashinfer*.whl",
         ]
@@ -103,7 +106,16 @@ class VllmTestRunner(BaseRunner):
         self.prepare()
         with working_directory(self.work_directory):
             if self.test_type == TestInpuType.TEST_PLAN:
-                run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
+                if self.num_shards > 1:
+                    run_test_plan(
+                        self.test_plan,
+                        "vllm",
+                        sample_vllm_test_library(),
+                        self.shard_id,
+                        self.num_shards,
+                    )
+                else:
+                    run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
             else:
                 raise ValueError(f"Unknown test type {self.test_type}")
 
@@ -208,6 +220,8 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
+    pkgs_to_add = []
+
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
     kept_lines = [line for line in lines if not pattern.match(line)]
@@ -224,7 +238,11 @@ def preprocess_test_in(
     ]
 
     # Write back: header_lines + blank + kept_lines
-    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    out_lines = header_lines + [""] + kept_lines
+    if pkgs_to_add:
+        out_lines += [""] + pkgs_to_add
+
+    out = "\n".join(out_lines) + "\n"
     target_path.write_text(out)
     logger.info("[INFO] Updated %s", target_file)
 

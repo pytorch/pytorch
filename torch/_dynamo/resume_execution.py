@@ -22,6 +22,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Callable, cast, Optional
 
 from .bytecode_transformation import (
+    add_push_null,
     bytecode_from_template,
     create_call_function,
     create_instruction,
@@ -310,6 +311,9 @@ class ContinueExecutionCache:
         stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
         argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
         null_idxes: tuple[int, ...],
+        # mainly used to ensure distinct code objects per stack trace,
+        # which prevents excessive recompilation of inner frames
+        nested_code_objs: tuple[types.CodeType],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -330,6 +334,7 @@ class ContinueExecutionCache:
                 stack_ctx_vars,
                 argnames_ctx_vars,
                 null_idxes,
+                nested_code_objs,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -340,7 +345,8 @@ class ContinueExecutionCache:
         ) -> None:
             meta.instructions = copy.deepcopy(instructions)
 
-            args = [f"___stack{i}" for i in range(nstack)]
+            args = ["__nested_resume_fns", "__nested_frame_values"]
+            args += [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
@@ -368,11 +374,7 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [
-                    v
-                    for v in code_options["co_varnames"]
-                    if v not in args and v not in freevars
-                ]
+                + [v for v in code_options["co_varnames"] if v not in args]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
@@ -461,15 +463,67 @@ class ContinueExecutionCache:
                         ]
                     )
 
-            # Set is_tracing_resume_prologue back to allow graph breaks.
-            prefix.extend(
-                [
-                    create_instruction("LOAD_CONST", argval=False),
-                    create_instruction(
-                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
-                    ),
-                ]
-            )
+            # Call nested resume function
+            if nested_code_objs:
+                prefix.extend(
+                    [
+                        # set up __nested_resume_fns[-1] call
+                        *add_push_null(
+                            [
+                                create_instruction(
+                                    "LOAD_FAST", argval="__nested_resume_fns"
+                                ),
+                                create_instruction("LOAD_CONST", argval=-1),
+                                create_instruction("BINARY_SUBSCR"),
+                            ]
+                        ),
+                        # del __nested_resume_fns[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
+                        create_instruction("LOAD_CONST", argval=-1),
+                        create_instruction("DELETE_SUBSCR"),
+                        # load [__nested_resume_fns, __nested_frame_values]
+                        create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("BUILD_LIST", arg=2),
+                        # load __nested_frame_values[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("LOAD_CONST", argval=-1),
+                        create_instruction("BINARY_SUBSCR"),
+                        # create [
+                        #     __nested_resume_fns,
+                        #     __nested_frame_values,
+                        #     *__nested_frame_values[-1],
+                        # ]
+                        create_instruction("LIST_EXTEND", arg=1),
+                        # del __nested_frame_values[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("LOAD_CONST", argval=-1),
+                        create_instruction("DELETE_SUBSCR"),
+                        # delete __nested values
+                        create_instruction("DELETE_FAST", argval="__nested_resume_fns"),
+                        create_instruction(
+                            "DELETE_FAST", argval="__nested_frame_values"
+                        ),
+                        # Set is_tracing_resume_prologue back to allow graph breaks
+                        # in the nested resume
+                        create_instruction("LOAD_CONST", argval=False),
+                        create_instruction(
+                            "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                        ),
+                        # finish the call
+                        create_instruction("CALL_FUNCTION_EX", arg=0),
+                    ]
+                )
+            else:
+                # Set is_tracing_resume_prologue back to allow graph breaks after the jump
+                prefix.extend(
+                    [
+                        create_instruction("LOAD_CONST", argval=False),
+                        create_instruction(
+                            "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                        ),
+                    ]
+                )
 
             prefix.append(create_jump_absolute(target))
 
