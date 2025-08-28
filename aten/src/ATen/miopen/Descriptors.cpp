@@ -1,15 +1,12 @@
 #include <ATen/miopen/Descriptors.h>
-
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <iostream>
-#include <sstream>
 
-namespace at::native {
+namespace at { namespace native {
 
 namespace {
-
 
 inline miopenDataType_t getDataType(const at::Tensor& t) {
   auto scalar_type = t.scalar_type();
@@ -19,13 +16,16 @@ inline miopenDataType_t getDataType(const at::Tensor& t) {
     return miopenHalf;
   } else if (scalar_type == at::kBFloat16) {
     return miopenBFloat16;
+  } else {
+    TORCH_CHECK(
+        false,
+        "TensorDescriptor does not support ", scalar_type);
   }
-  TORCH_CHECK(false, "TensorDescriptor does not support ", scalar_type);
 }
 
-constexpr size_t MIOPEN_DIM_MAX = 5;
-
 } // anonymous namespace
+
+constexpr size_t MIOPEN_DIM_MAX = 5;
 
 void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad,
@@ -165,4 +165,4 @@ std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
 
 void FilterDescriptor::print() { std::cout << *this; }
 
-}
+}}

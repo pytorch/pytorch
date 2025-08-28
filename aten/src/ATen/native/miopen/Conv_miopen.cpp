@@ -1178,7 +1178,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
     grad_bias = miopen_convolution_backward_bias(grad_output);
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
 
 // ---------------------------------------------------------------------
@@ -1187,17 +1187,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
 //
 // ---------------------------------------------------------------------
 
-// NOTE [ Backward vs transpose convolutions ]
-//
-// Backward and transpose are algorithmically equivalent, but they
-// compute their geometry differently.  In a backwards, you knew what
-// the original size of the input tensor was, so you can cache that
-// geometry and fill it directly.  In transposed convolution, it is
-// more conventional to not explicitly specify the output (previously
-// input) size, and compute it.  This, however, leaves a degree of
-// freedom; this degree of freedom is resolved using the
-// output_padding parameter.  Both of these interfaces are equivalent,
-// but they are differently convenient depending on the use case.
+// See NOTE [ Backward vs transpose convolutions ] in aten/src/ATen/native/cudnn/ConvShared.cpp
 
 void raw_miopen_convolution_backward_input_out_32bit(
     const at::Tensor& grad_input,
