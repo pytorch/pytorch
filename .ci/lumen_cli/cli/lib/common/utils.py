@@ -4,11 +4,15 @@ General Utility helpers for CLI tasks.
 
 import logging
 import os
+import secrets
 import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional
+
+from cli.lib.common.path_helper import ensure_dir_exists
 
 
 logger = logging.getLogger(__name__)
@@ -115,3 +119,63 @@ def working_directory(path: str):
         yield
     finally:
         os.chdir(prev_cwd)
+
+
+def get_wheels(
+    output_dir: Path,
+    max_depth: Optional[int] = None,
+) -> list[str]:
+    """Return a list of wheels found in the given output directory."""
+    root = Path(output_dir)
+    if not root.exists():
+        return []
+    items = []
+    for dirpath, _, filenames in os.walk(root):
+        depth = Path(dirpath).relative_to(root).parts
+        if max_depth is not None and len(depth) > max_depth:
+            continue
+        for fname in sorted(filenames):
+            if fname.endswith(".whl"):
+                pkg = fname.split("-")[0]
+                relpath = str((Path(dirpath) / fname).relative_to(root))
+                items.append({"pkg": pkg, "relpath": relpath})
+    return items
+
+
+def attach_junitxml_if_pytest(
+    cmd: str,
+    dir: Optional[Path],
+    prefix: str,
+    *,
+    ensure_unique: bool = False,
+    resolve_xml: bool = False,
+) -> tuple[str, Optional[Path]]:
+    """
+    Append --junitxml=<ABS_PATH> to a pytest command string.
+    The XML filename is <prefix>_<random-hex>.xml.
+
+    - dir: target folder (will be created), if None, skip the junitxml attachment
+    - prefix: filename prefix (e.g., "junit" -> junit_ab12cd34.xml)
+    - ensure_unique: if True, regenerate a hash with 8 characters
+
+    Returns: (amended_cmd, abs_xml_path)
+    """
+    if "pytest" not in cmd:
+        return cmd, None
+    if dir is None:
+        return cmd, None
+    ensure_dir_exists(dir)
+
+    file_name_prefix = f"{prefix}"
+    if ensure_unique:
+        file_name_prefix += f"_{unique_hex(8)}"
+    xml_path = dir / f"{file_name_prefix}_junit_pytest.xml"
+    if resolve_xml:
+        xml_path = xml_path.resolve()
+
+    return f"{cmd} --junitxml={xml_path.as_posix()}", xml_path
+
+
+def unique_hex(length: int = 8) -> str:
+    """Return a random hex string of `length` characters."""
+    return secrets.token_hex((length + 1) // 2)[:length]

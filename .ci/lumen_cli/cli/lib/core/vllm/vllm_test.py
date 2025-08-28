@@ -11,6 +11,11 @@ from typing import Any
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
+from cli.lib.common.gh_summary import (
+    gh_summary_path,
+    summarize_failures_by_test_command,
+    write_gh_step_summary,
+)
 from cli.lib.common.path_helper import copy, remove_dir
 from cli.lib.common.pip_helper import (
     pip_install_first_match,
@@ -18,8 +23,8 @@ from cli.lib.common.pip_helper import (
     pkg_exists,
     run_python,
 )
-from cli.lib.common.utils import run_command, working_directory
-from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library
+from cli.lib.common.utils import ensure_dir_exists, run_command, working_directory
+from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library, summarize_build_info
 
 
 logger = logging.getLogger(__name__)
@@ -91,33 +96,54 @@ class VllmTestRunner(BaseRunner):
         logger.info("Display VllmTestParameters %s", params)
         self._set_envs(params)
 
-        clone_vllm(dst=self.work_directory)
+        vllm_commit = clone_vllm(dst=self.work_directory)
         with working_directory(self.work_directory):
             remove_dir(Path("vllm"))
             self._install_wheels(params)
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
         check_versions()
+        return vllm_commit
 
     def run(self):
         """
         main function to run vllm test
         """
-        self.prepare()
-        with working_directory(self.work_directory):
-            if self.test_type == TestInpuType.TEST_PLAN:
-                if self.num_shards > 1:
-                    run_test_plan(
-                        self.test_plan,
-                        "vllm",
-                        sample_vllm_test_library(),
-                        self.shard_id,
-                        self.num_shards,
-                    )
+        vllm_commit = self.prepare()
+
+        # prepare test summary
+        test_summary_path = Path("tmp_pytest_report").resolve()
+        ensure_dir_exists(test_summary_path)
+        test_summary_result = []
+
+        try:
+            with working_directory(self.work_directory):
+                if self.test_type == TestInpuType.TEST_PLAN:
+                    if self.num_shards > 1:
+                        run_test_plan(
+                            self.test_plan,
+                            "vllm",
+                            sample_vllm_test_library(),
+                            self.shard_id,
+                            self.num_shards,
+                            test_summary_path=test_summary_path,
+                            test_summary_result=test_summary_result,
+                        )
                 else:
-                    run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
-            else:
-                raise ValueError(f"Unknown test type {self.test_type}")
+                    raise ValueError(f"Unknown test type {self.test_type}")
+        except Exception as e:
+            logger.error("Failed to run vllm test: %s", e)
+        finally:
+            self.vllm_test_gh_summary(vllm_commit, test_summary_result)
+
+    def vllm_test_gh_summary(
+        self, vllm_commit: str, test_summary_results: list[tuple[str, str]]
+    ):
+        if not gh_summary_path():
+            return logger.info("Skipping, not detect GH Summary env var....")
+        logger.info("Generate GH Summary ...")
+        summarize_build_info(vllm_commit)
+        summarize_failures_by_test_command(test_summary_results)
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
@@ -220,6 +246,8 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
+    pkgs_to_add = []
+
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
     kept_lines = [line for line in lines if not pattern.match(line)]
@@ -236,7 +264,11 @@ def preprocess_test_in(
     ]
 
     # Write back: header_lines + blank + kept_lines
-    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    out_lines = header_lines + [""] + kept_lines
+    if pkgs_to_add:
+        out_lines += [""] + pkgs_to_add
+
+    out = "\n".join(out_lines) + "\n"
     target_path.write_text(out)
     logger.info("[INFO] Updated %s", target_file)
 
