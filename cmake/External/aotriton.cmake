@@ -43,10 +43,17 @@ if(NOT __AOTRITON_INCLUDED)
      "" # amd-gfx11xx
      "" # amd-gfx120x
      )
+  set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")
   set(__AOTRITON_Z "gz")
-  function(build_aotriton_from_source noimage project)
+  function(aotriton_build_from_source noimage project)
+    if(noimage)
+      SET(RECURSIVE "OFF")
+    else()
+      SET(RECURSIVE "ON")
+    endif()
     ExternalProject_Add(${project}
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
+      GIT_SUBMODULES_RECURSE ${RECURSIVE}
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
       INSTALL_DIR ${__AOTRITON_INSTALL_DIR}
@@ -65,7 +72,7 @@ if(NOT __AOTRITON_INCLUDED)
   endfunction()
 
   set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
-  function(download_aotriton_runtime index project)
+  function(aotriton_download_runtime index project)
     list(GET __AOTRITON_ROCM_LIST ${index} __AOTRITON_ROCM)
     list(GET __AOTRITON_MANYLINUX_LIST ${index} __AOTRITON_MANYLINUX)
     list(GET __AOTRITON_SHA256_LIST ${index} __AOTRITON_SHA256)
@@ -89,14 +96,16 @@ if(NOT __AOTRITON_INCLUDED)
     )
   endfunction()
 
-  function(download_aotriton_image image project)
+  function(aotriton_download_image image project)
     list(FIND __AOTRITON_IMAGE_LIST ${image} index)
     list(GET __AOTRITON_IMAGE_SHA256_LIST ${index} __AOTRITON_SHA256)
 
-    string(CONCAT __AOTRITON_FILE "aotriton-${__AOTRITON_VER}-images-"
-                                  "${image}.tar.${__AOTRITON_Z}")
-    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"  # @lint-ignore
-                                 "${__AOTRITON_VER}/${__AOTRITON_FILE}")
+    string(CONCAT __AOTRITON_FILE
+           "aotriton-${__AOTRITON_VER}-images-"
+           "${image}.tar.${__AOTRITON_Z}")
+    string(CONCAT __AOTRITON_URL
+           "${__AOTRITON_BASE_URL}"
+           "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
@@ -121,27 +130,32 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
-    build_aotriton_from_source(OFF aotriton_external)
+    aotriton_build_from_source(OFF aotriton_external)
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_EXTERN_PREFIX}")
   else()
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
     if (${__AOTRITON_RUNTIME_INDEX} LESS 0)
-      download_aotriton_runtime(${__AOTRITON_RUNTIME_INDEX} aotriton_runtime)
+      aotriton_download_runtime(${__AOTRITON_RUNTIME_INDEX} aotriton_runtime)
+      message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
+      Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
     else()
-      build_aotriton_from_source(ON aotriton_runtime)
+      aotriton_build_from_source(ON aotriton_runtime)
+      message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
+      Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
     endif()
     add_dependencies(__caffe2_aotriton aotriton_runtime)
-    message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
-    Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
+    set(__AOTRITON_CHAINED_IMAGE "aotriton_runtime")
     foreach(image ${__AOTRITON_IMAGE_LIST})
-      string(SUBSTRING ${image} 7 -1 gfx_number)
-      string(REPLACE "x" "." gfx_pattern ${gfx_number})
+      string(SUBSTRING ${image} 7 -1 gfx_pattern)
+      string(REPLACE "x" "." gfx_regex ${gfx_pattern})
       foreach(target ${PYTORCH_ROCM_ARCH})
-        if (target MATCHES ${gfx_pattern})
-          download_aotriton_image(${image} aotriton_image_${gfx_number})
-          add_dependencies(aotriton_runtime aotriton_image_${gfx_number})
+        if (target MATCHES ${gfx_regex})
+          set(__AOTRITON_DOWNLOAD_TARGET aotriton_image_${gfx_pattern})
+          aotriton_download_image(${image} ${__AOTRITON_DOWNLOAD_TARGET})
+          add_dependencies(${__AOTRITON_CHAINED_IMAGE} ${__AOTRITON_DOWNLOAD_TARGET})
+          set(__AOTRITON_CHAINED_IMAGE ${__AOTRITON_DOWNLOAD_TARGET})
           break()
         endif()
       endforeach()
