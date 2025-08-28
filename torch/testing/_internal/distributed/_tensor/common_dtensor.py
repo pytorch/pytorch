@@ -400,6 +400,7 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
+
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
@@ -417,13 +418,18 @@ class DTensorTestBase(MultiProcessTestCase):
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        if device_id is None:
+        if device_id is None and self.device_type == "cuda":
             device_id = (
-                torch.cuda.current_device()
-                if self.device_type == "cuda"
-                else self.rank % 8
+                torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
-        dist.barrier(device_ids=[device_id])
+
+        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+            print("self.device_type == cpu and torch._C._get_accelerator().type != cpu")
+            # NOTE:
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=[device_id])
+
         dist.destroy_process_group()
 
     def setUp(self) -> None:
