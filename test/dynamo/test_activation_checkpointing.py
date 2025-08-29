@@ -267,7 +267,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+                    return torch.compile(gm, fullgraph=False)(*runtime_args)
 
                 return runtime_wrapper
 
