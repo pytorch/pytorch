@@ -379,7 +379,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         sharding_strategy,
         enable_sharded_grad_scaler,
     ):
-        torch.get_device_module(device_type).set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         fsdp_models = [
             self._get_simple_model(
                 param_dtype=full_precision_param_dtype,
