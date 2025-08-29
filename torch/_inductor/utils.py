@@ -1561,12 +1561,16 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 @functools.lru_cache
 def get_max_num_sms() -> int:
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
+    if torch.xpu.is_available():
+        return get_max_num_sms()
     carveout = torch._C._get_sm_carveout_experimental()
     return get_max_num_sms() - (carveout if carveout is not None else 0)
 
