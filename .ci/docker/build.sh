@@ -173,8 +173,8 @@ case "$tag" in
     VISION=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     VISION=yes
     TRITON=yes
@@ -209,19 +209,19 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
     ;;
-  pytorch-linux-jammy-xpu-2025.0-py3)
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=11
-    VISION=yes
-    XPU_VERSION=2025.0
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-xpu-2025.1-py3)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-xpu-n-1-py3)
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.1
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-n-py3)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -234,8 +234,8 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12)
+    ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     CLANG_VERSION=12
     VISION=yes
@@ -246,8 +246,8 @@ case "$tag" in
     CLANG_VERSION=18
     VISION=yes
     ;;
-  pytorch-linux-jammy-py3.9-gcc11)
-    ANACONDA_PYTHON_VERSION=3.9
+  pytorch-linux-jammy-py3.10-gcc11)
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
