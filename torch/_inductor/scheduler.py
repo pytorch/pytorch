@@ -853,7 +853,7 @@ class BaseSchedulerNode:
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
 
-        if config.runtime_comp_profile_and_benchmark:
+        if config.runtime_estimations_comp_benchmark:
             ret = estimate_runtime_benchmark(self)
             if ret is not None:
                 return ret
@@ -935,7 +935,7 @@ def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
             time, _ = sched.benchmark_codegened_module(module=module, device=device)
         except Exception:
             # if there is dynamic shape in generated triton code, the benchmark will throw errors.
-            # we fall back such case
+            # falling back to 0 for such cases
             time = 0
         return time * 1e3
 
