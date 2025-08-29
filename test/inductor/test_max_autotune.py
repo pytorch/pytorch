@@ -3070,7 +3070,11 @@ class TestTuningProcessPool(TestCase):
         b = torch.randn(32, 32, device=GPU_TYPE)
 
         with config.patch(
-            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+            {
+              "max_autotune": True, 
+              "max_autotune_gemm_backends": "TRITON",
+              "triton.enable_native_matmul": False,
+            }
         ):
             torch.compile(mm)(a, b)
 
