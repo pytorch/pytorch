@@ -358,6 +358,7 @@ static inline int C10_WARP_SIZE_INTERNAL() {
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -395,6 +396,34 @@ __host__ __device__
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
   }
+// CUDA_KERNEL_ASSERT_PRINTF is optionally defined because of performance
+// implications, even when the assert is not triggered. See discussion in:
+// https://github.com/pytorch/pytorch/pull/160129
+#ifdef ENABLE_CUDA_KERNEL_ASSERT_PRINTF
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                     \
+  if (C10_UNLIKELY(!(cond))) {                                        \
+    (void)(printf(                                                    \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(           \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: " \
+                      "Assertion failed: `" #cond "`: " msg "\n",     \
+        __func__,                                                     \
+        blockIdx.x,                                                   \
+        blockIdx.y,                                                   \
+        blockIdx.z,                                                   \
+        threadIdx.x,                                                  \
+        threadIdx.y,                                                  \
+        threadIdx.z,                                                  \
+        ##__VA_ARGS__));                                              \
+    (void)(_wassert(                                                  \
+               _CRT_WIDE(#cond),                                      \
+               _CRT_WIDE(__FILE__),                                   \
+               static_cast<unsigned>(__LINE__)),                      \
+           0);                                                        \
+  }
+#else
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  CUDA_KERNEL_ASSERT_MSG((cond), (msg))
+#endif // ENABLE_CUDA_KERNEL_ASSERT_PRINTF
 #define SYCL_KERNEL_ASSERT(cond)                 \
   if (C10_UNLIKELY(!(cond))) {                   \
     (void)(_wassert(                             \
@@ -454,6 +483,10 @@ __host__ __device__
   if C10_UNLIKELY (!(cond)) {             \
     abort();                              \
   }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  if C10_UNLIKELY (!(cond)) {                     \
+    abort();                                      \
+  }
 #define SYCL_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
@@ -469,6 +502,34 @@ __host__ __device__
     __assert_fail(                                                     \
         msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+// CUDA_KERNEL_ASSERT_PRINTF is optionally defined because of performance
+// implications, even when the assert is not triggered. See discussion in:
+// https://github.com/pytorch/pytorch/pull/160129
+#ifdef ENABLE_CUDA_KERNEL_ASSERT_PRINTF
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                        \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    printf(                                                            \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
+            "Assertion failed: `" #cond "`: " msg "\n",                \
+        __func__,                                                      \
+        blockIdx.x,                                                    \
+        blockIdx.y,                                                    \
+        blockIdx.z,                                                    \
+        threadIdx.x,                                                   \
+        threadIdx.y,                                                   \
+        threadIdx.z,                                                   \
+        ##__VA_ARGS__); \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#else
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  CUDA_KERNEL_ASSERT_MSG(                         \
+      (cond),                                     \
+      (msg                                        \
+       " (recompile with -DENABLE_CUDA_KERNEL_ASSERT_PRINTF to see values)"))
+#endif // ENABLE_CUDA_KERNEL_ASSERT_PRINTF
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
