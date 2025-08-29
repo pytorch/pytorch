@@ -62,7 +62,6 @@ runs:
       shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
-      shell: bash
       run: |
         cd "${GITHUB_WORKSPACE}"
         if [ -n "${NO_SUDO}" ]; then
