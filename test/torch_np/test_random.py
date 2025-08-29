@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-"""Light smoke test switching between numpy to pytorch random streams.
-"""
+"""Light smoke test switching between numpy to pytorch random streams."""
+
 from contextlib import contextmanager
 from functools import partial
 

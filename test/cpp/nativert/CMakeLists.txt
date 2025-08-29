@@ -5,9 +5,12 @@ file(GLOB_RECURSE NATIVERT_ALL_TEST_FILES "${NATIVERT_TEST_ROOT}/test_*.cpp")
 # Build the cpp gtest binary containing the cpp-only tests.
 set(NATIVERT_TEST_SRCS
   ${NATIVERT_ALL_TEST_FILES}
+  ${TORCH_ROOT}/torch/nativert/ModelRunner.cpp
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Graph.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/GraphUtils.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Serialization.cpp
   ${TORCH_ROOT}/torch/nativert/executor/OpKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
@@ -21,6 +24,22 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/executor/memory/GreedyBySize.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/Bump.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/DisjointStorageGroups.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutPlanner.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutManager.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/AliasAnalyzer.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/Executor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelFactory.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/ConstantFolder.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/GraphExecutorBase.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/SerialGraphExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/ParallelGraphExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/AutoFunctionalizeKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/CallTorchBindKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/HigherOrderKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/SubgraphRewriter.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/GraphPasses.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
 )
 
 add_executable(test_nativert

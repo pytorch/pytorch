@@ -201,7 +201,7 @@ class DimOrder(enum.Enum):
 
 
 class Operand(NamedTuple):
-    """Represenation of an NNAPI operand."""
+    """Representation of an NNAPI operand."""
 
     # NNAPI operand type.  One of NNAPI_OperandCode.
     # TODO: Make this an enum.

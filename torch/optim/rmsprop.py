@@ -55,18 +55,18 @@ class RMSprop(Optimizer):  # noqa: D101
         if not 0.0 <= alpha:
             raise ValueError(f"Invalid alpha value: {alpha}")
 
-        defaults = dict(
-            lr=lr,
-            momentum=momentum,
-            alpha=alpha,
-            eps=eps,
-            centered=centered,
-            weight_decay=weight_decay,
-            capturable=capturable,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "momentum": momentum,
+            "alpha": alpha,
+            "eps": eps,
+            "centered": centered,
+            "weight_decay": weight_decay,
+            "capturable": capturable,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105
@@ -420,7 +420,7 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            # Reuse the intermediate memory (grouped_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:

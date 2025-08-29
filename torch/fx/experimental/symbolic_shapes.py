@@ -56,6 +56,7 @@ import torch.utils._pytree as pytree
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
+from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
@@ -1146,7 +1147,10 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
-    elif isinstance(a, torch.Tensor):
+    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
+        unwrapped_tensor = get_unwrapped(a)
+        r.update(go(unwrapped_tensor, path))
+    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
@@ -1282,6 +1286,7 @@ def compute_unbacked_bindings(
         return None
 
     fs = shape_env.pending_fresh_unbacked_symbols
+
     pending = set(fs)
     if not pending:
         return None
@@ -1333,7 +1338,7 @@ def compute_unbacked_bindings(
                     # If old_s is not an unbacked_symbol,
                     # we assume that the original unbacked symbol is replaced
                     # by a backed symbol (old_s). This can happen
-                    # when this node reuses the orignal symbol (due to memoi)
+                    # when this node reuses the original symbol (due to memoi)
                     # and the original symbol gets replaced by the backed symbol.
                     # When this happens we just replace new_s by the old_s
                     # because we know the value is the same.
@@ -1463,7 +1468,6 @@ def statically_known_true(x: BoolLikeType) -> bool:
     if not isinstance(x, SymBool):
         assert isinstance(x, bool)
         return x
-
     result = _static_eval_sym_bool(x)
     if result is None:
         return False
@@ -2375,7 +2379,7 @@ def _maybe_evaluate_static_worker(
 
         # Note:
         #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
-        #   Sympy might give unexepected results when comparing an integer with a non-integer
+        #   Sympy might give unexpected results when comparing an integer with a non-integer
         #   Therefore, we cast offset to int here.
         #   For example:
         #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
@@ -3383,7 +3387,7 @@ class DimConstraints:
         constraint_violation_error: object,
         forced_specializations: dict[str, str],
     ) -> str:
-        """Format a message for constraint violation erros"""
+        """Format a message for constraint violation errors"""
         from torch.export.dynamic_shapes import _get_dim_name_mapping
 
         if not self._dcp.source_name_to_debug_name:
@@ -3849,8 +3853,7 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
-        self.user_specialization_stacks: dict[Source, traceback.StackSummary] = {}
-        self.framework_specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
         self.trace_asserts = trace_asserts
 
@@ -3941,7 +3944,7 @@ class ShapeEnv:
                 added_replacements[axiom.lhs] = axiom.rhs
         self.axioms.update(new_axioms)
 
-        # We need to freeze the ShapeEnv becuase any additional modification of
+        # We need to freeze the ShapeEnv because any additional modification of
         # the ShapeEnv will cause unsoundness for subsequent specialization calls.
         self.frozen = True
         try:
@@ -3981,8 +3984,7 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "user_specialization_stacks",
-            "framework_specialization_stacks",
+            "specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4368,11 +4370,15 @@ class ShapeEnv:
         tensor_size: Sequence[IntLikeType],
         source: Source,
         symbolic_context: SymbolicContext,
+        hint_overrides: Optional[dict[int, int]] = None,
     ) -> list[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), (
             f"Expect size to be a plain tuple of ints but got {tensor_size}"
         )
         from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        if not hint_overrides:
+            hint_overrides = {}
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
@@ -4380,7 +4386,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
-                val,
+                val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
@@ -4476,7 +4482,7 @@ class ShapeEnv:
 
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnessary shape speciliazation for y.
+    # we may have an unnecessary shape speciliazation for y.
     def _maybe_specialize_sym_int_with_hint(
         self, maybe_sym: IntLikeType
     ) -> IntLikeType:
@@ -4500,12 +4506,16 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        hint_overrides: Optional[dict[int, int]] = None,
     ) -> tuple[
         tuple[IntLikeType, ...],
         tuple[IntLikeType, ...],
         IntLikeType,
     ]:
         dim = len(ex_size)
+
+        if not hint_overrides:
+            hint_overrides = {}
 
         # Reimplement the legacy behavior
         if symbolic_context is None:
@@ -4561,7 +4571,7 @@ class ShapeEnv:
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 
         size: list[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
-            ex_size, source, symbolic_context
+            ex_size, source, symbolic_context, hint_overrides=hint_overrides
         )
         stride = self._compute_symbolic_stride(
             source,
@@ -4577,7 +4587,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint,
+                hint=hint if i not in hint_overrides else hint_overrides[i],
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -4714,7 +4724,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[int | float | bool],
         source: Optional[Source] = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
@@ -5252,7 +5262,7 @@ class ShapeEnv:
         # calls on this new instance. Finally, it will check whether this new instance
         # has equal state.
         #
-        # It's important that we do it in the begining of this function, since it modifies
+        # It's important that we do it in the beginning of this function, since it modifies
         # self.dim_constraints through its execution. Changes that happen in this method
         # aren't interesting, since this is the function call we wish to reproduce at the
         # end. If we wish to simply reproduce ShapeEnv instances even after this call,
@@ -5537,20 +5547,12 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
-                    user_stack = self.user_specialization_stacks.get(source, None)
-                    framework_stack = self.framework_specialization_stacks.get(
-                        source, None
-                    )
+                    user_stack = self.specialization_stacks.get(source, None)
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
                         f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
                         f"replace it with either Dim.STATIC or Dim.AUTO."
-                        + (
-                            "\n\nFramework stack:\n" + "".join(framework_stack.format())
-                            if framework_stack
-                            else ""
-                        )
                         + (
                             "\n\nUser stack:\n" + "".join(user_stack.format())
                             if user_stack
@@ -6257,7 +6259,7 @@ class ShapeEnv:
 
         Use compute_hint == True if you are trying to compute a non-binding
         hint for the particular hint values of backed and unbacked SymInts,
-        e.g., if s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
+        e.g., if s0 happens to be 3 this run, compute_hint will substitute s0 with 3.
         """
 
         # axioms with compute hint NYE
@@ -6274,11 +6276,11 @@ class ShapeEnv:
                 return
             self._resimplify_floor_div_axioms = False
             new_items = {}
-            for k, v in axioms.items():
+            for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
-                # TODO try to get rid of CleanDiv since it breaks the invariant thats simplifications of sympy
+                # TODO try to get rid of CleanDiv since it breaks the invariant that's simplifications of sympy
                 # expressions only depend on the expression itself.
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
@@ -6359,6 +6361,24 @@ class ShapeEnv:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
+
+        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
+        # expression when creating contiguous strides.
+        if not size_oblivious:
+            min_max_replacements = {}
+            for atom in expr.atoms(Max):  # type: ignore[has-type]
+                if len(atom.args) > 2:
+                    continue
+                a, b = atom.args
+                if b == 1 or b == 0:
+                    a, b = b, a
+
+                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
+                    min_max_replacements[atom] = b
+                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
+                    min_max_replacements[atom] = b
+            if min_max_replacements:
+                expr = expr.xreplace(min_max_replacements)
 
         if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
             min_max_replacements = {}
@@ -6773,10 +6793,7 @@ class ShapeEnv:
 
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
-                    self.user_specialization_stacks[source] = user_tb
-                self.framework_specialization_stacks[source] = (
-                    CapturedTraceback.extract(cpp=True)
-                )
+                    self.specialization_stacks[source] = user_tb
 
             if config.print_specializations:
                 self.log.warning(
@@ -7866,7 +7883,9 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        fake_mode = detect_fake_mode()
+        assert fake_mode is not None
+        rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 

@@ -116,7 +116,7 @@ def bundle_inputs(
     )
 
     # The above cloning function returns a torch._C.scriptmodule and we need a torch.jit.scriptmodule.
-    # Fortunately theres a function in _recursive that does exactly that conversion.
+    # Fortunately there is a function in _recursive that does exactly that conversion.
     cloned_module = wrap_cpp_module(clone)
     if isinstance(inputs, dict):
         assert isinstance(info, dict) or info is None

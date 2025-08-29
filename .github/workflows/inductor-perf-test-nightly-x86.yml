@@ -1,6 +1,9 @@
 name: inductor-perf-nightly-x86
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/inductor-perf-test-nightly-x86.yml
   schedule:
     # - cron: 0 7 * * 1-6
     # - cron: 0 7 * * 0
@@ -40,6 +43,11 @@ on:
         required: false
         type: boolean
         default: false
+      freezing:
+        description: Run freezing?
+        required: false
+        type: boolean
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -47,10 +55,12 @@ on:
         default: inductor_huggingface_perf_cpu_x86,inductor_timm_perf_cpu_x86,inductor_torchbench_perf_cpu_x86
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-label-type:
@@ -88,17 +98,17 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_x86", shard: 4, num_shards: 4, runner: "linux.24xl.spr-metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
-
-  linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly:
+  linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly-freezing:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -108,7 +118,6 @@ jobs:
       monitor-data-collect-interval: 4
     secrets: inherit
 
-
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
@@ -116,7 +125,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-freezing-${{ inputs.freezing }}
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720

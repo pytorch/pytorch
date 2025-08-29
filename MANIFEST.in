@@ -1,31 +1,50 @@
-include MANIFEST.in
+# Reference: https://setuptools.pypa.io/en/latest/userguide/miscellaneous.html
+
+# Include source files in SDist
 include CMakeLists.txt
-include CITATION.cff
-include LICENSE
-include NOTICE
-include .gitmodules
-include build_variables.bzl
-include mypy.ini
-include requirements.txt
-include ufunc_defs.bzl
+include *.bzl *.bazel .bazel* BUILD *.BUILD BUILD.* WORKSPACE
+include BUCK BUCK.*
+include requirements*.txt
 include version.txt
-recursive-include android *.*
-recursive-include aten *.*
-recursive-include binaries *.*
-recursive-include c10 *.*
-recursive-include caffe2 *.*
-recursive-include cmake *.*
-recursive-include torch *.*
-recursive-include tools *.*
-recursive-include test *.*
-recursive-include docs *.*
-recursive-include ios *.*
-recursive-include third_party *
-recursive-include test *.*
-recursive-include benchmarks *.*
-recursive-include scripts *.*
-recursive-include mypy_plugins *.*
-recursive-include modules *.*
-recursive-include functorch *.*
+include [Mm]akefile *.[Mm]akefile [Mm]akefile.*
+include [Dd]ockerfile *.[Dd]ockerfile [Dd]ockerfile.* .dockerignore
+graft android
+graft aten
+graft binaries
+graft c10
+graft caffe2
+graft cmake
+graft functorch
+graft third_party
+graft tools
+graft torch
+graft torchgen
+# FIXME: torch-xla build during codegen will fail if include this file in wheel
+exclude torchgen/BUILD.bazel
+
+# Misc files and directories in SDist
+include *.md
+include CITATION.cff
+include LICENSE NOTICE
+include mypy*.ini
+graft benchmarks
+graft docs
+graft mypy_plugins
+graft scripts
+
+# Misc files needed for custom setuptools command
+include .gitignore
+include .gitmodules
+
+# Include test suites in SDist
+graft test
+include pytest.ini
+include .coveragerc
+
+# Prune generated/compiled files
+prune torchgen/packaged
 prune */__pycache__
-global-exclude *.o *.so *.dylib *.a .git *.pyc *.swp
+global-exclude *.o *.obj *.so *.a *.dylib *.pxd *.dll *.lib *.py[cod]
+
+prune */.git
+global-exclude .git *~ *.swp

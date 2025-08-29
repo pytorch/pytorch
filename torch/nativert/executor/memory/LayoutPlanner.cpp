@@ -1,6 +1,5 @@
 #include <torch/nativert/executor/memory/LayoutPlanner.h>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/Enumerate.h>
 
 #include <torch/nativert/executor/ExecutionPlanner.h>
@@ -16,9 +15,18 @@ LayoutPlanner::LayoutPlanner(
     const c10::FastMap<std::string /* target */, FunctionSchema>& kernelSchemas,
     const std::vector<bool>& persistentValues,
     const torch::nativert::LayoutPlannerSettings& settings)
-    : managed_values_(graph.values().size()), settings_(settings) {
-  auto value_to_allocation_spec = c10::FastMap<const Value*, AllocationSpec>{};
+    : managed_values_(graph.values().size()),
+#ifndef NDEBUG
+      alias_analyzer_(graph, kernelSchemas),
+#endif
+      settings_(settings) {
+#ifndef NDEBUG
+  auto& alias_analyzer = alias_analyzer_;
+#else
   auto alias_analyzer = AliasAnalyzer(graph, kernelSchemas);
+#endif
+
+  auto value_to_allocation_spec = c10::FastMap<const Value*, AllocationSpec>{};
 
   std::set<const Value*> input_values_set_;
   for (const auto* nv : graph.userInputs()) {
@@ -80,7 +88,7 @@ LayoutPlanner::LayoutPlanner(
         continue;
       }
 
-      if (bool is_consumed = output->users().size() > 0; !is_consumed) {
+      if (bool is_not_consumed = output->users().empty(); is_not_consumed) {
         VLOG(1) << "not planning " << output->name() << " as it has no users";
         continue;
       }
@@ -124,7 +132,7 @@ LayoutPlanner::LayoutPlanner(
     }
   }
 
-  TORCH_CHECK_NOTNULL(algorithm_);
+  TORCH_CHECK(algorithm_ != nullptr, "algorithm can't be null");
 
   initialize_vectors(value_to_allocation_spec);
 
@@ -150,11 +158,13 @@ void LayoutPlanner::initialize_vectors(
 
   size_t i = 0;
   for (auto& [v, spec] : value_to_allocation_spec) {
-    TORCH_CHECK_LE(spec.lifetime.start, spec.lifetime.end);
+    TORCH_CHECK(
+        spec.lifetime.start <= spec.lifetime.end,
+        "lifetime start must be before lifetime end");
 
     planned_values_[i] = v->id();
     planned_values_historical_max_nbytes_[i] = spec.size;
-    planned_allocation_specs_[i] = std::move(spec);
+    planned_allocation_specs_[i] = spec;
 
     i++;
   }
@@ -173,14 +183,12 @@ const std::vector<ValueId>& LayoutPlanner::get_unplanned_values() const {
 }
 
 void LayoutPlanner::start_worker_if_not_started() {
-  static c10::once_flag flag;
-  c10::call_once(flag, [&]() {
+  c10::call_once(worker_once_flag_, [&]() {
     // make sure plan is populated by the time this
     // returns for the first time :P
     create_plan();
-    worker_ = std::thread([this]() {
-      run_periodic(std::bind(&LayoutPlanner::create_plan, this));
-    });
+    worker_ =
+        std::thread([this]() { run_periodic([this] { create_plan(); }); });
   });
 }
 
@@ -206,13 +214,21 @@ void LayoutPlanner::run_periodic(const std::function<void()>& f) {
 void LayoutPlanner::create_plan() {
   // update spec sizes to use historical maximums set
   // by execution frames before creating the new plan
+  bool updated = false;
   for (const auto i : c10::irange(planned_allocation_specs_.size())) {
     auto& spec = planned_allocation_specs_[i];
-    spec.size = planned_values_historical_max_nbytes_[i].load(
-        std::memory_order_relaxed);
+    if (const auto new_size = planned_values_historical_max_nbytes_[i].load(
+            std::memory_order_relaxed);
+        new_size > spec.size) {
+      spec.size = new_size;
+      updated = true;
+    }
   }
-  plan_.write([p_new = (*algorithm_)(planned_allocation_specs_)](
-                  LayoutPlan& plan) { plan = p_new; });
+
+  if (updated) {
+    plan_.write([p_new = (*algorithm_)(planned_allocation_specs_)](
+                    LayoutPlan& plan) { plan = p_new; });
+  }
 }
 
 } // namespace torch::nativert

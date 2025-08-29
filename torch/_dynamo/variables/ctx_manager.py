@@ -197,6 +197,34 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    def __init__(self, ctx_manager_vt, mod):
+        self.cm_vt = ctx_manager_vt
+        self.mod = mod
+        # We don't call super().__init__() because we're delegating most methods to cm_vt
+
+    def enter(self, tx: "InstructionTranslator"):
+        # Custom enter implementation with side effects
+
+        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+        return self.cm_vt.enter(tx)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        # Custom exit implementation with side effects
+        x = self.cm_vt.exit(tx, *args)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+        return x
+
+    # Forward all other method calls to self.cm_vt
+    def __getattr__(self, name):
+        # This will be called for any attribute not explicitly defined in this class
+        return getattr(self.cm_vt, name)
+
+
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requires grad"""
 
@@ -495,7 +523,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.proxy = tx.output.create_node(
             "call_function",
-            torch._C._functorch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_increment_nesting,
             (batch_size_node, randomness),
             {},
         )
@@ -504,7 +532,10 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup()
         tx.output.create_node(
-            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
+            "call_function",
+            torch._functorch.predispatch._vmap_decrement_nesting,
+            (),
+            {},
         )
         return variables.ConstantVariable.create(None)
 
@@ -779,10 +810,8 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
         )
         torch._C._set_deterministic_algorithms(value)
 
@@ -914,7 +943,8 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        none = variables.ConstantVariable.create(None)
+        return self.target_values if self.target_values else none
 
     def exit(self, tx: "InstructionTranslator", *args):
         return variables.ConstantVariable.create(None)

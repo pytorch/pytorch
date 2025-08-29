@@ -34,7 +34,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
-            "//torch/standalone:torch_standalone_headers",
+            "//torch/headeronly:torch_headeronly",
             "//c10/macros",
             "@fmt",
             "@moodycamel//:moodycamel",
@@ -58,6 +58,9 @@ def define_targets(rules):
         name = "bit_cast",
         hdrs = ["bit_cast.h"],
         visibility = ["//:__subpackages__"],
+        deps = [
+            "//c10/macros",
+        ],
     )
 
     rules.cc_library(
@@ -92,7 +95,7 @@ def define_targets(rules):
             ],
         ),
         deps = [
-            "//torch/standalone:torch_standalone_headers",
+            "//torch/headeronly:torch_headeronly",
         ],
         visibility = ["//visibility:public"],
     )

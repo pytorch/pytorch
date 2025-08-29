@@ -1004,7 +1004,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-        # cat and split lenghts are different
+        # cat and split lengths are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
@@ -1353,6 +1353,22 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_addmm_dtype_mismatch(self):
+        a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
+        a = a.to(dtype=torch.float16)
+
+        w = torch.randn(1024, 1024, device=GPU_TYPE)
+
+        def func():
+            x = torch.ones(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+            x = a(x)
+            x = x + w
+            return x
+
+        actual, (code) = run_and_get_code(torch.compile(func))
+        self.assertEqual(actual, func())
+        FileCheck().check_not("addmm").run(code[0])
 
     def test_replace_mul_zero(self):
         def test(x, y):
@@ -1735,6 +1751,18 @@ class TestPatternMatcher(TestCase):
         # print(my_func_static(*inputs))
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
+
+    def test_fwd_only_generate_original_aten_meta(self):
+        def f(x):
+            return torch.ops.aten.sigmoid(x)
+
+        sample_input = torch.randn(3, 5, device=GPU_TYPE)
+        gm_with_meta = fwd_only(f, args=[sample_input])
+        sigmoid_nodes = gm_with_meta.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sigmoid.default
+        )
+        self.assertEqual(len(sigmoid_nodes), 1)
+        self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
 
 if __name__ == "__main__":

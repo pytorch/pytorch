@@ -169,6 +169,10 @@ static void unfolded2d_acc_channels_last(
 
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
+#if defined(__GNUC__) && __GNUC__ == 14 && defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_BF16)
+// Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE without BF16
+__attribute__((optimize("no-tree-vectorize")))
+#endif
 void unfolded2d_acc_kernel(
     ScalarType dtype,
     void *finput_data,
