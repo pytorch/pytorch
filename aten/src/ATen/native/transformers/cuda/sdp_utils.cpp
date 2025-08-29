@@ -30,6 +30,8 @@
 #include <aotriton/flash.h>
 #define USE_ROCM_ATTENTION 1
 #endif
+#else
+#define USE_ROCM_ATTENTION 0
 #endif
 
 // Avoid potential compiler -Wall -Werror complains undefined macro
@@ -131,7 +133,7 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
-#if USE_ROCM_ATTENTION && AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
+#if USE_ROCM_ATTENTION
   // AOTriton 0.9+ supports head_dim up to 512
   const static auto max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -142,7 +144,11 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
       return 256;
     }
 #endif // AOTriton 0.11
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
     return 512;
+#else
+    return 256;
+#endif
   }();
   const auto max_size = c10::SymInt(max_hdim);
 #else
