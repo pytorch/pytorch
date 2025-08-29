@@ -3,14 +3,14 @@
 
 namespace {
 
-class MemoryManagerTest : public ::testing::Test {
+class MemoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
     orSetDevice(0);
   }
 };
 
-TEST_F(MemoryManagerTest, AllocateAndFreeDevice) {
+TEST_F(MemoryTest, AllocateAndFreeDevice) {
   void* ptr = nullptr;
   EXPECT_EQ(orMalloc(&ptr, 4096), orSuccess);
   EXPECT_NE(ptr, nullptr);
@@ -18,7 +18,7 @@ TEST_F(MemoryManagerTest, AllocateAndFreeDevice) {
   EXPECT_EQ(orFree(ptr), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, AllocateAndFreeHost) {
+TEST_F(MemoryTest, AllocateAndFreeHost) {
   void* ptr = nullptr;
   EXPECT_EQ(orMallocHost(&ptr, 8192), orSuccess);
   EXPECT_NE(ptr, nullptr);
@@ -26,18 +26,18 @@ TEST_F(MemoryManagerTest, AllocateAndFreeHost) {
   EXPECT_EQ(orFreeHost(ptr), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, AllocateNullptr) {
+TEST_F(MemoryTest, AllocateNullptr) {
   EXPECT_EQ(orMalloc(nullptr, 4096), orErrorUnknown);
   EXPECT_EQ(orMallocHost(nullptr, 4096), orErrorUnknown);
 }
 
-TEST_F(MemoryManagerTest, AllocateZeroSize) {
+TEST_F(MemoryTest, AllocateZeroSize) {
   void* ptr = nullptr;
   EXPECT_EQ(orMalloc(&ptr, 0), orErrorUnknown);
   EXPECT_EQ(orMallocHost(&ptr, 0), orErrorUnknown);
 }
 
-TEST_F(MemoryManagerTest, MemcpyHostToDevice) {
+TEST_F(MemoryTest, MemcpyHostToDevice) {
   char host_src[] = "data";
   char host_dst[5] = {};
 
@@ -52,7 +52,7 @@ TEST_F(MemoryManagerTest, MemcpyHostToDevice) {
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, MemcpyDeviceToDevice) {
+TEST_F(MemoryTest, MemcpyDeviceToDevice) {
   const char host_src[5] = "data";
   char host_dst[5] = {};
   void *dev_dst1 = nullptr, *dev_dst2 = nullptr;
@@ -70,7 +70,7 @@ TEST_F(MemoryManagerTest, MemcpyDeviceToDevice) {
   EXPECT_EQ(orFree(dev_dst2), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, MemcpyInvalidKind) {
+TEST_F(MemoryTest, MemcpyInvalidKind) {
   char host_ptr[5] = "data";
   void* dev_ptr = nullptr;
 
@@ -86,7 +86,7 @@ TEST_F(MemoryManagerTest, MemcpyInvalidKind) {
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, PointerAttributes) {
+TEST_F(MemoryTest, PointerAttributes) {
   void* dev_ptr = nullptr;
   EXPECT_EQ(orMalloc(&dev_ptr, 32), orSuccess);
 
@@ -102,7 +102,7 @@ TEST_F(MemoryManagerTest, PointerAttributes) {
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
 }
 
-TEST_F(MemoryManagerTest, ProtectUnprotectDevice) {
+TEST_F(MemoryTest, ProtectUnprotectDevice) {
   void* dev_ptr = nullptr;
   EXPECT_EQ(orMalloc(&dev_ptr, 64), orSuccess);
 
