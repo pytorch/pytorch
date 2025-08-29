@@ -31,7 +31,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
+def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
        Since the number of splits is calculated based of the the number of batch and head dims
@@ -60,6 +60,15 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
                 sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
             )
         )
+
+    Hq = query.get_size()[1]
+    Hkv = value.get_size()[1]
+    ratio = Hq // Hkv
+
+    pw_of_two = V.graph.sizevars.guard_or_false(
+        sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
+    )
+
     return (
         not force_flex
         and short_query_length
@@ -67,6 +76,7 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
         and static_num_heads
         and non_zero_length
         and valid_block_mask_num_heads
+        and pw_of_two
     )
 
 

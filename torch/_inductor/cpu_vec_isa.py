@@ -210,6 +210,9 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAMX(VecAVX512):
     _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+    # check amx_fp16 separately since it is not always supported when amx is supported
+    # amx_fp16 intrinsic compilation need gcc >=13 on platforms which support amx_fp16
+    _is_amx_fp16_supported = False
 
     def __str__(self) -> str:
         return super().__str__() + " amx_tile"
@@ -237,14 +240,37 @@ extern "C" void __amx_chk_kernel() {
 }
 """
 
+    _amx_fp16_code = _amx_code.replace("_tile_dpbf16ps", "_tile_dpfp16ps")
+
     @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
                 return False
             if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
+                # check amx-fp16 as well when check amx
+                if torch.cpu._is_amx_fp16_supported():
+                    # save _arch_flags
+                    base_flags = self._arch_flags
+                    # temporarily change _arch_flags for amx-fp16 check_build
+                    self._arch_flags += " -mamx-fp16"
+                    if self.check_build(VecAMX._amx_fp16_code):
+                        self._is_amx_fp16_supported = True
+                    # restore _arch_flags
+                    self._arch_flags = base_flags
+
                 return True
         return False
+
+    @functools.lru_cache(None)  # noqa: B019
+    def is_amx_fp16_supported(self) -> bool:
+        return self._is_amx_fp16_supported
+
+    def build_arch_flags(self) -> str:
+        if self._is_amx_fp16_supported:
+            return self._arch_flags + " -mamx-fp16"
+        else:
+            return self._arch_flags
 
 
 @dataclasses.dataclass
