@@ -1901,8 +1901,8 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
-        init = torch.randn(4, 4, 4)
-        xs = torch.randn(scan_length, 4, 4, 4)
+        init = torch.randn(4, 4, 4, dtype=torch.float64)
+        xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)
         self._run_test(
             model=ScanModels.ScanInCond(reverse=reverse, dim=dim),
