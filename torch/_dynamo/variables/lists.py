@@ -423,6 +423,12 @@ class RangeVariable(BaseListVariable):
 
     def call_method(self, tx, name, args, kwargs):
         if name == "__iter__":
+            if not all(var.is_python_constant() for var in self.items):
+                # Can't represent a `range_iterator` without well defined bounds
+                return variables.misc.DelayGraphBreakVariable(
+                    source=AttrSource(self.source, "__iter__"),
+                    msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
+                )
             return RangeIteratorVariable(
                 self.start(), self.stop(), self.step(), self.range_length()
             )
