@@ -3339,6 +3339,10 @@ class TestMPS(TestCaseMPS):
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
 
+        with self.assertRaisesRegex(RuntimeError, r"check the repeats tensor values"):
+            torch.repeat_interleave(torch.rand((7, 2, 6, 4, 8, 3), device=device),
+                                    torch.tensor([6773413839565225984], device=device))
+
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
         y1_v1 = torch.repeat_interleave(y, 2)
