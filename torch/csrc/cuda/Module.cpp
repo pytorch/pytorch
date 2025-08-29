@@ -422,15 +422,6 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
-    PyObject* _unused,
-    PyObject* env) {
-  HANDLE_TH_ERRORS
-  c10::CachingAllocator::setAllocatorSettings(THPUtils_unpackString(env));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
@@ -2050,10 +2041,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
-     METH_O,
-     nullptr},
-    {"_cuda_cudaCachingAllocator_set_allocator_settings",
-     THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {"_cuda_getAllocatorBackend",
