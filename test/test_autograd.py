@@ -3778,6 +3778,7 @@ class TestAutograd(TestCase):
             f.metadata
 
     @unittest.expectedFailure
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod

@@ -198,6 +198,7 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+@skipIfTorchDynamo("Not suitable for dynamo")
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
