@@ -23,8 +23,8 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <torch/csrc/cuda/green_context.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
