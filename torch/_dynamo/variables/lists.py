@@ -1383,7 +1383,7 @@ class TupleIteratorVariable(ListIteratorVariable):
     pass
 
 
-class RangeIteratorVariable(VariableTracker):
+class RangeIteratorVariable(IteratorVariable):
     # only needed for isinstance(..., range_iterator) to work
     _nonvar_fields = {
         "iter_obj",
@@ -1402,6 +1402,12 @@ class RangeIteratorVariable(VariableTracker):
         elif name == "__iter__":
             return self
         return super().call_method(tx, name, args, kwargs)
+
+    def call_obj_hasattr(self, tx, name):
+        if self.python_type() is range_iterator:
+            ri = iter(range(0))
+            return ConstantVariable(hasattr(ri, name))
+        return super().call_obj_hasattr(tx, name)
 
     def next_variable(self, tx):
         if self.len <= 0:
