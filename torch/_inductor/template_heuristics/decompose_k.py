@@ -20,9 +20,15 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
+# on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
     "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
 )
+# TODO(coconutruben): enable decompose k on AMD by removing the register bool
+# and benchmarking it for performance and stability
+# TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
+# by either adding specific register_template_heuristic tags, or setting the
+# device to None (enabled on all devices)
 class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
     def get_template_configs(
         self,
