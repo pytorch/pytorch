@@ -875,8 +875,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             for x, g in zip(lengths, groups)
         ):
             return set_ranges(*lengths)
+        
+        try:
+            new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
+        except CantSplit:
+            print("groups: ", groups)
+            print("lengths: ", lengths)
+            print("isnative: ", V.kernel.is_native_matmul)
+            print("node_schedule: ", V.kernel.features.node_schedule)
+            print("node: ", V.kernel.features.node_schedule[0].node)
+            raise CantSplit
 
-        new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
