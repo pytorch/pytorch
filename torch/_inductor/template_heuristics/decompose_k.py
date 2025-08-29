@@ -20,6 +20,11 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
+@register_template_heuristic("decompose_k", None, op_name="mm")
+class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
+    """empty heuristics to skip decompose k on anything not cuda"""
+
+
 # on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
     "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
