@@ -783,7 +783,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
@@ -798,7 +798,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
