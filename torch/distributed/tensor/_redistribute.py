@@ -20,11 +20,6 @@ from torch.distributed.tensor.placement_types import (
 
 logger = logging.getLogger(__name__)
 
-from typing import TypeVar
-
-
-TOrder = TypeVar("TOrder", bound=tuple[int, ...])
-
 # jax style sharding representation: map from tensor dim to mesh dim
 print_jax_style_sharding = True
 
@@ -417,13 +412,13 @@ class DTensorRedistributePlanner:
         src_spec: DTensorSpec,
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
-        src_device_order: Optional[TOrder],
-        dst_device_order: Optional[TOrder],
     ) -> list[_TransformInfo]:
-        if src_device_order is None:
-            src_device_order = cast(TOrder, tuple(range(self.device_mesh.ndim)))
-        if dst_device_order is None:
-            dst_device_order = cast(TOrder, tuple(range(self.device_mesh.ndim)))
+        src_device_order = tuple(range(self.device_mesh.ndim))
+        dst_device_order = tuple(range(self.device_mesh.ndim))
+        if src_spec.device_order is not None:
+            src_device_order = src_spec.device_order
+        if dst_spec.device_order is not None:
+            dst_device_order = dst_spec.device_order
         src_map = self.map_tensor_dim_to_mesh_dim(src_spec.placements, src_device_order)
         dst_map = self.map_tensor_dim_to_mesh_dim(dst_spec.placements, dst_device_order)
         src_state = self.DistState(
@@ -432,6 +427,7 @@ class DTensorRedistributePlanner:
         dst_state = self.DistState(
             dst_spec.placements, tuple(tuple(x) for x in dst_map)
         )
+
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         logger.debug(
@@ -591,15 +587,13 @@ def _get_dtensor_redistribute_planner(
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    src_device_order: tuple[int, ...],
-    dst_device_order: tuple[int, ...],
 ) -> list[_TransformInfo]:
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
 
-    if src_device_order == tuple(
+    if src_spec.device_order == tuple(
         range(src_spec.mesh.ndim)
-    ) and dst_device_order == tuple(range(src_spec.mesh.ndim)):
+    ) and dst_spec.device_order == tuple(range(dst_spec.mesh.ndim)):
         use_greedy_transform = True
     else:
         use_greedy_transform = False
@@ -609,7 +603,7 @@ def _gen_transform_infos_non_cached(
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     else:
         transform_infos = drp.generate_optimal_transform_infos(
-            src_spec, dst_spec, src_spec.shape, src_device_order, dst_device_order
+            src_spec, dst_spec, src_spec.shape
         )
     return transform_infos
 
@@ -618,20 +612,14 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    src_device_order: TOrder,
-    dst_device_order: TOrder,
 ) -> list[_TransformInfo]:
-    return _gen_transform_infos_non_cached(
-        src_spec, dst_spec, src_device_order, dst_device_order
-    )
+    return _gen_transform_infos_non_cached(src_spec, dst_spec)
 
 
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
-    src_device_order: Optional[TOrder] = None,
-    dst_device_order: Optional[TOrder] = None,
     *,
     async_op: bool = False,
     is_backward: bool = False,
@@ -645,11 +633,6 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
-
-    if not src_device_order:
-        src_device_order = cast(TOrder, tuple(range(current_spec.device_mesh.ndim)))
-    if not dst_device_order:
-        dst_device_order = cast(TOrder, tuple(range(target_spec.device_mesh.ndim)))
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
@@ -665,13 +648,9 @@ def redistribute_local_tensor(
         isinstance(s, torch.SymInt) for s in target_spec.shape
     )
     if has_symints:
-        transform_infos = _gen_transform_infos_non_cached(
-            current_spec, target_spec, src_device_order, dst_device_order
-        )
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
-        transform_infos = _gen_transform_infos(
-            current_spec, target_spec, src_device_order, dst_device_order
-        )
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
 
     for transform_info in transform_infos:
         i = transform_info.mesh_dim
@@ -780,7 +759,6 @@ class Redistribute(torch.autograd.Function):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype
         ctx.original_dtype = input._local_tensor.dtype
-        ctx.original_device_order = input._spec.device_order
 
         if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
             local_tensor = input._local_tensor.to(dtype=forward_dtype)
@@ -812,8 +790,6 @@ class Redistribute(torch.autograd.Function):
                 local_tensor,
                 current_spec,
                 target_spec,
-                src_device_order=input._spec.device_order,
-                dst_device_order=device_order,
                 async_op=async_op,
             )
         else:
@@ -857,8 +833,6 @@ class Redistribute(torch.autograd.Function):
             local_tensor,
             current_spec,
             previous_spec,
-            src_device_order=current_spec.device_order,
-            dst_device_order=previous_spec.device_order,
             async_op=async_op,
             is_backward=True,
         )
