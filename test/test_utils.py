@@ -21,8 +21,6 @@ import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
 from torch._utils_internal import deprecated
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -788,65 +786,6 @@ class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
-
-
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
 class TestHipify(TestCase):

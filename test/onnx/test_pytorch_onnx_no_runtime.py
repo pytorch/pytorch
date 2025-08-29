@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.onnx import symbolic_helper, utils
-from torch.onnx._internal import registration
+from torch.onnx._internal.torchscript_exporter import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
 
@@ -430,9 +430,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             torch.randn(3, 4, requires_grad=True),
             mocks=[
                 unittest.mock.patch(
-                    "torch.onnx._internal.registration.registry.get_function_group",
+                    "torch.onnx._internal.torchscript_exporter.registration.registry.get_function_group",
                     side_effect=break_is_registered_op_api,
-                    # wraps=registration.registry.get_function_group
                 )
             ],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
