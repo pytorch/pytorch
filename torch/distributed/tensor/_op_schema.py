@@ -31,6 +31,10 @@ from typing_extensions import deprecated
 
 import torch
 
+from torch._C import (
+    _DTensor_OpSchema_post_init,
+    _DTensor_OpSchema_recompute_comparison_key,
+)
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -387,8 +391,7 @@ class OpSchema:
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
-        self.has_symints = torch._C._DTensor_OpSchema_post_init(self.args_schema)
-        self._recompute_comparison_key()
+        self.has_symints = _DTensor_OpSchema_post_init(self)
 
     def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:
         is_tensor = isinstance(arg, DTensorSpec)
@@ -472,28 +475,10 @@ class OpSchema:
         return "out" in self.op._schema.overload_name
 
     def is_view_op(self) -> bool:
-        return self.op._schema._has_any_present_but_not_write_alias_info()
+        return self.op._schema._is_view_op()
 
     def _recompute_comparison_key(self):
-        if not self.schema_info:
-            static_argnum = len(self.args_schema)
-            static_kwargkey = None
-        else:
-            static_argnum = self.schema_info.static_argnum
-            static_kwargkey = self.schema_info.static_kwargkey
-
-        args_to_hash = tuple(
-            tuple(e) if isinstance(e, list) else e
-            for i, e in enumerate(self.args_schema)
-            if self.arg_type_tensor_or_tensor_list_like(e) or i >= static_argnum
-        )
-        if static_kwargkey is not None:
-            kwargs_to_hash = tuple(
-                self.kwargs_schema.get(k, None) for k in static_kwargkey
-            )
-            self._comparison_key = (self.op, args_to_hash, kwargs_to_hash)
-        else:
-            self._comparison_key = (self.op, args_to_hash)
+        _DTensor_OpSchema_recompute_comparison_key(self)
 
     def __hash__(self) -> int:
         return hash(self._comparison_key)
