@@ -15,8 +15,6 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
-#include <iostream>
-
 namespace at::native {
 namespace {
 
