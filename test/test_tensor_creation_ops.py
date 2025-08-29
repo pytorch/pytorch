@@ -3261,6 +3261,17 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
 
 
+    def test_zeros_bounds_checking(self, device):
+        """Test that zeros function properly validates size parameters and provides clear error messages."""
+        
+        # Test negative large integer
+        with self.assertRaisesRegex(RuntimeError, r"zeros\(\.\.\.\): dimension size must be non-negative, got -6744789213055875072"):
+            torch.zeros(-6744789213055875072, device=device)
+        
+        # Test extremely large integer
+        with self.assertRaisesRegex(RuntimeError, r"zeros\(\.\.\.\): dimension size too large, got 6409021227853660160"):
+            torch.zeros(6409021227853660160, device=device)
+
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
     exact_dtype = True
