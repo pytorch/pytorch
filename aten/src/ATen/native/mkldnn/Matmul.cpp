@@ -157,7 +157,7 @@ mkldnn_gemm(
   bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
   bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
   if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
-      (n <= 8 || m <= 8 || k >= 1024) || (alpha == 0.0f)) {
+      ((m >= 16 && k >= 16) || (k <= 8 && n * m < 16384) || (m <= 8 && n <= 1024)) || (alpha == 0.0f)) {
     return false;
   }
 
