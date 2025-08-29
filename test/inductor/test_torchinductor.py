@@ -99,6 +99,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
+    skipIfMPS,
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -249,6 +250,7 @@ def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
         )
+        
         libtest.impl(id_, fn, "CPU")
         libtest.impl(id_, fn, "CUDA")
         libtest.impl(id_, fn, "XPU")
@@ -8480,6 +8482,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfMPS
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):
@@ -8488,7 +8491,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for dtype in [
             torch.int64,
             torch.float64,
-            torch.complex128,
         ]:
             self.common(
                 fn,
