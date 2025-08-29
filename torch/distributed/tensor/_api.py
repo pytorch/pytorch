@@ -763,6 +763,7 @@ def distribute_tensor(
 
     # TODO(xilun): address sharding order
     # distribute the tensor according to the placements.
+    tensor_sharding: dict[int, list[int]] = {}
     placements = list(placements)
     for idx, placement in enumerate(placements):
         if placement.is_shard():
@@ -774,6 +775,11 @@ def distribute_tensor(
             local_tensor = placement._shard_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
             )
+            shard_dim = placement.dim
+            if shard_dim not in tensor_sharding:
+                tensor_sharding[shard_dim] = [idx]
+            else:
+                tensor_sharding[shard_dim].append(idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(
@@ -796,6 +802,7 @@ def distribute_tensor(
             stride=tensor.stride(),
             dtype=tensor.dtype,
         ),
+        tensor_sharding=tensor_sharding if tensor_sharding else None,
     )
     return DTensor(
         local_tensor.requires_grad_(tensor.requires_grad),

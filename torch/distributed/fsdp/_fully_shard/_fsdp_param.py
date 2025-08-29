@@ -13,7 +13,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import _mesh_resources
-from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.distributed.tensor.placement_types import Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -303,41 +303,65 @@ class FSDPParam:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
                 )
-            split_factor = self._tp_spec.num_shards_map[shard_dim]
+
             assert 2 <= self._spmd_mesh.ndim <= 4, (
                 "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
                 f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
-            dp_shard_tp_placement = (
-                (
-                    _StridedShard(shard_dim, split_factor=split_factor)
-                    if split_factor > 1
-                    else fsdp_placement
-                ),
-                *self._tp_spec.placements,
-            )
+            tensor_sharding = self._tp_spec.tensor_sharding
+
+            dp_shard_tp_placement = (Shard(shard_dim), *self._tp_spec.placements)
+            # TODO: extract the mesh_dim push operation to a util function
             if dp_mesh.ndim == 1:  # FSDP
                 self._spmd_placements = dp_shard_tp_placement
+                if tensor_sharding is not None:
+                    # increment all mesh_dim by 1 and push dp_shard dim
+                    for shard_dim, mesh_dims in tensor_sharding.items():
+                        new_mesh_dims = [mesh_dim + 1 for mesh_dim in mesh_dims]
+                        tensor_sharding[shard_dim] = new_mesh_dims
+
+                    if shard_dim in tensor_sharding:
+                        tensor_sharding[shard_dim].append(0)
+                    else:
+                        tensor_sharding[shard_dim] = [0]
+                else:
+                    tensor_sharding = {shard_dim: [0]}
             else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
+                if tensor_sharding is not None:
+                    # increment all mesh_dim by 2 and push dp_shard dim
+                    for shard_dim, mesh_dims in tensor_sharding.items():
+                        new_mesh_dims = [mesh_dim + 2 for mesh_dim in mesh_dims]
+                        tensor_sharding[shard_dim] = new_mesh_dims
+
+                    if shard_dim in tensor_sharding:
+                        tensor_sharding[shard_dim].append(1)
+                    else:
+                        tensor_sharding[shard_dim] = [1]
+                else:
+                    tensor_sharding = {shard_dim: [1]}
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
+                tensor_sharding=tensor_sharding,
             )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
                 self._spmd_placements = (Replicate(), fsdp_placement)
+                tensor_sharding = {fsdp_placement.dim: [1]}
             else:
                 self._spmd_placements = (fsdp_placement,)
+                tensor_sharding = {fsdp_placement.dim: [0]}
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
                 tensor_meta=TensorMeta(param.size(), param.stride(), param.dtype),
+                tensor_sharding=tensor_sharding,
             )
             param_data = param
         assert param_data.is_contiguous(), f"{param_data.shape=} {param_data.stride()=}"
