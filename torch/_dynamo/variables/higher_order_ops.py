@@ -27,6 +27,7 @@ import logging
 import types
 import warnings
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
 import torch._C
@@ -68,6 +69,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+
+
+@dataclass
+class OutputSpec:
+    """
+    The treespec of the output of the speculated subgraph and other metadata.
+    """
+
+    treespec: pytree.TreeSpec
 
 
 def raise_hard_error_if_graph_break(reason):
@@ -216,7 +226,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
 
 
 def _call_function_and_unflatten_output(
-    tx, fn, args, kwargs, flat_example_value, ret_treespec
+    tx, fn, args, kwargs, flat_example_value, ret_spec
 ):
     from .builder import wrap_fx_proxy
 
@@ -236,8 +246,8 @@ def _call_function_and_unflatten_output(
     # speculate_subgraph function) so as to respect the pytree API typing.
     flat_list_variable = BuiltinVariable(list).call_function(tx, [flat_variable], {})
     return (
-        _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_treespec)
-        if ret_treespec
+        _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_spec.treespec)
+        if ret_spec.treespec
         else flat_variable
     )
 
@@ -742,7 +752,11 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
+                return (
+                    (output, OutputSpec(treespec)),
+                    tx.output.graph,
+                    subtracer.lifted_freevars,
+                )
             else:
                 validate_subgraph_output_types(output)
 
@@ -858,7 +872,7 @@ def speculate_subgraph(
                         )
 
                 return (
-                    (output, treespec),
+                    (output, OutputSpec(treespec)),
                     graph,
                     lifted_freevars,
                 )
@@ -1045,7 +1059,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ix = 1 if branch else 2
             # TODO: Support kwargs
             (
-                (ret_val, ret_treespec),
+                (ret_val, ret_spec),
                 ret_graph,
                 ret_lifted_freevars,
             ) = speculate_subgraph(
@@ -1071,25 +1085,23 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         "Expected branches to return a possibly nested pytree of tensors "
                         f"or constant ints but it consists of others {ret.python_type()}.",
                     )
-            return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
+            return ret_val, ret_spec, ret_graph, ret_lifted_freevars
 
-        (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
-            True
-        )
+        (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
         true_nn_modules = dict(tx.output.nn_modules)
 
         (
             false_r,
-            false_treespec,
+            false_spec,
             false_graph,
             false_lifted_freevars,
         ) = speculate_branch(False)
         false_nn_modules = dict(tx.output.nn_modules)
 
-        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
-            true_treespec, false_treespec
+        same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            true_spec.treespec, false_spec.treespec
         )
-        if not same_treespec.as_python_constant():
+        if not same_spec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
         (
@@ -1134,7 +1146,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             None,
-            true_treespec,
+            true_spec,
         )
 
 
@@ -1292,7 +1304,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # create cond subgrpahs
         (
-            (cond_r, _cond_treespec),
+            (cond_r, _cond_spec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -1357,7 +1369,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # create body subgraph
         (
-            (body_r, body_treespec),
+            (body_r, body_spec),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -1436,7 +1448,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             None,
-            body_treespec,
+            body_spec,
         )
 
 
@@ -1526,7 +1538,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         sub_args = sub_args + sub_args_additional_inputs
         (
-            (combine_result, _combine_treespec),
+            (combine_result, _combine_spec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1641,7 +1653,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             None,
-            xs_treespec,
+            OutputSpec(xs_treespec),
         )
 
 
@@ -1749,7 +1761,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
-            (combine_result, _combine_treespec),
+            (combine_result, _combine_spec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1783,7 +1795,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}"
                 )
             carry_tree, out_vars = combine_result_vars
-            carry_vars, carry_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            carry_vars, _ = _make_inlined(tx, pytree.tree_flatten)(
                 carry_tree
             ).unpack_var_sequence(tx)
             carry_vars = carry_vars.unpack_var_sequence(tx)
@@ -1792,7 +1804,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ).unpack_var_sequence(tx)
 
             # additional output checking
-            _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
+            _combine_spec = OutputSpec(
+                _make_inlined(tx, pytree.tree_structure)(combine_result)
+            )
 
             check_meta_consistency_vt(
                 init_vars,
@@ -1833,7 +1847,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_treespec
+            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_spec
         )
 
 
@@ -2413,7 +2427,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         (
-            (ret_val, ret_treespec),
+            (ret_val, ret_spec),
             ret_graph,
             ret_lifted_freevars,
         ) = speculate_subgraph(
@@ -2451,7 +2465,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             flat_example_value,
-            ret_treespec,
+            ret_spec,
         )
 
 
@@ -2490,7 +2504,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             _,
             example_value,
             _body_r,
-            treespec,
+            out_spec,
             checkpointed_gmod,
             _,
         ) = self.create_wrapped_node(
@@ -2518,14 +2532,14 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             example_value=example_value,
         )
 
-        if treespec is None:
+        if out_spec is None:
             return variable
 
         # Transform variable back into a list (previously made into a tuple by
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, out_spec.treespec)
 
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
@@ -2592,7 +2606,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec.treespec)
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -2772,7 +2786,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (_body_output, _body_treespec),
+                (_body_output, _body_spec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
