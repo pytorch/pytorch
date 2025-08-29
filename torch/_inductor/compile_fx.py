@@ -2314,7 +2314,9 @@ def compile_fx_backward(
             )
 
 
-def run_pre_grad_passes(model_: GraphModule, example_inputs_: Sequence[InputType]):
+def run_pre_grad_passes(
+    model_: GraphModule, example_inputs_: Sequence[InputType]
+) -> GraphModule:
     # "before_pre_grad_graph" is used in inductor provenance
     # tracking highlighter front-end.
     trace_structured(
