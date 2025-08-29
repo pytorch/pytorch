@@ -1519,21 +1519,30 @@ if torch._C._has_mkldnn:
                         user_node.replace_all_uses_with(node)
                         gm.graph.erase_node(user_node)
 
+    def _register_unary_mkldnn_fusion():
+        # Match any decomposed unary operations that we couldn't perform as part of other
+        # fusions in this file (e.g. Linear+GELU). To ensure the other fusions, which are
+        # done on pass_number=1, take precedence, we perform these fusions on pass_number=2
+
+        # GELU(approximate="none")
+        @register_lowering_pattern(pattern=_gelu_fusion_1(Arg()), pass_number=2)
+        def lower_gelu_none_to_mkldnn(match, *args, **kwargs):
+            assert len(args) == 1, len(args)
+            output = L[mkldnn._gelu](args[0], "none")
+            return output
+
     @functools.cache
     def _mkldnn_fusion_init():
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
-        if (
-            torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
-            and not torch.ops.mkldnn._is_mkldnn_acl_supported()
-        ):
+        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
+            _register_unary_mkldnn_fusion()
 
     @functools.cache
     def _mkldnn_weight_pack_init():
