@@ -1958,29 +1958,12 @@ void initJITBindings(PyObject* module) {
            std::vector<Argument>,
            bool,
            bool>())
-      .def_property_readonly(
-          "name",
-          // NOTE[decltype(auto) lambdas]: lambdas with no declared
-          // return type act like they return `auto`, not
-          // `decltype(auto)`, so simple wrapper lambdas like these
-          // will force copies if the thing they're returning is a
-          // reference. See https://godbolt.org/z/daG7x4xKc for a
-          // demonstration.
-          [](const FunctionSchema& self) -> decltype(auto) {
-            return self.name();
-          })
-      .def_property_readonly(
-          "overload_name",
-          [](const FunctionSchema& self) -> decltype(auto) {
-            return self.overload_name();
-          })
-      .def_property_readonly(
-          "arguments",
-          [](const FunctionSchema& self) -> decltype(auto) {
-            return self.arguments();
-          })
+      .def_property_readonly("name", &FunctionSchema::name)
+      .def_property_readonly("overload_name", &FunctionSchema::overload_name)
+      .def_property_readonly("arguments", &FunctionSchema::arguments)
+      .def_property_readonly("returns", &FunctionSchema::returns)
       .def(
-          "_has_any_present_but_not_write_alias_info",
+          "_is_view_op",
           [](const FunctionSchema& self) -> bool {
             for (const auto& arg : self.arguments()) {
               if (arg.alias_info() && !arg.alias_info()->isWrite()) {
@@ -1989,16 +1972,9 @@ void initJITBindings(PyObject* module) {
             }
             return false;
           })
-      .def_property_readonly(
-          "returns",
-          [](const FunctionSchema& self) -> decltype(auto) {
-            return self.returns();
-          })
       .def(
           "is_backward_compatible_with",
-          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
-            return self.isBackwardCompatibleWith(old_schema);
-          })
+          &FunctionSchema::isBackwardCompatibleWith)
       .def(
           "check_forward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
@@ -2050,18 +2026,9 @@ void initJITBindings(PyObject* module) {
            std::optional<IValue>,
            bool,
            std::optional<AliasInfo>>())
-      .def_property_readonly(
-          "name",
-          // See NOTE[decltype(auto) lambdas] above.
-          [](const Argument& self) -> decltype(auto) { return self.name(); })
-      .def_property_readonly(
-          "type",
-          [](const Argument& self) -> decltype(auto) { return self.type(); })
-      .def_property_readonly(
-          "real_type",
-          [](const Argument& self) -> decltype(auto) {
-            return self.real_type();
-          })
+      .def_property_readonly("name", &Argument::name)
+      .def_property_readonly("type", &Argument::type)
+      .def_property_readonly("real_type", &Argument::real_type)
       .def_property_readonly(
           "N",
           [](const Argument& self) -> py::object {
