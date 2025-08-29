@@ -14,6 +14,16 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def get_triton_version(fallback=(0,0)) -> tuple[int]:
+    try:
+        import triton  # noqa: F401
+
+        return tuple(int(v) for v in triton.__version__.split('.')[:2])
+    except ImportError:
+        return fallback
+
+
+@functools.cache
 def _device_supports_tma() -> bool:
     import torch
 
