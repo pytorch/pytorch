@@ -8017,6 +8017,14 @@ class TestMPS(TestCaseMPS):
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+    def test_empty_posneginf(self):
+        # just to check that it doesnt crash
+        input_tensor = torch.empty(0, device="mps")
+        out_pos = torch.isposinf(input_tensor)
+        out_neg = torch.isposinf(input_tensor)
+        self.assertEqual(out_pos.numel(), 0)
+        self.assertEqual(out_neg.numel(), 0)
+
 
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
