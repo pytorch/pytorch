@@ -945,7 +945,7 @@ def _check_dynamic_shapes(
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
                         f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
-                        f" but got {dim} instead)",
+                        f" but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
@@ -968,7 +968,7 @@ def _check_dynamic_shapes(
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
                         f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
-                        f"but got {dim} instead)",
+                        f"but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif shape is not None:

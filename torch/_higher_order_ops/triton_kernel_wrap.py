@@ -18,6 +18,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -28,6 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
@@ -1342,6 +1344,9 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 
+# Adds SAC support for triton ops
+redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
+redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
 
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into

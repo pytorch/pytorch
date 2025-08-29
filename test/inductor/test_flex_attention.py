@@ -2925,6 +2925,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
 
+        if torch.version.hip and mode == "paged_attention":
+            raise self.skipTest(
+                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
+            )
+
         dtype = torch.float32
         # Setup
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
@@ -4333,40 +4338,6 @@ class GraphModule(torch.nn.Module):
         finally:
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
-
-    @largeTensorTest("38GB", "cuda")  # emperically
-    @skip_on_cpu
-    def test_int64_indexing_large_stride(self, device):
-        B = 1
-        H = 64
-        S = 2**20
-        D = 64
-        dtype = torch.float16
-
-        def _simple_causal(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        BLOCK_M = 1024
-        BLOCK_N = 1024
-
-        block_mask = torch.compile(create_block_mask)(
-            _simple_causal, B, H, S, S, device=device, BLOCK_SIZE=(BLOCK_M, BLOCK_N)
-        )
-
-        q = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
-        k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
-        v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
-
-        # Test forward and backward pass
-        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
-        loss = out.sum()
-        loss.backward()
-
-        # Basic correctness checks, doing full comapre consumes too much memory :/
-        self.assertEqual(out.shape, (B, H, S, D))
-        self.assertTrue(q.grad is not None)
-        self.assertTrue(k.grad is not None)
-        self.assertTrue(v.grad is not None)
 
 
 class TestBlockMask(InductorTestCase):

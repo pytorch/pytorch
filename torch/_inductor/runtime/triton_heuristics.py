@@ -753,6 +753,25 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
+
+        # Simulate JIT Hook call
+        if (
+            torch._inductor.config.run_jit_post_compile_hook
+            and knobs
+            and getattr(knobs.runtime, "jit_post_compile_hook", None)
+        ):
+            try:
+                knobs.runtime.jit_post_compile_hook(
+                    key=getattr(self.fn, "cache_key", self.kernel_hash or str(self.fn)),
+                    repr=getattr(self.fn, "src", None),
+                    fn=self.fn,
+                    compile=binary,
+                    is_manual_warmup=False,
+                    already_compiled=True,
+                )
+            except Exception:
+                log.exception("jit_post_compile_hook failed")
+
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )

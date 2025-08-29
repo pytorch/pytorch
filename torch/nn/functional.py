@@ -5823,7 +5823,6 @@ scaled_dot_product_attention = _add_docstr(
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-                attn_bias.to(query.dtype)
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:

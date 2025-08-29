@@ -136,6 +136,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_with_vars(self):
+        def fn(x):
+            try:
+                vars(42)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_autocast_with_exception(self):
         class Optimizer(torch.autograd.Function):
             @staticmethod

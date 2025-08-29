@@ -683,6 +683,8 @@ wrap_top_frame = False
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
 
+enable_aot_compile = False
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 

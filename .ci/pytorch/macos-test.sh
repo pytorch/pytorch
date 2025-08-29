@@ -302,6 +302,47 @@ test_torchbench_smoketest() {
     fi
 
   done
+  echo "Pytorch benchmark on mps device completed"
+}
+
+test_aoti_torchbench_smoketest() {
+  print_cmake_info
+
+  echo "Launching AOTInductor torchbench setup"
+  pip_benchmark_deps
+  # shellcheck disable=SC2119,SC2120
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local device=mps
+  local dtypes=(undefined float16 bfloat16 notset)
+  local dtype=${dtypes[$1]}
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
+
+  echo "Launching torchbench inference performance run for AOT Inductor and dtype ${dtype}"
+  local dtype_arg="--${dtype}"
+  if [ "$dtype" == notset ]; then
+      dtype_arg="--float32"
+  fi
+  touch "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv"
+  for model in "${models[@]}"; do
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --performance --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv" || true
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --accuracy --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+  done
+
+  echo "Launching HuggingFace inference performance run for AOT Inductor and dtype ${dtype}"
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+    --performance --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+    --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_performance.csv" || true
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+    --accuracy --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+    --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
 
   echo "Pytorch benchmark on mps device completed"
 }
@@ -350,6 +391,8 @@ elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
 elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
+  test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

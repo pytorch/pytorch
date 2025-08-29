@@ -1,12 +1,26 @@
 import logging
+import os
+import textwrap
 from typing import Any
 
+from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
 from cli.lib.common.utils import run_command, temp_environ, working_directory
+from jinja2 import Template
 
 
 logger = logging.getLogger(__name__)
+
+_TPL_VLLM_INFO = Template(
+    textwrap.dedent("""\
+    ##  Vllm against Pytorch CI Test Summary
+    **Vllm Commit**: [{{ vllm_commit }}](https://github.com/vllm-project/vllm/commit/{{ vllm_commit }})
+    {%- if torch_sha %}
+    **Pytorch Commit**: [{{ torch_sha }}](https://github.com/pytorch/pytorch/commit/{{ torch_sha }})
+    {%- endif %}
+""")
+)
 
 
 def sample_vllm_test_library():
@@ -214,12 +228,13 @@ def run_test_plan(
 
 
 def clone_vllm(dst: str = "vllm"):
-    clone_external_repo(
+    _, commit = clone_external_repo(
         target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
         dst=dst,
         update_submodules=True,
     )
+    return commit
 
 
 def replace_buildkite_placeholders(step: str, shard_id: int, num_shards: int) -> str:
@@ -230,3 +245,12 @@ def replace_buildkite_placeholders(step: str, shard_id: int, num_shards: int) ->
     for k in sorted(mapping, key=len, reverse=True):
         step = step.replace(k, mapping[k])
     return step
+
+
+def summarize_build_info(vllm_commit: str) -> bool:
+    torch_sha = os.getenv("GITHUB_SHA")
+    md = (
+        _TPL_VLLM_INFO.render(vllm_commit=vllm_commit, torch_sha=torch_sha).strip()
+        + "\n"
+    )
+    return write_gh_step_summary(md)

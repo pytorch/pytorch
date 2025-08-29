@@ -125,7 +125,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
-            raise NotImplementedError
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError

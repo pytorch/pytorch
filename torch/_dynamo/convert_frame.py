@@ -73,6 +73,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    is_in_any_mode_without_ignore_compile_internals,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -1432,7 +1433,12 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
-            log_frame_dynamic_whitelist(code)
+            if (
+                tracer_output
+                and (output_graph := tracer_output.output_graph)
+                and output_graph.has_outputs()
+            ):
+                log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1770,6 +1776,10 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
+def should_skip_due_to_torch_dispatch_mode() -> bool:
+    return is_in_any_mode_without_ignore_compile_internals()
+
+
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -1797,7 +1807,7 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False)
+                should_skip_due_to_torch_dispatch_mode()
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):

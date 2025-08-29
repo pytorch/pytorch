@@ -45,7 +45,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -156,7 +156,7 @@ jobs:
       - wheel-py3_10-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -280,7 +280,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -392,7 +392,7 @@ jobs:
       - wheel-py3_10-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -518,7 +518,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -630,7 +630,7 @@ jobs:
       - wheel-py3_10-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -756,7 +756,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -868,7 +868,7 @@ jobs:
       - wheel-py3_10-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -994,7 +994,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1004,7 +1004,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -1106,7 +1106,7 @@ jobs:
       - wheel-py3_10-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1230,7 +1230,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1341,7 +1341,7 @@ jobs:
       - wheel-py3_11-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1465,7 +1465,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1577,7 +1577,7 @@ jobs:
       - wheel-py3_11-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1703,7 +1703,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1815,7 +1815,7 @@ jobs:
       - wheel-py3_11-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -1941,7 +1941,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2053,7 +2053,7 @@ jobs:
       - wheel-py3_11-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2179,7 +2179,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2189,7 +2189,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -2291,7 +2291,7 @@ jobs:
       - wheel-py3_11-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2415,7 +2415,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2526,7 +2526,7 @@ jobs:
       - wheel-py3_12-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2650,7 +2650,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2762,7 +2762,7 @@ jobs:
       - wheel-py3_12-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -2888,7 +2888,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3000,7 +3000,7 @@ jobs:
       - wheel-py3_12-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3126,7 +3126,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3238,7 +3238,7 @@ jobs:
       - wheel-py3_12-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3364,7 +3364,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3374,7 +3374,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -3476,7 +3476,7 @@ jobs:
       - wheel-py3_12-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3600,7 +3600,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3711,7 +3711,7 @@ jobs:
       - wheel-py3_13-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3835,7 +3835,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -3947,7 +3947,7 @@ jobs:
       - wheel-py3_13-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4073,7 +4073,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4185,7 +4185,7 @@ jobs:
       - wheel-py3_13-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4311,7 +4311,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4423,7 +4423,7 @@ jobs:
       - wheel-py3_13-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4549,7 +4549,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4559,7 +4559,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -4661,7 +4661,7 @@ jobs:
       - wheel-py3_13-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4785,7 +4785,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -4896,7 +4896,7 @@ jobs:
       - wheel-py3_13t-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5020,7 +5020,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5132,7 +5132,7 @@ jobs:
       - wheel-py3_13t-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5258,7 +5258,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5370,7 +5370,7 @@ jobs:
       - wheel-py3_13t-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5496,7 +5496,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5608,7 +5608,7 @@ jobs:
       - wheel-py3_13t-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5734,7 +5734,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5744,7 +5744,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -5846,7 +5846,7 @@ jobs:
       - wheel-py3_13t-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -5970,7 +5970,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6081,7 +6081,7 @@ jobs:
       - wheel-py3_14-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6205,7 +6205,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6317,7 +6317,7 @@ jobs:
       - wheel-py3_14-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6443,7 +6443,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6555,7 +6555,7 @@ jobs:
       - wheel-py3_14-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6681,7 +6681,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6793,7 +6793,7 @@ jobs:
       - wheel-py3_14-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6919,7 +6919,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -6929,7 +6929,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -7031,7 +7031,7 @@ jobs:
       - wheel-py3_14-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7155,7 +7155,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7266,7 +7266,7 @@ jobs:
       - wheel-py3_14t-cpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7390,7 +7390,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7502,7 +7502,7 @@ jobs:
       - wheel-py3_14t-cuda12_6-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7628,7 +7628,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7740,7 +7740,7 @@ jobs:
       - wheel-py3_14t-cuda12_8-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7866,7 +7866,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -7978,7 +7978,7 @@ jobs:
       - wheel-py3_14t-cuda12_9-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -8104,7 +8104,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
@@ -8114,7 +8114,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.1.1 | intel-cmplr-lib-ur==2025.1.1 | intel-cmplr-lic-rt==2025.1.1 | intel-sycl-rt==2025.1.1 | oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.1.0 | onemkl-sycl-dft==2025.1.0 | onemkl-sycl-lapack==2025.1.0 | onemkl-sycl-rng==2025.1.0 | onemkl-sycl-sparse==2025.1.0 | dpcpp-cpp-rt==2025.1.1 | intel-opencl-rt==2025.1.1 | mkl==2025.1.0 | intel-openmp==2025.1.1 | tbb==2022.1.0 | tcmlib==1.3.0 | umf==0.10.0 | intel-pti==0.12.3
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -8216,7 +8216,7 @@ jobs:
       - wheel-py3_14t-xpu-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
-    timeout-minutes: 300
+    timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
