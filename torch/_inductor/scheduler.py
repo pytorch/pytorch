@@ -3958,7 +3958,28 @@ class Scheduler:
         ):
             return None
 
-        # only support nodes
+        # does not support reinplace since `index % boundary` may lead to
+        # race condition
+        def has_reusable_buffer(node: BaseSchedulerNode) -> bool:
+            for read in node.read_writes.reads:
+                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                if read.name in self.name_to_donated_buffer:
+                    input_buf = self.name_to_donated_buffer[read.name]
+                else:
+                    input_buf = self.name_to_buf.get(read.name)
+
+                if (
+                    input_buf
+                    and V.graph.wrapper_code.can_reuse(input_buf, node)
+                    and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
+                ):
+                    return True
+            return False
+
+        if has_reusable_buffer(node1) or has_reusable_buffer(node2):
+            return None
+
+        # only support nodes with 1 mismatch dimension
         mismatch_dimensions = []
         for idx, (n1_size, n2_size) in enumerate(zip(n1_iter_sizes, n2_iter_sizes)):
             if n1_size != n2_size:
