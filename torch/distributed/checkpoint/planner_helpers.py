@@ -8,7 +8,9 @@ from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.tensor import DTensor
-from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor._utils import (
+    compute_local_shape_and_global_offset_from_spec,
+)
 
 from .metadata import (
     BytesStorageMetadata,
@@ -172,9 +174,12 @@ def _sharded_tensor_metadata(
 
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
+    """
     sizes, offsets = compute_local_shape_and_global_offset(
         tensor.shape, tensor.device_mesh, tensor.placements
     )
+    """
+    sizes, offsets = compute_local_shape_and_global_offset_from_spec(tensor._spec)
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
 
     return WriteItem(
@@ -336,9 +341,7 @@ def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
 
 
 def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
-    sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
-    )
+    sizes, offsets = compute_local_shape_and_global_offset_from_spec(tensor._spec)
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
     return ChunkStorageMetadata(
         offsets=offsets,
