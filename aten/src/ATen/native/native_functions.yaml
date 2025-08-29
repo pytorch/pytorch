@@ -4237,6 +4237,7 @@
     CPU: _weight_int8pack_mm_cpu
     CUDA: _weight_int8pack_mm_cuda
     MPS: _weight_int8pack_mm_mps
+    XPU: _weight_int8pack_mm_xpu
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse

@@ -559,4 +559,64 @@ Tensor _int_mm_xpu(const Tensor& self, const Tensor& mat2) {
       at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_xpu(self, mat2, result);
 }
+
+Tensor _weight_int8pack_mm_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__,
+      " : expect A to be either 32-bit or 16-bit float tensor.");
+  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
+  TORCH_CHECK(
+      A.stride(1) == 1,
+      __func__,
+      " : A must be contiguous on the last dimension.");
+  TORCH_CHECK(B.dtype() == kChar, __func__, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(), __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K, __func__, " : expect B.size(1) == ", K);
+
+  TORCH_CHECK(
+      scales.dim() == 1 && scales.size(0) == N,
+      __func__,
+      " : expect scales to be 1d tensor with size ",
+      N);
+
+  auto C = at::empty({M, N}, A.options());
+
+  // --- Launch kernel ---
+  Tensor bias = at::Tensor();
+  Tensor mat2_zero_points = at::Tensor();
+  Tensor non_const_scales = scales;
+  auto post_op_args = torch::List<std::optional<at::Scalar>>();
+
+  at::native::onednn::quantized_matmul(
+      A.contiguous(),
+      1.0,
+      0,
+      B.contiguous(),
+      non_const_scales,
+      mat2_zero_points,
+      bias,
+      C,
+      1.0,
+      0,
+      C.scalar_type(),
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      /*post_op_name*/ "none",
+      post_op_args,
+      /*post_op_algorithm*/ "none",
+      /*m2_trans*/ false);
+
+  return C;
+}
 } // namespace at::native
