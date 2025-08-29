@@ -167,7 +167,6 @@
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
         kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
-        MAX_KV_IDX = {{size("FULL_KV_IDX", -1)}}
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
         # Assign full block in a reverse order for off_t. Prioritize the last CTA.
         block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
