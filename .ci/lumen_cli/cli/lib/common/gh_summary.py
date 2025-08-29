@@ -201,9 +201,12 @@ def summarize_failures_by_test_command(
 
     # If *all* sections are empty or we collected nothing, skip writing.
     if not sections or all(not s["failures"] for s in sections):
+        logger.info("[gh-summary] No failures to summarize, skipping write.")
         return False
 
     md = _TPL_FAIL_BY_CMD.render(title=title, sections=sections).rstrip() + "\n"
+    if md:
+        logger.info("[gh-summary] %s", md)
     return write_gh_step_summary(md)
 
 
