@@ -724,7 +724,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out0.device_mesh, mesh_x)
         self.assertEqual(out1.device_mesh, mesh_y)
 
-        with self.assertRaisesRegex(ValueError, "computation across different mesh"):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             torch.ops.aten._foreach_add(
                 [replica_inp00, replica_inp01], [replica_inp10, replica_inp11]
             )
