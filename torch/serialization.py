@@ -1511,7 +1511,7 @@ def load(
         if pickle_module is None:
             pickle_module = pickle
 
-    if pickle_load_args is not None and weights_only == True:
+    if pickle_load_args != {} and weights_only == True:
         raise RuntimeError(
             "pickle_load_args only works if `weights_only=False`."
         )
