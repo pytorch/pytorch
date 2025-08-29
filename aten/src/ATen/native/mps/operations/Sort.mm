@@ -175,6 +175,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_mps(
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
   TORCH_CHECK(k >= 1 && k <= slicesize,
               "kthvalue(): selected number k out of range for dimension ", dim);
+  at::assert_no_overlap(self, values);
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
 
