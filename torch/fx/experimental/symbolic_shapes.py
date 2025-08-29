@@ -69,7 +69,7 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.sym_node import bitwise_ops, magic_methods, magic_methods_on_operator_with_trailing_underscore, only_float_magic_methods, SymNode, SymTypes
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1023,6 +1023,47 @@ def find_symbol_binding_fx_nodes(
         if (s := is_symbol_binding_fx_node(node)) is not None and s not in r:
             r[s] = node
     return r
+
+
+class SymToken:
+    def __init__(self, val):
+        self.val = val
+
+
+class SymBoolToken(SymToken):
+    def __bool__(self):
+        node = self.val.node
+        return node.guard_bool("", 0)
+
+
+class SymIntToken(SymToken):
+    pass
+
+
+class SymFloatToken(SymToken):
+    pass
+
+
+_TOKEN_SHAPE_ENV = None
+
+
+def sym_wrap(val: Union[int, float], name: str) -> Union[SymIntToken, SymFloatToken]:
+    from torch._dynamo.source import SymTokenSource
+
+    assert isinstance(val, (int, float))
+    global _TOKEN_SHAPE_ENV
+    if _TOKEN_SHAPE_ENV is None:
+        _TOKEN_SHAPE_ENV = ShapeEnv()
+    shape_env = _TOKEN_SHAPE_ENV
+
+    sym = shape_env.create_symbol(
+        val,
+        SymTokenSource(name),
+        dynamic_dim=DimDynamic.DYNAMIC,
+    )
+    sym.name = name
+    node = shape_env.create_symintnode(sym, hint=val)
+    return SymIntToken(node) if isinstance(val, int) else SymFloatToken(node)
 
 
 @dataclass(frozen=True)

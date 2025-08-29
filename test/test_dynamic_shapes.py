@@ -528,6 +528,18 @@ class TestPySymInt(TestCase):
             """[Eq(s97, 2)]""",
         )
 
+    def test_sym_wrap(self):
+        from torch.fx.experimental.symbolic_shapes import sym_wrap
+
+        def f(x, y, z):
+            return x + y + z + 2
+
+        s0 = sym_wrap(4, "s0")
+        s1 = sym_wrap(5, "s1")
+        assert s0 + s1 + 2 <= 32  # guard added in token shape env
+        fn = torch.compile(f, fullgraph=True)
+        fn(s0, 2*s0, s1)
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)

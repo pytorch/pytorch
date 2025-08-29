@@ -47,6 +47,7 @@ from torch import SymInt
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
+    is_sym_token,
     is_torch_sym,
     set_feature_use,
 )

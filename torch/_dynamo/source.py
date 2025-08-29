@@ -527,6 +527,17 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class SymTokenSource(Source):
+    _name: str
+
+    def name(self) -> str:
+        return self._name
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.LOCAL
+
+
+@dataclasses.dataclass(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None

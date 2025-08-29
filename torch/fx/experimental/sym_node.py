@@ -14,6 +14,7 @@ to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
 
 
+from atexit import register
 import builtins
 import functools
 import inspect
@@ -1648,6 +1649,8 @@ for method, func in sizes_strides_methods.items():
 
 
 def _make_user_magic(method, user_type):
+    from torch.fx.experimental.symbolic_shapes import SymBoolToken, SymFloatToken, SymIntToken, SymToken
+
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
 
@@ -1790,11 +1793,32 @@ def _make_user_magic(method, user_type):
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
         return get_constant(ret) if is_constant(ret) else ret
 
+    def _setattrs(user_type, attr, impl):
+        setattr(user_type, attr, impl)
+        if user_type == SymBool:
+            token_type = SymBoolToken
+        elif user_type == SymFloat:
+            token_type = SymFloatToken
+        else:
+            token_type = SymIntToken
+        
+        def token_impl(*args):
+            node = impl(*[x.val if isinstance(x, SymToken) else x for x in args])
+            if isinstance(node, SymBool):
+                out_type = SymBoolToken
+            elif isinstance(node, SymFloat):
+                out_type = SymFloatToken
+            else:
+                out_type = SymIntToken
+            return out_type(node)
+
+        setattr(token_type, attr, token_impl)
+
     if method in unary_magic_methods:
-        setattr(user_type, f"__{method}__", unary_magic_impl)
+        _setattrs(user_type, f"__{method}__", unary_magic_impl)
     elif method in unary_nonmagic_methods:
         orig = getattr(user_type, method)
-        setattr(user_type, method, update_wrapper(unary_magic_impl, orig))
+        _setattrs(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(pred, then_val, else_val):
@@ -1811,7 +1835,7 @@ def _make_user_magic(method, user_type):
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
             return get_constant(ret) if ret.node.is_constant() else ret
 
-        setattr(user_type, f"__{method}__", sym_ite_magic_impl)
+        _setattrs(user_type, f"__{method}__", sym_ite_magic_impl)
     elif method == "round":
 
         def round_magic_impl(self, ndigits=None):
@@ -1820,28 +1844,29 @@ def _make_user_magic(method, user_type):
 
             return wrap_node(getattr(self.node, method)(ndigits))
 
-        setattr(user_type, f"__{method}__", round_magic_impl)
+        _setattrs(user_type, f"__{method}__", round_magic_impl)
     else:
         method_name = method
         if method in bitwise_ops:
             method_name = bitwise_ops[method]
-        setattr(user_type, f"__{method_name}__", binary_magic_impl)
+        _setattrs(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
-            setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
+            _setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method, func in magic_methods.items():  # type: ignore[assignment]
-    if method in only_bool_magic_methods:
-        _make_user_magic(method, SymBool)
-        continue
-    if method in only_float_magic_methods:
-        _make_user_magic(method, SymFloat)
-        continue
-    if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
-        _make_user_magic(method, SymBool)
-    _make_user_magic(method, SymInt)
-    if method not in bitwise_ops:
-        _make_user_magic(method, SymFloat)
+def register_methods():
+    for method, func in magic_methods.items():  # type: ignore[assignment]
+        if method in only_bool_magic_methods:
+            _make_user_magic(method, SymBool)
+            continue
+        if method in only_float_magic_methods:
+            _make_user_magic(method, SymFloat)
+            continue
+        if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
+            _make_user_magic(method, SymBool)
+        _make_user_magic(method, SymInt)
+        if method not in bitwise_ops:
+            _make_user_magic(method, SymFloat)
 
-del method
-del func
+
+register_methods()

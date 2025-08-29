@@ -2453,6 +2453,12 @@ def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     )
 
 
+def is_sym_token(value: Any) -> bool:
+    from torch.fx.experimental.symbolic_shapes import SymToken
+
+    return isinstance(value, SymToken)
+
+
 def is_int_specialization_case(value: Any, source: Any) -> bool:
     from .source import is_from_defaults
 
