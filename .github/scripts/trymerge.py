@@ -737,24 +737,16 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def last_commit_sha(self, default: Optional[str] = None) -> str:
-        # for commits, the oid is the sha
-
-        if default is None:
-            return str(self.last_commit()["oid"])
-
-        return str(self.last_commit().get("oid", default))
-
     def get_merge_base(self) -> str:
         if self.merge_base:
             return self.merge_base
 
-        last_commit_sha = self.last_commit_sha()
+        last_commit_oid = self.last_commit()["oid"]
         # NB: We could use self.base_ref() here for regular PR, however, that doesn't
         # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
         # so let's just use main instead
         self.merge_base = gh_fetch_merge_base(
-            self.org, self.project, last_commit_sha, self.default_branch()
+            self.org, self.project, last_commit_oid, self.default_branch()
         )
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
@@ -1159,7 +1151,7 @@ class GitHubPR:
         *,
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
-        comment_id: int,
+        comment_id: Optional[int] = None,
         ignore_current_checks: Optional[list[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
@@ -1175,7 +1167,7 @@ class GitHubPR:
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             ignore_current_checks=ignore_current_checks,
         )
-        additional_merged_prs = self.merge_changes_locally(
+        additional_merged_prs = self.merge_changes(
             repo, skip_mandatory_checks, comment_id
         )
 
@@ -1204,7 +1196,7 @@ class GitHubPR:
                 broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
                 flaky_checks=ignorable_checks.get("FLAKY", []),
                 unstable_checks=ignorable_checks.get("UNSTABLE", []),
-                last_commit_sha=self.last_commit_sha(default=""),
+                last_commit_sha=self.last_commit().get("oid", ""),
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
@@ -1225,7 +1217,7 @@ class GitHubPR:
             dry_run=dry_run,
         )
 
-    def merge_changes_locally(
+    def merge_changes(
         self,
         repo: GitRepo,
         skip_mandatory_checks: bool = False,
@@ -1239,28 +1231,28 @@ class GitHubPR:
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
-        if self.is_ghstack_pr():
+        if not self.is_ghstack_pr():
+            msg = self.gen_commit_message()
+            pr_branch_name = f"__pull-request-{self.pr_num}__init__"
+            repo.fetch(self.last_commit()["oid"], pr_branch_name)
+            repo._run_git("merge", "--squash", pr_branch_name)
+            repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
+            return []
+        else:
             return self.merge_ghstack_into(
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
             )
-
-        msg = self.gen_commit_message()
-        pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-        repo.fetch(self.last_commit_sha(), pr_branch_name)
-        repo._run_git("merge", "--squash", pr_branch_name)
-        repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
-
-        # Did the PR change since we started the merge?
-        pulled_sha = repo.show_ref(pr_branch_name)
-        latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
-        if pulled_sha != latest_pr_status.last_commit_sha():
-            raise RuntimeError(
-                "PR has been updated since CI checks last passed. Please rerun the merge command."
-            )
-        return []
 
 
 class MergeRuleFailedError(RuntimeError):
@@ -1466,7 +1458,7 @@ def find_matching_merge_rule(
             pending_checks = []
             failed_checks = []
 
-        hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit_sha()}"
+        hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
@@ -2164,14 +2156,14 @@ def categorize_checks(
 def merge(
     pr: GitHubPR,
     repo: GitRepo,
-    comment_id: int,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
+    comment_id: Optional[int] = None,
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
 ) -> None:
-    initial_commit_sha = pr.last_commit_sha()
+    initial_commit_sha = pr.last_commit()["oid"]
     pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
     print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
@@ -2242,7 +2234,7 @@ def merge(
             f"Attempting merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} ({elapsed_time / 60} minutes elapsed)"
         )
         pr = GitHubPR(pr.org, pr.project, pr.pr_num)
-        if initial_commit_sha != pr.last_commit_sha():
+        if initial_commit_sha != pr.last_commit()["oid"]:
             raise RuntimeError(
                 "New commits were pushed while merging. Please rerun the merge command."
             )
@@ -2409,7 +2401,7 @@ def main() -> None:
     if args.check_mergeability:
         if pr.is_ghstack_pr():
             get_ghstack_prs(repo, pr)  # raises error if out of sync
-        pr.merge_changes_locally(
+        pr.merge_changes(
             repo,
             skip_mandatory_checks=True,
             skip_all_rule_checks=True,
@@ -2424,18 +2416,12 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
     try:
-        # Ensure comment id is set, else fail
-        if not args.comment_id:
-            raise ValueError(
-                "Comment ID is required for merging PRs, please provide it using --comment-id"
-            )
-
         merge(
             pr,
             repo,
-            comment_id=args.comment_id,
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
+            comment_id=args.comment_id,
             ignore_current=args.ignore_current,
         )
     except Exception as e:
@@ -2457,7 +2443,7 @@ def main() -> None:
                 broken_trunk_checks=[],
                 flaky_checks=[],
                 unstable_checks=[],
-                last_commit_sha=pr.last_commit_sha(default=""),
+                last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
                 skip_mandatory_checks=args.force,

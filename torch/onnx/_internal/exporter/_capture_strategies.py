@@ -283,4 +283,5 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrictStrategy,
+    TorchExportDraftExportStrategy,
 )

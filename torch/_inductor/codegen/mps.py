@@ -366,7 +366,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def round(x: CSEVariable) -> str:
-        return f"metal::rint({x})"
+        return f"metal::round({x})"
 
     @staticmethod
     def pow(a: CSEVariable, b: CSEVariable) -> str:

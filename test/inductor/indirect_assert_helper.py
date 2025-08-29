@@ -73,10 +73,7 @@ if __name__ == "__main__":
         shape = (y.numel(),) + x.shape[2:]
         z = torch.randn(shape, device=GPU_TYPE)
         fn(x, y, z)
-        # On Windows, Python will optimize away a function call if its updated value is not used.
-        # Touch the memory of x so that the fn(x, y, z) will not be optimized away
-        print(x)
     elif fn_name in ("upper1", "upper2", "lower1", "lower2"):
-        print(fn(x))
+        fn(x)
     else:
-        print(fn(x, y))
+        fn(x, y)

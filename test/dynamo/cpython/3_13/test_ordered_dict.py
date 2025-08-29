@@ -170,14 +170,13 @@ class OrderedDictTests:
 
     def test_init_calls(self):
         calls = []
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Spam:
-                def keys(self):
-                    calls.append('keys')
-                    return ()
-                def items(self):
-                    calls.append('items')
-                    return ()
+        class Spam:
+            def keys(self):
+                calls.append('keys')
+                return ()
+            def items(self):
+                calls.append('items')
+                return ()
 
         self.OrderedDict(Spam())
         self.assertEqual(calls, ['keys'])
@@ -187,10 +186,9 @@ class OrderedDictTests:
         # a consistent internal state is created in __new__
         # rather than __init__.
         OrderedDict = self.OrderedDict
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class ODNI(OrderedDict):
-                def __init__(*args, **kwargs):
-                    pass
+        class ODNI(OrderedDict):
+            def __init__(*args, **kwargs):
+                pass
         od = ODNI()
         od['a'] = 1  # This used to fail because __init__ was bypassed
 
@@ -326,10 +324,9 @@ class OrderedDictTests:
         self.assertEqual(od.pop(k, 12345), 12345)
 
         # make sure pop still works when __missing__ is defined
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Missing(OrderedDict):
-                def __missing__(self, key):
-                    return 0
+        class Missing(OrderedDict):
+            def __missing__(self, key):
+                return 0
         m = Missing(a=1)
         self.assertEqual(m.pop('b', 5), 5)
         self.assertEqual(m.pop('a', 6), 1)
@@ -476,10 +473,9 @@ class OrderedDictTests:
         self.assertEqual(od.setdefault('g', default=9), 9)
 
         # make sure setdefault still works when __missing__ is defined
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Missing(OrderedDict):
-                def __missing__(self, key):
-                    return 0
+        class Missing(OrderedDict):
+            def __missing__(self, key):
+                return 0
         self.assertEqual(Missing().setdefault(5, 9), 9)
 
     def test_reinsert(self):
@@ -545,10 +541,9 @@ class OrderedDictTests:
     def test_override_update(self):
         OrderedDict = self.OrderedDict
         # Verify that subclasses can override update() without breaking __init__()
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class MyOD(OrderedDict):
-                def update(self, *args, **kwds):
-                    raise Exception()
+        class MyOD(OrderedDict):
+            def update(self, *args, **kwds):
+                raise Exception()
         items = [('a', 1), ('c', 3), ('b', 2)]
         self.assertEqual(list(MyOD(items).items()), items)
 
@@ -569,10 +564,9 @@ class OrderedDictTests:
         # should not crash Python.
         OrderedDict = self.OrderedDict
         deleted = []
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class MyOD(OrderedDict):
-                def __del__(self):
-                    deleted.append(self.i)
+        class MyOD(OrderedDict):
+            def __del__(self):
+                deleted.append(self.i)
         obj = None
         for i in range(100):
             obj = MyOD([(None, obj)])
@@ -584,20 +578,19 @@ class OrderedDictTests:
     def test_delitem_hash_collision(self):
         OrderedDict = self.OrderedDict
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key:
-                def __init__(self, hash):
-                    self._hash = hash
-                    self.value = str(id(self))
-                def __hash__(self):
-                    return self._hash
-                def __eq__(self, other):
-                    try:
-                        return self.value == other.value
-                    except AttributeError:
-                        return False
-                def __repr__(self):
-                    return self.value
+        class Key:
+            def __init__(self, hash):
+                self._hash = hash
+                self.value = str(id(self))
+            def __hash__(self):
+                return self._hash
+            def __eq__(self, other):
+                try:
+                    return self.value == other.value
+                except AttributeError:
+                    return False
+            def __repr__(self):
+                return self.value
 
         def blocking_hash(hash):
             # See the collision-handling in lookdict (in Objects/dictobject.c).
@@ -624,10 +617,9 @@ class OrderedDictTests:
     def test_issue24347(self):
         OrderedDict = self.OrderedDict
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key:
-                def __hash__(self):
-                    return randrange(100000)
+        class Key:
+            def __hash__(self):
+                return randrange(100000)
 
         od = OrderedDict()
         for i in range(100):
@@ -647,10 +639,9 @@ class OrderedDictTests:
     def test_issue24348(self):
         OrderedDict = self.OrderedDict
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key:
-                def __hash__(self):
-                    return 1
+        class Key:
+            def __hash__(self):
+                return 1
 
         od = OrderedDict()
         od[Key()] = 0
@@ -832,10 +823,9 @@ class PurePythonOrderedDictTests(OrderedDictTests, __TestCase):
     OrderedDict = py_coll.OrderedDict
 
     def test_issue119004_attribute_error(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                def side_effect(self):
-                    del dict1[TODEL]
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
 
         TODEL = Key()
         dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
@@ -875,10 +865,9 @@ class CPythonOrderedDictSideEffects:
         self.assertRaisesRegex(RuntimeError, msg, operator.eq, dict1, dict2)
 
     def test_issue119004_change_size_by_clear(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                def side_effect(self):
-                    dict1.clear()
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                dict1.clear()
 
         dict1 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
         dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
@@ -888,10 +877,9 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
     def test_issue119004_change_size_by_delete_key(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                def side_effect(self):
-                    del dict1[TODEL]
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
 
         TODEL = Key()
         dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
@@ -902,11 +890,10 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
     def test_issue119004_change_linked_list_by_clear(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                def side_effect(self):
-                    dict1.clear()
-                    dict1['a'] = dict1['b'] = 'c'
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                dict1.clear()
+                dict1['a'] = dict1['b'] = 'c'
 
         dict1 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
         dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
@@ -916,11 +903,10 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
     def test_issue119004_change_linked_list_by_delete_key(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                def side_effect(self):
-                    del dict1[TODEL]
-                    dict1['a'] = 'c'
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
+                dict1['a'] = 'c'
 
         TODEL = Key()
         dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
@@ -931,11 +917,10 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
     def test_issue119004_change_size_by_delete_key_in_dict_eq(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Key(_TriggerSideEffectOnEqual):
-                trigger = 0
-                def side_effect(self):
-                    del dict1[TODEL]
+        class Key(_TriggerSideEffectOnEqual):
+            trigger = 0
+            def side_effect(self):
+                del dict1[TODEL]
 
         TODEL = Key()
         dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))

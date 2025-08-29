@@ -1081,13 +1081,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        return configs
-
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1584,19 +1577,6 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
     "mm_persistent_tma", "cuda", register=torch.version.hip is None
 )
 class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
-    """Persistent TMA template heuristic for CUDA"""
-
-    def __init__(self) -> None:
-        super().__init__()
-        # Override mm_configs to use persistent_mm_configs
-        self.mm_configs = self.persistent_mm_configs
-
-
-@register_template_heuristic(
-    "mm_persistent_tma",
-    "xpu",
-)
-class XPUPersistentTMATemplateConfigHeuristic(TMAConfigMixin, XPUConfigHeuristic):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
