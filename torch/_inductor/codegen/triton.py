@@ -1296,21 +1296,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def log1p(x):
-        bug = config.triton.inject_log1p_bug_TESTING_ONLY
-        if bug == "compile_error":
-            return "compile error!"
-        elif bug == "runtime_error":
-            # NB: this only triggers runtime error as long as input
-            # is not all zero
-            return f'triton_helpers.device_assert_then({x} == 0, "injected assert fail", {x})'
-        elif bug == "accuracy":
-            return f"{x} + 1"
-        elif bug is None:
-            return f"libdevice.log1p({x})"
-        else:
-            raise AssertionError(
-                f"unrecognized config triton.inject_log1p_bug_TESTING_ONLY = {bug!r}"
-            )
+        return f"libdevice.log1p({x})"
 
     @staticmethod
     @maybe_upcast_float32()
