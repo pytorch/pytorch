@@ -531,14 +531,15 @@ class TestPySymInt(TestCase):
     def test_sym_wrap(self):
         from torch.fx.experimental.symbolic_shapes import sym_wrap
 
-        def f(x, y, z):
-            return x + y + z + 2
+        def f(x, x1, y, z):
+            return x + x1 + y + z + 2, torch.randn(x + x1)
 
         s0 = sym_wrap(4, "s0")
         s1 = sym_wrap(5, "s1")
         assert s0 + s1 + 2 <= 32  # guard added in token shape env
-        fn = torch.compile(f, fullgraph=True)
-        fn(s0, 2*s0, s1)
+        fn = torch.compile(f, fullgraph=True, backend="eager")
+        out = fn(s0, s0, 2*s0, 4)
+        print(out)
 
     def test_sym_int(self):
         shape_env = ShapeEnv()

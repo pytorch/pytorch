@@ -1048,7 +1048,7 @@ _TOKEN_SHAPE_ENV = None
 
 
 def sym_wrap(val: Union[int, float], name: str) -> Union[SymIntToken, SymFloatToken]:
-    from torch._dynamo.source import SymTokenSource
+    from torch._dynamo.source import UserSideSymTokenSource
 
     assert isinstance(val, (int, float))
     global _TOKEN_SHAPE_ENV
@@ -1058,7 +1058,7 @@ def sym_wrap(val: Union[int, float], name: str) -> Union[SymIntToken, SymFloatTo
 
     sym = shape_env.create_symbol(
         val,
-        SymTokenSource(name),
+        UserSideSymTokenSource(name),
         dynamic_dim=DimDynamic.DYNAMIC,
     )
     sym.name = name

@@ -69,6 +69,8 @@ from torch.fx.experimental.symbolic_shapes import (
     SubclassSymbolicContext,
     SymbolicContext,
     SymIntSymbolicContext,
+    SymFloatToken,
+    SymIntToken,
     TrackedFake,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -118,9 +120,11 @@ from ..source import (
     RandomValueSource,
     Source,
     SubclassAttrListSource,
+    SymTokenSource,
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UserSideSymTokenSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -432,9 +436,11 @@ class VariableBuilder:
         self.name = source.name()
 
     def __call__(self, value):
+        breakpoint()
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
+            print("__call", self, value, dup_guard)
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
@@ -1098,6 +1104,60 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif is_sym_token(value):
+            assert isinstance(value, (SymIntToken, SymFloatToken))
+            source = SymTokenSource(self.source)
+            is_int = isinstance(value, SymIntToken)
+
+            in_symnode = value.val.node
+            in_shape_env = in_symnode.shape_env
+            in_expr = in_symnode.expr
+
+            def map_symbol(sym):
+                if sym in self.tx.output.root_tracer.symint_map:
+                    return self.tx.output.root_tracer.symint_map[sym]
+                else:
+                    hint = in_shape_env.var_to_val[sym]
+                    res = self.tx.output.shape_env.create_unspecified_symbol(
+                        int(hint) if is_int else float(hint),
+                        source=in_shape_env.var_to_sources[sym][0],
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    )
+                    self.tx.output.root_tracer.symint_map[sym] = res
+                    return res
+
+            symbol_map = {sym: map_symbol(sym) for sym in in_expr.free_symbols}
+            expr = in_expr.xreplace(symbol_map)
+            if is_int:
+                node = self.tx.output.shape_env.create_symintnode(
+                    expr,
+                    hint=in_symnode.hint,
+                    source=source,
+                )
+            else:
+                node = self.tx.output.shape_env.create_symfloatnode(
+                    expr,
+                    hint=in_symnode.hint,
+                    source=source,
+                )
+
+            # bind symint to graph input
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(node),
+                node,
+                source=source,
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                source,
+                node,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=node,
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
+            return SymNodeVariable(sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.

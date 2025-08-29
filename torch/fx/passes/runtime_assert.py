@@ -642,3 +642,4 @@ def insert_deferred_runtime_asserts(
         ):
             log.debug("deleting unused reified symbol for %s", expr)
             gm.graph.erase_node(proxy.node)
+    print(gm)

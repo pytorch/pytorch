@@ -2477,6 +2477,9 @@ class SubgraphTracer(fx.Tracer):
         # 2. when we track_unbacked_symbols for intermediate results that contain unbacked symints.
         self.bound_symbols: dict[sympy.Symbol, Union[torch.fx.Proxy, LazyProxy]] = {}
 
+        # Maps symints from SymTokens -> new symints
+        self.symint_map = {}
+
         self.prev_inst = None
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
