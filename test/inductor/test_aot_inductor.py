@@ -2158,6 +2158,8 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    # mps doesn't support float64
+    @skipIfMPS
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
