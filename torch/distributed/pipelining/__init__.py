@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
+from .pipeline_stage_coordinator import _register_default_stage_coordinator
 from .schedules import (
     _ScheduleForwardOnly,
     Schedule1F1B,
@@ -12,6 +13,9 @@ from .schedules import (
 )
 from .stage import build_stage, PipelineStage
 
+
+# Initialize default stage coordinators
+_register_default_stage_coordinator()
 
 __all__ = [
     "Pipe",
