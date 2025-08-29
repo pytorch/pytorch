@@ -1964,7 +1964,12 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly("returns", &FunctionSchema::returns)
       .def(
           "is_backward_compatible_with",
-          &FunctionSchema::isBackwardCompatibleWith)
+          // FunctionSchema::isBackwardCompatibleWith has an extra
+          // defaulted argument, so we can't just use a
+          // pointer-to-member here.
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            return self.isBackwardCompatibleWith(old_schema);
+          })
       .def(
           "check_forward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
