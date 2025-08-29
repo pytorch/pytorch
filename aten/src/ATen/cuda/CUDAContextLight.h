@@ -25,6 +25,7 @@
 #endif
 
 #include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace c10 {
@@ -86,6 +87,7 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
+TORCH_CUDA_CPP_API void maybeSetCUDABlasHandleTF32(c10::ScalarType dtype, cublasHandle_t handle);
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace();

@@ -344,4 +344,14 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #endif
 }
 
+void maybeSetCUDABlasHandleTF32(c10::ScalarType dtype, cublasHandle_t handle) {
+  if (dtype == at::kFloat || dtype == at::kComplexFloat) {
+    if (!NoTF32Guard::should_disable_tf32() &&
+        at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+      TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+    } else {
+      TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+    }
+  }
+}
 } // namespace at::cuda
