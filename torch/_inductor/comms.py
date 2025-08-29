@@ -215,12 +215,15 @@ def wait_exposed_communication_time(
             else:
                 continue
 
+        comp_time_before = comp_time
+
         def accumulate_time(_snode: BaseSchedulerNode) -> None:
             nonlocal comp_time
             comp_time += runtimes[_snode]
 
         _temp_group_visit_leaves(c, accumulate_time)
-        overlap_info += f"+{c.get_name()}"
+        comp_time_after = comp_time
+        overlap_info += f"+{c.get_name()}[{int(comp_time_after - comp_time_before)}]"
 
     return comm_time, comp_time, overlap_info
 
@@ -229,7 +232,6 @@ def coll_exposed_communication_time(
     snodes: list[BaseSchedulerNode],
     runtimes,
 ) -> tuple[float, float, str]:
-    # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
     collective_snode = snodes[0]
     comm_time = runtimes[collective_snode]
     comp_time = 0.0
@@ -251,9 +253,6 @@ def coll_exposed_communication_time(
 
         if contains_collective(snode):
             if not contains_async_collective(snode):
-                # That means we have found collective and wait
-                # Any compute after not overlapping original Collective
-                # TODO(ivankobzarev): Support different pgs as they use different streams
                 break
             else:
                 collectives_found.append(snode)
@@ -268,15 +267,17 @@ def coll_exposed_communication_time(
                 # Any compute after not overlapping original Collective
                 break
 
-        acc_before = comp_time
+        comp_time_before = comp_time
 
         def accumulate_time(_snode: BaseSchedulerNode) -> None:
             nonlocal comp_time
             comp_time += runtimes[_snode]
 
         _temp_group_visit_leaves(snode, accumulate_time)
-        acc_after = comp_time
-        overlap_info += f"+{snode.get_name()}[{int(acc_after - acc_before)}]"
+        comp_time_after = comp_time
+        overlap_info += (
+            f"+{snode.get_name()}[{int(comp_time_after - comp_time_before)}]"
+        )
     return comm_time, comp_time, overlap_info
 
 
