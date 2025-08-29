@@ -1065,29 +1065,6 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Dump provenance artifacts for debugging trace
-    if config.trace.provenance_tracking_level != 0:
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(
-                torch._inductor.debug.dump_inductor_provenance_info()
-            ),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_kernel_stack_traces",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(
-                torch._inductor.debug._inductor_kernel_stack_trace
-            ),
-        )
-
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
         mm_table_data = []
@@ -1530,6 +1507,33 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
+                    # Dump provenance artifacts for debugging trace
+                    inductor_provenance_tracking_node_mappings = None
+                    inductor_kernel_stack_trace_str = None
+                    if config.trace.provenance_tracking_level != 0:
+                        inductor_provenance_tracking_node_mappings = json.dumps(
+                            torch._inductor.debug.dump_inductor_provenance_info()
+                        )
+                        inductor_kernel_stack_trace_str = json.dumps(
+                            torch._inductor.debug._inductor_kernel_stack_trace
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "inductor_provenance_tracking_node_mappings",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: inductor_provenance_tracking_node_mappings,
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: inductor_kernel_stack_trace_str,
+                        )
+
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -1637,6 +1641,8 @@ class _InProcessFxCompile(FxCompile):
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,
+                        inductor_provenance_tracking_node_mappings,
+                        inductor_kernel_stack_trace_str,
                     )
 
 
@@ -2308,6 +2314,54 @@ def compile_fx_backward(
             )
 
 
+def run_pre_grad_passes(model_: GraphModule, example_inputs_: Sequence[InputType]):
+    # "before_pre_grad_graph" is used in inductor provenance
+    # tracking highlighter front-end.
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "before_pre_grad_graph",
+            "encoding": "string",
+        },
+        payload_fn=lambda: model_.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+        + f"\n\n # graph id: {id(model_.graph)}",
+    )
+    pre_grad_graphs_log.debug(
+        "%s",
+        lazy_format_graph_code(
+            "BEFORE PRE GRAD",
+            model_,
+            include_stride=True,
+            include_device=True,
+            colored=True,
+        ),
+    )
+    torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
+
+    if config.trace.provenance_tracking_level == 1:
+        for node in model_.graph.nodes:
+            if node.stack_trace:
+                torch._inductor.debug._inductor_pre_grad_node_stack_trace[node.name] = (
+                    node.stack_trace
+                )
+
+    model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "after_pre_grad_graph",
+            "encoding": "string",
+        },
+        payload_fn=lambda: model_.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+        + f"\n\n # graph id: {id(model_.graph)}",
+    )
+    return model_
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2452,50 +2506,7 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
-            # "before_pre_grad_graph" is used in inductor provenance
-            # tracking highlighter front-end.
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before_pre_grad_graph",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: model_.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                )
-                + f"\n\n # graph id: {id(model_.graph)}",
-            )
-            pre_grad_graphs_log.debug(
-                "%s",
-                lazy_format_graph_code(
-                    "BEFORE PRE GRAD",
-                    model_,
-                    include_stride=True,
-                    include_device=True,
-                    colored=True,
-                ),
-            )
-            torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
-
-            if config.trace.provenance_tracking_level == 1:
-                for node in model_.graph.nodes:
-                    if node.stack_trace:
-                        torch._inductor.debug._inductor_pre_grad_node_stack_trace[
-                            node.name
-                        ] = node.stack_trace
-
-            model_ = _recursive_pre_grad_passes(model_, example_inputs_)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "after_pre_grad_graph",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: model_.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                )
-                + f"\n\n # graph id: {id(model_.graph)}",
-            )
+            model_ = run_pre_grad_passes(model_, example_inputs_)
 
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
