@@ -134,8 +134,10 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 

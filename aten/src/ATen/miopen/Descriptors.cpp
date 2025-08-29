@@ -136,7 +136,9 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   }
 
   dim = std::max<int64_t>(dim, pad);
-  set(getDataType(t), static_cast<int>(dim), size, stride);
+  set(getDataType(t), static_cast<int>(dim), size, stride,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
 }
 
 }}
