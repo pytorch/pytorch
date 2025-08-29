@@ -1183,7 +1183,9 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape(1, 9, 1).data_ptr())
         self.assertEqual(torch.reshape(x, (9,)), x.reshape(9))
         self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
-
+        # insure reshape throws an error when extra positional arguments are given. 
+        self.assertRaises(TypeError, lambda: x.reshape((9,), torch.float32))
+        
         y = torch.randn(4, 4, 4, device=device)[:, 0, :]
         # .data_ptr() on meta tensors is always 0 so they are equal regardless of the reshape
         if device != "meta":
