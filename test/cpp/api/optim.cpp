@@ -202,6 +202,8 @@ struct MyOptimizerOptions
     : public OptimizerCloneableOptions<MyOptimizerOptions> {
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {}
   TORCH_ARG(double, lr) = 1.0;
+
+  void overwrite_from(const OptimizerOptions& source) override {}
 };
 
 TEST(OptimTest, OldInterface) {
@@ -563,4 +565,333 @@ TEST(OptimTest, CheckLRChange_ReduceLROnPlateau_Adam) {
 
   check_lr_change_for_reduce_on_plateau(
       optimizer, reduce_lr_on_plateau_scheduler, expected_epoch_lrs);
+}
+
+// Tests for Issue 141884: merge_with functionality for default option
+// inheritance
+TEST(OptimTest, MergeWithDefaultOptions_Adam) {
+  torch::manual_seed(0);
+
+  // Create tensors for parameter groups
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param groups with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Group 1: Only weight_decay specified, should inherit lr, betas, eps,
+  // amsgrad
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor1},
+      std::make_unique<AdamOptions>(AdamOptions().weight_decay(0.11)));
+
+  // Group 2: Only eps specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor2},
+      std::make_unique<AdamOptions>(AdamOptions().eps(1e-6)));
+
+  // Create optimizer with specific defaults
+  AdamOptions defaults;
+  defaults.lr(0.002)
+      .betas(std::make_tuple(0.8, 0.88))
+      .eps(1e-12)
+      .weight_decay(0.05)
+      .amsgrad(true);
+
+  Adam optimizer(param_groups, defaults);
+
+  // Check Group 1: weight_decay preserved, others inherited
+  auto& group1_opts =
+      static_cast<AdamOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group1_opts.lr(), 0.002, 1e-6); // Inherited
+  ASSERT_EQ(group1_opts.betas(), std::make_tuple(0.8, 0.88)); // Inherited
+  ASSERT_NEAR(group1_opts.eps(), 1e-12, 1e-15); // Inherited
+  ASSERT_NEAR(group1_opts.weight_decay(), 0.11, 1e-6); // Preserved
+  ASSERT_TRUE(group1_opts.amsgrad()); // Inherited
+
+  // Check Group 2: eps preserved, others inherited
+  auto& group2_opts =
+      static_cast<AdamOptions&>(optimizer.param_groups()[1].options());
+  ASSERT_NEAR(group2_opts.lr(), 0.002, 1e-6); // Inherited
+  ASSERT_EQ(group2_opts.betas(), std::make_tuple(0.8, 0.88)); // Inherited
+  ASSERT_NEAR(group2_opts.eps(), 1e-6, 1e-9); // Preserved
+  ASSERT_NEAR(group2_opts.weight_decay(), 0.05, 1e-6); // Inherited
+  ASSERT_TRUE(group2_opts.amsgrad()); // Inherited
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_SGD) {
+  torch::manual_seed(0);
+
+  // Create tensors for parameter groups
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param groups with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Group 1: Only lr and weight_decay specified, should inherit momentum,
+  // dampening, nesterov
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor1},
+      std::make_unique<SGDOptions>(SGDOptions(0.01).weight_decay(0.22)));
+
+  // Group 2: Only lr specified, should inherit all others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor2},
+      std::make_unique<SGDOptions>(SGDOptions(0.02)));
+
+  // Create optimizer with specific defaults
+  SGDOptions defaults(0.001); // lr should be overridden by param groups
+  defaults.momentum(0.9)
+      .dampening(0.0) // Must be 0 for Nesterov
+      .weight_decay(0.05)
+      .nesterov(true);
+
+  SGD optimizer(param_groups, defaults);
+
+  // Check Group 1: lr and weight_decay preserved, others inherited
+  auto& group1_opts =
+      static_cast<SGDOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group1_opts.lr(), 0.01, 1e-6); // Preserved
+  ASSERT_NEAR(group1_opts.momentum(), 0.9, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.dampening(), 0.0, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.weight_decay(), 0.22, 1e-6); // Preserved
+  ASSERT_TRUE(group1_opts.nesterov()); // Inherited
+
+  // Check Group 2: lr preserved, others inherited
+  auto& group2_opts =
+      static_cast<SGDOptions&>(optimizer.param_groups()[1].options());
+  ASSERT_NEAR(group2_opts.lr(), 0.02, 1e-6); // Preserved
+  ASSERT_NEAR(group2_opts.momentum(), 0.9, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.dampening(), 0.0, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.weight_decay(), 0.05, 1e-6); // Inherited
+  ASSERT_TRUE(group2_opts.nesterov()); // Inherited
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_AdamW) {
+  torch::manual_seed(0);
+
+  // Create tensors for parameter groups
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param groups with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Group 1: Only eps specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor1},
+      std::make_unique<AdamWOptions>(AdamWOptions().eps(1e-6)));
+
+  // Group 2: Only betas specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor2},
+      std::make_unique<AdamWOptions>(
+          AdamWOptions().betas(std::make_tuple(0.95, 0.999))));
+
+  // Create optimizer with specific defaults
+  AdamWOptions defaults;
+  defaults.lr(0.003)
+      .betas(std::make_tuple(0.9, 0.98))
+      .eps(1e-8)
+      .weight_decay(0.02)
+      .amsgrad(false);
+
+  AdamW optimizer(param_groups, defaults);
+
+  // Check Group 1: eps preserved, others inherited
+  auto& group1_opts =
+      static_cast<AdamWOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group1_opts.lr(), 0.003, 1e-6); // Inherited
+  ASSERT_EQ(group1_opts.betas(), std::make_tuple(0.9, 0.98)); // Inherited
+  ASSERT_NEAR(group1_opts.eps(), 1e-6, 1e-9); // Preserved
+  ASSERT_NEAR(group1_opts.weight_decay(), 0.02, 1e-6); // Inherited
+  ASSERT_FALSE(group1_opts.amsgrad()); // Inherited
+
+  // Check Group 2: betas preserved, others inherited
+  auto& group2_opts =
+      static_cast<AdamWOptions&>(optimizer.param_groups()[1].options());
+  ASSERT_NEAR(group2_opts.lr(), 0.003, 1e-6); // Inherited
+  ASSERT_EQ(group2_opts.betas(), std::make_tuple(0.95, 0.999)); // Preserved
+  ASSERT_NEAR(group2_opts.eps(), 1e-8, 1e-11); // Inherited
+  ASSERT_NEAR(group2_opts.weight_decay(), 0.02, 1e-6); // Inherited
+  ASSERT_FALSE(group2_opts.amsgrad()); // Inherited
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_Adagrad) {
+  torch::manual_seed(0);
+
+  // Create tensors for parameter groups
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param groups with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Group 1: Only lr_decay specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor1},
+      std::make_unique<AdagradOptions>(AdagradOptions().lr_decay(0.001)));
+
+  // Group 2: Only initial_accumulator_value specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor2},
+      std::make_unique<AdagradOptions>(
+          AdagradOptions().initial_accumulator_value(0.5)));
+
+  // Create optimizer with specific defaults
+  AdagradOptions defaults;
+  defaults.lr(0.04)
+      .lr_decay(0.002)
+      .weight_decay(0.03)
+      .initial_accumulator_value(0.1)
+      .eps(1e-11);
+
+  Adagrad optimizer(param_groups, defaults);
+
+  // Check Group 1: lr_decay preserved, others inherited
+  auto& group1_opts =
+      static_cast<AdagradOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group1_opts.lr(), 0.04, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.lr_decay(), 0.001, 1e-6); // Preserved
+  ASSERT_NEAR(group1_opts.weight_decay(), 0.03, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.initial_accumulator_value(), 0.1, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.eps(), 1e-11, 1e-14); // Inherited
+
+  // Check Group 2: initial_accumulator_value preserved, others inherited
+  auto& group2_opts =
+      static_cast<AdagradOptions&>(optimizer.param_groups()[1].options());
+  ASSERT_NEAR(group2_opts.lr(), 0.04, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.lr_decay(), 0.002, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.weight_decay(), 0.03, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.initial_accumulator_value(), 0.5, 1e-6); // Preserved
+  ASSERT_NEAR(group2_opts.eps(), 1e-11, 1e-14); // Inherited
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_RMSprop) {
+  torch::manual_seed(0);
+
+  // Create tensors for parameter groups
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param groups with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Group 1: Only alpha specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor1},
+      std::make_unique<RMSpropOptions>(RMSpropOptions().alpha(0.95)));
+
+  // Group 2: Only momentum and centered specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{tensor2},
+      std::make_unique<RMSpropOptions>(
+          RMSpropOptions().momentum(0.8).centered(true)));
+
+  // Create optimizer with specific defaults
+  RMSpropOptions defaults;
+  defaults.lr(0.015)
+      .alpha(0.98)
+      .eps(1e-9)
+      .weight_decay(0.01)
+      .momentum(0.7)
+      .centered(false);
+
+  RMSprop optimizer(param_groups, defaults);
+
+  // Check Group 1: alpha preserved, others inherited
+  auto& group1_opts =
+      static_cast<RMSpropOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group1_opts.lr(), 0.015, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.alpha(), 0.95, 1e-6); // Preserved
+  ASSERT_NEAR(group1_opts.eps(), 1e-9, 1e-12); // Inherited
+  ASSERT_NEAR(group1_opts.weight_decay(), 0.01, 1e-6); // Inherited
+  ASSERT_NEAR(group1_opts.momentum(), 0.7, 1e-6); // Inherited
+  ASSERT_FALSE(group1_opts.centered()); // Inherited
+
+  // Check Group 2: momentum and centered preserved, others inherited
+  auto& group2_opts =
+      static_cast<RMSpropOptions&>(optimizer.param_groups()[1].options());
+  ASSERT_NEAR(group2_opts.lr(), 0.015, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.alpha(), 0.98, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.eps(), 1e-9, 1e-12); // Inherited
+  ASSERT_NEAR(group2_opts.weight_decay(), 0.01, 1e-6); // Inherited
+  ASSERT_NEAR(group2_opts.momentum(), 0.8, 1e-6); // Preserved
+  ASSERT_TRUE(group2_opts.centered()); // Preserved
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_LBFGS) {
+  torch::manual_seed(0);
+
+  // Create tensors for single parameter group (LBFGS limitation)
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  // Create param group with partial options
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Single group: Only max_iter specified, should inherit others
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{
+          tensor1, tensor2}, // Combine tensors in single group
+      std::make_unique<LBFGSOptions>(LBFGSOptions().max_iter(15)));
+
+  // Create optimizer with specific defaults
+  LBFGSOptions defaults;
+  defaults.lr(0.8)
+      .max_iter(25)
+      .max_eval(31) // Use same value that appears to be auto-calculated
+      .tolerance_grad(1e-5)
+      .tolerance_change(1e-8)
+      .history_size(80)
+      .line_search_fn("strong_wolfe");
+
+  LBFGS optimizer(param_groups, defaults);
+
+  // Check Group: max_iter preserved, others inherited
+  auto& group_opts =
+      static_cast<LBFGSOptions&>(optimizer.param_groups()[0].options());
+  ASSERT_NEAR(group_opts.lr(), 0.8, 1e-6); // Inherited
+  ASSERT_EQ(group_opts.max_iter(), 15); // Preserved
+  ASSERT_EQ(group_opts.max_eval(), 31); // Inherited
+  ASSERT_NEAR(group_opts.tolerance_grad(), 1e-5, 1e-8); // Inherited
+  ASSERT_NEAR(group_opts.tolerance_change(), 1e-8, 1e-11); // Inherited
+  ASSERT_EQ(group_opts.history_size(), 80); // Inherited
+  ASSERT_EQ(group_opts.line_search_fn(), "strong_wolfe"); // Inherited
+}
+
+TEST(OptimTest, MergeWithDefaultOptions_NoOptionsInheritance) {
+  torch::manual_seed(0);
+
+  // Test that param groups without options get full defaults
+  auto tensor1 = torch::randn({2, 2}).requires_grad_(true);
+  auto tensor2 = torch::randn({3, 3}).requires_grad_(true);
+
+  std::vector<OptimizerParamGroup> param_groups;
+
+  // Groups with no options - should inherit everything
+  param_groups.emplace_back(std::vector<torch::Tensor>{tensor1});
+  param_groups.emplace_back(std::vector<torch::Tensor>{tensor2});
+
+  // Create optimizer with specific defaults
+  AdamOptions defaults;
+  defaults.lr(0.005)
+      .betas(std::make_tuple(0.85, 0.95))
+      .eps(1e-7)
+      .weight_decay(0.08)
+      .amsgrad(true);
+
+  Adam optimizer(param_groups, defaults);
+
+  // Both groups should have exactly the default options
+  for (int i = 0; i < 2; i++) {
+    auto& group_opts =
+        static_cast<AdamOptions&>(optimizer.param_groups()[i].options());
+    ASSERT_NEAR(group_opts.lr(), 0.005, 1e-6);
+    ASSERT_EQ(group_opts.betas(), std::make_tuple(0.85, 0.95));
+    ASSERT_NEAR(group_opts.eps(), 1e-7, 1e-10);
+    ASSERT_NEAR(group_opts.weight_decay(), 0.08, 1e-6);
+    ASSERT_TRUE(group_opts.amsgrad());
+  }
 }
