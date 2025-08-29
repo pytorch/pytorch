@@ -154,6 +154,8 @@ else:
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 
 if TYPE_CHECKING:
+    import types
+
     from torch._functorch._aot_autograd.schemas import (
         FQN,
         GraphInputName,
@@ -2120,17 +2122,58 @@ def get_num_model_outputs(model: GraphModule) -> int:
     return len(model_outputs)
 
 
+@dataclass(frozen=True)
+class CompilerConfigExtra:
+    cudagraphs: BoxedBool
+    graph_id: int
+    forward_device: BoxedDeviceIndex
+
+
+def create_compiler_config_extra(config: types.ModuleType) -> CompilerConfigExtra:
+    # Although cudagraphs may have been enabled via config, various
+    # conditions (which are tested within the bowels of Inductor) may
+    # force cudagraphs to be disabled.  This mutable box lets us retrieve
+    # the final determination if cudagraphs actually can be used or not.
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+    # TODO: The modern style is to use CompileId from TracingContext to
+    # identify Inductor compilation.  However, this CompileId cannot
+    # uniquely identify multiple Inductor compilations that arise from
+    # DDPOptimizer
+    graph_id = next(_graph_counter)
+
+    # See [Backward Generation Handling]
+    forward_device = BoxedDeviceIndex(None)
+
+    return CompilerConfigExtra(
+        cudagraphs=cudagraphs,
+        graph_id=graph_id,
+        forward_device=forward_device,
+    )
+
+
 def compile_fx_forward(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    num_orig_model_outputs: int,  # Number of original model outputs from original dynamo graph.
-    num_example_inputs: int,  # Number of example inputs from original dynamo graph.
-    cudagraphs: BoxedBool,
-    graph_id: int,
-    forward_device: BoxedDeviceIndex,
+    num_orig_model_outputs: int,
+    num_example_inputs: int,
+    compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     is_inference: bool = False,
-):
+) -> OutputCode:
+    """
+    Compile the forward graph of the given graph module.
+
+    Args:
+        gm: The graph module to compile.
+        example_inputs: The example inputs to use for compilation.
+        num_orig_model_outputs: The number of model outputs from the original dynamo graph.
+        num_example_inputs: The number of example inputs from the original dynamo graph.
+        compiler_config_extra: Extra configuration for the compiler.
+        inner_compile: The inner compile function to use.
+        is_inference: Whether this is an inference graph.
+    """
+
     if is_inference:
         # partition_fn won't be called
         trace_structured(
@@ -2212,21 +2255,28 @@ def compile_fx_forward(
         gm,
         example_inputs,
         static_input_idxs=get_static_input_idxs(fixed),
-        cudagraphs=cudagraphs,
-        graph_id=graph_id,
+        cudagraphs=compiler_config_extra.cudagraphs,
+        graph_id=compiler_config_extra.graph_id,
         is_inference=is_inference,
-        boxed_forward_device_index=forward_device,
+        boxed_forward_device_index=compiler_config_extra.forward_device,
     )
 
 
 def compile_fx_backward(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    cudagraphs: BoxedBool,
-    graph_id: int,
-    forward_device: BoxedDeviceIndex,
+    compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
-):
+) -> OutputCode:
+    """
+    Compile the backward graph of the given graph module.
+
+    Args:
+        gm: The graph module to compile.
+        example_inputs: The example inputs to use for compilation.
+        compiler_config_extra: Extra configuration for the compiler.
+        inner_compile: The inner compile function to use.
+    """
     from torch._dynamo.convert_frame import compile_lock
 
     with compile_lock:
@@ -2251,10 +2301,10 @@ def compile_fx_backward(
                 gm,
                 example_inputs,
                 static_input_idxs=list(range(fixed)),
-                cudagraphs=cudagraphs,
+                cudagraphs=compiler_config_extra.cudagraphs,
                 is_backward=True,
-                graph_id=graph_id,
-                boxed_forward_device_index=forward_device,
+                graph_id=compiler_config_extra.graph_id,
+                boxed_forward_device_index=compiler_config_extra.forward_device,
             )
 
 
@@ -2461,20 +2511,7 @@ def compile_fx(
 
         num_example_inputs = len(example_inputs_)
 
-        # Although cudagraphs may have been enabled via config, various
-        # conditions (which are tested within the bowels of Inductor) may
-        # force cudagraphs to be disabled.  This mutable box lets us retrieve
-        # the final determination if cudagraphs actually can be used or not.
-        cudagraphs = BoxedBool(config.triton.cudagraphs)
-
-        # See [Backward Generation Handling]
-        forward_device = BoxedDeviceIndex(None)
-
-        # TODO: The modern style is to use CompileId from TracingContext to
-        # identify Inductor compilation.  However, this CompileId cannot
-        # uniquely identify multiple Inductor compilations that arise from
-        # DDPOptimizer
-        graph_id = next(_graph_counter)
+        compiler_config_extra = create_compiler_config_extra(config)
 
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
@@ -2495,9 +2532,7 @@ def compile_fx(
                     example_inputs,
                     num_orig_model_outputs=num_orig_model_outputs,
                     num_example_inputs=num_example_inputs,
-                    cudagraphs=cudagraphs,
-                    graph_id=graph_id,
-                    forward_device=forward_device,
+                    compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                     is_inference=is_inference,
                 )
@@ -2513,9 +2548,9 @@ def compile_fx(
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
                 inner_compile=inner_compile,
-                cudagraphs=cudagraphs,
-                graph_id=graph_id,
-                forward_device=forward_device,
+                cudagraphs=compiler_config_extra.cudagraphs,
+                graph_id=compiler_config_extra.graph_id,
+                forward_device=compiler_config_extra.forward_device,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
@@ -2533,9 +2568,7 @@ def compile_fx(
                 return compile_fx_backward(
                     gm,
                     example_inputs,
-                    cudagraphs=cudagraphs,
-                    graph_id=graph_id,
-                    forward_device=forward_device,
+                    compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                 )
 
@@ -2624,8 +2657,8 @@ def compile_fx(
                     decompositions=decompositions,
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
-                    cudagraphs=cudagraphs,
-                    boxed_forward_device_index=forward_device,
+                    cudagraphs=compiler_config_extra.cudagraphs,
+                    boxed_forward_device_index=compiler_config_extra.forward_device,
                     ignore_shape_env=ignore_shape_env,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
