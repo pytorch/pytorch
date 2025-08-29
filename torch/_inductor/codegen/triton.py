@@ -1061,10 +1061,7 @@ class TritonOverrides(OpOverrides):
         Check https://github.com/triton-lang/triton/issues/5735 for
         more details.
         """
-        if config.use_fast_math:
-            return f"libdevice.exp2({x} * {TritonOverrides._LOG_2_E})"
-        else:
-            return f"tl_math.exp({x})"
+        return f"libdevice.exp({x})"
 
     @staticmethod
     @maybe_upcast_float32()
