@@ -266,7 +266,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     )
     @patch.object(
         torch._inductor.config,
-        "runtime_estimations_mms_benchmark",
+        "runtime_estimations_comp_benchmark",
         False,
     )
     def test_reorder_compute_for_overlap(self):
