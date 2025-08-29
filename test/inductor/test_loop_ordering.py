@@ -870,7 +870,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
-    def test_induced_fused_tiling(self):
+    @parametrize("dynamic", (False, True))
+    def test_induced_fused_tiling(self, dynamic):
         from torch._inductor import tiling_utils
 
         def fn(nodes):
@@ -894,9 +895,14 @@ class MemoryCoalescingTest(MockSchedulerTest):
             YDIM = 4096
 
             arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
+            if dynamic:
+                torch._dynamo.mark_dynamic(arg0_1, 0)
+
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
-            out, code = run_and_get_code(torch.compile(forward), (permute))
+            out, code = run_and_get_code(
+                torch.compile(forward), (permute)
+            )
 
             self.assertEqual(out, forward(permute))
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
@@ -937,12 +943,13 @@ class TestTiling(TestCase):
 
     @parametrize("a", layouts)
     @parametrize("b", layouts)
-    def test_pointwise(self, a, b):
+    @parametrize("dynamic", (False, True))
+    def test_pointwise(self, a, b, dynamic):
         def foo(x, y):
             return x + y
 
         x, y = self.T(a), self.T(b)
-        res, code = run_and_get_code(torch.compile(foo), x, y)
+        res, code = run_and_get_code(torch.compile(foo, dynamic=dynamic), x, y)
 
         if a != b:
             FileCheck().check("ynumel").run(code[0])
@@ -968,13 +975,14 @@ class TestTiling(TestCase):
         ).run(code[0])
         self.assertEqual(out, f(*inps), atol=0.001, rtol=0.04)
 
-    def test_3d_pointwise(self):
+    @parametrize("dynamic", (False, True))
+    def test_3d_pointwise(self, dynamic):
         inps = (self.T("cont"), self.T("T"), self.T("NHWC"))
 
         def f(x, y, z):
             return x + y + z
 
-        f_c = torch.compile(f)
+        f_c = torch.compile(f, dynamic=dynamic)
         out, code = run_and_get_code(f_c, *inps)
 
         FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
