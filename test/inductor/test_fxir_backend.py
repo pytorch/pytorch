@@ -39,6 +39,8 @@ if HAS_GPU:
     import triton
     import triton.language as tl
 
+    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+
 
 @requires_gpu()
 @config.patch(
@@ -596,9 +598,11 @@ class FxirTestCase(InductorTestCase):
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
-    def check(self, model, inp, dynamic_shapes=None):
+    def check(self, model, inp, dynamic_shapes=None, strict=False):
         with torch.no_grad():
-            ep = torch.export.export(model, inp, dynamic_shapes=dynamic_shapes)
+            ep = torch.export.export(
+                model, inp, dynamic_shapes=dynamic_shapes, strict=strict
+            )
             gm = torch._inductor.aot_compile(
                 ep.module(), inp, options={"fx_wrapper": True}
             )
@@ -658,6 +662,37 @@ class AOTFxirTestCase(InductorTestCase):
             M().to(device=self.device),
             inp,
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+        )
+
+    def test_custom_triton_autotune_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                output = torch.zeros_like(x)
+                x_elements = output.size()[0]
+                y_elements = output.size()[1]
+
+                def grid(meta):
+                    return (
+                        triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                        triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                    )
+
+                add_kernel_2d_autotuned[grid](x, y, output, x_elements, y_elements)
+
+                return output
+
+        num_dims = 2
+        dims = [10] * num_dims
+        x = torch.randn(*dims, device=self.device)
+        y = torch.randn(*dims, device=self.device)
+        dim0_x = Dim("dim0_x", min=1, max=10)
+        dim0_y = Dim("dim0_y", min=1, max=10)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
+        self.check(
+            Model().to(device=self.device),
+            (x, y),
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
         )
 
 
