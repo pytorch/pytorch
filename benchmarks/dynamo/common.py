@@ -1442,7 +1442,7 @@ class AOTInductorModelCache:
                     example_args,
                     example_kwargs,
                     dynamic_shapes=dynamic_shapes,
-                    strict=True,
+                    strict=False,
                 )
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
