@@ -1032,6 +1032,27 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 
+class performance_model:
+    """
+    Settings for performance model interface in inductor.
+
+    The performance model interface allows using machine learning models or
+    heuristics to predict kernel performance and guide kernel selection.
+
+    see README.md in performance_model for more details.
+    """
+
+    # 0 means the model is off
+    # -1 means the model filters down to default set of configs (from exhaustive)
+    # > 0 means the model filters down to topk
+    # anything else results in the model being off
+    topk: int = 0
+
+    # whether to discard choices that no model was able to make a prediction on
+    # or to keep them in the set of autotuning configs
+    discard_unranked: bool = False
+
+
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
     if is_fbcode():
@@ -1184,7 +1205,7 @@ class cpp:
 
 class triton:
     """
-    Config specific to codegen/triton.py
+    Settings specific to the Triton backend.
     """
 
     # Use cudagraphs on output code
@@ -1387,6 +1408,7 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1904,6 +1926,34 @@ _cache_config_ignore_prefix: list[str] = [
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+
+
+# Please see the README inside lookup_table for details on the knobs
+class template_config_lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False or None, no
+    # hash checking is performed.
+    check_src_hash: bool = True
+
+    # Enable emitting entries to registered emit backends (e.g., logging)
+    recorder_emit: bool = True
+
+    # Directory to record lookup tables to. If set, enables DirectoryRecordBackend
+    recorder_record_dir: Optional[str] = os.environ.get(
+        "TORCH_INDUCTOR_LOOKUP_TABLE_RECORD_DIR", None
+    )
+
+    # Number of top choices to record. If None or negative, record all choices.
+    # If 0, record nothing. If positive, record only the top k choices.
+    recorder_topk: Optional[int] = None
+
+    # Whether to record template hashes for templates that provide them.
+    # Template hashes make the lookup table more robust but potentially
+    # less portable
+    record_template_hash: bool = True
 
 
 class test_configs:
