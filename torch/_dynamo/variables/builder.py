@@ -459,7 +459,7 @@ class VariableBuilder:
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
             # all other usages of that constant, leading to unnecessary recompilations.
-            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+            return (is_torch_sym(value) or is_sym_token(value)) and isinstance(vt, SymNodeVariable)
 
         if (
             (
