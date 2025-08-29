@@ -726,6 +726,12 @@ def _handle_output_node(
     # node.args[0] can be a tuple with more than one elements. This happens when,
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
     for output in node.args[0]:  # type: ignore[index,union-attr]
+        if output is None:
+            logger.warning(
+                "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
+                node.name,
+            )
+            continue
         output_value_name = output.name  # type: ignore[union-attr]
         assert isinstance(output_value_name, str), (
             f"Bug: Expected {output_value_name!r} to be a string"
@@ -1334,8 +1340,6 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
                 export_status.torch_export_strict = result.success
-            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
-                export_status.torch_export_draft_export = result.success
 
             if result.exception is not None:
                 failed_results.append(result)
