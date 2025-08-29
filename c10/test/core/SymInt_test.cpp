@@ -38,6 +38,10 @@ TEST(SymIntTest, Overflows) {
 
 namespace {
 
+// We need a SymNodeImpl that 1) has working arithmetic with
+// predictable results and 2) causes SymInt::maybe_as_int to return
+// nullopt so that we can hit all 4 cases (zero/one/both arguments
+// have null maybe_as_int) in the operator implementations.
 class ConstantIntPretendingToBeSymbolicSymNodeImpl
     : public ConstantSymNodeImpl<int64_t> {
  public:
@@ -130,9 +134,7 @@ template <template <typename> class Op>
 void test_operator() {
   for (const auto& arg1 : {SymInt(42), create_symbolic_symint(42)}) {
     for (const auto& arg2 : {SymInt(27), create_symbolic_symint(27)}) {
-      EXPECT_EQ(unwrap(Op<SymInt>()(arg1, arg2)), Op<int64_t>()(42, 27))
-          << "arg1 is_heap_allocated: " << arg1.is_heap_allocated()
-          << " arg2 is_heap_allocated: " << arg2.is_heap_allocated();
+      EXPECT_EQ(unwrap(Op<SymInt>()(arg1, arg2)), Op<int64_t>()(42, 27));
     }
   }
 }
