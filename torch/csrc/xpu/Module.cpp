@@ -301,7 +301,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
-  auto get_xpu_uuid = [](const DeviceProp& prop) { return XPUuuid(prop.uuid); };
+  // auto get_xpu_uuid = [](const DeviceProp& prop) { return XPUuuid(prop.uuid); };
 
   auto m = py::handle(module).cast<py::module>();
 
