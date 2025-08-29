@@ -318,6 +318,7 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     linear_weight = self.linear.weight
     linear_bias = self.linear.bias
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
     return pytree.tree_unflatten((linear,), self._out_spec)""",
         )

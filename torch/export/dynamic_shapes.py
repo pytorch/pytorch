@@ -887,7 +887,7 @@ class AdditionalInputs:
 
         epm = ep.module()
         for args, kwargs in self._examples:
-            torch.export._unlift._check_input_constraints_pre_hook(
+            torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
 
