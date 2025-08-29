@@ -2312,6 +2312,10 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, 
+        "FIXME: cannot do get_size on FakeTensor during lowering."
+    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
