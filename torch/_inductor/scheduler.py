@@ -853,7 +853,7 @@ class BaseSchedulerNode:
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
 
-        if config.runtime_estimations_mms_benchmark:
+        if config.runtime_comp_profile_and_benchmark:
             ret = estimate_runtime_benchmark(self)
             if ret is not None:
                 return ret
@@ -928,7 +928,17 @@ class EstimateRuntimeCache:
 def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
     # Extern Kernels(e.g. mm) perf will depend on backends.
     if not isinstance(snode, ExternKernelSchedulerNode):
-        return None
+        try:
+            src_code = sched.generate_kernel_code_from_nodes(snode.get_nodes(), benchmark_kernel=True)
+            module = PyCodeCache.load(src_code)
+
+            time, _ = sched.benchmark_codegened_module(module=module, device=device)
+        except Exception:
+            # if there is dynamic shape in generated triton code, the benchmark will throw errors.
+            # we fall back such case
+            time = 0
+        return time * 1e3
+
     mms_fns = {
         "extern_kernels.mm": torch.ops.aten.mm,
         "extern_kernels.bmm": torch.ops.aten.bmm,
