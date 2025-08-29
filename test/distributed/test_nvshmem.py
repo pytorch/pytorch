@@ -140,6 +140,35 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(hdl0.offset, 0)
         self.assertEqual(hdl1.offset, x0.untyped_storage().nbytes())
 
+    def test_get_remote_tensor(self) -> None:
+        """
+        Get a remote tensor and use regular aten ops to write to it.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            # src data stores my rank
+            x = torch.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+            y = torch.empty_like(x)
+
+        hdl_y = symm_mem.rendezvous(y, group=group_name)
+        peer = (self.rank + 1) % self.world_size  # Shifting pattern
+        y_remote = hdl_y.get_remote_tensor(peer, y.size(), y.dtype)
+        y_remote.copy_(x)
+        dist.barrier()
+        # Expecting data from -1 rank
+        expected = torch.empty(numel, dtype=dtype, device=self.device).fill_(
+            (self.rank - 1) % self.world_size
+        )
+        self.assertEqual(y, expected)
+
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
