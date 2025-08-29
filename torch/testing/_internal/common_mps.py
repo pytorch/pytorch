@@ -12,7 +12,7 @@ if torch.backends.mps.is_available():
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: Optional[str] = None,
+        device_type: str = "mps",
         xfail_exclusion: Optional[list[str]] = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
@@ -635,11 +635,9 @@ if torch.backends.mps.is_available():
             "positive": [torch.complex128],
         }
 
-        def addDecorator(
-            op: OpInfo, d: DecorateInfo, _device_type: Optional[str] = device_type
-        ) -> None:
-            if _device_type is not None:
-                d.device_type = _device_type
+        def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
+            if device_type is not None:
+                d.device_type = device_type
 
             op.decorators = op.decorators + (d,)
 
@@ -654,7 +652,6 @@ if torch.backends.mps.is_available():
                         torch.cdouble,
                     ],
                 ),
-                _device_type="mps",
             )
             if sparse and op.name in SKIPLIST_SPARSE:
                 addDecorator(
@@ -689,7 +686,6 @@ if torch.backends.mps.is_available():
                     addDecorator(
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
-                        _device_type="mps",
                     )
 
             if (
@@ -879,7 +875,7 @@ else:
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: Optional[str] = None,
+        device_type: str = "mps",
         xfail_exclusion: Optional[list[str]] = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
