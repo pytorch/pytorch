@@ -373,6 +373,10 @@ class DtypePropagationOpsHandler:
             f"{type(self).__name__}: ops.placeholder should not appear here"
         )
 
+    @staticmethod
+    def device_assert_async(cond, msg: str) -> torch.dtype:
+        return torch.bool
+
 
 if TYPE_CHECKING:
 
