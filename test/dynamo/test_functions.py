@@ -31,7 +31,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import ifdynstaticdefault, same
+from torch._dynamo.utils import ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
@@ -3491,6 +3491,52 @@ class GraphModule(torch.nn.Module):
         if args_count == 3 and args[2] == 0:
             args[2] = 1
         return args
+
+    def test_range_iterator_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 7, 2).__iter__()
+            y = x + next(it)
+            torch._dynamo.graph_break()
+            return y + next(it) + next(it)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x + 1 + 3 + 5)
+
+    def test_range_iterator_graph_break_2(self):
+        @torch.compiler.disable
+        def g(y, it):
+            return y + next(it) + next(it)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 10, 2).__iter__()
+            y = x + next(it)
+            z = g(y, it)
+            k = next(it)
+            assert k == 7
+            return z + k
+
+        x = torch.tensor([1.0])
+        z = fn(x)
+        self.assertEqual(z, x + 1 + 3 + 5 + 7)
+
+    @make_test
+    def test_range_iterator(a, b):
+        it = range(5).__iter__()
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
+
+    @unittest.expectedFailure
+    @make_test
+    def test_range_iterator_2(a, b):
+        # should pass once we stop having three different paths on call_iter
+        it = iter(range(5))
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
 
     def test_range_length(self):
         def test(*args, expected=None):
