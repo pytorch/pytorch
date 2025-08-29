@@ -687,7 +687,7 @@ def merge_all_gather(
                 ag_node_in = ag_node.args[0]
                 if (
                     ag_node_in.op == "call_function"  # type: ignore[union-attr]
-                    and ag_node_in.target
+                    and ag_node_in.target  # type: ignore[union-attr]
                     == torch.ops.prims.convert_element_type.default  # type: ignore[union-attr]
                     and len(ag_node_in.users) == 1  # type: ignore[union-attr]
                 ):
