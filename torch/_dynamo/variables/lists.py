@@ -19,6 +19,7 @@ variable tracking system.
 import collections
 import inspect
 import operator
+import sys
 from typing import Optional, TYPE_CHECKING
 
 import torch
@@ -445,13 +446,37 @@ class RangeVariable(BaseListVariable):
 
         return r0.step() == r1.step()
 
+    def range_count(self, x: VariableTracker):
+        # Based on CPython
+        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
+        x = x.as_python_constant()
+        if type(x) not in (bool, int, float):
+            return 0
+
+        start, stop, step = self.start(), self.stop(), self.step()
+
+        if step == 0:
+            return 0
+
+        in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+
+        if in_range:
+            re = ((x - start) % step) == 0
+            return int(re)
+        return 0
+
     def call_method(self, tx, name, args, kwargs):
         if name == "__iter__":
             return RangeIteratorVariable(
                 self.start(), self.stop(), self.step(), self.range_length()
             )
         elif name == "__len__":
+            length = self.range_length()
+            if length > sys.maxsize:
+                raise_observed_exception(OverflowError, tx)
             return ConstantVariable.create(self.range_length())
+        elif name in ("count", "__contains__"):
+            return ConstantVariable(self.range_count(*args))
         elif name in cmp_name_to_op_mapping:
             other = args[0]
             pt = other.python_type()
@@ -481,16 +506,6 @@ class RangeVariable(BaseListVariable):
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        # if name in ("__iter__", "__eq__"):
-        #     return variables.GetAttrVariable(self, name)
-
-        # unimplemented_v2(
-        #     gb_type="Unsupported attribute for range() object",
-        #     context=f"var_getattr {self} {name}",
-        #     explanation=f"Expected attribute to be one of {','.join(fields)} "
-        #     f"but got {name}",
-        #     hints=[*graph_break_hints.USER_ERROR],
-        # )
         return super().var_getattr(tx, name)
 
 
