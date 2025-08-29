@@ -301,7 +301,10 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
-  // auto get_xpu_uuid = [](const DeviceProp& prop) { return XPUuuid(prop.uuid); };
+  auto get_xpu_uuid = [](const DeviceProp& prop) {
+    td::array<unsigned char, 16> uuid{};
+    return XPUuuid(uuid);
+  };
 
   auto m = py::handle(module).cast<py::module>();
 
@@ -346,7 +349,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
-      // .def_property_readonly("uuid", get_xpu_uuid)
+      .def_property_readonly("uuid", get_xpu_uuid)
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
