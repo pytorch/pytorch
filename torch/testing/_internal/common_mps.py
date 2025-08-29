@@ -317,7 +317,7 @@ if torch.backends.mps.is_available():
             "index_reducemean": None,
             "index_reduceamax": None,
             "index_reduceamin": None,
-            "kthvalue": None,
+            # "kthvalue": None,
             "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,

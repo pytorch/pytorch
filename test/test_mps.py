@@ -12303,6 +12303,15 @@ class TestConsistency(TestCaseMPS):
             if op.name in "grid_sampler_3d":
                 atol, rtol = 1e-4, 1e-4
 
+            if op.name == "kthvalue":
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                # kthvalue is non-deterministic if input has repeated values
+                dim = cpu_args[2] if len(cpu_args) > 2 else -1
+                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
+                self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
