@@ -2506,9 +2506,11 @@ def compile(
         (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
         `error_on_graph_break` determines whether `torch.compile` throws an error upon
         encountering a graph break, or attempts to continue tracing. This setting can be toggled
-        during compile time with `torch._dynamo.error_on_graph_break` to allow graph breaks in some
+        during compile time with `torch._dynamo.error_on_graph_break()` to allow graph breaks in some
         compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
         does NOT guarantee that a single graph is captured from the compiled function.
+        See https://docs.pytorch.org/docs/main/compile/programming_model.error_on_graph_break.html for more details
+        and examples.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will

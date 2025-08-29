@@ -1982,6 +1982,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f2(inp), inp + 3)
 
     def test_error_on_graph_break_fullgraph(self):
+        # Test that error_on_graph_break=False cannot override fullgraph=True
         inp = torch.ones(3)
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -2002,10 +2003,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(), 1)
 
     def test_nested_compile_fullgraph(self):
-        # This is not well documented behavior, but based
-        # on how fullgraph and graph breaks are implemented,
-        # we end up observing this behavior.
-
+        # Test that fullgraph=True cannot be toggled back by fullgraph=False
         inp = torch.ones(3)
 
         @torch.compile(backend="eager", fullgraph=True)

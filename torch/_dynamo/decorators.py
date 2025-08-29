@@ -941,9 +941,10 @@ def error_on_graph_break(
     error_on_graph_break: bool,
 ) -> ErrorOnGraphBreakDecoratorContextManager:
     """
-    Context manager/decorator to toggle error_on_graph_break (i.e. torch.compile's fullgraph) setting.
+    Context manager/decorator to toggle torch.compile's error_on_graph_break setting at compile time.
 
-    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
-    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    If torch.compile's `fullgraph` setting is set to False, then setting `error_on_graph_break` to True
+    will result in an error being raised when a graph break is encountered. If `error_on_graph_break` is
+    set to False, then torch.compile will resume tracing after the graph break.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
