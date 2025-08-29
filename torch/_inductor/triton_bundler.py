@@ -183,6 +183,9 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+
+            hash_lock = getattr(kernel.fn, "_hash_lock")
+
             # Put the values back since we need it to use now
             (
                 kernel.fn.fn,
@@ -190,6 +193,7 @@ class TritonBundler:
                 kernel.fn.used_global_vals,
                 kernel.fn.repr,
                 kernel.launchers,
+                hash_lock
             ) = old_values
 
     @classmethod
