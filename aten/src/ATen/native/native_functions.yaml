@@ -2764,7 +2764,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, MPS: floor_divide
+    CPU, CUDA, MPS, MTIA: floor_divide
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2931,6 +2931,7 @@
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
+    MPS: grid_sampler_3d_mps
   autogen: grid_sampler_3d.out
 
 # `grid_sampler_3d_backward` takes in `output_mask` to optimize performance for

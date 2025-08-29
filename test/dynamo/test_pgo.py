@@ -122,6 +122,29 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
 
+    def test_no_empty_graph_allowlist(self):
+        @torch._dynamo.disable
+        def g(x):
+            return x * 2 + x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return g(x)
+
+        self.reset()
+        f(torch.randn(4))
+        f(torch.randn(8))
+        self.assertEqual(torch._dynamo.pgo._LOGGED_DYNAMIC_ALLOWLIST, False)
+
+        @torch.compile(backend="eager")
+        def f1(x):
+            return g(x + 2) + 2
+
+        self.reset()
+        f1(torch.randn(4))
+        f1(torch.randn(8))
+        self.assertEqual(torch._dynamo.pgo._LOGGED_DYNAMIC_ALLOWLIST, True)
+
     def test_pgo_dynamic_false(self):
         @torch.compile(backend="eager", dynamic=False)
         class Foo(torch.nn.Module):
@@ -361,6 +384,74 @@ def run(cnt):
         cnts.clear()
         write_load_and_run(path2)
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_remote_pgo=True, automatic_dynamic_local_pgo=False
+    )
+    def test_sticky_pgo_read_write(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            return x * 2, y * 3
+
+        def t(x, y):
+            return torch.randn(x, y)
+
+        with mock_cache.PatchCaches():
+            # we pretend to disable the default remote cache, by keying different job ids per run
+            with torch.compiler.config.patch(job_id="a"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 2)
+
+            # first test we're not reading from local/default remote cache;
+            # we should recompile when x wobbles
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(
+                job_id="b", pgo_extra_write_key="sticky_0"
+            ):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 2)
+
+            # now with the extra sticky_0 key, we start with dynamic x;
+            # no recompiles
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(job_id="c", pgo_extra_read_key="sticky_0"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(2, 2))
+                self.assertEqual(cnts.frame_count, 1)
+
+            # last test: wobble y and write to sticky_1 key
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(
+                job_id="d", pgo_extra_write_key="sticky_1"
+            ):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 2), t(2, 4))
+                f(t(2, 2), t(4, 4))
+                self.assertEqual(cnts.frame_count, 3)
+
+            # start using default remote PGO, create run that wobbles y
+            self.reset()
+            cnts.clear()
+            f(t(2, 2), t(2, 2))
+            f(t(2, 4), t(2, 2))
+            f(t(4, 2), t(2, 2))
+
+            # with default remote (dynamic x) + extra remote (dynamic y),
+            # we should be able to wobble x & y with no recompiles.
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
+                f(t(2, 2), t(2, 2))
+                f(t(2, 4), t(4, 2))
+                f(t(4, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":
