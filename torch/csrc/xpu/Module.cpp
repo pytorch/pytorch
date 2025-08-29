@@ -16,7 +16,7 @@ using namespace torch;
 // Wrapper class for XPU UUID
 struct XPUuuid {
   explicit XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
-  const std::array<unsigned char, 16>& bytes;
+  const std::array<unsigned char, 16> bytes;
 };
 
 // XPU management methods
@@ -346,7 +346,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
-      .def_property_readonly("uuid", get_xpu_uuid)
+      // .def_property_readonly("uuid", get_xpu_uuid)
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
