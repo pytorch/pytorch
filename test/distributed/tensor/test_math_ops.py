@@ -84,17 +84,20 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(dt_full_reduced, full_reduced_tensor)
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_linear_op_reductions(self):
         for op_str in ("all", "sum", "prod", "max", "min", "any", "amax", "amin"):
             self.linear_op_reductions(op_str)
 
     @with_comms
     @skip_unless_torch_gpu
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_mean(self):
         self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_softmax_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -168,6 +171,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_nll_loss_and_cross_entropy(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -261,6 +265,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(fully_shard_full_tensor, expect_rs)
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_layer_norm_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -329,6 +334,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(y_local, y_dist.full_tensor())
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_layer_norm_bwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -451,6 +457,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_layer_norm_bwd_req_grad(self):
         device_mesh = self.build_device_mesh()
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
@@ -607,6 +614,7 @@ class DistMathOpsTest(DTensorTestBase):
         )
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_topk(self):
         device_mesh = self.build_device_mesh()
         placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
@@ -634,6 +642,7 @@ class DistMathOpsTest(DTensorTestBase):
             # out_full_values.sum().backward()
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_shard0_svd(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
@@ -765,6 +774,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(result, dtensor_result.full_tensor())
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
