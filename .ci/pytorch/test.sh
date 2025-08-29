@@ -496,6 +496,14 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    python test/run_test.py \
+      --include inductor/test_mkldnn_pattern_matcher \
+      -k 'xpu' \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
