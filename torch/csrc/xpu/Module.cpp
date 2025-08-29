@@ -15,8 +15,8 @@ using namespace torch;
 
 // Wrapper class for XPU UUID
 struct XPUuuid {
-  explicit XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
-  const std::array<unsigned char, 16> bytes;
+  XPUuuid(const std::array<unsigned char, 16> uuid) : bytes(uuid) {}
+  std::array<unsigned char, 16> bytes;
 };
 
 // XPU management methods
@@ -266,6 +266,11 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 
 // XPU module initialization
 
+XPUUuid get_xpu_uuid(const DeviceProp& prop) {
+  std::array<unsigned char, 16> uuid{};
+  return XPUuuid(uuid);
+};
+
 static void registerXpuDeviceProperties(PyObject* module) {
   // Add _xpuDevicePropertires class to torch._C
   using namespace c10::xpu;
@@ -301,10 +306,6 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
-  auto get_xpu_uuid = [](const DeviceProp& prop) {
-    std::array<unsigned char, 16> uuid{};
-    return XPUuuid(uuid);
-  };
 
   auto m = py::handle(module).cast<py::module>();
 
@@ -358,8 +359,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
                    << std::uppercase << prop.device_id << std::dec << ", uuid="
-                   << uuid_to_string(
-                          reinterpret_cast<const char*>(prop.uuid.data()))
+                  //  << uuid_to_string(
+                  //         reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
