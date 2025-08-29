@@ -202,9 +202,12 @@ class CppPrinter(_CppPrinter):
         return super().doprint(expr)
 
     def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
-        # use parenthesis to enforce precedence.
-        # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
-        return f"({self._print(item)})"
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
 
 
 # A function to print, useful for printing sympy symbols.
