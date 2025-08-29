@@ -11,7 +11,6 @@ from typing_extensions import TypeIs
 import torch
 import torchgen
 import torchgen.model
-
 from torch._C import (
     _get_dispatch_stack_at,
     _len_torch_dispatch_stack,
