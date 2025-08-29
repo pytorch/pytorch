@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
+#include <fmt/core.h>
 
 using namespace torch;
 
