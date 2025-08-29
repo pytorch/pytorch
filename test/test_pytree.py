@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -1493,6 +1494,7 @@ if "optree" in sys.modules:
             leaves_out = py_pytree.tree_leaves_with_path(pytree)
             self.assertEqual(flat_out, leaves_out)
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_key_str(self):
         class ANamedTuple(NamedTuple):
             x: str

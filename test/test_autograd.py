@@ -3432,6 +3432,7 @@ class TestAutograd(TestCase):
         x.add_(2)
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_mark_non_differentiable(self):
         class MyFunction(Function):
             @staticmethod
@@ -3473,6 +3474,7 @@ class TestAutograd(TestCase):
         b.sum().backward()
         self.assertEqual(x.grad, torch.ones(5, 5))
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_mark_non_differentiable_none(self):
         # This used to segfault because MyFunction would send back null
         # gradients to MulBackward, which is implemented in C++. C++
@@ -3776,6 +3778,7 @@ class TestAutograd(TestCase):
             f.metadata
 
     @unittest.expectedFailure
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod
@@ -3794,6 +3797,7 @@ class TestAutograd(TestCase):
         del y
         g.metadata  # this currently fails, but shouldn't
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_naughty_autograd_function_stashing_ctx(self):
         saved_ctx = []
 
@@ -3817,6 +3821,7 @@ class TestAutograd(TestCase):
         # problem).
         self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
@@ -4072,6 +4077,7 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, torch.ones(5, 5))
         self.assertTrue(hook_called[0])
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_return_leaf_inplace(self):
         class Inplace(InplaceFunction):
             @staticmethod
@@ -5355,6 +5361,7 @@ Done""",
         # we should throw an exception if the output requires grad
         self.assertRaisesRegex(RuntimeError, "out=", lambda: torch.mul(a, b, out=x))
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_anomaly_detect_nan(self):
         size = 10
 
@@ -7138,6 +7145,7 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_checkpointing_without_reentrant_with_context_fn(self):
         class VerboseTorchDispatchMode(TorchDispatchMode):
             def __init__(self) -> None:
@@ -8098,6 +8106,7 @@ for shape in [(1,), ()]:
             should_raise_tuple=(None, None, None),
         )
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_inplace_not_requires_grad(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -8387,6 +8396,7 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_autograd_print_tensor(self):
         a = torch.ones(1, requires_grad=True)
         a_clone = a.clone()
@@ -13829,6 +13839,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
 
+    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_preserve_backtrace(self):
         class Foo(torch.autograd.Function):
             @staticmethod
