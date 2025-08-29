@@ -4,8 +4,6 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-import torch
-
 from ..ir import get_free_symbols
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
@@ -20,9 +18,9 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
-@register_template_heuristic(
-    "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
-)
+# decompose_k is supported on all devices, and utils checks if
+# the template should be used for a specific scenario
+@register_template_heuristic("decompose_k", None, op_name="mm")
 class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
     def get_template_configs(
         self,
