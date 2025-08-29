@@ -2481,7 +2481,6 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
         class Model(nn.Module):
@@ -4208,7 +4207,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    # @skipIfXpu(msg="torch.xpu.memory_allocated not supported yet")
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != GPU_TYPE:
