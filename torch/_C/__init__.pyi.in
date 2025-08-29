@@ -2788,8 +2788,8 @@ class _StaticCudaLauncher:
 class GreenContext:
     @staticmethod
     def create(
-        num_sms: int,
-        device_id: int,
+        num_sms: _int,
+        device_id: _int,
         ) -> GreenContext: ...
     def make_current(
         self,

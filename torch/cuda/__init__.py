@@ -35,7 +35,7 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
-from .green_contexts import *
+from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 

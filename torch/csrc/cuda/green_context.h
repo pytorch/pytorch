@@ -64,8 +64,7 @@ class GreenContext {
     // Convert to regular context
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
-    TORCH_CHECK(
-        context_, "Green ctx conversion to regular ctx failed!");
+    TORCH_CHECK(context_, "Green ctx conversion to regular ctx failed!");
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
