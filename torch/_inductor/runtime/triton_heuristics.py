@@ -31,6 +31,7 @@ from typing import (
 
 import torch
 from torch._dynamo.utils import set_feature_use
+from torch._environment import is_fbcode
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -2591,7 +2592,9 @@ def _reduction_configs(
     )
 
     outer_config = make_config(64, 8, register_intensive=register_intensive)
-    if not torch.version.hip:
+    # TODO (paulzhan): Test heuristic on AMD and internal testing
+    # for correctness
+    if not torch.version.hip and not is_fbcode():
         outer_config = outer_config_opt()
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:

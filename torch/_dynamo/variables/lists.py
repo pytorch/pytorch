@@ -481,16 +481,6 @@ class RangeVariable(BaseListVariable):
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        # if name in ("__iter__", "__eq__"):
-        #     return variables.GetAttrVariable(self, name)
-
-        # unimplemented_v2(
-        #     gb_type="Unsupported attribute for range() object",
-        #     context=f"var_getattr {self} {name}",
-        #     explanation=f"Expected attribute to be one of {','.join(fields)} "
-        #     f"but got {name}",
-        #     hints=[*graph_break_hints.USER_ERROR],
-        # )
         return super().var_getattr(tx, name)
 
 
