@@ -478,7 +478,7 @@ class OpSchema:
         return "out" in self.op._schema.overload_name
 
     def is_view_op(self) -> bool:
-        return self.op._schema._has_any_present_but_not_write_alias_info()
+        return self.op._schema._is_view_op()
 
     def _recompute_comparison_key(self):
         if not self.schema_info:
