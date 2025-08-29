@@ -886,6 +886,14 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         Tensor result = at::empty({}, self.options());
 
         auto handle = at::cuda::getCurrentCUDABlasHandle();
+	if (self.scalar_type() == at::kFloat || self.scalar_type() == at::kComplexFloat) {
+	  if (!NoTF32Guard::should_disable_tf32() &&
+	      at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+	    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+	  } else {
+	    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+	  }
+	}
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
             handle,
@@ -934,6 +942,15 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
+    if (self.scalar_type() == at::kFloat || self.scalar_type() == at::kComplexFloat) {
+      if (!NoTF32Guard::should_disable_tf32() &&
+          at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+        TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+      } else {
+        TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+      }
+    }
+
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::vdot<scalar_t>(
