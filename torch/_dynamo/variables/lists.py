@@ -38,6 +38,7 @@ from ..utils import (
     namedtuple_fields,
     odict_values,
     raise_args_mismatch,
+    range_iterator,
     set_example_value,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -276,6 +277,16 @@ class RangeVariable(BaseListVariable):
         else:
             raise AssertionError
 
+        def maybe_as_int(x):
+            return (
+                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+            )
+
+        # cast each argument to an integer
+        start = maybe_as_int(start)
+        step = maybe_as_int(step)
+        stop = maybe_as_int(stop)
+
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
 
@@ -413,17 +424,74 @@ class RangeVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if self.python_type() is not range:
+            return super().call_obj_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr(range(0), name))
+
+    def range_equals(self, other: "RangeVariable"):
+        r0, r1 = self, other
+        if (
+            self.range_length() != r1.range_length()
+            or self.range_length() == 0
+            or r0.start() != r1.start()
+        ):
+            return False
+
+        if len(r0) == 1:
+            return True
+
+        return r0.step() == r1.step()
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__iter__":
+            return RangeIteratorVariable(
+                self.start(), self.stop(), self.step(), self.range_length()
+            )
+        elif name == "__len__":
+            return ConstantVariable.create(self.range_length())
+        elif name in cmp_name_to_op_mapping:
+            other = args[0]
+            pt = other.python_type()
+            if name not in ("__eq__", "__ne__"):
+                # ranges are only comparable to other ranges
+                msg = f"{name} not supported between instances of 'range' and '{pt}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(msg)],
+                )
+
+            if pt is not range:
+                # The correct behavior is to return NotImplemented
+                return ConstantVariable.create(False)
+
+            cmp = self.range_equals(other)
+
+            # Two ranges are equal if they produce the same sequence of values
+            if name == "__eq__":
+                return ConstantVariable(cmp)
+            else:
+                return ConstantVariable(not cmp)
+        return super().call_method(tx, name, args, kwargs)
+
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
-        if name not in fields:
-            unimplemented_v2(
-                gb_type="Unsupported attribute for range() object",
-                context=f"var_getattr {self} {name}",
-                explanation=f"Expected attribute to be one of {','.join(fields)} "
-                f"but got {name}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
-        return self.items[fields.index(name)]
+        if name in fields:
+            return self.items[fields.index(name)]
+        # if name in ("__iter__", "__eq__"):
+        #     return variables.GetAttrVariable(self, name)
+
+        # unimplemented_v2(
+        #     gb_type="Unsupported attribute for range() object",
+        #     context=f"var_getattr {self} {name}",
+        #     explanation=f"Expected attribute to be one of {','.join(fields)} "
+        #     f"but got {name}",
+        #     hints=[*graph_break_hints.USER_ERROR],
+        # )
+        return super().var_getattr(tx, name)
 
 
 class CommonListMethodsVariable(BaseListVariable):
@@ -1298,3 +1366,46 @@ class ListIteratorVariable(IteratorVariable):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
+
+
+class RangeIteratorVariable(VariableTracker):
+    # only needed for isinstance(..., range_iterator) to work
+    _nonvar_fields = {
+        "iter_obj",
+    }
+
+    def __init__(self, start: int, stop: int, step: int, len_: int, **kwargs):
+        super().__init__(**kwargs)
+        self.start = start
+        self.stop = stop
+        self.step = step
+        self.len = len_
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__next__":
+            return self.next_variable(tx)
+        elif name == "__iter__":
+            return self
+        return super().call_method(tx, name, args, kwargs)
+
+    def next_variable(self, tx):
+        if self.len <= 0:
+            raise_observed_exception(StopIteration, tx)
+
+        self.len -= 1
+        current = self.start
+        self.start += self.step
+        return ConstantVariable.create(current)
+
+    def python_type(self):
+        return range_iterator
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(range))
+        )
+        codegen.append_output(codegen.create_load_const(self.start))
+        codegen.append_output(codegen.create_load_const(self.stop))
+        codegen.append_output(codegen.create_load_const(self.step))
+        codegen.extend_output(create_call_function(3, False))
+        codegen.append_output(create_instruction("GET_ITER"))
