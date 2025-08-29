@@ -25,13 +25,21 @@ class TensorMeta(NamedTuple):
 class DTensorSpec:
     mesh: DeviceMesh
     placements: tuple[Placement, ...]
-
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
+    # When a tensor dimension is sharded across multiple mesh axes,
+    # `device_order` specifies the sequence in which these shardings are
+    # applied, which in turn determines the placement of tensor shards on
+    # devices.
+    device_order: Optional[tuple[int, ...]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
+        if not self.device_order:
+            self.device_order = tuple(range(self.mesh.ndim))
+        if not isinstance(self.device_order, tuple):
+            self.device_order = tuple(self.device_order)
         self._hash: Optional[int] = None
 
     def __setattr__(self, attr: str, value: Any) -> None:
@@ -65,9 +73,10 @@ class DTensorSpec:
                     self.tensor_meta.shape,
                     self.tensor_meta.stride,
                     self.tensor_meta.dtype,
+                    self.device_order,
                 )
             )
-        return hash((self.mesh, self.placements))
+        return hash((self.mesh, self.placements, self.device_order))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -83,6 +92,7 @@ class DTensorSpec:
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
             and self.placements == other.placements
+            and self.device_order == other.device_order
         ):
             return False
         if self.tensor_meta is None or other.tensor_meta is None:
