@@ -4311,7 +4311,6 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
     def test_tma_with_customer_kernel_options(self, device):
         make_tensor = functools.partial(
