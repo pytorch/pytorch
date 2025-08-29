@@ -309,39 +309,39 @@ class FSDPParam:
                 f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
-
-            if self._tp_spec.tensor_sharding is None:
-                # `param` has the default sharding order
-                tensor_sharding: dict[int, list[int]] = {}
-                for mesh_dim, placement in enumerate(self._tp_spec.placements):
-                    if isinstance(placement, Shard):
-                        shard_dim = placement.dim
-                        if shard_dim in tensor_sharding:
-                            tensor_sharding[shard_dim].append(mesh_dim)
-                        else:
-                            tensor_sharding[shard_dim] = [mesh_dim]
-            else:
-                tensor_sharding = self._tp_spec.tensor_sharding
+            tensor_sharding = self._tp_spec.tensor_sharding
 
             dp_shard_tp_placement = (Shard(shard_dim), *self._tp_spec.placements)
             # TODO: extract the mesh_dim push operation to a util function
             if dp_mesh.ndim == 1:  # FSDP
                 self._spmd_placements = dp_shard_tp_placement
-                # increment all mesh_dim by 1 and push dp_shard dim
-                for shard_dim, mesh_dims in tensor_sharding.items():
-                    new_mesh_dims = [mesh_dim + 1 for mesh_dim in mesh_dims]
-                    tensor_sharding[shard_dim] = new_mesh_dims
+                if tensor_sharding is not None:
+                    # increment all mesh_dim by 1 and push dp_shard dim
+                    for shard_dim, mesh_dims in tensor_sharding.items():
+                        new_mesh_dims = [mesh_dim + 1 for mesh_dim in mesh_dims]
+                        tensor_sharding[shard_dim] = new_mesh_dims
 
-                tensor_sharding[shard_dim].append(0)
+                    if shard_dim in tensor_sharding:
+                        tensor_sharding[shard_dim].append(0)
+                    else:
+                        tensor_sharding[shard_dim] = [0]
+                else:
+                    tensor_sharding = {shard_dim: [0]}
             else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
-                # increment all mesh_dim by 2 and push dp_shard dim
-                for shard_dim, mesh_dims in tensor_sharding.items():
-                    new_mesh_dims = [mesh_dim + 2 for mesh_dim in mesh_dims]
-                    tensor_sharding[shard_dim] = new_mesh_dims
+                if tensor_sharding is not None:
+                    # increment all mesh_dim by 2 and push dp_shard dim
+                    for shard_dim, mesh_dims in tensor_sharding.items():
+                        new_mesh_dims = [mesh_dim + 2 for mesh_dim in mesh_dims]
+                        tensor_sharding[shard_dim] = new_mesh_dims
 
-                tensor_sharding[shard_dim].append(1)
+                    if shard_dim in tensor_sharding:
+                        tensor_sharding[shard_dim].append(1)
+                    else:
+                        tensor_sharding[shard_dim] = [1]
+                else:
+                    tensor_sharding = {shard_dim: [1]}
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -353,12 +353,15 @@ class FSDPParam:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
                 self._spmd_placements = (Replicate(), fsdp_placement)
+                tensor_sharding = {fsdp_placement.dim: [1]}
             else:
                 self._spmd_placements = (fsdp_placement,)
+                tensor_sharding = {fsdp_placement.dim: [0]}
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
                 tensor_meta=TensorMeta(param.size(), param.stride(), param.dtype),
+                tensor_sharding=tensor_sharding,
             )
             param_data = param
         assert param_data.is_contiguous(), f"{param_data.shape=} {param_data.stride()=}"
