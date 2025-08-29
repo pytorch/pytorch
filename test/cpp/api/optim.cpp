@@ -203,14 +203,7 @@ struct MyOptimizerOptions
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {}
   TORCH_ARG(double, lr) = 1.0;
 
-  void overwrite_from(const OptimizerOptions& source) override {
-    const auto& source_opts = static_cast<const MyOptimizerOptions&>(source);
-    const MyOptimizerOptions default_ctor_opts;
-
-    if (source_opts.lr() != default_ctor_opts.lr()) {
-      this->lr(source_opts.lr());
-    }
-  }
+  void overwrite_from(const OptimizerOptions& source) override {}
 };
 
 TEST(OptimTest, OldInterface) {
