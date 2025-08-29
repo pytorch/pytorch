@@ -50,6 +50,7 @@ from .autotune_process import (
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
+    DeferredLine,
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
@@ -352,7 +353,6 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 # Function name, followed by args and kwargs.
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
-
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -467,6 +467,13 @@ class TritonTemplateKernel(TritonKernel):
 
         # Extra functions to be exposed during partial template rendering.
         self.extra_template_env_fns: list[Callable[..., Any]] = []
+
+        # Values to append to the top of a kernel after the existing definitions.
+        self.define_appends: IndentedBuffer = IndentedBuffer()
+        self.var_id = itertools.count()
+
+    def _generate_intermediate_var_name(self) -> str:
+        return f"_tmp_var{next(self.var_id)}"
 
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
@@ -715,6 +722,7 @@ class TritonTemplateKernel(TritonKernel):
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
+                code.splice(self.define_appends.getvalue())
             return code.getvalue()
 
         return self._register_hook("<DEF_KERNEL>", hook)
@@ -1012,6 +1020,67 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook(hook_key, hook)
 
+    def _generate_index_from_tma_index(
+        self,
+        tma_index: sympy.Symbol,
+        block_size: str,
+        dim: int,
+        num_dims: int,
+        extra_lines: list[str],
+    ) -> str:
+        """
+        Generate the logic to compute the regular tl.load index from the provided
+        tma index. This is used to ensure variables can support fusions.
+
+        Args:
+            tma_index (sympy.Symbol): The symbol used for the original TMA index.
+            block_size (str): The block size of the index.
+            dim (int): Which dimension to project the index in.
+            num_dims (int): The total number of dimensions in the output.
+            extra_lines (list[str]): The list in which to store an intermediate
+                lines that are generated.
+
+        Returns:
+            str: The name of the final output variable.
+
+        """
+        idx_name1 = self._generate_intermediate_var_name()
+        line1 = f"{idx_name1} = {texpr(tma_index)} + tl.arange(0, {block_size})"
+        extra_lines.append(line1)
+        prefix_none = "".join(["None, "] * dim)
+        suffix_none = ", ".join(["None"] * (num_dims - (dim + 1)))
+        idx_name2 = self._generate_intermediate_var_name()
+        line2 = f"{idx_name2} = {idx_name1}[{prefix_none}:, {suffix_none}]"
+        extra_lines.append(line2)
+        return idx_name2
+
+    def _generated_mask_from_tma(
+        self,
+        indices: Union[list[str], tuple[str]],
+        shapes: Union[list[str], tuple[str]],
+        extra_lines: list[str],
+    ) -> str:
+        """
+        Generate the logic to compute the regular tl.load mask from the computed
+        tl.load index and the provided shapes. This is used to ensure variables
+        can support fusions.
+
+        Args:
+            indices (Union[list[str], tuple[str]]): The computed index variables.
+            shapes (Union[list[str], tuple[str]]): The shape sizes for the mask upper bounds.
+            extra_lines (list[str]): The list in which to store an intermediate
+                lines that are generated.
+
+        Returns:
+            str: The name of the final output mask variable.
+        """
+        mask_var = self._generate_intermediate_var_name()
+        mask_body = " & ".join(
+            [f"({indices[i]} < {shapes[i]})" for i in range(len(indices))]
+        )
+        extra_lines.append(f"{mask_var} = {mask_body}")
+        return mask_var
+
     def store_output(
         self,
         indices: Union[list[Any], tuple[Any]],
@@ -1019,6 +1088,7 @@ class TritonTemplateKernel(TritonKernel):
         mask: Optional[str] = None,
         indent_width: int = 4,
         val_shape: Optional[list[str]] = None,
+        tma_block_sizes: Optional[tuple[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1030,11 +1100,15 @@ class TritonTemplateKernel(TritonKernel):
                 will be applied to the store.
             indent_width (int): The number of spaces to use for indentation. This is used when the call to
                 store_output is indented in the kernel definition.
+            val_shape (Optional[list[str]]): Shape information for the output value.
+            tma_block_sizes (Optional[tuple[str]]): Should TMA be used and if so what are the variables
+                that represent the block sizes.
         """
         with self.create_subgraph_body("<STORE_OUTPUT>"):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
+            assert isinstance(tma_block_sizes, (type(None), tuple))
             assert self.template_mask is None
             indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
@@ -1043,49 +1117,125 @@ class TritonTemplateKernel(TritonKernel):
             ]
             assert len(indices) == len(lengths)
 
-            # glue to make generated code use same indexing from template
-            for name, range_tree_entry in zip(
-                indices, self.range_trees[0].construct_entries(lengths)
-            ):
-                range_tree_entry.set_name(name)
-            contiguous_index = sympy_dot(
-                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
-            )
-            contiguous_index = self.rename_indexing(contiguous_index)
-            self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-                "xindex"
-            )
-            self.template_mask = mask
-            self.template_out = val
-            self.template_indices = indices
-            output_index = self.output_node.get_layout().make_indexer()(index_symbols)
-            output_index = self.rename_indexing(output_index)
-            if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex", integer=True)
+            needs_transpose = False
+            output_name = self.output_node.get_name()
+            output_layout = self.output_node.get_layout()
+            output_desc_name = self._generate_intermediate_var_name()
+            if tma_block_sizes:
+                assert not mask, "Mask is not supported with TMA"
+                needs_transpose = not output_layout.is_contiguous()
+                strides = [str(V.kernel.args.sizevars.get(l, l)) for l in output_layout.stride]
+                shapes = [str(V.kernel.args.sizevars.get(l, l)) for l in lengths]
+                if needs_transpose:
+                    output_index = index_symbols[::-1]
+                    strides = strides[::-1]
+                    tma_block_sizes = tma_block_sizes[::-1]
+                    shapes = shapes[::-1]
+                else:
+                    output_index = index_symbols
+                output_var_name = V.kernel.args.output(output_name)
+                shapes_str = ", ".join(shapes)
+                block_shape_str = ", ".join(tma_block_sizes)
+                strides_str = ", ".join(strides)
+                body = (
+                    f"triton.language.make_tensor_descriptor("
+                    f"base={output_var_name}, "
+                    f"shape=[{shapes_str}], "
+                    f"strides=[{strides_str}], "
+                    f"block_shape=[{block_shape_str}])"
+                )
+                line_body = (
+                    f"{output_desc_name} = {body}"
+                    if output_name not in V.graph.removed_buffers
+                    else ""
+                )
+                tma_definition_line = DeferredLine(output_name, line_body)
+                self.define_appends.writeline(tma_definition_line)
+
+                # Fusions may consistent of non-tma components (e.g. tl.load).
+                # In case this occurs, we need to remap our TMA indices and masks
+                # back to the original indexing logic.
+                intermediate_lines: list[str] = []
+                index_vars = [
+                    self._generate_index_from_tma_index(
+                        output_index[i],
+                        tma_block_sizes[i],
+                        i,
+                        len(output_index),
+                        intermediate_lines,
+                    )
+                    for i in range(len(output_index))
+                ]
+                epilogue_index_symbols = [
+                    sympy.Symbol(index_var, integer=True) for index_var in index_vars
+                ]
+                self.template_mask = self._generated_mask_from_tma(
+                    index_vars, shapes, intermediate_lines
+                )
+                self.template_out = val
+                self.template_indices = index_vars
+                # Write out the intermediate lines
+                if output_name not in V.graph.removed_buffers:
+                    for line in intermediate_lines:
+                        self.body.writeline(DeferredLine(output_name, line))
+            else:
+                # glue to make generated code use same indexing from template
+                for name, range_tree_entry in zip(
+                    indices, self.range_trees[0].construct_entries(lengths)
+                ):
+                    range_tree_entry.set_name(name)
+                contiguous_index = sympy_dot(
+                    ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+                )
+                contiguous_index = self.rename_indexing(contiguous_index)
+                self.body.writeline("xindex = " + texpr(contiguous_index))
+                self.range_trees[0].lookup(
+                    sympy.S.One, sympy_product(lengths)
+                ).set_name("xindex")
+                self.template_mask = mask
+                self.template_out = val
+                self.template_indices = indices
+                output_index = self.output_node.get_layout().make_indexer()(
+                    index_symbols
+                )
+                output_index = self.rename_indexing(output_index)
+                if output_index == contiguous_index:
+                    output_index = sympy.Symbol("xindex", integer=True)
+                epilogue_index_symbols = index_symbols
 
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [
-                V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
-            ]
+            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                epilogue_args.append(input_node.make_loader()(index_symbols))
+                epilogue_args.append(input_node.make_loader()(epilogue_index_symbols))
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
-            V.ops.store(
-                self.output_node.get_name(),
-                output_index,
-                self.epilogue_fn(*epilogue_args),
-            )
+            data = self.epilogue_fn(*epilogue_args)
+            if needs_transpose:
+                data = f"tl.trans({data})"
+            if tma_block_sizes:
+                output_dtype = triton_type(output_layout.dtype)
+                output = DeferredLine(
+                    output_name,
+                    f"triton.language.store_tensor_descriptor({output_desc_name}, {output_index}, {data}.to({output_dtype}))",
+                )
+                V.kernel.store_buffer_names.add(output_name)
+                if output_name not in V.graph.removed_buffers:
+                    V.kernel.stores.writeline(output)
+            else:
+                V.ops.store(
+                    self.output_node.get_name(),
+                    output_index,
+                    data,
+                )
             self.codegen_body()
 
         def hook():

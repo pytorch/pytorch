@@ -165,8 +165,25 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(mm, dynamic=dynamic)(a, b)
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
             c_expected = mm(a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = (
+                "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            )
+            read_api = "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_mm").check(make_desc_api).check(
+            read_api
+        ).check(write_api).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
@@ -263,6 +280,41 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_illegal_output_alignment(
+        self, dynamic
+    ):
+        def mm(a, b, out):
+            torch.mm(a, b, out=out)
+            return out
+
+        M, N, K = 21, 31, 32
+        a = torch.empty_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
+        a[:] = torch.randn((M, K), dtype=torch.float16)
+        b = torch.empty_strided((K, N), (1, K), dtype=torch.float16, device=GPU_TYPE)
+        b[:] = torch.randn((K, N), dtype=torch.float16)
+        # allocate an output with a stride not divisble by 16, so it can't satisfy TMA alignment checks.
+        out = torch.empty_strided((M, N), (N, 1), dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
+        ):
+            torch.compile(mm, dynamic=dynamic)(a, b, out)
+
+        # Lowering to the persistent+TMA Triton template should be skipped
+        # since the output doesn't have a stride of 1 in any dim
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
     def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
         def mm(a, b):
             return torch.mm(a, b)
@@ -354,8 +406,27 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            c_actual, code = run_and_get_code(
+                torch.compile(addmm, dynamic=dynamic), x, a, b
+            )
             c_expected = addmm(x, a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = (
+                "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            )
+            read_api = "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_addmm").check(make_desc_api).check(
+            read_api
+        ).check(write_api).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
