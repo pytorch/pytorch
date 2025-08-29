@@ -70,6 +70,58 @@ def _explicit_order_placements(
     return ordered
 
 
+def compute_local_shape_and_global_offset_from_spec(
+    spec: DTensorSpec,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    global_shape = spec.shape
+    mesh = spec.mesh
+    mesh_shape = mesh.shape
+    my_coordinate = mesh.get_coordinate()
+    placements = spec.placements
+    tensor_sharding = (
+        spec.tensor_sharding
+    )  # tensor_dim -> [mesh_dim] in order from major to minor
+
+    if tensor_sharding is None:
+        return _compute_local_shape_and_global_offset(
+            global_shape, mesh_shape, my_coordinate, placements
+        )
+
+    if my_coordinate is None:
+        # if rank not in the mesh, return empty offset
+        return ((0,), ())
+    else:
+        local_shape = list(global_shape)
+        global_offset = [0] * len(global_shape)
+        for shard_dim, mesh_dims in tensor_sharding.items():
+            # shard tensor_dim `dim`
+            for mesh_dim in mesh_dims:
+                mesh_dim_size = mesh_shape[mesh_dim]
+                local_offset = [0] * len(global_shape)
+                placement = placements[mesh_dim]
+                assert isinstance(placement, Shard)
+                shard_size, shard_offset = placement._local_shard_size_and_offset(
+                    local_shape[shard_dim],
+                    mesh_dim_size,
+                    my_coordinate[mesh_dim],
+                )
+
+                local_shape[shard_dim] = shard_size
+                local_offset[shard_dim] = shard_offset
+
+                if shard_size == 0:
+                    # Special case to fill in a standardized non-garbage value for the global_offset
+                    # of zero-sized shards.  This value is out of bounds of the tensor, so it won't conflict
+                    # with any real offsets.  DCP may rely on this value to de-duplicate shards.
+                    global_offset[shard_dim] = global_shape[shard_dim]
+                else:
+                    # TODO: `_compute_local_shape_and_global_offset` checks
+                    # `global_offset[shard_dim] <= local_offset[shard_dim]`, WHY?
+                    global_offset[shard_dim] += shard_offset
+
+        return tuple(local_shape), tuple(global_offset)
+
+
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -136,9 +188,9 @@ def _compute_local_shape_and_global_offset(
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
-                assert shard_dim < len(local_shape), (
-                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-                )
+                assert shard_dim < len(
+                    local_shape
+                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 shard_size, shard_offset = placement._local_shard_size_and_offset(
                     local_shape[shard_dim],
                     mesh_dim_size,
@@ -229,9 +281,9 @@ def compute_global_tensor_info(
                 )
             shard_dim = shard_placement.dim
 
-            assert shard_dim < tensor.ndim, (
-                f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
-            )
+            assert (
+                shard_dim < tensor.ndim
+            ), f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
 
             local_dim_size = tensor_shape[shard_dim]
             tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
