@@ -25,6 +25,9 @@ from typing import TypeVar
 
 TOrder = TypeVar("TOrder", bound=tuple[int, ...])
 
+# jax style sharding representation: map from tensor dim to mesh dim
+print_jax_style_sharding = True
+
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
@@ -55,15 +58,34 @@ class DTensorRedistributePlanner:
 
         def __str__(self):
             out_str = ""
-            for mesh_dim, p in enumerate(self.placements):
-                if isinstance(p, Replicate):
-                    out_str += "R"
-                elif isinstance(p, Shard):
-                    assert mesh_dim in self.tensor_dim_to_mesh_dim[p.dim]
-                    out_str += f"S({p.dim})<{self.tensor_dim_to_mesh_dim[p.dim].index(mesh_dim)}>"
-                else:
-                    assert isinstance(p, Partial)
+            # jax style sharding representation: map from tensor dim to mesh dim
+            if globals().get("print_jax_style_sharding", True):
+                for tensor_dim, mesh_dims in enumerate(self.tensor_dim_to_mesh_dim):
+                    if len(mesh_dims) > 0:
+                        out_str += f"S({tensor_dim})"
+                        out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
+                # in addition, add the partial placement
+                partial_to_mesh_dim: dict[Partial, list[int]] = {}
+                for mesh_dim, p in enumerate(self.placements):
+                    if isinstance(p, Partial):
+                        if p not in partial_to_mesh_dim:
+                            partial_to_mesh_dim[p] = []
+                        partial_to_mesh_dim[p].append(mesh_dim)
+                for p, mesh_dims in partial_to_mesh_dim.items():
                     out_str += f"P({p.reduce_op})"
+                    out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
+            else:
+                # native dtensor style sharding representation: map from mesh
+                # dim to tensor dim
+                for mesh_dim, placement in enumerate(self.placements):
+                    if isinstance(placement, Replicate):
+                        out_str += "R"
+                    elif isinstance(placement, Shard):
+                        assert mesh_dim in self.tensor_dim_to_mesh_dim[placement.dim]
+                        out_str += f"S({placement.dim})[{self.tensor_dim_to_mesh_dim[placement.dim].index(mesh_dim)}]"
+                    else:
+                        assert isinstance(placement, Partial)
+                        out_str += f"P({placement.reduce_op})"
             return out_str
 
         def __repr__(self):

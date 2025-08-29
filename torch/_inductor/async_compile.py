@@ -38,7 +38,11 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     torch_key,
 )
-from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.subproc_pool import (
+    AnyPool,
+    SubprocException,
+    SubprocPool,
+)
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
@@ -144,6 +148,7 @@ def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
     for pool in _pool_set:
         pool.shutdown()
+    AsyncCompile._ready_future = None
     after_fork()
 
 
@@ -304,8 +309,8 @@ class AsyncCompile:
 
     @classmethod
     def wait_pool_ready(cls, timeout=120) -> None:
-        if cls.use_process_pool():
-            assert cls._ready_future is not None
+        cls.use_process_pool()
+        if cls._ready_future is not None:
             cls._ready_future.result(timeout=timeout)
 
     @classmethod
@@ -401,9 +406,11 @@ class AsyncCompile:
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
+            # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
+                future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
             else:
@@ -448,7 +455,11 @@ class AsyncCompile:
             )
 
             def get_result() -> CachingAutotuner:
-                kernel, elapsed_us = task.result()
+                try:
+                    kernel, elapsed_us = task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
@@ -457,7 +468,7 @@ class AsyncCompile:
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
-                    source_code=source_code,
+                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
                 info = kernel.autotune_cache_info or {}
                 info["compile_time_us"] = elapsed_us
@@ -486,7 +497,7 @@ class AsyncCompile:
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
                         warm_cache_only=False,
-                        source_code=source_code,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
                     get_metrics_context().add_top_n(
