@@ -3089,32 +3089,6 @@ def forward(self, causal_mask, fill_value):
                 },
             )
 
-    def test_unbacked_slice_forward(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, xs):
-                u0, u1 = xs.tolist()
-                out = x[u0:u1]
-                return out
-
-        x = torch.randn(10)
-        idxs = torch.tensor([3, 6])
-        mod = Foo()
-        ep = export(mod, (x, idxs))
-        for xs in [
-            idxs,
-            torch.tensor([-9, -1]),
-            torch.tensor([-10000, 10000]),
-            torch.tensor([0, -10]),
-        ]:
-            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
-
-        # check unbacked bindings
-        # should be 4 symbols: u0, u1, output size, output storage offset
-        bound_unbacked = set()
-        for node in ep.graph.nodes:
-            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
-        self.assertEqual(len(bound_unbacked), 4)
-
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -4366,80 +4340,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
         x = torch.tensor([1, 2])
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
-
-    def test_nested_module_fake_tensor_leak(self):
-        class Bar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self._tensor_cache = None
-
-            def forward(self, x):
-                if self._tensor_cache is None:
-                    self._tensor_cache = x + 2
-                return self._tensor_cache.sum() + x.sum()
-
-        class Foo(torch.nn.Module):
-            def __init__(self, bar):
-                super().__init__()
-                self.bar = bar
-
-            def forward(self, x):
-                return self.bar(x)
-
-        foo = Foo(Bar())
-        _ = export(foo, (torch.ones(4, 4),), strict=False)
-        self.assertTrue(foo.bar._tensor_cache is None)
-
-    def test_export_leak_compile(self):
-        class BaseModule(torch.nn.Module):
-            def forward(self, *args, **kwargs):
-                raise NotImplementedError
-
-        class CacheModule(BaseModule):
-            def __init__(self, cache: torch.Tensor):
-                super().__init__()
-                assert cache.ndim == 3
-                self.cache = torch.nn.Parameter(cache, requires_grad=False)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                n_tokens = x.size(1)
-                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
-                rolled_cache[:, -n_tokens:, :] = x
-                self.cache.data = rolled_cache
-                return self.cache
-
-        class LinearBlock(torch.nn.Module):
-            def __init__(self, in_features, out_features, activation=None):
-                super().__init__()
-                self.linear = torch.nn.Linear(in_features, out_features)
-                self.activation = activation
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.activation(x) if self.activation else x
-
-        class MyModel(BaseModule):
-            def __init__(self):
-                super().__init__()
-                default_cache = torch.zeros(1, 10, 5)
-                self.cache_layer = CacheModule(default_cache)
-                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
-                self.fc2 = LinearBlock(10, 5)
-
-            def forward(self, x):
-                cached = self.cache_layer(x)
-                out = self.fc1(cached)
-                out = self.fc2(out)
-                return out
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "We found a fake tensor in the exported program constant's list. "
-            "This typically means our tracing system encountered an op that we can't trace through. "
-            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
-            "Please file an issue on github.",
-        ):
-            _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
@@ -5865,7 +5765,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice_simple(self):
+    def test_unbacked_slice(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr
@@ -11481,7 +11381,6 @@ graph():
             ep.module()(4, torch.randn(4, 4))
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureRetraceabilityNonStrict  # no runtime asserts added for assert x == 3
     def test_symint_input_ranges(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -11515,8 +11414,12 @@ graph():
         )
         constraints = list(ep.range_constraints.values())
         constraint = constraints[0]
-        self.assertEqual(constraint.lower, 4)
-        self.assertEqual(constraint.upper, 5)
+        # retracebility does not remember the range asserts in the forward
+        lower, upper = (
+            (3, 10) if is_retracebility_test(self._testMethodName) else (4, 5)
+        )
+        self.assertEqual(constraint.lower, lower)
+        self.assertEqual(constraint.upper, upper)
 
         # While tracing the range was found to be bigger than the original range
         class M(torch.nn.Module):
@@ -13540,22 +13443,36 @@ def forward(self, x, y):
             "y": [Dim(f"dy{i}", min=2) for i in range(2)],
             "z": [Dim(f"dz{i}", min=4) for i in range(1)],
         }
-        ep = torch.export._trace._export(
-            FreeReshape(),
-            inputs,
-            dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
-        )
-        ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
-        out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
-        self.assertEqual(out1.shape, torch.ones(48).shape)
-        out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
-        self.assertEqual(out2.shape, torch.ones(40).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
-        ):  # fail only at runtime
-            ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
+
+        for private_api in (True, False):
+            if private_api:
+                ep = torch.export._trace._export(
+                    FreeReshape(),
+                    inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    allow_complex_guards_as_runtime_asserts=True,
+                )
+            else:
+                ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
+            out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
+            self.assertEqual(out1.shape, torch.ones(48).shape)
+            out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
+            self.assertEqual(out2.shape, torch.ones(40).shape)
+            if private_api:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
+                ):  # fail only at runtime
+                    ep.module()(
+                        torch.randn(5, 8), torch.randn(4, 5), torch.randn(30)
+                    )  # fail
+            else:
+                # no runtime assert in exported module but it fails anyway with wrong inputs
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(40\) must match the size of tensor b \(20\) at non-singleton dimension 0",
+                ):
+                    ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))
 
         # case 3: 3d reshape (previously failing with different issue)
         class Reshape3d(torch.nn.Module):
@@ -15025,21 +14942,41 @@ def forward(self, x):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return x.view(x.shape[0] - 1, -1)
 
-        ep = export(
-            ModConstraint(),
-            (torch.randn(3, 4),),
-            dynamic_shapes={
-                "x": (dynamic, dynamic),
-            },
-        )
-        ep.module()(torch.randn(5, 8))
-        num_asserts = [
-            node.target == torch.ops.aten._assert_scalar.default
-            for node in ep.graph.nodes
-        ].count(True)
-        self.assertEqual(num_asserts, 2)
-        with self.assertRaises(RuntimeError):
-            ep.module()(torch.randn(4, 2))
+        for private_api in (True, False):
+            if private_api:
+                ep = torch.export._trace._export(
+                    ModConstraint(),
+                    (torch.randn(3, 4),),
+                    dynamic_shapes={"x": (dynamic, dynamic)},
+                    allow_complex_guards_as_runtime_asserts=True,
+                )
+            else:
+                ep = export(
+                    ModConstraint(),
+                    (torch.randn(3, 4),),
+                    dynamic_shapes={"x": (dynamic, dynamic)},
+                )
+            ep.module()(torch.randn(5, 8))
+            num_asserts = [
+                node.target == torch.ops.aten._assert_scalar.default
+                for node in ep.graph.nodes
+            ].count(True)
+            if private_api:
+                self.assertEqual(num_asserts, 7)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
+                ):
+                    ep.module()(torch.randn(4, 2))
+            else:
+                # no runtime assert in exported module
+                self.assertEqual(num_asserts, 0)
+                # but it fails anyway with wrong inputs
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"shape '\[3, -1\]' is invalid for input of size 8",
+                ):
+                    ep.module()(torch.randn(4, 2))
 
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
@@ -16263,6 +16200,29 @@ def forward(self, x):
         wrapper = Wrapper(pyt_model, example_inputs)
         wrapper.forward()
 
+    def test_strict_export_with_shared_parameters(self):
+        """Test that parameter names are preserved when there are shared parameters with the same name."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = torch.nn.Parameter(torch.ones(3))
+                self.n2 = self.n1
+
+            def forward(self, x):
+                res1 = x * self.n1
+                res2 = x * self.n2
+                return res1 + res2
+
+        m = M()
+        ep = torch.export.export(m, (torch.ones(3),), strict=True)
+        gm = ep.module()
+
+        # Check that named_parameters are preserved
+        original_param_names = [name for name, _ in m.named_parameters()]
+        exported_param_names = [name for name, _ in gm.named_parameters()]
+        self.assertEqual(original_param_names, exported_param_names)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
@@ -16490,6 +16450,35 @@ def forward(self, x, y):
     select = torch.ops.aten.select.int(x, 0, item);  x = item = None
     return (select,)""",
             ignore_empty_lines=True,
+        )
+
+    def test_is_fx_tracing(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                if torch.fx._symbolic_trace.is_fx_tracing():
+                    return x + y
+                else:
+                    return x * y
+
+        inp = (torch.randn(3), torch.randn(3))
+
+        ep = export(M(), inp)
+        FileCheck().check_count("torch.ops.aten.add", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                if torch.fx._symbolic_trace.is_fx_symbolic_tracing():
+                    return x + y
+                else:
+                    return x * y
+
+        inp = (torch.randn(3), torch.randn(3))
+
+        ep = export(M(), inp)
+        FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
+            str(ep.graph)
         )
 
 

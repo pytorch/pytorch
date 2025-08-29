@@ -41,6 +41,7 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
@@ -56,6 +57,7 @@ ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifa
 device = torch.accelerator.current_accelerator()
 backend = c10d.get_default_backend_for_device(device) if device is not None else "None"
 
+device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -743,10 +745,7 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_backend_available(backend),
-        f"c10d was not compiled with the NCCL {backend}",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_v_schedule(self):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
@@ -864,10 +863,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_backend_available(backend),
-        f"c10d was not compiled with the {backend}",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_split_b_w(self):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
