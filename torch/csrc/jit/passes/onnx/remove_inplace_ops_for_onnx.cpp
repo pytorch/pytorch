@@ -191,7 +191,8 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
   expanded_value->node()->copyMetadata(node);
 
   auto index_put = graph->insert(
-      aten::index_put_, {node->input(0), dummy_list, expanded_value});
+      aten::index_put_,
+      {node->input(0), dummy_list, expanded_value, node->input(2)});
   index_put->node()->copyMetadata(node);
   index_put->copyMetadata(node->output());
   node->output()->replaceAllUsesWith(index_put);

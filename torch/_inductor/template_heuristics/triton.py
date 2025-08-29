@@ -799,7 +799,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
@@ -814,7 +814,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
@@ -1303,9 +1303,9 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         Convert config lists to template kwargs.
         This replaces the logic from choices.get_mm_configs and inlines mm_options.
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), f"{self.__class__.__name__} requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
@@ -1452,9 +1452,9 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "TMATemplateConfigMixin requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "TMATemplateConfigMixin requires MMKernelInputs"
+        )
         mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
@@ -1484,9 +1484,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         """
         for scaled_mm, we need to unsqueeze scale tensors, and bias
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "Expect MMKernelInputs for scaled MM"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for scaled MM"
+        )
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
@@ -1525,9 +1525,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
         # Initial assertion from mm_common.scaled_mm_options
-        assert (
-            len(input_nodes) >= 4
-        ), f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+        assert len(input_nodes) >= 4, (
+            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+        )
 
         # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
         scale_a = input_nodes[2]
@@ -1556,9 +1556,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
         )
 
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), f"{self.__class__.__name__} requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
 
         if not self._valid(kernel_inputs):
             return
@@ -1597,9 +1597,9 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "Expect MMKernelInputs for ScaledMMConfigMixin"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
+        )
         _, _, k = kernel_inputs.mnk_symbolic()
         if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
             # Triton crashes however uncommon for real workloads

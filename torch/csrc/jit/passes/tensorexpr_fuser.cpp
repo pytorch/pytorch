@@ -196,20 +196,11 @@ static void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
         input_tensor_type = it->input()->type()->expect<TensorType>();
       } else {
-        auto element_type = it->input()
-                              ->type();
-        if (element_type->cast<OptionalType>()) {
-          input_tensor_type = element_type->expectRef<OptionalType>()
-                                          .getElementType()
-                                          ->expect<TensorType>();
-        } else {
-          // This handles the following scenario:
-          // 1. profiling nodes are inserted
-          // 2. optimizations simplify a Tensor? -> None type
-          // 3. Now the input to the prim::profile() is actually a None type.
-          element_type->expect<NoneType>();
-        }
-
+        input_tensor_type = it->input()
+                                ->type()
+                                ->expectRef<OptionalType>()
+                                .getElementType()
+                                ->expect<TensorType>();
         input_is_optional = true;
       }
 

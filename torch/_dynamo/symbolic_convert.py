@@ -2841,7 +2841,7 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         # ensure everything is a dict
         items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
-        result: dict[Any, Any] = {}
+        result = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)

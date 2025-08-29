@@ -39,7 +39,6 @@ from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
-from torch._utils_internal import get_file_path_2
 
 from . import config
 from .utils import counters
@@ -513,29 +512,18 @@ def format_graph_break_message(
 
 
 @lru_cache(maxsize=1)
-def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
+def _load_graph_break_registry() -> dict[str, Any]:
     """
-    Loads the gb_type to gb_id map from the graph break registry from JSON file with caching.
-
-    Includes historical gb_type (mapping behavior of duplicate gb_types with different gb_ids is undefined).
+    Loads the graph break registry from JSON file with caching.
     """
     try:
         script_dir = Path(__file__).resolve().parent
-        registry_path = get_file_path_2(
-            "", str(script_dir), "graph_break_registry.json"
-        )
-        with open(registry_path) as f:
-            registry = json.load(f)
-    except Exception as e:
+        registry_path = script_dir / "graph_break_registry.json"
+        with registry_path.open() as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
         log.error("Error accessing the registry file: %s", e)
-        registry = {}
-
-    mapping = {}
-    for k, v in registry.items():
-        for entry in v:
-            mapping[entry["Gb_type"]] = k
-
-    return mapping
+        return {}
 
 
 def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
@@ -552,12 +540,11 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
         "https://meta-pytorch.github.io/compile-graph-break-site/gb/"  # @lint-ignore
     )
 
-    gb_type_to_gb_id_map = _load_gb_type_to_gb_id_map()
+    registry = _load_graph_break_registry()
 
-    if gb_type in gb_type_to_gb_id_map:
-        return (
-            f"{GRAPH_BREAK_SITE_URL}gb{gb_type_to_gb_id_map[gb_type].lstrip('GB')}.html"
-        )
+    for k, v in registry.items():
+        if v and v[0].get("Gb_type") == gb_type:
+            return f"{GRAPH_BREAK_SITE_URL}gb{k.lstrip('GB')}.html"
 
     return None
 

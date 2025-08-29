@@ -33,6 +33,12 @@ class KernelTemplateChoice:
         self.extra_kwargs = extra_kwargs
         self.layout = layout
         self.inputs = inputs
+        # Field to store a performance prediction for this choice
+        # Note that all performance predictions should be in ms of runtime
+        # the kernel choice is expected to take in Inductor benchmarking
+        # This enables us to combine performance predictions from different
+        # sources and compare them in a consistent way
+        self.performance_prediction: Union[None, float] = None
 
     @property
     def choice(self) -> Optional[ChoiceCaller]:
@@ -54,6 +60,11 @@ class KernelTemplateChoice:
                 input_nodes=self.inputs.nodes(),
                 **self.extra_kwargs,
             )
+            # provide the ChoiceCaller with a reference back to oneself
+            # this allows ChoiceCaller uses to understand how the choice was
+            # constructed and reenable things like recording choices
+            if self._choice is not None:
+                self._choice.set_ktc(self)
         return self._choice
 
 
