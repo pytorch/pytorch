@@ -971,12 +971,12 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
 
     def __call__(
         self,
-        kernel: "TritonKernelType",
         kernel_idx: int,
         constant_args_idx: int,
         grid: list["TritonGridType"],
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
+        kernel: Optional["TritonKernelType"] = None,
     ) -> Any:
         return super().__call__(
             kernel=kernel,
@@ -1245,7 +1245,6 @@ def triton_kernel_wrapper_functional_dense(
         for key, val in kwargs.items()
     }
     triton_kernel_wrapper_mutation(
-        kernel="placeholder",
         kernel_idx=kernel_idx,
         constant_args_idx=constant_args_idx,
         grid=grid,
