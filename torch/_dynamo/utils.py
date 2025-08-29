@@ -1292,6 +1292,7 @@ class CompilationMetrics:
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
     stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
     graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
@@ -1362,6 +1363,7 @@ class CompilationMetrics:
     # the number of distinct type of params.
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
+    inline_inbuilt_nn_modules_candidate: Optional[bool] = False
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1555,9 +1557,14 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
 
     keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
-    inductor_config_copy = (
-        torch._inductor.config.get_config_copy() if torch._inductor.config else None
-    )
+    inductor_config_copy = None
+
+    if torch._inductor.config:
+        try:
+            inductor_config_copy = torch._inductor.config.get_config_copy()
+        except (TypeError, AttributeError):
+            inductor_conf_str = "Inductor Config cannot be pickled"
+
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
@@ -3328,9 +3335,11 @@ def get_fake_value(
         id_to_initial_version = {}
 
     nnmodule = None
+    fake_mode = tx.fake_mode
+    assert fake_mode is not None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
-        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+        args = (deepcopy_to_fake_tensor(args[0], fake_mode),) + tuple(args[1:])
 
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
@@ -3343,7 +3352,7 @@ def get_fake_value(
             nnmodule._infer_parameters(nnmodule, args)
 
         # no matter it's lazy module or not, we should copy to fake mode.
-        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, fake_mode)
 
     if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
         isinstance(a, complex) for a in args
@@ -3359,7 +3368,7 @@ def get_fake_value(
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4721,6 +4730,11 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+class CompileCounterInt(int):
+    def __add__(self, other: Any) -> CompileCounterInt:
+        return CompileCounterInt(super().__add__(other))
 
 
 def set_feature_use(feature: str, usage: bool) -> None:

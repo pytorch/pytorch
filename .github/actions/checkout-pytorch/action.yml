@@ -43,6 +43,8 @@ runs:
             sudo git clean -ffdx
           else
             git clean -ffdx
+            # Do the same for submodules, should cleanup stale submodule dirs
+            git submodule foreach --recursive git clean -ffdx
           fi
         fi
 
