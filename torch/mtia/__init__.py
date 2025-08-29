@@ -541,44 +541,57 @@ def initial_seed() -> int:
     return default_generators[idx].initial_seed()
 
 
+def get_device_name(device: torch.device | None = None) -> str:
+    return "mtia"
+
+
+def device_type() -> str:
+    return "mtia"
+
+
+current_device_index = current_device
+
 from .memory import *  # noqa: F403
 from .mtia_graph import *  # noqa: F403
 
 
 __all__ = [
-    "init",
-    "is_available",
-    "is_initialized",
-    "synchronize",
-    "device_count",
+    "MTIAGraph",
+    "attach_out_of_memory_observer",
     "current_device",
+    "current_device_index",
     "current_stream",
     "default_stream",
-    "memory_stats",
-    "max_memory_allocated",
-    "memory_allocated",
-    "reset_peak_memory_stats",
-    "get_device_capability",
-    "get_device_properties",
-    "record_memory_history",
-    "snapshot",
-    "attach_out_of_memory_observer",
-    "empty_cache",
-    "set_device",
-    "set_stream",
-    "stream",
     "device",
-    "set_rng_state",
+    "device_count",
+    "device_type",
+    "empty_cache",
+    "get_device_capability",
+    "get_device_name",
+    "get_device_properties",
     "get_rng_state",
-    "set_rng_state_all",
     "get_rng_state_all",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "initial_seed",
-    "is_bf16_supported",
-    "MTIAGraph",
     "graph",
     "graph_pool_handle",
+    "init",
+    "initial_seed",
+    "is_available",
+    "is_bf16_supported",
+    "is_initialized",
+    "manual_seed",
+    "manual_seed_all",
+    "max_memory_allocated",
+    "memory_allocated",
+    "memory_stats",
+    "record_memory_history",
+    "reset_peak_memory_stats",
+    "seed",
+    "seed_all",
+    "set_device",
+    "set_rng_state",
+    "set_rng_state_all",
+    "set_stream",
+    "snapshot",
+    "stream",
+    "synchronize",
 ]

@@ -1155,6 +1155,14 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
+def current_device_index() -> int:
+    return current_device()
+
+
+def device_type() -> str:
+    return "cuda"
+
+
 def synchronize(device: Device = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
@@ -1940,6 +1948,7 @@ __all__ = [
     "cudart",
     "current_blas_handle",
     "current_device",
+    "current_device_index",
     "current_stream",
     "default_generators",
     "default_stream",
@@ -1947,6 +1956,7 @@ __all__ = [
     "device_count",
     "device_memory_used",
     "device_of",
+    "device_type",
     "empty_cache",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
