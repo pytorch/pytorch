@@ -62,6 +62,14 @@ def pickle_deprecated(testfunc):
 maxsize = support.MAX_Py_ssize_t
 minsize = -maxsize-1
 
+@torch._dynamo.disable
+def choice(*args):
+    return random.choice(*args)
+
+@torch._dynamo.disable
+def randrange(*args):
+    return random.randrange(*args)
+
 def lzip(*args):
     return list(zip(*args))
 
@@ -1351,7 +1359,7 @@ class TestBasicOps(__TestCase):
                     set('abcdefg'), range(11), tuple(range(13))]
         for i in range(100):
             with torch._dynamo.set_fullgraph(fullgraph=False):
-                args = [random.choice(argtypes) for j in range(random.randrange(5))]
+                args = [choice(argtypes) for j in range(randrange(5))]
             expected_len = prod(map(len, args))
             self.assertEqual(len(list(product(*args))), expected_len)
             self.assertEqual(list(product(*args)), list(product1(*args)))
