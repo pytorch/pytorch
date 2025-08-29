@@ -8,9 +8,7 @@ def check_if_rocm() -> bool:
     if use_rocm_env:
         return bool(use_rocm_env)
     # otherwise infer existence of ROCm installation as indication of ROCm build
-    if os.path.exists("/opt/rocm"):
-        return True
-    rocm_path_env = os.environ.get("ROCM_PATH")
+    rocm_path_env = os.environ.get("ROCM_PATH", "/opt/rocm")
     if rocm_path_env and os.path.exists(rocm_path_env):
         return True
     return False
