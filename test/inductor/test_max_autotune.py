@@ -2417,8 +2417,12 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-        # upcast preserves zero mask
-        FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
+        if config.triton.enable_native_matmul:
+            # native matmul preserves zero mask - need to optimize; see codegen/triton.py
+            FileCheck().check("a =").check("tl.where").check("tl.dot").run(code[0])
+        else:
+            # upcast preserves zero mask
+            FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
     @unittest.skip("Triton bug in compilation")
     def test_gather_fusion(self):
