@@ -2530,7 +2530,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
         return {
             key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
         }
-    elif isinstance(arg, (tuple, list)):
+    if isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
         )
@@ -2555,6 +2555,8 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
             return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+        if isinstance(arg, (tuple, list)):
+            return type(arg)(apply_constraint(a, f_a) for (a, f_a) in zip(arg, fx_arg))
         return arg
 
     args = tuple(
@@ -2745,7 +2747,7 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+make_fallback(aten.convolution_backward, constrain_to_fake_tensors)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 

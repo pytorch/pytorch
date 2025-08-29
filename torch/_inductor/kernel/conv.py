@@ -10,7 +10,7 @@ from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTempla
 from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
-    constrain_to_fx_strides,
+    constrain_to_fake_tensors,
     lowerings as L,
     register_lowering,
 )
@@ -676,12 +676,10 @@ def _convolution(
     )
 
 
-def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution.default
+def constrain_conv_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     if V.graph.layout_opt:
         return args, kwargs
-    else:
-        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+    return constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs)
 
 
-add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)
+add_layout_constraint(aten.convolution, constrain_conv_to_fake_tensors)
