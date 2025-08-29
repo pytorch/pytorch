@@ -627,6 +627,65 @@ static PyObject* THPVariable_make_subclass(
   END_HANDLE_TH_ERRORS
 }
 
+// Shared code factored out of THPVariable_make_wrapper_subclass and
+// THPVariable_make_dtensor.
+static Tensor make_tensor_for_subclass_helper(
+    SymIntArrayRef sym_sizes,
+    OptionalSymIntArrayRef sym_strides,
+    const std::optional<c10::SymInt>& sym_storage_offset,
+    const TensorOptions& options,
+    const std::optional<c10::SymInt>& storage_size,
+    std::optional<DispatchKeySet> extra_dispatch_keys) {
+  AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+  tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+  c10::SymInt size_bytes;
+  auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
+
+  if (storage_size.has_value()) {
+    size_bytes = storage_size.value();
+  } else if (sym_strides.has_value()) {
+    size_bytes = at::detail::computeStorageNbytes(
+        sym_sizes,
+        sym_strides.value(),
+        dtype_itemsize,
+        sym_storage_offset.value_or(0));
+  } else {
+    size_bytes = at::detail::computeStorageNbytesContiguous(
+        sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
+  }
+
+  // We use storages **only** to track aliasing of subclasses during tracing.
+  // The actual data pointers are not valid.
+  Storage storage{
+      Storage::use_byte_size_t{},
+      size_bytes,
+      /*allocator=*/c10::GetAllocator(c10::kMeta),
+      /*resizable=*/true};
+  // TODO: constructor should probably accept data pointer
+  storage.set_data_ptr_noswap(at::DataPtr{nullptr, options.device()});
+
+  auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+  if (extra_dispatch_keys.has_value()) {
+    keys = keys | *extra_dispatch_keys;
+  }
+  Tensor tensor = at::detail::make_tensor<TensorImpl>(
+      std::move(storage), keys, options.dtype());
+
+  TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+
+  if (sym_strides.has_value()) {
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides.value(), sym_storage_offset);
+  } else {
+    TORCH_CHECK(
+        !sym_storage_offset.has_value(),
+        "setting storage offset without stride not supported");
+    tensor_impl->generic_set_sizes_contiguous(sym_sizes);
+  }
+  return tensor;
+}
+
 static PyObject* THPVariable_make_wrapper_subclass(
     PyObject*,
     PyObject* args,
@@ -634,8 +693,6 @@ static PyObject* THPVariable_make_wrapper_subclass(
   HANDLE_TH_ERRORS
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
-  // NOTE: Updates to this function need to be synced with
-  // THPVariable_make_dtensor below.
 
   // cls: Python subclass type
   // size, strides, storage_offset, memory_format, dtype: self-explanatory
@@ -696,69 +753,20 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
-  Tensor tensor;
+  auto sym_sizes = r.symintlist(1);
+  auto sym_strides_own = r.symintlistOptional(2);
+  Tensor tensor = make_tensor_for_subclass_helper(
+      /*sym_sizes=*/r.symintlist(1),
+      /*sym_strides=*/r.symintlistOptional(2),
+      /*sym_storage_offset=*/r.toSymIntOptional(3),
+      options,
+      /*storage_size=*/r.toSymIntOptional(14),
+      r.toDispatchKeySetOptional(13));
 
-  {
-    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-    tracer::impl::NoTracerDispatchMode tracer_guard{};
-
-    auto sym_sizes = r.symintlist(1);
-    auto sym_strides_own = r.symintlistOptional(2);
-    auto sym_strides =
-        static_cast<std::optional<c10::SymIntArrayRef>>(sym_strides_own);
-    auto sym_storage_offset = r.toSymIntOptional(3);
-
-    c10::SymInt size_bytes;
-    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    auto storage_size = r.toSymIntOptional(14);
-
-    if (storage_size.has_value()) {
-      size_bytes = storage_size.value();
-    } else if (sym_strides.has_value()) {
-      size_bytes = at::detail::computeStorageNbytes(
-          sym_sizes,
-          sym_strides.value(),
-          dtype_itemsize,
-          sym_storage_offset.value_or(0));
-    } else {
-      size_bytes = at::detail::computeStorageNbytesContiguous(
-          sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
-    }
-
-    // We use storages **only** to track aliasing of subclasses during tracing.
-    // The actual data pointers are not valid.
-    Storage storage{
-        Storage::use_byte_size_t{},
-        size_bytes,
-        /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizable=*/true};
-    // TODO: constructor should probably accept data pointer
-    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
-
-    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
-    if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
-      keys = keys | *mb_extra_keys;
-    }
-    tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), keys, options.dtype());
-
-    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-    if (sym_strides.has_value()) {
-      tensor_impl->set_sizes_and_strides(
-          sym_sizes, sym_strides.value(), sym_storage_offset);
-    } else {
-      TORCH_CHECK(
-          !sym_storage_offset.has_value(),
-          "setting storage offset without stride not supported");
-      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
-    }
-
-    const auto sizes_strides_policy = r.stringViewOptional(10);
-    if (sizes_strides_policy.has_value()) {
-      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
-          parseSizesStridesPolicyArgument(*sizes_strides_policy));
-    }
+  const auto sizes_strides_policy = r.stringViewOptional(10);
+  if (sizes_strides_policy.has_value()) {
+    tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
   }
 
   tensor.set_requires_grad(r.toBool(9));
@@ -788,7 +796,6 @@ static PyObject* THPVariable_make_dtensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      // REVIEW: is requiring strides correct?
       "_make_dtensor(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "Tensor local_tensor, bool requires_grad)",
   });
@@ -801,6 +808,8 @@ static PyObject* THPVariable_make_dtensor(
       "cls must be a type (got ",
       Py_TYPE(cls)->tp_name,
       ")");
+  // See note about the __torch_dispatch__ check in
+  // THPVariable_make_wrapper_subclass above.
   py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
   TORCH_CHECK_TYPE(
       attr.ptr() != nullptr &&
@@ -814,40 +823,22 @@ static PyObject* THPVariable_make_dtensor(
                            .device(local_tensor.device())
                            .layout(local_tensor.layout());
 
-  Tensor tensor;
-  {
-    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-    tracer::impl::NoTracerDispatchMode tracer_guard{};
-
-    auto sym_sizes = r.symintlist(1);
-    auto sym_strides = r.symintlist(2);
-
-    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
-        sym_sizes, sym_strides, dtype_itemsize, 0);
-    // We use storages **only** to track aliasing of subclasses during tracing.
-    // The actual data pointers are not valid.
-    Storage storage{
-        Storage::use_byte_size_t{},
-        size_bytes,
-        /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizable=*/true};
-    // TODO: constructor should probably accept data pointer
-    storage.set_data_ptr_noswap(at::DataPtr{nullptr, local_tensor.device()});
-    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
-    const auto tensor_keys = local_tensor.key_set();
-    if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
-      keys = keys.add(c10::DispatchKey::Conjugate);
-    }
-    if (tensor_keys.has(c10::DispatchKey::Negative)) {
-      keys = keys.add(c10::DispatchKey::Negative);
-    }
-    tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), keys, options.dtype());
-
-    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides);
+  DispatchKeySet extra_dispatch_keys;
+  const auto tensor_keys = local_tensor.key_set();
+  if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
+    extra_dispatch_keys = extra_dispatch_keys.add(c10::DispatchKey::Conjugate);
   }
+  if (tensor_keys.has(c10::DispatchKey::Negative)) {
+    extra_dispatch_keys = extra_dispatch_keys.add(c10::DispatchKey::Negative);
+  }
+
+  Tensor tensor = make_tensor_for_subclass_helper(
+      /*sym_sizes=*/r.symintlist(1),
+      /*sym_strides=*/r.symintlist(2),
+      /*sym_storage_offset=*/std::nullopt,
+      options,
+      /*storage_size=*/std::nullopt,
+      extra_dispatch_keys);
   tensor.set_requires_grad(r.toBool(4));
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
