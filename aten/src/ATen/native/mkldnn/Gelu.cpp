@@ -27,7 +27,9 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std:
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/ops/_to_dense_native.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <torch/library.h>
 
 namespace at::native {
 
@@ -42,8 +44,11 @@ Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+  auto output = new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
+  if (input.is_mkldnn())
+    return output;
+  return mkldnn_to_dense(output);
 }
 
 Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
@@ -57,6 +62,18 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std:
   return new_with_itensor_mkldnn(std::move(gradx),
                                  optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                  grad_output.options().device_opt());
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_gelu"),
+      TORCH_FN(mkldnn_gelu));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_gelu"),
+      TORCH_FN(mkldnn_gelu));
 }
 
 }
