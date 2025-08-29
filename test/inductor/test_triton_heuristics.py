@@ -274,7 +274,10 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+        )
 
         expected_count = 1 if do_pruning else 2
         mm_configs = [
