@@ -633,11 +633,20 @@ class ScanAutogradOp(torch.autograd.Function):
                 *y,
             ]
 
+        # Materialize the ``combine_fn_with_carry_checkpoint`` under enable_grad
+        # we need the context manager to support torch.func.grad_and_value
+        # in subgraph.
+        with torch.enable_grad():
+            gm = materialize_as_graph(
+                combine_fn_with_carry_checkpoint,
+                (*init, *[x[0] for x in xs], *additional_inputs),
+            )
+
         with torch._C._AutoDispatchBelowAutograd():
             # 2.) Compute the all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``
             c_T, carries_ys = _extract_carry_and_out(
                 scan_op(
-                    combine_fn_with_carry_checkpoint,
+                    gm,
                     init,
                     xs,
                     additional_inputs,
