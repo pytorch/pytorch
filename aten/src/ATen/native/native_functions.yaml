@@ -3289,6 +3289,7 @@
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
+    MPS: kthvalue_out_mps
 
 - func: kthvalue.dimname(Tensor self, SymInt k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
