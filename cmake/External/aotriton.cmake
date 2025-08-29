@@ -24,10 +24,10 @@ if(NOT __AOTRITON_INCLUDED)
       )
   set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
   set(__AOTRITON_SHA256_LIST
-      ""  # rocm6.2
-      ""  # rocm6.3
-      ""  # rocm6.4
-      ""  # rocm7.0
+      "6cae3d5de75ee205d22e088f7dfaab1227056d02ea67f29ccdbc09f2be4e8c8f"  # rocm6.2
+      "72a153549ea20707331e8a1f1e3d1b8de2913f9d5af2b900c56235d578b57efe"  # rocm6.3
+      "c7f319dd7448cbbbab81889dd8a37d47dbc25ebcbd89760f09e6a0904e556393"  # rocm6.4
+      "a2a974e0ad929a5e5827c0f896c59bda4872459cbaf8dd8e0a00407f404491cf"  # rocm7.0
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -37,14 +37,13 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx120x"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "" # amd-gfx90a
-     "" # amd-gfx942
-     "" # amd-gfx950
-     "" # amd-gfx11xx
-     "" # amd-gfx120x
+     "c19a41c9480510ab32e6fb05e6ed0a3832d6b07634f050b836b760200befa735" # amd-gfx90a
+     "3a06a99971dddb7703a30378f1c5d6b41468d926ea51821156d1b6857b985bc4" # amd-gfx942
+     "27fc21f6761d57987a700436de8cf29cbdd9eeee91318dfed596eeb147d219ad" # amd-gfx950
+     "ec134032087344176695505db659387374d1916adfee16f0db47dee38d9c8603" # amd-gfx11xx
+     "fec05205747ff51649b1e151545267d5aa2037ba9d0338cad286882915b941b0" # amd-gfx120x
      )
-  # set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")
-  set(__AOTRITON_BASE_URL "http://10.227.26.253:8000/")
+  set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")
   set(__AOTRITON_Z "gz")
   function(aotriton_build_from_source noimage project)
     if(noimage)
