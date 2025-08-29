@@ -906,12 +906,19 @@ static bool is_int_or_symint_list(
     PyObject* obj,
     int broadcast_size,
     int64_t* failed_idx = nullptr) {
-  if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+  py::object item;
+  if (PyTuple_Check(obj)) {
+    if (PyTuple_GET_SIZE(obj) == 0) {
       return true;
     }
-    auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
-
+    item = py::reinterpret_borrow<py::object>(PyTuple_GET_ITEM(obj, 0));
+  } else if (PyList_Check(obj)) {
+    if (PyList_GET_SIZE(obj) == 0) {
+      return true;
+    }
+    item = py::reinterpret_borrow<py::object>(PyList_GET_ITEM(obj, 0));
+  }
+  if (item) {
     if (is_int_or_symint(item.ptr())) {
       return true;
     }
