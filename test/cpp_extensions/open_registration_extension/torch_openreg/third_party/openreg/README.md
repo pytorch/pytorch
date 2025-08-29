@@ -14,16 +14,27 @@ The project's code is organized with a clear structure and separation of respons
 
 ```text
 openreg/
-├── CMakeLists.txt      # Top-level CMake build script, used to compile and generate libopenreg.so
+├── README.md               # Comprehensive introduction of OpenReg.
+├── CMakeLists.txt          # Top-level CMake build script, used to compile and generate libopenreg.so
+├── cmake/
+│   └── GTestTargets.cmake  # Utils of fetching GoogleTest.
 ├── include/
-│   ├── openreg.h       # Public API header file, external users only need to include this file
-│   └── openreg.inl     # Public API header file, as an extension of openreg.h, cannot be included separately.
+│   ├── openreg.h           # Public API header file, external users only need to include this file
+│   └── openreg.inl         # Public API header file, as an extension of openreg.h, cannot be included separately.
+├── example/
+│   └── example.cpp         # Example for OpenReg.
+├── tests/
+│   ├── event_tests.cpp     # Testcases about OpenReg Event.
+│   ├── stream_tests.cpp    # Testcases about OpenReg Stream.
+│   ├── device_tests.cpp    # Testcases about OpenReg Device.
+│   └── memory_tests.cpp    # Testcases about OpenReg Memory.
 └── csrc/
-    ├── device.cpp      # Implementation of device management APIs
-    ├── memory.cpp      # Implementation of memory management APIs
-    └── stream.cpp      # Implementation of stream and event APIs.
+    ├── device.cpp          # Implementation of device management APIs
+    ├── memory.cpp          # Implementation of memory management APIs
+    └── stream.cpp          # Implementation of stream and event APIs.
 ```
 
+* `CMakeLists.txt`: Responsible for compiling and linking all source files under the `csrc/` directory to generate the final `libopenreg.so` shared library.
 * `include`: Defines all externally exposed APIs, data structures, and enums.
   * `openreg.h`: Defines all externally exposed C-style APIs.
   * `openreg.inl`: Defines all externally exposed C++ APIs.
@@ -31,7 +42,6 @@ openreg/
   * `device.cpp`: Implements the core functions of device management: device discovery and context management.
   * `memory.cpp`: Implements the core functions of memory management: allocation, free, copy and memory protection.
   * `stream.cpp`: Implements the core functions of stream and event: creation, destroy, record, synchronization and so on.
-* `CMakeLists.txt`: Responsible for compiling and linking all source files under the `csrc/` directory to generate the final `libopenreg.so` shared library.
 
 ## Implemented APIs
 
@@ -115,12 +125,15 @@ Please refer to [example](example/example.cpp) for example.
 The command to compile example.cpp is as follow:
 
 ```Shell
-pushd third_party/openreg/
+mkdir build
 
-g++ -o out example/example.cpp -L ../../torch_openreg/lib -lopenreg
-LD_LIBRARY_PATH=../../torch_openreg/lib ./out
-
+pushd build
+cmake ..
+make -j 32
 popd
+
+g++ -o out example/example.cpp -L ./build -lopenreg
+LD_LIBRARY_PATH=./build ./out
 ```
 
 The output is as follow:
