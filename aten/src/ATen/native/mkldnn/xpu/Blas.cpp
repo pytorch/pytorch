@@ -673,4 +673,3 @@ Tensor _int_mm_xpu(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_xpu(self, mat2, result);
 }
 } // namespace at::native
-    
