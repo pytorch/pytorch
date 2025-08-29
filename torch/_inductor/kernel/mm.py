@@ -29,7 +29,7 @@ from ..ir import Buffer, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     add_layout_constraint,
-    constrain_to_fx_strides,
+    constrain_to_fake_tensors,
     lowerings as L,
     register_lowering,
 )
@@ -1123,7 +1123,7 @@ def tuned_sparse_semi_structured_mm(
     )
 
 
-add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
+add_layout_constraint(aten._scaled_mm.default, constrain_to_fake_tensors)
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]

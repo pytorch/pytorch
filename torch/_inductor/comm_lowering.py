@@ -182,13 +182,13 @@ def register_comm_lowerings():
     from .lowering import (
         add_layout_constraint,
         clone,
-        constrain_to_fx_strides,
+        constrain_to_fake_tensors,
         copy_,
         register_lowering,
     )
 
     def register_comm_lowering(fn):
-        add_layout_constraint(fn, constrain_to_fx_strides)
+        add_layout_constraint(fn, constrain_to_fake_tensors)
         return register_lowering(fn)
 
     c10d = torch.ops._c10d_functional

@@ -80,6 +80,7 @@ from .ir import (
     TensorBox,
     TorchBindObject,
 )
+from .kernel.conv import constrain_conv_to_fake_tensors
 from .lowering import (
     constrain_to_fake_tensors,
     constrain_to_fx_strides,
@@ -1247,7 +1248,10 @@ class GraphLowering(torch.fx.Interpreter):
             layout_constraints = maybe_layout_constraints(target)
             if layout_constraints:
                 old_args, old_kwargs = args, kwargs
-                if layout_constraints is constrain_to_fake_tensors:
+                if layout_constraints in {
+                    constrain_to_fake_tensors,
+                    constrain_conv_to_fake_tensors,
+                }:
                     # only constrain_to_fake_tensor if this exists.
                     # otherwise, no constraints at all: the implication is
                     # that this operator was inserted by a custom pass
@@ -1270,9 +1274,11 @@ class GraphLowering(torch.fx.Interpreter):
                         args, kwargs = normalize(args, kwargs)
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
-                        args, kwargs = constrain_to_fake_tensors(
+                        args, kwargs = layout_constraints(
                             args, kwargs, fake_args, fake_kwargs
                         )
+                    else:
+                        raise RuntimeError("No eager_input_vals!")
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
