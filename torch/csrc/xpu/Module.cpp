@@ -302,7 +302,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
   };
 #endif
   auto get_xpu_uuid = [](const DeviceProp& prop) {
-    td::array<unsigned char, 16> uuid{};
+    std::array<unsigned char, 16> uuid{};
     return XPUuuid(uuid);
   };
 
