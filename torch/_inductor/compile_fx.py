@@ -2114,6 +2114,150 @@ def partition_fn(
         )
 
 
+def get_num_model_outputs(model: GraphModule) -> int:
+    model_outputs_node = output_node(model)
+    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+    return len(model_outputs)
+
+
+def compile_fx_forward(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    num_orig_model_outputs: int,  # Number of original model outputs from original dynamo graph.
+    num_example_inputs: int,  # Number of example inputs from original dynamo graph.
+    cudagraphs: BoxedBool,
+    graph_id: int,
+    forward_device: BoxedDeviceIndex,
+    inner_compile: Callable[..., OutputCode] = compile_fx_inner,
+    is_inference: bool = False,
+):
+    if is_inference:
+        # partition_fn won't be called
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "before_joint_graph",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+
+        _recursive_joint_graph_passes(gm)
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "after_joint_graph",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+
+    fixed = torch._inductor.utils.num_fw_fixed_arguments(
+        num_example_inputs, len(example_inputs)
+    )
+
+    model_outputs_node = output_node(gm)
+    if config.keep_output_stride:
+        model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+        num_model_outputs = len(model_outputs)
+
+        context = torch._guards.TracingContext.try_get()
+        # See Note [User Outputs in the inductor graph]
+        if context is not None and context.fw_metadata and not is_inference:
+            original_output_start_index = (
+                context.fw_metadata.num_mutated_inp_runtime_indices
+            )
+        else:
+            original_output_start_index = 0
+
+        assert num_orig_model_outputs <= num_model_outputs
+
+        # Note [User Outputs in the inductor graph]
+        # We makes the following assumption
+        # For inference
+        #   len(orig_model_outputs) == len(model_outputs)
+        # For training
+        #   len(orig_model_outputs) <= len(model_outputs)
+        # During training, most of the time the model_outputs starts with
+        # original module's outputs followed by saved activations.
+        # But this can be not true if the model have inplace updated tensors.
+        # AOTAutograd will make those tensors being returned before the original
+        # module's output.
+        # To make things safe, we'll use original_output_start_index field
+        # set by AOTAutograd to decide where the original module outputs start.
+        orig_output_end_idx = original_output_start_index + num_orig_model_outputs
+        # Sanity check: we are about to splice out the "user" outputs from the full set
+        # of "graph" outputs. Make sure we're within bounds.
+        assert orig_output_end_idx <= num_model_outputs
+
+        model_outputs_node.meta["user_visible_output_idxs"] = [
+            idx
+            for idx in range(original_output_start_index, orig_output_end_idx)
+            if isinstance(model_outputs[idx], torch.fx.Node)
+        ]
+    else:
+        model_outputs_node.meta["user_visible_output_idxs"] = []
+
+    # We also mark the invoke_subgraph outputs as user_visible to
+    # force the outputs of invoke_subgraph subgraph to follow the
+    # original strides
+    _recursive_record_user_visible_output_idxs(gm)
+
+    return inner_compile(
+        gm,
+        example_inputs,
+        static_input_idxs=get_static_input_idxs(fixed),
+        cudagraphs=cudagraphs,
+        graph_id=graph_id,
+        is_inference=is_inference,
+        boxed_forward_device_index=forward_device,
+    )
+
+
+def compile_fx_backward(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    cudagraphs: BoxedBool,
+    graph_id: int,
+    forward_device: BoxedDeviceIndex,
+    inner_compile: Callable[..., OutputCode] = compile_fx_inner,
+):
+    from torch._dynamo.convert_frame import compile_lock
+
+    with compile_lock:
+        model_outputs_node = output_node(gm)
+        if config.bw_outputs_user_visible:
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+            model_outputs_node.meta["user_visible_output_idxs"] = [
+                idx
+                for idx, n in enumerate(model_outputs)
+                if isinstance(n, torch.fx.Node)
+            ]
+        else:
+            model_outputs_node.meta["user_visible_output_idxs"] = []
+
+        fixed = count_tangents(gm)
+        with (
+            config.patch(get_cpp_wrapper_config())
+            if config.cpp_wrapper
+            else contextlib.nullcontext()
+        ):
+            return inner_compile(
+                gm,
+                example_inputs,
+                static_input_idxs=list(range(fixed)),
+                cudagraphs=cudagraphs,
+                is_backward=True,
+                graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
+            )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2342,105 +2486,20 @@ def compile_fx(
             is_inference: bool,
         ) -> OutputCode:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
-                if is_inference:
-                    # partition_fn won't be called
-                    trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "before_joint_graph",
-                            "encoding": "string",
-                        },
-                        payload_fn=lambda: gm.print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                    )
-
-                    _recursive_joint_graph_passes(gm)
-
-                    trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "after_joint_graph",
-                            "encoding": "string",
-                        },
-                        payload_fn=lambda: gm.print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                    )
-
-                fixed = torch._inductor.utils.num_fw_fixed_arguments(
-                    num_example_inputs, len(example_inputs)
-                )
-
-                model_outputs_node = output_node(gm)
-                if config.keep_output_stride:
-                    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                    num_model_outputs = len(model_outputs)
-
-                    context = torch._guards.TracingContext.try_get()
-                    # See Note [User Outputs in the inductor graph]
-                    if context is not None and context.fw_metadata and not is_inference:
-                        original_output_start_index = (
-                            context.fw_metadata.num_mutated_inp_runtime_indices
-                        )
-                    else:
-                        original_output_start_index = 0
-
-                    if isinstance(model_, GraphModule):
-                        *_, orig_model_outputs_node = model_.graph.nodes
-                        assert orig_model_outputs_node.op == "output"
-                        orig_model_outputs, _ = pytree.tree_flatten(
-                            orig_model_outputs_node.args
-                        )
-                        num_orig_model_outputs = len(orig_model_outputs)
-                    else:
-                        num_orig_model_outputs = num_model_outputs
-
-                    assert num_orig_model_outputs <= num_model_outputs
-
-                    # Note [User Outputs in the inductor graph]
-                    # We makes the following assumption
-                    # For inference
-                    #   len(orig_model_outputs) == len(model_outputs)
-                    # For training
-                    #   len(orig_model_outputs) <= len(model_outputs)
-                    # During training, most of the time the model_outputs starts with
-                    # original module's outputs followed by saved activations.
-                    # But this can be not true if the model have inplace updated tensors.
-                    # AOTAutograd will make those tensors being returned before the original
-                    # module's output.
-                    # To make things safe, we'll use original_output_start_index field
-                    # set by AOTAutograd to decide where the original module outputs start.
-                    orig_output_end_idx = (
-                        original_output_start_index + num_orig_model_outputs
-                    )
-                    # Sanity check: we are about to splice out the "user" outputs from the full set
-                    # of "graph" outputs. Make sure we're within bounds.
-                    assert orig_output_end_idx <= num_model_outputs
-
-                    model_outputs_node.meta["user_visible_output_idxs"] = [
-                        idx
-                        for idx in range(
-                            original_output_start_index, orig_output_end_idx
-                        )
-                        if isinstance(model_outputs[idx], torch.fx.Node)
-                    ]
+                if isinstance(model_, GraphModule):
+                    num_orig_model_outputs = get_num_model_outputs(model_)
                 else:
-                    model_outputs_node.meta["user_visible_output_idxs"] = []
-
-                # We also mark the invoke_subgraph outputs as user_visible to
-                # force the outputs of invoke_subgraph subgraph to follow the
-                # original strides
-                _recursive_record_user_visible_output_idxs(gm)
-
-                return inner_compile(
+                    num_orig_model_outputs = get_num_model_outputs(gm)
+                return compile_fx_forward(
                     gm,
                     example_inputs,
-                    static_input_idxs=get_static_input_idxs(fixed),
+                    num_orig_model_outputs=num_orig_model_outputs,
+                    num_example_inputs=num_example_inputs,
                     cudagraphs=cudagraphs,
                     graph_id=graph_id,
+                    forward_device=forward_device,
+                    inner_compile=inner_compile,
                     is_inference=is_inference,
-                    boxed_forward_device_index=forward_device,
                 )
 
         fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
@@ -2468,38 +2527,17 @@ def compile_fx(
         def bw_compiler(
             gm: GraphModule, example_inputs: Sequence[InputType]
         ) -> OutputCode:
-            from torch._dynamo.convert_frame import compile_lock
-
             with (
                 dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"),
-                compile_lock,
             ):
-                model_outputs_node = output_node(gm)
-                if config.bw_outputs_user_visible:
-                    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                    model_outputs_node.meta["user_visible_output_idxs"] = [
-                        idx
-                        for idx, n in enumerate(model_outputs)
-                        if isinstance(n, torch.fx.Node)
-                    ]
-                else:
-                    model_outputs_node.meta["user_visible_output_idxs"] = []
-
-                fixed = count_tangents(gm)
-                with (
-                    config.patch(get_cpp_wrapper_config())
-                    if config.cpp_wrapper
-                    else contextlib.nullcontext()
-                ):
-                    return inner_compile(
-                        gm,
-                        example_inputs,
-                        static_input_idxs=list(range(fixed)),
-                        cudagraphs=cudagraphs,
-                        is_backward=True,
-                        graph_id=graph_id,
-                        boxed_forward_device_index=forward_device,
-                    )
+                return compile_fx_backward(
+                    gm,
+                    example_inputs,
+                    cudagraphs=cudagraphs,
+                    graph_id=graph_id,
+                    forward_device=forward_device,
+                    inner_compile=inner_compile,
+                )
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
