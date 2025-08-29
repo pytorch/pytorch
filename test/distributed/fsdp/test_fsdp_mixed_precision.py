@@ -978,7 +978,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model,
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
-            device_id=torch.accelerator.current_device(),
+            device_id=torch.accelerator.current_device_index(),
             use_orig_params=use_orig_params,
         )
         # Use an input with dtype not equal to the mixed precision
@@ -1125,7 +1125,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
             mixed_precision=float16,
         )
 
-        x = torch.ones(2, 100, device=torch.get_device_module(device_type).current_device())
+        x = torch.ones(2, 100, device=device_type)
 
         with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
             model(x).sum().backward()
