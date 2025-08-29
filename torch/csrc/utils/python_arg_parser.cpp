@@ -1685,9 +1685,23 @@ bool FunctionSignature::parse(
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
   if (max_pos_args == 1 &&
-      (params[0].type_ == ParameterType::INT_LIST ||
-       params[0].type_ == ParameterType::SYM_INT_LIST)) {
-    allow_varargs_intlist = true;
+     (params[0].type_ == ParameterType::INT_LIST ||
+      params[0].type_ == ParameterType::SYM_INT_LIST)) {
+    PyObject* arg_i;
+    if (nargs == 1) {
+      arg_i = PyTuple_GetItem(args, 0);
+      // If there is only one argument, make sure it's a sequence or an int.
+      allow_varargs_intlist = PySequence_Check(arg_i) || PyLong_Check(arg_i); 
+    }
+    else {
+      allow_varargs_intlist = true;
+      for (Py_ssize_t i = 0; i < nargs; i++) {
+        arg_i = PyTuple_GetItem(args, i);
+        // Make sure every argument in args is an int.
+        if (!PyLong_Check(arg_i))
+          allow_varargs_intlist = false;
+      }
+    }
   }
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
