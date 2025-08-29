@@ -397,6 +397,17 @@ jobs:
 
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
+      - name: Add test summary
+        if: always()
+        run: |
+          set -x
+          # only add generated_step_summary.md if it exists
+          if [ -s generated_step_summary.md ]; then
+            cat generated_step_summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No summary generated."
+          fi
+
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
         continue-on-error: true

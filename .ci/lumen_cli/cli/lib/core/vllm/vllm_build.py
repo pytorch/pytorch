@@ -20,7 +20,7 @@ from cli.lib.common.gh_summary import (
 )
 from cli.lib.common.path_helper import (
     copy,
-    ensure_dir_exists,
+    ensure_path,
     force_create_dir,
     get_path,
     is_path_exist,
@@ -165,7 +165,7 @@ class VllmBuildRunner(BaseRunner):
         self.cp_torch_whls_if_exist(inputs)
 
         # make sure the output dir to store the build artifacts exist
-        ensure_dir_exists(Path(inputs.output_dir))
+        ensure_path(Path(inputs.output_dir))
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)

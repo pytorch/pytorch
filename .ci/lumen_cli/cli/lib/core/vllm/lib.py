@@ -1,12 +1,18 @@
 import logging
 import os
 import textwrap
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
-from cli.lib.common.utils import run_command, temp_environ, working_directory
+from cli.lib.common.utils import (
+    attach_junitxml_if_pytest,
+    run_command,
+    temp_environ,
+    working_directory,
+)
 from jinja2 import Template
 
 
@@ -186,6 +192,9 @@ def run_test_plan(
     tests_map: dict[str, Any],
     shard_id: int = 0,
     num_shards: int = 0,
+    *,
+    test_summary_path: Optional[Path] = None,
+    test_summary_result: Optional[list[tuple[str, str]]] = None,
 ):
     """
     a method to run list of tests based on the test plan.
@@ -198,7 +207,6 @@ def run_test_plan(
     tests = tests_map[test_plan]
     pkgs = tests.get("package_install", [])
     title = tests.get("title", "unknown test")
-
     is_parallel = check_parallelism(tests, title, shard_id, num_shards)
     if is_parallel:
         title = title.replace("%N", f"{shard_id}/{num_shards}")
@@ -212,7 +220,15 @@ def run_test_plan(
         temp_environ(tests.get("env_vars", {})),
     ):
         failures = []
-        for step in tests["steps"]:
+        for idx, step in enumerate(tests["steps"]):
+            # generate xml report for each test for test summary if needed
+            step, xml_file_path = attach_junitxml_if_pytest(
+                cmd=step, dir=test_summary_path, prefix=f"{test_plan}_{idx}"
+            )
+            if xml_file_path and xml_file_path.exists() and test_summary_result:
+                test_summary_result.append((title, str(xml_file_path)))
+            else:
+                logger.info("No test report will be generate for %s", step)
             logger.info("Running step: %s", step)
             if is_parallel:
                 step = replace_buildkite_placeholders(step, shard_id, num_shards)

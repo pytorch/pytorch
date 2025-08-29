@@ -139,7 +139,7 @@ class TestBuildCmdAndRun(unittest.TestCase):
         self.assertIn("-t vllm-wheels", squashed)
 
     @patch(f"{_VLLM_BUILD_MODULE}.run_command")
-    @patch(f"{_VLLM_BUILD_MODULE}.ensure_dir_exists")
+    @patch(f"{_VLLM_BUILD_MODULE}.ensure_path")
     @patch(f"{_VLLM_BUILD_MODULE}.clone_vllm")
     @patch.object(
         vllm_build.VllmBuildRunner,
