@@ -3014,7 +3014,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 @register_decomposition(aten.expand)
-def expand(a: Tensor, *shape) -> Tensor:
+def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
