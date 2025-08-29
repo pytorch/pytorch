@@ -60,6 +60,262 @@ extern uint8_t _binary_constants_bin_end[];
 #define AOTI_CONST_ALIGNMENT 64
 #endif
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+
+#define PATH_MAX 255
+
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC 0x4
+
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_FAILED ((void*)-1)
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+struct Dl_info {
+  char dli_fname[PATH_MAX]; /**< Filename of defining object */
+  void* dli_fbase; /**< Load address of that object */
+  const char* dli_sname; /**< Name of nearest lower symbol */
+  void* dli_saddr; /**< Exact value of nearest symbol */
+};
+typedef struct Dl_info Dl_info;
+
+int dladdr(const void* addr, Dl_info* info) {
+  // only returns filename, FWIW.
+  CHAR tpath[PATH_MAX];
+  MEMORY_BASIC_INFORMATION mbi;
+  char* path;
+  char* tmp;
+  size_t length;
+  int ret = 0;
+
+  if (!info)
+    return 0;
+
+  ret = GetModuleFileNameA(NULL, (LPSTR)&tpath, PATH_MAX);
+  if (!ret)
+    return 0;
+
+  path = tpath;
+
+  length = strlen(path);
+  if (length >= PATH_MAX) {
+    length = PATH_MAX - 1;
+    path[PATH_MAX - 1] = '\0';
+  }
+
+  /* replace '/' by '\' */
+  tmp = path;
+  while (*tmp) {
+    if (*tmp == '/')
+      *tmp = '\\';
+    tmp++;
+  }
+
+  memcpy(info->dli_fname, path, length + 1);
+  info->dli_fbase = NULL;
+  info->dli_sname = NULL;
+  info->dli_saddr = NULL;
+  return 1;
+}
+
+static DWORD get_creation_disposition(int flags) {
+  if (flags & O_CREAT) {
+    if (flags & O_EXCL)
+      return CREATE_NEW;
+    if (flags & O_TRUNC)
+      return CREATE_ALWAYS;
+    return OPEN_ALWAYS;
+  }
+  if (flags & O_TRUNC)
+    return TRUNCATE_EXISTING;
+  return OPEN_EXISTING;
+}
+
+#define O_ACCMODE 03
+#define O_RDONLY 00
+#define O_WRONLY 01
+#define O_RDWR 02
+
+static DWORD get_access_mode(int flags) {
+  switch (flags & O_ACCMODE) {
+    case O_RDONLY:
+      return GENERIC_READ;
+    case O_WRONLY:
+      return GENERIC_WRITE;
+    case O_RDWR:
+      return GENERIC_READ | GENERIC_WRITE;
+    default:
+      return GENERIC_READ;
+  }
+}
+#ifndef O_DSYNC
+#define O_DSYNC 00010000 /* used to be O_SYNC, see below */
+#endif
+
+#ifndef O_SYNC
+#define __O_SYNC 04000000
+#define O_SYNC (__O_SYNC | O_DSYNC)
+#endif
+// open实现
+int open(char* pathname, int flags) {
+  DWORD dwDesiredAccess = get_access_mode(flags);
+  DWORD dwCreationDisposition = get_creation_disposition(flags);
+  DWORD dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+  DWORD dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+
+  // 处理同步标志
+  if (flags & O_SYNC) {
+    dwFlagsAndAttributes |= FILE_FLAG_WRITE_THROUGH;
+  }
+
+  // 处理顺序访问优化
+  if (flags & O_SEQUENTIAL) {
+    dwFlagsAndAttributes |= FILE_FLAG_SEQUENTIAL_SCAN;
+  }
+
+  // 处理随机访问优化
+  if (flags & O_RANDOM) {
+    dwFlagsAndAttributes |= FILE_FLAG_RANDOM_ACCESS;
+  }
+
+  HANDLE hFile = CreateFileA(
+      pathname,
+      dwDesiredAccess,
+      dwShareMode,
+      NULL,
+      dwCreationDisposition,
+      dwFlagsAndAttributes,
+      NULL);
+
+  if (hFile == INVALID_HANDLE_VALUE) {
+    switch (GetLastError()) {
+      case ERROR_FILE_NOT_FOUND:
+        errno = ENOENT;
+        break;
+      case ERROR_PATH_NOT_FOUND:
+        errno = ENOTDIR;
+        break;
+      case ERROR_ACCESS_DENIED:
+        errno = EACCES;
+        break;
+      case ERROR_FILE_EXISTS:
+        errno = EEXIST;
+        break;
+      case ERROR_TOO_MANY_OPEN_FILES:
+        errno = EMFILE;
+        break;
+      default:
+        errno = EIO;
+    }
+    return -1;
+  }
+
+  // 转换为C运行时文件描述符
+  int fd = _open_osfhandle((intptr_t)hFile, flags);
+  if (fd == -1) {
+    CloseHandle(hFile);
+    errno = EMFILE;
+    return -1;
+  }
+
+  // 如果是追加模式，定位到文件末尾
+  if (flags & O_APPEND) {
+    lseek(fd, 0, SEEK_END);
+  }
+
+  return fd;
+}
+
+int close(int fd) {
+  // 使用C运行时的close，它会自动关闭对应的HANDLE
+  return _close(fd);
+}
+
+void* mmap(
+    void* addr,
+    size_t length,
+    int prot,
+    int flags,
+    int fd,
+    off_t offset) {
+  HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    errno = EBADF;
+    return MAP_FAILED;
+  }
+
+  // 转换保护标志
+  DWORD flProtect;
+  if (prot & PROT_WRITE) {
+    flProtect = PAGE_READWRITE;
+  } else if (prot & PROT_READ) {
+    flProtect = PAGE_READONLY;
+  } else {
+    flProtect = PAGE_NOACCESS;
+  }
+
+  // 转换访问标志
+  DWORD dwDesiredAccess = 0;
+  if (prot & PROT_READ)
+    dwDesiredAccess |= FILE_MAP_READ;
+  if (prot & PROT_WRITE)
+    dwDesiredAccess |= FILE_MAP_WRITE;
+  if (prot & PROT_EXEC)
+    dwDesiredAccess |= FILE_MAP_EXECUTE;
+
+  // 创建文件映射
+  HANDLE hMapping = CreateFileMapping(
+      hFile,
+      NULL,
+      flProtect,
+      (DWORD)((length >> 32) & 0xFFFFFFFF),
+      (DWORD)(length & 0xFFFFFFFF),
+      NULL);
+
+  if (!hMapping) {
+    errno = EACCES;
+    return MAP_FAILED;
+  }
+
+  // 映射视图
+  void* p = MapViewOfFileEx(
+      hMapping,
+      dwDesiredAccess,
+      (DWORD)((offset >> 32) & 0xFFFFFFFF),
+      (DWORD)(offset & 0xFFFFFFFF),
+      length,
+      addr);
+
+  CloseHandle(hMapping);
+
+  if (!p) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+
+  return p;
+}
+
+int munmap(void* addr, size_t length) {
+  if (!UnmapViewOfFile(addr)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+#endif
+
 namespace {
 
 using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
