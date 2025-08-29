@@ -228,28 +228,32 @@ Tensor aminmax_backward(
     const Tensor& max_val) {     
 
   auto dims = dim ? IntArrayRef{*dim} : IntArrayRef{};
-  auto min_reduced = restore_reduced_dims(min_val, dims, keepdim);
-  auto max_reduced = restore_reduced_dims(max_val, dims, keepdim);
-
-  Tensor min_mask = (self == min_reduced);
-  Tensor max_mask = (self == max_reduced);
-
   Tensor result;  
 
   if (grad_min.defined()) {
+    auto min_restored = restore_reduced_dims(min_val, dims, keepdim);
+    Tensor min_mask = (self == min_restored);
     auto grad_min_full =
         restore_reduced_dims(grad_min, dims, keepdim);      
     result = scale_grad_by_count(grad_min_full, min_mask, dims);
   }
 
   if (grad_max.defined()) {
+    auto max_restored = restore_reduced_dims(max_val, dims, keepdim);
+    Tensor max_mask = (self == max_restored);
     auto grad_max_full =
         restore_reduced_dims(grad_max, dims, keepdim);          
     auto grad_max_res = scale_grad_by_count(grad_max_full, max_mask, dims);
-    result = result.defined() ? result + grad_max_res
-                              : grad_max_res;
+    if (result.defined()) {
+      if (areAnyTensorSubclassLike({grad_min, grad_max})) {
+        result = result + grad_max_res;  
+      } else {
+        result.add_(grad_max_res);       
+      }
+    } else {
+      result = grad_max_res;
+    }
   }
-
   return result;
 }
 
