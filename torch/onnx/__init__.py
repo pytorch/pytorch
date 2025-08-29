@@ -36,8 +36,6 @@ from ._internal.torchscript_exporter._type_utils import (
     JitScalarType,  # Deprecated members that are excluded from __all__
 )
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
-    _run_symbolic_function,
-    _run_symbolic_method,
     register_custom_op_symbolic,
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
