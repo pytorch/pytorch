@@ -14,11 +14,12 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
 
-from . import config, config as inductor_config
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .template_registry import register_template_heuristic
-from .utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
-from .virtualized import V
+from .. import config, config as inductor_config
+from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
+from ..virtualized import V
+from .base import TemplateConfigHeuristics
+from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
@@ -487,7 +488,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         if not self.should_scale_configs:
             return configs
-        from .runtime.runtime_utils import next_power_of_2
+        from ..runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
@@ -1358,24 +1359,6 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-
-
-class TemplateConfigHeuristics:
-    def get_template_configs(
-        self,
-        kernel_inputs: KernelInputs,
-        layout: Any,
-        op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
-        """
-        Get template configs for the given inputs.
-        This is the main entry point for template-specific logic.
-        """
-        # NOTE: not an abstract class, because that clashed below for the mixin
-        # functionality. Can be adjusted, but not a high priority
-        yield from {}
-
-
 class MMTemplateConfigMixin(TemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -1698,6 +1681,19 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
     "mm_persistent_tma", "cuda", register=torch.version.hip is None
 )
 class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
+    """Persistent TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
+    "mm_persistent_tma",
+    "xpu",
+)
+class XPUPersistentTMATemplateConfigHeuristic(TMAConfigMixin, XPUConfigHeuristic):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
