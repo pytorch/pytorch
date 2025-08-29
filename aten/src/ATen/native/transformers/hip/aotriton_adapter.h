@@ -7,7 +7,7 @@
 #include <aotriton/dtypes.h>
 #include <aotriton/util.h>
 #include <aotriton/config.h>
-#include "aotriton_versions.h"
+#include <ATen/native/transformers/hip/aotriton_versions.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
