@@ -2035,8 +2035,12 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_options = ProcessGroupXCCL.Options()
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
-                backend_prefix_store, group_rank, group_size
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
@@ -3323,7 +3327,7 @@ def send_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_dst: Optional[int] = None,
-    use_batched: bool = False,
+    use_batch: bool = False,
 ):
     """
     Sends picklable objects in ``object_list`` synchronously.
@@ -3344,7 +3348,7 @@ def send_object_list(
             ``device`` before sending. Default is ``None``.
         group_dst (int, optional): Destination rank on ``group``.
             Must specify one of ``dst`` and ``group_dst`` but not both
-        use_batched (bool, optional): If True, use batched p2p operations instead of
+        use_batch (bool, optional): If True, use batch p2p operations instead of
             regular send operations. This avoids initializing 2-rank communicators and
             uses existing entire group communicators. See batch_isend_irecv for usage and
             assumptions. Default is ``False``.
@@ -3411,7 +3415,7 @@ def send_object_list(
     object_sizes_tensor = torch.cat(size_list)
 
     # Send object sizes
-    if use_batched:
+    if use_batch:
         batch_isend_irecv(
             [P2POp(isend, object_sizes_tensor, group_peer=group_dst, group=group)]
         ).pop().wait()
@@ -3426,7 +3430,7 @@ def send_object_list(
     else:
         object_tensor = torch.cat(tensor_list)
 
-    if use_batched:
+    if use_batch:
         batch_isend_irecv(
             [P2POp(isend, object_tensor, group_peer=group_dst, group=group)]
         ).pop().wait()
@@ -3441,7 +3445,7 @@ def recv_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_src: Optional[int] = None,
-    use_batched: bool = False,
+    use_batch: bool = False,
 ):
     """
     Receives picklable objects in ``object_list`` synchronously.
@@ -3459,7 +3463,7 @@ def recv_object_list(
         device (``torch.device``, optional): If not None, receives on this device.
             Default is ``None``.
         group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
-        use_batched (bool, optional): If True, use batched p2p operations instead of
+        use_batch (bool, optional): If True, use batch p2p operations instead of
             regular send operations. This avoids initializing 2-rank communicators and
             uses existing entire group communicators. See batch_isend_irecv for usage and
             assumptions. Default is ``False``.
@@ -3526,7 +3530,7 @@ def recv_object_list(
     )
 
     # Receive object sizes
-    if use_batched:
+    if use_batch:
         work = batch_isend_irecv(
             [
                 P2POp(
@@ -3538,7 +3542,7 @@ def recv_object_list(
             ]
         ).pop()
         work.wait()
-        rank_sizes = work.source_rank()
+        rank_sizes = get_global_rank(group, group_src)
     else:
         rank_sizes = recv(object_sizes_tensor, group=group, group_src=group_src)
 
@@ -3549,7 +3553,7 @@ def recv_object_list(
         device=current_device,
     )
 
-    if use_batched:
+    if use_batch:
         work = batch_isend_irecv(
             [
                 P2POp(
@@ -3561,7 +3565,7 @@ def recv_object_list(
             ]
         ).pop()
         work.wait()
-        rank_objects = work.source_rank()
+        rank_objects = get_global_rank(group, group_src)
     else:
         rank_objects = recv(object_tensor, group=group, group_src=group_src)
     assert rank_sizes == rank_objects, (

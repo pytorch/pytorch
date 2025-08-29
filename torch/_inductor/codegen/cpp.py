@@ -933,8 +933,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar(dtype=torch.int32)
-        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32, shape=x.shape)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype, shape=x.shape)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -1118,6 +1118,10 @@ class CppOverrides(OpOverrides):
             code.writeline("return left - right;")
         code.writeline("()")
         return code
+
+    @staticmethod
+    def device_assert_async(cond, msg):
+        return f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0))'
 
 
 CppOverrides._initialize_pointwise_overrides("cpp")
@@ -3218,11 +3222,10 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = (
-            (out_dtype if out_dtype == torch.double else torch.float)
-            if out_dtype.is_floating_point
-            else torch.int64
-        )
+        if out_dtype.is_floating_point and out_dtype != torch.double:
+            dtype = torch.float
+        else:
+            dtype = out_dtype
         out_num_vectors = V.kernel._get_num_vectors(out_dtype)
         src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
@@ -5159,11 +5162,19 @@ class CppScheduling(BaseScheduling):
                         ):
                             continue
                         # Local Buffer is a view of global buffer
+                        local_buffer_stride: list[int] = []
+                        stride = global_buffer_layout.stride[-1]
+                        local_buffer_size = get_call_ranges(scheduler_node)[
+                            size_offset:
+                        ]
+                        for sz in reversed(local_buffer_size):
+                            local_buffer_stride.insert(0, stride)
+                            stride *= sz
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
-                            global_buffer_layout.size[size_offset:],
-                            global_buffer_layout.stride[size_offset:],
+                            local_buffer_size,
+                            local_buffer_stride,
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
@@ -5385,10 +5396,6 @@ class CppScheduling(BaseScheduling):
             else ""
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        # below add provenance tracing info for cpu CppKernel types
-        if config.trace.provenance_tracking:
-            set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
-
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
         src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
@@ -5427,7 +5434,15 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
-            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+            # below add provenance tracing info for cpu CppKernel types
+            debug_handle: Optional[int] = None
+            if config.trace.provenance_tracking_level != 0:
+                debug_handle = set_kernel_post_grad_provenance_tracing(
+                    self.kernel_group.scheduled_nodes, kernel_name
+                )
+            self.kernel_group.call_kernel(
+                V.graph.wrapper_code, kernel_name, debug_handle=debug_handle
+            )
         self.reset_kernel_group()
         self._set_flush_status(False)
 
@@ -5468,7 +5483,7 @@ class KernelGroup:
             "win32",
         ]
         if enable_kernel_profile:
-            code.writelines(["#include <ATen/record_function.h>"])
+            code.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
@@ -5491,7 +5506,10 @@ class KernelGroup:
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        (
+                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                            f'record_{prefix + kernel_name}_("{prefix + kernel_name}", nullptr);'
+                        )
                     ]
                 )
             for old, new in self.args.aliases():
@@ -5499,10 +5517,14 @@ class KernelGroup:
             code.splice(self.loops_code)
         return code.getvalue()
 
-    def call_kernel(self, wrapper, kernel_name):
+    def call_kernel(self, wrapper, kernel_name, debug_handle: Optional[int] = None):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, triton=False, arg_types=arg_types
+            kernel_name,
+            call_args,
+            triton=False,
+            arg_types=arg_types,
+            debug_handle=debug_handle,
         )
 
 

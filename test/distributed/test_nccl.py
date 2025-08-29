@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -246,7 +246,7 @@ class TestNCCL(TestCase):
 
 
 @requires_cuda_p2p_access()
-class NCCLSymmetricMemoryTest(MultiProcContinousTest):
+class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)

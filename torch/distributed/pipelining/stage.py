@@ -1424,7 +1424,7 @@ class PipelineStage(_PipelineStageBase):
                 ),
                 group=self.group,
                 device=self.device,
-                use_batched=True,
+                use_batch=True,
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1490,7 +1490,7 @@ class PipelineStage(_PipelineStageBase):
                 ),
                 group=self.group,
                 device=self.device,
-                use_batched=True,
+                use_batch=True,
             )
             outputs_meta = tuple()
 
