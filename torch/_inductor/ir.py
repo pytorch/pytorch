@@ -1094,10 +1094,7 @@ class Pointwise(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(
-            device=device,
-            dtype=self.dtype,
-            inner_fn=loader,
-            ranges=self.ranges,
+            device=device, dtype=self.dtype, inner_fn=loader, ranges=self.ranges
         )
 
 
@@ -4426,17 +4423,6 @@ class ComputedBuffer(OperationBuffer):
     """
 
     data: Loops
-    _force_realize: ClassVar[bool] = False
-
-    @staticmethod
-    @contextlib.contextmanager
-    def force_realize() -> Iterator[None]:
-        old_value = ComputedBuffer._force_realize
-        try:
-            ComputedBuffer._force_realize = True
-            yield
-        finally:
-            ComputedBuffer._force_realize = old_value
 
     def get_computed_buffer_name(self) -> Optional[str]:
         """
@@ -4511,7 +4497,6 @@ class ComputedBuffer(OperationBuffer):
             not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
-            and not self._force_realize
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
