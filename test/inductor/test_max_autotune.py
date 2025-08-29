@@ -50,9 +50,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
+    get_triton_version,
     has_triton_stable_tma_api,
     has_triton_tma_device,
-    get_triton_version,
 )
 
 
@@ -705,7 +705,10 @@ class TestMaxAutotune(TestCase):
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_baddmm(self, search_space):
         if TEST_WITH_ROCM and get_triton_version() == (3, 4):
-            self.skipTest("To investigate. Error info: RuntimeError: PassManager::run failed")
+            self.skipTest(
+                "To investigate. Error info: RuntimeError: PassManager::run failed"
+            )
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
