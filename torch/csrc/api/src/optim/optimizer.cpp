@@ -106,18 +106,20 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
     TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
   }
   TORCH_INTERNAL_ASSERT(defaults_ != nullptr);
-  
+
   // 1. Start with a clone of the defaults
   auto final_options = defaults_->clone();
-  
-  // 2. If the user provided options, overwrite defaults with user-specified values
+
+  // 2. If the user provided options, overwrite defaults with user-specified
+  // values
   if (param_group.has_options()) {
     final_options->overwrite_from(param_group.options());
   }
-  
+
   // 3. Create the new group with the final, merged options
-  OptimizerParamGroup param_group_(param_group.params(), std::move(final_options));
-  
+  OptimizerParamGroup param_group_(
+      param_group.params(), std::move(final_options));
+
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
         state_.count(p.unsafeGetTensorImpl()) == 0,

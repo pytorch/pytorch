@@ -58,7 +58,8 @@ void AdagradOptions::overwrite_from(const OptimizerOptions& source) {
   if (source_adagrad.weight_decay() != default_ctor_opts.weight_decay()) {
     this->weight_decay(source_adagrad.weight_decay());
   }
-  if (source_adagrad.initial_accumulator_value() != default_ctor_opts.initial_accumulator_value()) {
+  if (source_adagrad.initial_accumulator_value() !=
+      default_ctor_opts.initial_accumulator_value()) {
     this->initial_accumulator_value(source_adagrad.initial_accumulator_value());
   }
   if (source_adagrad.eps() != default_ctor_opts.eps()) {
