@@ -611,6 +611,9 @@ class BaseSchedulerNode:
                     + stack_trace_last_line.replace("{", "{{")
                     .replace("}", "}}")
                     .replace("\n", "\\")
+                    .replace(
+                        "\\", "\\\\"
+                    )  # For windows safe path, avoid for example \x, \U.
                 )
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")

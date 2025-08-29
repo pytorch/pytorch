@@ -184,7 +184,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(round, round);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \

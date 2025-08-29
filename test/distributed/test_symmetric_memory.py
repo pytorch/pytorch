@@ -57,9 +57,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    def _init_process(self, set_device: bool = True):
-        if set_device:
-            torch.cuda.set_device(self.device)
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
     def test_has_multicast_support(self) -> None:
@@ -91,86 +90,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
-
-    def _get_test_alloc_args(self):
-        shape = (64, 64)
-        stride = (64, 1)
-        dtype = torch.float32
-        device = self.device
-        group_name = "0"
-        return (shape, stride, dtype, device, group_name)
-
-    def _verify_symmetric_memory(self, symm_mem_hdl):
-        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
-
-        buf = symm_mem_hdl.get_buffer(
-            0, (symm_mem_hdl.buffer_size // 4,), torch.float32
-        )
-        self.assertEqual(buf.storage_offset(), 0)
-        self.assertEqual(buf.untyped_storage().size(), symm_mem_hdl.buffer_size)
-
-        if symm_mem_hdl.rank == 0:
-            symm_mem_hdl.wait_signal(src_rank=1)
-            self.assertTrue(buf.eq(42).all())
-        else:
-            buf.fill_(42)
-            symm_mem_hdl.put_signal(dst_rank=0)
-
-        symm_mem_hdl.barrier()
-
-        if symm_mem_hdl.rank == 0:
-            symm_mem_hdl.barrier()
-            self.assertTrue(buf.eq(43).all())
-        else:
-            buf.fill_(43)
-            symm_mem_hdl.barrier()
-
-        symm_mem_hdl.barrier()
-
-    @runOnRocmArch(MI300_ARCH)
-    @skip_if_lt_x_gpu(2)
-    @parametrize("set_device", [True, False])
-    def test_empty_strided_p2p(self, set_device: bool) -> None:
-        self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
-
-        alloc_args = self._get_test_alloc_args()
-
-        t = torch.empty((64, 64), device=self.device)
-        self.assertIsNone(_SymmetricMemory.rendezvous(t))
-
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
-
-        del t
-        self._verify_symmetric_memory(symm_mem_hdl)
-
-    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
-    @skip_if_lt_x_gpu(2)
-    @parametrize("set_device", [True, False])
-    def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
-        self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
-
-        alloc_args = self._get_test_alloc_args()
-
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-        data_ptr = t.data_ptr()
-
-        # Verify that persistent allocation would fail if there's an active
-        # allocation with the same alloc_id.
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-
-        # Verify that persistent allocation would succeed in lieu of activate
-        # allocations with the same alloc_id, and the returned tensor would
-        # have the same data pointer.
-        del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-        self.assertEqual(t.data_ptr(), data_ptr)
-
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
-        self._verify_symmetric_memory(symm_mem_hdl)
 
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
@@ -632,6 +551,123 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertTrue(buf.eq(peer_rank).all())
         else:
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
+
+
+# [READ ME FIRST]
+# The `SymmMemEmptySetDeviceTest` suite parameterizes whether user sets the
+# device before calling symm_mem.emtpy.  Either way should work.
+# However, since `set_device` is persistent, we cannot use the
+# `MultiProcContinuousTest` template because the next function will be
+# "contaminated", leading to flaky tests (e.g. hang). Therefore, we use
+# `MultiProcessTestCase` which spawns new processes for each test function.
+# Please limit the number of tests you want to add under this test
+# suite as respawning processes and `init_process_group` is expensive.
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return device_module.device_count()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self, set_device: bool):
+        if set_device:
+            torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        torch.manual_seed(42 + self.rank)
+
+    def _get_test_alloc_args(self):
+        shape = (64, 64)
+        stride = (64, 1)
+        dtype = torch.float32
+        device = self.device
+        group_name = "0"
+        return (shape, stride, dtype, device, group_name)
+
+    def _verify_symmetric_memory(self, symm_mem_hdl):
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        buf = symm_mem_hdl.get_buffer(
+            0, (symm_mem_hdl.buffer_size // 4,), torch.float32
+        )
+        self.assertEqual(buf.storage_offset(), 0)
+        self.assertEqual(buf.untyped_storage().size(), symm_mem_hdl.buffer_size)
+
+        if symm_mem_hdl.rank == 0:
+            symm_mem_hdl.wait_signal(src_rank=1)
+            self.assertTrue(buf.eq(42).all())
+        else:
+            buf.fill_(42)
+            symm_mem_hdl.put_signal(dst_rank=0)
+
+        symm_mem_hdl.barrier()
+
+        if symm_mem_hdl.rank == 0:
+            symm_mem_hdl.barrier()
+            self.assertTrue(buf.eq(43).all())
+        else:
+            buf.fill_(43)
+            symm_mem_hdl.barrier()
+
+        symm_mem_hdl.barrier()
+
+    @runOnRocmArch(MI300_ARCH)
+    @skip_if_lt_x_gpu(2)
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p(self, set_device: bool) -> None:
+        self._init_process(set_device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+
+        alloc_args = self._get_test_alloc_args()
+
+        t = torch.empty((64, 64), device=self.device)
+        self.assertIsNone(_SymmetricMemory.rendezvous(t))
+
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
+
+        del t
+        self._verify_symmetric_memory(symm_mem_hdl)
+
+    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
+    @skip_if_lt_x_gpu(2)
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
+        self._init_process(set_device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+
+        alloc_args = self._get_test_alloc_args()
+
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        data_ptr = t.data_ptr()
+
+        # Verify that persistent allocation would fail if there's an active
+        # allocation with the same alloc_id.
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+
+        # Verify that persistent allocation would succeed in lieu of activate
+        # allocations with the same alloc_id, and the returned tensor would
+        # have the same data pointer.
+        del t
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        self.assertEqual(t.data_ptr(), data_ptr)
+
+        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
+        self._verify_symmetric_memory(symm_mem_hdl)
 
 
 # This Test class is used to test the error handling of SymmetricMemory APIs.

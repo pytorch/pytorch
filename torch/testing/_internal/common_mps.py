@@ -439,9 +439,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # round not working properly for float16 and bfloat16
-            "round": [torch.float16, torch.bfloat16],
-            "rounddecimals_0": [torch.bfloat16],
         }
 
         if MACOS_VERSION < 15.0:
@@ -725,8 +722,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # round not working properly for float16
-            "round": [torch.float16],
             # topk fails with duplicate indices
             "topk": [torch.float16],
         }
