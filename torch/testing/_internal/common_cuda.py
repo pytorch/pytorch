@@ -66,6 +66,12 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
+def evaluate_platform_supports_ck_sdpa():
+    if TEST_WITH_ROCM:
+        return torch.backends.cuda.is_ck_sdpa_available()
+    else:
+        return False
+
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
@@ -90,6 +96,8 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
+
+PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
