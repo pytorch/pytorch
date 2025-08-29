@@ -168,7 +168,6 @@ class RangeTest(__TestCase):
         self.assertEqual(seq[0], -a)
         self.assertEqual(seq[-1], -a-c)
 
-    @skipIfTorchDynamo("slow test")
     def test_large_range(self):
         # Check long ranges (len > sys.maxsize)
         # len() is expected to fail due to limitations of the __len__ protocol
