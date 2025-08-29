@@ -607,7 +607,7 @@ class CachingAutotuner(KernelInterface):
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
         self.launchers = launchers
 
-    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any]:
+    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any, Any]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
         Returns a tuple of old values
@@ -618,12 +618,14 @@ class CachingAutotuner(KernelInterface):
             self.fn.used_global_vals,
             self.fn.repr,
             self.launchers,
+            getattr(self.fn, "_hash_lock", None),
         )
         self.fn.fn = None
         self.fn.__globals__ = None
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+        self.fn._hash_lock = None
         return old_values
 
     def prepare_for_caching(self) -> None:
@@ -753,6 +755,25 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
+
+        # Simulate JIT Hook call
+        if (
+            torch._inductor.config.run_jit_post_compile_hook
+            and knobs
+            and getattr(knobs.runtime, "jit_post_compile_hook", None)
+        ):
+            try:
+                knobs.runtime.jit_post_compile_hook(
+                    key=getattr(self.fn, "cache_key", self.kernel_hash or str(self.fn)),
+                    repr=getattr(self.fn, "src", None),
+                    fn=self.fn,
+                    compile=binary,
+                    is_manual_warmup=False,
+                    already_compiled=True,
+                )
+            except Exception:
+                log.exception("jit_post_compile_hook failed")
+
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
