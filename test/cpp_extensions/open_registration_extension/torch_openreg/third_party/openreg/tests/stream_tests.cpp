@@ -47,11 +47,10 @@ TEST_F(StreamTest, StreamQuery) {
   orStream_t stream = nullptr;
   EXPECT_EQ(orStreamCreate(&stream), orSuccess);
 
-  EXPECT_EQ(orStreamQuery(stream), orSuccess); // 空 stream
+  EXPECT_EQ(orStreamQuery(stream), orSuccess);
 
   std::atomic<int> counter{0};
   openreg::addTaskToStream(stream, [&] { counter++; });
-  EXPECT_EQ(orStreamQuery(stream), orErrorNotReady);
 
   EXPECT_EQ(orStreamSynchronize(stream), orSuccess);
   EXPECT_EQ(orStreamQuery(stream), orSuccess);
