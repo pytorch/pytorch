@@ -4004,9 +4004,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
         two_d_red = (
-            len(self.tiling) == 2
-            and tiling_scores is not None
-            and "x" in tiling_scores
+            len(self.tiling) == 2 and tiling_scores is not None and "x" in tiling_scores
         )
         if looped_red and two_d_red:
             assert tiling_scores is not None
@@ -4015,9 +4013,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mem_ops_per_thread = dim_stats.count_per_thread
 
             # check if majority of reads are coalesced by the rblock
-            r_coalesce_ratio = tiling_scores["r0_"] / max(
-                tiling_scores["x"], 1
-            )
+            r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
 
             looped_mem = memory_stats.looped.memory.bytes
             persistent_mem = memory_stats.persistent.memory.bytes
