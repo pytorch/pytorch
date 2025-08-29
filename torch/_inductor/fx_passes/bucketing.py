@@ -182,7 +182,7 @@ def greedy_bucket_collective_by_mb(
         )
         for node in nodes:
             if node in cur_bucket_descendents:
-                # We cannot bucket successors with the node
+                # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
@@ -315,6 +315,8 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
 
     new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size)
 
+    # TODO - either use torch.cat or make sure inductor foreach codegen
+    # fires more reliably
     new_rs_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.reduce_scatter_tensor.default(
             new_rs_in, reduce_op, group_size, group_name
@@ -386,42 +388,6 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
-def _post_bucket_all_gather(
-    wait_tensor: torch.Tensor,
-    ag_ins: list[torch.Tensor],
-    group_size: int,
-) -> list[torch.Tensor]:
-    ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
-    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
-    outs = torch.split_with_sizes(
-        new_ag_out_reshaped,
-        ins_split_sizes,
-        dim=1,
-    )
-    outs_reshaped = [
-        o.reshape((shape[0] * group_size,) + shape[1:])
-        for o, shape in zip(outs, ins_sizes)
-    ]
-    return outs_reshaped
-
-
-def _post_bucket_all_gather_fake(
-    wait_tensor: torch.Tensor,
-    ag_ins: list[torch.Tensor],
-    group_size: int,
-) -> list[torch.Tensor]:
-    ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    return [
-        torch.empty(
-            (shape[0] * group_size,) + shape[1:],
-            device=ag_ins[0].device,
-            dtype=ag_ins[0].dtype,
-        )
-        for shape in ins_sizes
-    ]
-
-
 def all_gather_merge_fn_to_trace_custom_ops(
     ag_ins: list[torch.Tensor],
     group_size: int,
@@ -429,6 +395,7 @@ def all_gather_merge_fn_to_trace_custom_ops(
     dtype: torch.dtype,  # type: ignore[name-defined]
     rank: int,
 ) -> list[torch.Tensor]:
+    ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
     ag_input_numel = sum(ins_split_sizes)
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
@@ -440,11 +407,17 @@ def all_gather_merge_fn_to_trace_custom_ops(
             new_ag_in, group_size, group_name, out=new_ag_out
         )
     )
-    return _post_bucket_all_gather(
-        wait_tensor,
-        ag_ins,
-        group_size,
+    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
+    outs = torch.split_with_sizes(
+        new_ag_out_reshaped,
+        ins_split_sizes,
+        dim=1,
     )
+    outs_reshaped = [
+        o.reshape((shape[0] * group_size,) + shape[1:])
+        for o, shape in zip(outs, ins_sizes)
+    ]
+    return outs_reshaped
 
 
 def all_gather_merge_fn_to_trace(
@@ -526,7 +499,13 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
         fake_mode = detect_fake_mode(inps)
         assert fake_mode is not None
         with fake_mode, enable_python_dispatcher():
-            return make_fx(fn)(*inps)
+            out = make_fx(fn)(*inps)
+            for node in out.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.detach.default
+            ):
+                node.replace_all_uses_with(node.args[0])
+                out.graph.erase_node(node)
+            return out
 
 
 def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
