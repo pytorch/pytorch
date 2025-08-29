@@ -193,6 +193,7 @@ def summarize_failures_by_test_command(
             logger.warning("XML %s not found, skipping", xmlp)
             continue
         failed = _parse_failed(xmlp)
+        logger.info("Found %d failures for %s", len(failed), label)
         if dedupe_within_command:
             failed = sorted(set(failed))
 
