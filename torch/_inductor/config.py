@@ -769,6 +769,10 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# Supply an override for a standalone compiler worker binary.
+# Intended for internal use.
+worker_path_override = os.environ.get("TORCHINDUCTOR_WORKER_PATH_OVERRIDE")
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
