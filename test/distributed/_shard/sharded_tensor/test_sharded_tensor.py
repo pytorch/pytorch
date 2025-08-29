@@ -525,7 +525,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                     f"rank:1/{DEVICE_TYPE}:1",
                     f"rank:2/{DEVICE_TYPE}:2",
                     f"rank:3/{DEVICE_TYPE}:3",
-            ],
+                ],
             )
             st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
 
