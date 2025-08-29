@@ -1599,8 +1599,6 @@ def native_matmul_pass(graph: torch.fx.Graph):
 
         match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
 
-
-
     @register_lowering_pattern(
         CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
         extra_check=native_matmul_extra_check,

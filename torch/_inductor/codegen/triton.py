@@ -1166,7 +1166,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def dot(a, b):
         assert V.kernel.is_native_matmul 
-
         orig_a, orig_b = a, b
 
         # Downcast if we upcasted to fp32 before
@@ -1210,7 +1209,7 @@ class TritonOverrides(OpOverrides):
             # Skip if the variable doesn't have a reduction mask
             if not any(map(prefix_is_reduction, var.mask_vars)):
                 return False 
-
+            
             reduction_range = V.kernel.range_trees[-1]
             assert reduction_range.is_reduction
             

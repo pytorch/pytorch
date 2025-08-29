@@ -2162,6 +2162,10 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, 
+        "FIXME: cannot do get_size on FakeTensor during lowering."
+    )
     def test_while_loop_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_a = Dim("s0", min=2, max=1024)
