@@ -305,17 +305,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
-#if !defined(USE_ROCM)
-  // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
-  // FP32 data type calculations based on the value of the allow_tf32 flag.
-  // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_tf32() &&
-      at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-  }
-#else
+#if defined(USE_ROCM)
   hipblasAtomicsMode_t hipblas_mode;
   if (at::globalContext().deterministicAlgorithms()) {
     hipblas_mode = HIPBLAS_ATOMICS_NOT_ALLOWED;
