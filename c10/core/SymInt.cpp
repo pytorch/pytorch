@@ -53,12 +53,11 @@ bool SymInt::has_hint() const {
 #define DEFINE_BINARY(API, OP, METHOD, RET)                          \
   RET SymInt::API(const SymInt& sci) const {                         \
     if (auto ma = maybe_as_int()) {                                  \
-      if (auto mb = sci.maybe_as_int()) {                            \
-        return RET(OP(*ma, *mb));                                    \
-      } else {                                                       \
-        auto b = sci.toSymNode();                                    \
-        return RET(b->wrap_int(*ma)->METHOD(b));                     \
-      }                                                              \
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(                              \
+          !sci.maybe_as_int(),                                       \
+          "should have hit fast path in the header in this case.");  \
+      auto b = sci.toSymNode();                                      \
+      return RET(b->wrap_int(*ma)->METHOD(b));                       \
     } else {                                                         \
       if (auto mb = sci.maybe_as_int()) {                            \
         auto a = toSymNodeImplUnowned();                             \
@@ -69,19 +68,19 @@ bool SymInt::has_hint() const {
     }                                                                \
   }
 
-DEFINE_BINARY(operator+, std::plus<>(), add, SymInt)
-DEFINE_BINARY(operator-, std::minus<>(), sub, SymInt)
-DEFINE_BINARY(operator*, std::multiplies<>(), mul, SymInt)
-DEFINE_BINARY(operator/, std::divides<>(), floordiv, SymInt)
-DEFINE_BINARY(operator%, std::modulus<>(), mod, SymInt)
-DEFINE_BINARY(sym_eq, std::equal_to<>(), eq, SymBool)
-DEFINE_BINARY(sym_ne, std::not_equal_to<>(), ne, SymBool)
-DEFINE_BINARY(sym_lt, std::less<>(), lt, SymBool)
-DEFINE_BINARY(sym_le, std::less_equal<>(), le, SymBool)
-DEFINE_BINARY(sym_gt, std::greater<>(), gt, SymBool)
-DEFINE_BINARY(sym_ge, std::greater_equal<>(), ge, SymBool)
-DEFINE_BINARY(min, std::min, sym_min, SymInt)
-DEFINE_BINARY(max, std::max, sym_max, SymInt)
+DEFINE_BINARY(operator_add_slow_path, std::plus<>(), add, SymInt)
+DEFINE_BINARY(operator_sub_slow_path, std::minus<>(), sub, SymInt)
+DEFINE_BINARY(operator_mul_slow_path, std::multiplies<>(), mul, SymInt)
+DEFINE_BINARY(operator_div_slow_path, std::divides<>(), floordiv, SymInt)
+DEFINE_BINARY(operator_mod_slow_path, std::modulus<>(), mod, SymInt)
+DEFINE_BINARY(sym_eq_slow_path, std::equal_to<>(), eq, SymBool)
+DEFINE_BINARY(sym_ne_slow_path, std::not_equal_to<>(), ne, SymBool)
+DEFINE_BINARY(sym_lt_slow_path, std::less<>(), lt, SymBool)
+DEFINE_BINARY(sym_le_slow_path, std::less_equal<>(), le, SymBool)
+DEFINE_BINARY(sym_gt_slow_path, std::greater<>(), gt, SymBool)
+DEFINE_BINARY(sym_ge_slow_path, std::greater_equal<>(), ge, SymBool)
+DEFINE_BINARY(min_slow_path, std::min, sym_min, SymInt)
+DEFINE_BINARY(max_slow_path, std::max, sym_max, SymInt)
 
 SymInt::operator SymFloat() const {
   if (auto ma = maybe_as_int()) {
@@ -161,15 +160,15 @@ SymInt operator-(const SymInt& s) {
   }
 }
 
-void SymInt::operator*=(const SymInt& sci) {
+void SymInt::operator_imul_slow_path(const SymInt& sci) {
   *this = *this * sci;
 }
 
-void SymInt::operator/=(const SymInt& sci) {
+void SymInt::operator_idiv_slow_path(const SymInt& sci) {
   *this = *this / sci;
 }
 
-void SymInt::operator+=(const SymInt& sci) {
+void SymInt::operator_iadd_slow_path(const SymInt& sci) {
   *this = *this + sci;
 }
 
