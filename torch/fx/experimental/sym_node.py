@@ -14,7 +14,6 @@ to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
 
 
-from atexit import register
 import builtins
 import functools
 import inspect
@@ -1854,19 +1853,18 @@ def _make_user_magic(method, user_type):
             _setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-def register_methods():
-    for method, func in magic_methods.items():  # type: ignore[assignment]
-        if method in only_bool_magic_methods:
-            _make_user_magic(method, SymBool)
-            continue
-        if method in only_float_magic_methods:
-            _make_user_magic(method, SymFloat)
-            continue
-        if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
-            _make_user_magic(method, SymBool)
-        _make_user_magic(method, SymInt)
-        if method not in bitwise_ops:
-            _make_user_magic(method, SymFloat)
+for method, func in magic_methods.items():  # type: ignore[assignment]
+    if method in only_bool_magic_methods:
+        _make_user_magic(method, SymBool)
+        continue
+    if method in only_float_magic_methods:
+        _make_user_magic(method, SymFloat)
+        continue
+    if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
+        _make_user_magic(method, SymBool)
+    _make_user_magic(method, SymInt)
+    if method not in bitwise_ops:
+        _make_user_magic(method, SymFloat)
 
-
-register_methods()
+del method
+del func
