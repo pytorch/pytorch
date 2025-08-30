@@ -19,6 +19,7 @@
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/detail/XLAHooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -72,6 +73,8 @@ class TORCH_API Context {
       return at::detail::getHIPHooks();
     } else if (opt_device_type == at::kHPU) {
       return at::detail::getHPUHooks();
+    } else if (opt_device_type == at::kXLA) {
+      return at::detail::getXLAHooks();
     } else {
       TORCH_CHECK(
           false,
