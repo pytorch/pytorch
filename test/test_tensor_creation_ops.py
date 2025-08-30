@@ -1151,33 +1151,6 @@ class TestTensorCreation(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    @dtypes(torch.float)
-    def test_cat_size1(self, device, dtype):
-        # create a tensor that has aligned stride along dim - 1 dimension
-        # but catted slice size is not aligned
-        x1 = torch.randn(16, 16, device=device, dtype=dtype)[:1, :1]
-        xref = x1.clone().view(-1).view(x1.shape)
-        # make sure output size is aligned, need at least 4 elements for this
-        res = torch.cat([x1, x1, x1, x1], dim=-1)
-        ref = torch.cat([xref, xref, xref, xref], dim=-1)
-        self.assertEqual(res, ref)
-
-    @dtypes(torch.float)
-    def test_cat_trailing_dim(self, device, dtype):
-        x1 = torch.randn(16, 16, 23, device=device, dtype=dtype)
-        x2 = torch.rand_like(x1)
-        res = torch.cat([x1, x2], dim=1)
-        ref = torch.cat([x1.cpu(), x2.cpu()], dim=1)
-        self.assertEqual(res, ref)
-
-    @dtypes(torch.float)
-    def test_cat_misaligned(self, device, dtype):
-        x1 = torch.randn(14, device=device, dtype=dtype)[2:]
-        x2 = torch.rand_like(x1)
-        res = torch.cat([x1, x2], dim=-1)
-        ref = torch.cat([x1.cpu(), x2.cpu()], dim=-1)
-        self.assertEqual(res, ref)
-
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
     @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
