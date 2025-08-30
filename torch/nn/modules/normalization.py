@@ -356,7 +356,7 @@ class LazyGroupNorm(LazyModuleMixin, GroupNorm):
     """
 
     cls_to_become = GroupNorm  # type: ignore[assignment]
-    weight: UninitializedParameter
+    weight: UninitializedParameter  # type: ignore[assignment]
     bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(
