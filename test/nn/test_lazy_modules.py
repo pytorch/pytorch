@@ -560,9 +560,12 @@ class TestLazyModules(TestCase):
                 self.assertIsNone(module.weight)
                 self.assertIsNone(module.bias)
 
-
-            self.assertEqual(output, torch.nn.functional.group_norm(input, num_groups, module.weight, module.bias))
-
+            self.assertEqual(
+                output,
+                torch.nn.functional.group_norm(
+                    input, num_groups, module.weight, module.bias, module.eps
+                ),
+            )
 
     @suppress_warnings
     def test_lazy_groupnorm_divisibility_exception(self):
