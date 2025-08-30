@@ -8,11 +8,18 @@ from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
-from .module import Module
 from .lazy import LazyModuleMixin
+from .module import Module
 
 
-__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "LazyGroupNorm", "RMSNorm"]
+__all__ = [
+    "LocalResponseNorm",
+    "CrossMapLRN2d",
+    "LayerNorm",
+    "GroupNorm",
+    "LazyGroupNorm",
+    "RMSNorm",
+]
 
 
 class LocalResponseNorm(Module):
@@ -330,6 +337,7 @@ class GroupNorm(Module):
             **self.__dict__
         )
 
+
 class LazyGroupNorm(LazyModuleMixin, GroupNorm):
     r"""A :class:`torch.nn.GroupNorm` module where `num_channels` is inferred.
 
@@ -393,7 +401,6 @@ class LazyGroupNorm(LazyModuleMixin, GroupNorm):
         if not self.has_uninitialized_params() and self.affine:
             super().reset_parameters()
 
-
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         """
         Infers ``num_channels`` based on ``input`` and initializes parameters.
@@ -410,6 +417,7 @@ class LazyGroupNorm(LazyModuleMixin, GroupNorm):
                 self.weight.materialize((self.num_channels,))
                 self.bias.materialize((self.num_channels,))
                 self.reset_parameters()
+
 
 class RMSNorm(Module):
     r"""Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
