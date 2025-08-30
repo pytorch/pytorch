@@ -536,6 +536,7 @@ class TestPySymInt(TestCase):
 
         s0 = sym_wrap(4, "s0")
         s1 = sym_wrap(5, "s1")
+        f1 = sym_wrap(3.2, "f1")
         assert s0 + s1 + 2 <= 32  # guard added in token shape env
         fn = torch.compile(f, fullgraph=True, backend="eager")
         out = fn(s0, s0, 2*s0, 4)

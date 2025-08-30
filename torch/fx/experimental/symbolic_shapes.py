@@ -1037,11 +1037,13 @@ class SymBoolToken(SymToken):
 
 
 class SymIntToken(SymToken):
-    pass
+    def __int__(self):
+        return self.val.node.hint
 
 
 class SymFloatToken(SymToken):
-    pass
+    def __float__(self):
+        return self.val.node.hint
 
 
 _TOKEN_SHAPE_ENV = None
@@ -1062,8 +1064,14 @@ def sym_wrap(val: Union[int, float], name: str) -> Union[SymIntToken, SymFloatTo
         dynamic_dim=DimDynamic.DYNAMIC,
     )
     sym.name = name
-    node = shape_env.create_symintnode(sym, hint=val)
-    return SymIntToken(node) if isinstance(val, int) else SymFloatToken(node)
+    if isinstance(val, int):
+        return SymIntToken(
+            shape_env.create_symintnode(sym, hint=val)
+        )
+    else:
+        return SymFloatToken(
+            shape_env.create_symfloatnode(sym, hint=val)
+        )
 
 
 @dataclass(frozen=True)
