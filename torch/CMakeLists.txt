@@ -107,7 +107,7 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 
 if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES} onnx_library)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -118,6 +118,7 @@ else()
       -fno-strict-aliasing
       -Wno-strict-aliasing)
 endif()
+list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
 
 if(USE_ITT)
   list(APPEND TORCH_PYTHON_SRCS
@@ -334,7 +335,7 @@ if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
   target_link_libraries(torch_python PRIVATE caffe2::mkl)
 endif()
 
-add_dependencies(torch_python onnx_proto)
+target_link_libraries(torch_python PRIVATE onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE Python::NumPy)
