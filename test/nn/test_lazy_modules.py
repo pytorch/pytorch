@@ -573,7 +573,7 @@ class TestLazyModules(TestCase):
 
         assert num_channels % num_groups != 0
 
-        module = nn.LazyGroupNorm(num_groups, num_channels)
+        module = nn.LazyGroupNorm(num_groups)
         input = torch.ones(5, num_channels, 7, 7)
 
         with self.assertRaisesRegex(ValueError, "num_channels must be divisible by num_groups"):
