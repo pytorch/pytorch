@@ -4,6 +4,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
+#include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -551,7 +552,6 @@ void cpublas_copy_impl(at::ScalarType type, int64_t n, const void *_x, int64_t i
 }
 
 }}  // namespace cpublas::(anonymous)
-
 
 REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl)
 REGISTER_DISPATCH(cpublas::gemm_no_downcast_stub, &cpublas::cpublas_gemm_no_downcast_impl)
