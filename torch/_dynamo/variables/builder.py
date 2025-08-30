@@ -1104,8 +1104,8 @@ class VariableBuilder:
             return ItertoolsVariable(value, source=self.source)
         elif is_sym_token(value):
             assert isinstance(value, (SymIntToken, SymFloatToken))
-            source = SymTokenSource(self.source)
             is_int = isinstance(value, SymIntToken)
+            source = SymTokenSource(self.source, is_int)
 
             in_symnode = value.val.node
             in_shape_env = in_symnode.shape_env
