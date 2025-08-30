@@ -521,8 +521,7 @@ class TestLazyModules(TestCase):
             (32,),
         )
 
-    @suppress_warnings
-    def test_lazy_groupnorm(self) -> None:
+    def test_lazy_group_norm(self) -> None:
         num_channels = 8
         num_groups = 4
 
@@ -567,8 +566,7 @@ class TestLazyModules(TestCase):
                 ),
             )
 
-    @suppress_warnings
-    def test_lazy_groupnorm_divisibility_exception(self) -> None:
+    def test_lazy_group_norm_divisibility_exception(self) -> None:
         num_channels = 7
         num_groups = 4
 
@@ -582,8 +580,7 @@ class TestLazyModules(TestCase):
         ):
             module(input)
 
-    @suppress_warnings
-    def test_lazy_groupnorm_pickle(self) -> None:
+    def test_lazy_group_norm_pickle(self) -> None:
         num_channels = 8
         num_groups = 4
 
@@ -625,8 +622,7 @@ class TestLazyModules(TestCase):
                 self.assertIsNone(module.weight)
                 self.assertIsNone(module.bias)
 
-    @suppress_warnings
-    def test_lazy_groupnorm_reset_parameters(self) -> None:
+    def test_lazy_group_norm_reset_parameters(self) -> None:
         num_channels = 8
         num_groups = 4
 
