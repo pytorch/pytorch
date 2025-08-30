@@ -25,7 +25,9 @@ openreg/
 │   └── example.cpp         # Example for OpenReg.
 ├── tests/
 │   ├── event_tests.cpp     # Testcases about OpenReg Event.
-│   └── stream_tests.cpp    # Testcases about OpenReg Stream.
+│   ├── stream_tests.cpp    # Testcases about OpenReg Stream.
+│   ├── device_tests.cpp    # Testcases about OpenReg Device.
+│   └── memory_tests.cpp    # Testcases about OpenReg Memory.
 └── csrc/
     ├── device.cpp          # Implementation of device management APIs
     ├── memory.cpp          # Implementation of memory management APIs
