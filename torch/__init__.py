@@ -34,6 +34,13 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
+import packaging
+try:
+    version_parser = packaging.version.parse
+except AttributeError:
+    from packaging.version import Version
+    version_parser = Version
+
 
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
@@ -157,12 +164,13 @@ else:
     del _rocm_init
 
 
+from .version import cuda as cuda_version_str
+
+
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
         import sysconfig
-
-        from torch.version import cuda as cuda_version
 
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
@@ -207,13 +215,13 @@ if sys.platform == "win32":
         else:
             nvtoolsext_dll_path = ""
 
-        if cuda_version and builtins.all(
+        if cuda_version_str and builtins.all(
             not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
         ):
-            cuda_version_1 = cuda_version.replace(".", "_")
+            cuda_version_1 = cuda_version_str.replace(".", "_")
             cuda_path_var = "CUDA_PATH_V" + cuda_version_1
             default_path = os.path.join(
-                pfiles_path, "NVIDIA GPU Computing Toolkit", "CUDA", f"v{cuda_version}"
+                pfiles_path, "NVIDIA GPU Computing Toolkit", "CUDA", f"v{cuda_version_str}"
             )
             cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), "bin")
         else:
@@ -300,6 +308,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     lib_path = None
     for path in sys.path:
         candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name)
+        # Try to get newest version:
+        if len(candidate_lib_paths) > 1:
+            try:
+                candidate_lib_paths = sorted(candidate_lib_paths, key=lambda x: packaging.version.parse(os.path.basename(x).split('.so.')[1]), reverse=True)
+            except packaging.version.InvalidVersion:
+                candidate_lib_paths = sorted(candidate_lib_paths, key=lambda x: os.path.basename(x), reverse=True)
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
@@ -342,34 +356,63 @@ def _load_global_deps() -> None:
 
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
+        # As PyTorch is not purelib, but nvidia-*-cu12 is.
 
-        cuda_libs: dict[str, str] = {
-            "cublas": "libcublas.so.*[0-9]",
-            "cudnn": "libcudnn.so.*[0-9]",
-            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
-            "cuda_cupti": "libcupti.so.*[0-9]",
-            "cufft": "libcufft.so.*[0-9]",
-            "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
-            "cusparse": "libcusparse.so.*[0-9]",
-            "cusparselt": "libcusparseLt.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
-            "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
-            "nvshmem": "libnvshmem_host.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
-        }
+        if cuda_version_str is not None:
+            # 2 patterns defined for each lib - first is specific,
+            # second is generic backup.
+            cuda_maj = int(cuda_version_str.split(".")[0])
+		    cuda_libs: dict[str, _Union[str, list[str]] ] = {
+		        "cublas": [f"libcublas.so.{cuda_maj}*", "libcublas.so.[0-9]"],
+		        "cudnn": [f"libcudnn.so.{cuda_maj-3}*", "libcudnn.so.*[0-9]"],
+		        "cuda_nvrtc": [f"libnvrtc.so.{cuda_maj}*", "libnvrtc.so.*[0-9]"],
+		        "cuda_runtime": [f"libcudart.so.{cuda_maj}*","libcudart.so.*[0-9]"],
+		        "cuda_cupti": [f"libcupti.so.{cuda_maj}*","libcupti.so.*[0-9]"],
+		        "cufft": [f"libcufft.so.{cuda_maj-1}*", "libcufft.so.*[0-9]"],
+		        "curand": [f"libcurand.so.{cuda_maj-2}*", "libcurand.so.*[0-9]"],
+		        "nvjitlink": "libnvJitLink.so.*[0-9]",
+		        "cusparse": [f"libcusparse.so.{cuda_maj}*", "libcusparse.so.*[0-9]"],
+		        "cusparselt": [f"libcusparseLt.so.{cuda_maj}*", "libcusparseLt.so.*[0-9]"],
+		        "cusolver": [f"libcusolver.so.{cuda_maj-1}", "libcusolver.so.*[0-9]"],
+		        "nccl": "libnccl.so.*[0-9]",
+		        "nvtx": "libnvToolsExt.so.*[0-9]",
+		        "nvshmem": "libnvshmem_host.so.*[0-9]",
+		        "cufile": "libcufile.so.*[0-9]",
+		    }
+        else:
+		    cuda_libs: dict[str, str] = {
+		        "cublas": "libcublas.so.*[0-9]",
+		        "cudnn": "libcudnn.so.*[0-9]",
+		        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
+		        "cuda_runtime": "libcudart.so.*[0-9]",
+		        "cuda_cupti": "libcupti.so.*[0-9]",
+		        "cufft": "libcufft.so.*[0-9]",
+		        "curand": "libcurand.so.*[0-9]",
+		        "nvjitlink": "libnvJitLink.so.*[0-9]",
+		        "cusparse": "libcusparse.so.*[0-9]",
+		        "cusparselt": "libcusparseLt.so.*[0-9]",
+		        "cusolver": "libcusolver.so.*[0-9]",
+		        "nccl": "libnccl.so.*[0-9]",
+		        "nvtx": "libnvToolsExt.so.*[0-9]",
+		        "nvshmem": "libnvshmem_host.so.*[0-9]",
+		        "cufile": "libcufile.so.*[0-9]",
+            }
 
         is_cuda_lib_err = [
-            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
+            li for l in cuda_libs.values() for li in (l if isinstance(l, list) else [l]) if li.split('.')[0] in err.args[0]
         ]
         if not is_cuda_lib_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
-            _preload_cuda_deps(lib_folder, lib_name)
+            lib_names = [lib_name] if not isinstance(lib_name, list) else lib_name
+            n = len(lib_names)
+            for i in range(n):
+                try:
+                    _preload_cuda_deps(lib_folder, lib_names[i])
+                    break
+                except ValueError:
+                    if i == n-1:
+                        raise
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
