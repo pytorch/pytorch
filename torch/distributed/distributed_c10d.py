@@ -4148,9 +4148,10 @@ def gather(
 
     Args:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor], optional): List of appropriately,
-            same-sized tensors to use for gathered data
-            (default is None, must be specified on the destination rank)
+        gather_list (list[Tensor], optional): Output list. On the ``dst`` rank, it
+            should be a list of same-sized tensors correctly sized as the size of the group for this
+            collective and will contain the output. Must be ``None`` on non-dst
+            ranks. (default is ``None``)
         dst (int, optional): Destination rank on global process group (regardless of ``group`` argument).
             (If both ``dst`` and ``group_dst`` are None, default is global rank 0)
         group (ProcessGroup, optional): The process group to work on. If None,
