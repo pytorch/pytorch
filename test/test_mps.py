@@ -8017,6 +8017,14 @@ class TestMPS(TestCaseMPS):
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
 
+    def test_empty_posneginf(self):
+        # just to check that it doesnt crash
+        input_tensor = torch.empty(0, device="mps")
+        out_pos = torch.isposinf(input_tensor)
+        out_neg = torch.isposinf(input_tensor)
+        self.assertEqual(out_pos.numel(), 0)
+        self.assertEqual(out_neg.numel(), 0)
+
 
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
@@ -12294,6 +12302,15 @@ class TestConsistency(TestCaseMPS):
 
             if op.name in "grid_sampler_3d":
                 atol, rtol = 1e-4, 1e-4
+
+            if op.name == "kthvalue":
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                # kthvalue is non-deterministic if input has repeated values
+                dim = cpu_args[2] if len(cpu_args) > 2 else -1
+                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
+                self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 

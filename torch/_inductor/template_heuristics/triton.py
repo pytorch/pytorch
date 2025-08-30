@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import os
 from functools import partial
 from threading import Lock
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -1234,8 +1235,121 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
     """
-    Placeholder child class for XPU specific overrides.
+    Placeholder child class for Intel GPU specific overrides.
     """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.xpu_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 128): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 256): FlexConfig(64, 16, 1, 8),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 256): FlexConfig(32, 64, 1, 4),
+            (torch.float16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 256): FlexConfig(32, 64, 1, 4),
+        }
+        self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
+            FlexConfig(32, 16, 2, 4),
+            FlexConfig(128, 64, 2, 16),
+            FlexConfig(128, 64, 2, 8),
+            FlexConfig(128, 32, 2, 16),
+            FlexConfig(128, 32, 2, 8),
+        ]
+        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = []
+        self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
+
+        if not bool(os.getenv("CI")):
+            self.flex_attn_bwd_autotune_configs += [
+                FlexConfig(BLOCK1, BLOCK2, s, w)
+                for BLOCK1 in [32, 64]
+                for BLOCK2 in [32, 64, 128]
+                for s in [1, 3, 4, 5]  # num_stages
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
+                if BLOCK2 % BLOCK1 == 0
+            ]
+            self.flex_decode_autotune_configs += [
+                FlexDecodeConfig(32, 1, 2),
+                FlexDecodeConfig(32, 1, 1),
+                FlexDecodeConfig(32, 2, 2),
+                FlexDecodeConfig(32, 2, 1),
+                FlexDecodeConfig(64, 1, 2),
+                FlexDecodeConfig(64, 1, 1),
+                FlexDecodeConfig(64, 2, 2),
+                FlexDecodeConfig(64, 2, 1),
+            ]
+
+    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+        flex_attn_fwd_configs: list[FlexConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_attn_fwd_configs
+            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                default_config = FlexConfig(64, 64, 1, 8)
+            else:
+                default_config = FlexConfig(128, 64, 1, 16)
+            default_config = self.xpu_default_flex_config.get(
+                (dtype, head_dim), default_config
+            )
+        else:
+            if dtype == torch.float32:
+                default_config = FlexConfig(32, 16, 1, 4)
+            else:
+                default_config = FlexConfig(64, 32, 1, 8)
+
+        if default_config not in flex_attn_fwd_configs:
+            flex_attn_fwd_configs.append(default_config)
+
+        return flex_attn_fwd_configs
+
+    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+        flex_attn_bwd_configs: list[FlexConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_attn_bwd_configs
+            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+
+        if dtype == torch.float32:
+            default_config = FlexConfig(16, 16, 1, 4)
+        elif head_dim <= 256:
+            if head_dim == 64:
+                default_config = FlexConfig(64, 64, 1, 8)
+            elif head_dim == 128:
+                default_config = FlexConfig(64, 128, 1, 8)
+            else:
+                default_config = FlexConfig(64, 64, 1, 8)
+        else:  # modest hardware or extremely large head_dim
+            default_config = FlexConfig(16, 16, 1, 4)
+
+        if default_config not in flex_attn_bwd_configs:
+            flex_attn_bwd_configs.append(default_config)
+
+        return flex_attn_bwd_configs
+
+    def get_flex_decode_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexDecodeConfig]:
+        flex_decode_configs: list[FlexDecodeConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_decode_configs
+            flex_decode_configs += self.flex_decode_autotune_configs
+
+        default_config = FlexDecodeConfig(64, 1, 2)
+
+        if default_config not in flex_decode_configs:
+            flex_decode_configs.append(default_config)
+
+        return flex_decode_configs
 
 
 class MTIAConfigHeuristic(BaseConfigHeuristic):
