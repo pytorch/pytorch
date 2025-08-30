@@ -58,6 +58,7 @@ runs:
         show-progress: false
 
     - name: Clean submodules post checkout
+      id: clean-submodules
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       shell: bash
       env:
