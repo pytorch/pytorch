@@ -35,6 +35,15 @@ from .wrapper import (
 )
 
 
+# MSVC string was longer than the limit of 16380 single-byte characters.
+# https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026
+MSVC_C2026_MAX_STRING_LENGTH = 16000
+
+
+def truncate_string(s: str, length: int) -> list[str]:
+    return [s[i : i + length] for i in range(0, len(s), length)]
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -868,12 +877,38 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     .replace("\t", "\\t")
                 )
 
-            self.prefix.writeline(
-                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
-            )
-            self.prefix.writeline(
-                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
-            )
+            if (
+                len(config.aot_inductor.serialized_in_spec)
+                > MSVC_C2026_MAX_STRING_LENGTH
+            ):
+                serialized_in_spec_strs = truncate_string(
+                    config.aot_inductor.serialized_in_spec, MSVC_C2026_MAX_STRING_LENGTH
+                )
+                self.prefix.writeline("in_spec_ =")
+                for truncate_str in serialized_in_spec_strs:
+                    self.prefix.writeline(f'R"({truncate_str})"')
+                self.prefix.writeline(";")
+            else:
+                self.prefix.writeline(
+                    f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
+                )
+
+            if (
+                len(config.aot_inductor.serialized_out_spec)
+                > MSVC_C2026_MAX_STRING_LENGTH
+            ):
+                serialized_out_spec_strs = truncate_string(
+                    config.aot_inductor.serialized_out_spec,
+                    MSVC_C2026_MAX_STRING_LENGTH,
+                )
+                self.prefix.writeline("out_spec_ =")
+                for truncate_str in serialized_out_spec_strs:
+                    self.prefix.writeline(f'R"({truncate_str})"')
+                self.prefix.writeline(";")
+            else:
+                self.prefix.writeline(
+                    f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
+                )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(output, sympy.Expr), (
