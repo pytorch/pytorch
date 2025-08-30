@@ -135,28 +135,6 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=9
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.13
-    GCC_VERSION=9
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
@@ -235,7 +213,8 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
+    # TODO (huydhn): Upgrade this to Python >= 3.10
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
