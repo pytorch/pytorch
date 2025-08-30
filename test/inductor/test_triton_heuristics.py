@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -271,6 +272,8 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
+    @skipIfXpu
+    @skipIfRocm
     @skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
