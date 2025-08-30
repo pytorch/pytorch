@@ -92,57 +92,53 @@ class TestMatmulCuda(TestCase):
         n, m, p = (size + 1, size, size + 2)
         # Disable reduced precision reductions in BFloat16 to bypass some kernels
         # which fail the threshold check
-        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = reduced_precision
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = reduced_precision
-        torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
-        # Make random tensors on CPU (seed set on common_utils.py import)
-        # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
-        m_beta = make_arg(1)
-        m_input = make_arg((n, p))
-        m_1 = make_arg((n, m))
-        m_2 = make_arg((m, p))
-        # scale to abate overflows in fp16 accum
-        if fp16_accumulate:
-            m_1 = m_1 / 100
-            m_2 = m_2 / 100
-        # *(B)FLOAT16 Special Handling*
-        # Backend does not tensorize float16 on CPU,
-        # and bloat16 may present accuracy issues,
-        # so convert to float32 for these cases
-        # (but keep same for other types, e.g. float32 and int*)
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=torch.float32)
-            m_input = m_input.to(dtype=torch.float32)
-            m_1 = m_1.to(dtype=torch.float32)
-            m_2 = m_2.to(dtype=torch.float32)
-        # Get CPU result
-        res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # *(B)FLOAT16 Special Handling*``
-        # Convert back to (b)float16
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=dtype)
-            m_input = m_input.to(dtype=dtype)
-            m_1 = m_1.to(dtype=dtype)
-            m_2 = m_2.to(dtype=dtype)
-            res_cpu = res_cpu.to(dtype=dtype)
-        # Move arg tensors to CUDA
-        m_beta = m_beta.to("cuda")
-        m_input = m_input.to("cuda")
-        m_1 = m_1.to("cuda")
-        m_2 = m_2.to("cuda")
-        # Get CUDA result
-        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # Move to CPU for comparison
-        res_cuda = res_cuda.to("cpu")
-        # Compare
-        self.assertEqual(res_cpu, res_cuda)
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
+        with torch.backends.cuda.matmul.flags(
+            allow_bf16_reduced_precision_reduction=reduced_precision,
+            allow_fp16_reduced_precision_reduction=reduced_precision,
+            allow_fp16_accumulation=fp16_accumulate,
+        ):
+            # Make random tensors on CPU (seed set on common_utils.py import)
+            # (Not using numpy because it does not support bfloat16)
+            make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+            m_beta = make_arg(1)
+            m_input = make_arg((n, p))
+            m_1 = make_arg((n, m))
+            m_2 = make_arg((m, p))
+            # scale to abate overflows in fp16 accum
+            if fp16_accumulate:
+                m_1 = m_1 / 100
+                m_2 = m_2 / 100
+            # *(B)FLOAT16 Special Handling*
+            # Backend does not tensorize float16 on CPU,
+            # and bloat16 may present accuracy issues,
+            # so convert to float32 for these cases
+            # (but keep same for other types, e.g. float32 and int*)
+            if dtype == torch.float16 or dtype == torch.bfloat16:
+                m_beta = m_beta.to(dtype=torch.float32)
+                m_input = m_input.to(dtype=torch.float32)
+                m_1 = m_1.to(dtype=torch.float32)
+                m_2 = m_2.to(dtype=torch.float32)
+            # Get CPU result
+            res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
+            # *(B)FLOAT16 Special Handling*``
+            # Convert back to (b)float16
+            if dtype == torch.float16 or dtype == torch.bfloat16:
+                m_beta = m_beta.to(dtype=dtype)
+                m_input = m_input.to(dtype=dtype)
+                m_1 = m_1.to(dtype=dtype)
+                m_2 = m_2.to(dtype=dtype)
+                res_cpu = res_cpu.to(dtype=dtype)
+            # Move arg tensors to CUDA
+            m_beta = m_beta.to("cuda")
+            m_input = m_input.to("cuda")
+            m_1 = m_1.to("cuda")
+            m_2 = m_2.to("cuda")
+            # Get CUDA result
+            res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
+            # Move to CPU for comparison
+            res_cuda = res_cuda.to("cpu")
+            # Compare
+            self.assertEqual(res_cpu, res_cuda)
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
@@ -178,17 +174,14 @@ class TestMatmulCuda(TestCase):
     @parametrize("size", [32768])
     @parametrize("backend", ["cublaslt", "cublas"])
     def test_cublas_addmm_no_reduced_precision(self, small_size: int, size: int, dtype: torch.dtype, backend):
-        with blas_library_context(backend):
+        with blas_library_context(backend), torch.backends.cuda.matmul.flags(allow_fp16_reduced_precision_reduction=False):
             torch.backends.cuda.preferred_blas_library(backend)
-            orig_precision = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
             m1 = torch.full((small_size, size), 65504.0, dtype=dtype, device='cuda')
             m2 = torch.ones((size, small_size), dtype=dtype, device='cuda')
             m2[size // 2:, :] = -1.0
             b = torch.zeros((small_size,), dtype=dtype, device='cuda')
             out = torch.addmm(b, m1, m2, beta=1.0)
             self.assertEqual(out.sum().item(), 0.0)
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))

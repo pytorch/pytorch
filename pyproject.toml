@@ -248,6 +248,10 @@ keep-runtime-typing = true
 "functorch/notebooks/**" = [
     "F401",
 ]
+"test/backends/cuda/test_cublas.py" = [
+    "B009",
+    "B010",
+]
 "test/export/**" = [
     "PGH004"
 ]
