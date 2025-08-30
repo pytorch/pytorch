@@ -3217,6 +3217,12 @@ class InstructionTranslatorBase(
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
+    # 3.14 opcodes
+    LOAD_FAST_BORROW = LOAD_FAST
+
+    def LOAD_SMALL_INT(self, inst: Instruction) -> None:
+        self.push(ConstantVariable.create(inst.argval))
+
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
             # perf optimization only
