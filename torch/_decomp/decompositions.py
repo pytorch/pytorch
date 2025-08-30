@@ -770,13 +770,6 @@ def slice_forward(
         return self.as_strided(sizes, strides, storage_offset)
 
 
-@register_decomposition(aten.expand_copy)
-@out_wrapper()
-def expand_copy(self, size, *, implicit: bool = False):
-    _expand = torch.ops.aten.expand.default
-    return _expand(self, size).clone()
-
-
 def _normalize_start_end(
     x: Tensor, dim: int, start: Optional[int], end: Optional[int]
 ) -> tuple[int, int]:

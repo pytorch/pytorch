@@ -13658,16 +13658,10 @@ def forward(self, x, y):
         model = ExpandModel()
         x = torch.ones([3])
 
-        # These should succeed
         model(x, False)
         model(x, True)
-        torch.export.export(model, (x, False))
-
-        # This used to fail with TypeError; now should succeed
-        try:
-            torch.export.export(model, (x, True))
-        except TypeError as e:
-            self.fail(f"expand_copy export with implicit=True raised TypeError: {e}")
+        export(model, (x, False))
+        export(model, (x, True))
 
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():

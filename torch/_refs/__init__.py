@@ -3067,6 +3067,14 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
+"""
+# must register decomp for im
+@register_decomposition(aten.expand_copy)
+@out_wrapper()
+def expand_copy(self, size, *, implicit: bool = False):
+    _expand = torch.ops.aten.expand.default
+    return _expand(self, size, implicit=implicit).clone()
+"""
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> tuple[TensorLikeType, ...]:
     if chunks <= 0:
@@ -6508,6 +6516,7 @@ zero_ = _make_inplace(zero)
 alias_copy = _make_copy_from_view(aten.alias)
 as_strided_copy = _make_copy_from_view(aten.as_strided)
 diagonal_copy = _make_copy_from_view(aten.diagonal)
+expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
