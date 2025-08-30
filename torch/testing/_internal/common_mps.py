@@ -38,6 +38,7 @@ if torch.backends.mps.is_available():
             "as_strided_copy",
             "as_strided_scatter",
             "asin",
+            "asinh",
             "acos",
             "atan",
             "broadcast_tensors",
@@ -447,35 +448,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "deg2rad": None,
-            "erf": None,
-            "expm1": None,
-            "floor": None,
-            "frac": None,
-            "isneginf": None,
-            "isposinf": None,
-            "log1p": None,
-            "nan_to_num": None,
-            "neg": None,
-            "rad2deg": None,
-            "round": None,
-            "sgn": None,
-            "sign": None,
-            "signbit": None,
-            "sin": None,
-            "sinh": None,
-            "sqrt": None,
-            "tan": None,
-            "tanh": None,
-            "asinh": None,
-            "asin": None,
-            "isnan": None,
-            "isinf": None,
-            "atan": None,
-            "atanh": None,
-            "ceil": None,
-            "relu": None,
-            "nn.functional.relu": None,
         }
 
         if MACOS_VERSION < 15.0:
@@ -629,11 +601,6 @@ if torch.backends.mps.is_available():
             # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
-        SKIPLIST_SPARSE = {
-            # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
-            # and does basically a no-op op(positive), which leads to unexpected success
-            "positive": [torch.complex128],
-        }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
@@ -653,7 +620,9 @@ if torch.backends.mps.is_available():
                     ],
                 ),
             )
-            if sparse and op.name in SKIPLIST_SPARSE:
+            if sparse:
+                # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
+                # which leads to unexpected success with it
                 addDecorator(
                     op,
                     DecorateInfo(

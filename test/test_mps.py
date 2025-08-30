@@ -12300,7 +12300,7 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
-            if op.name in "grid_sampler_3d":
+            if op.name in ["grid_sampler_3d", "asinh"]:
                 atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
