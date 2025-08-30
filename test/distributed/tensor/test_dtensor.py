@@ -29,6 +29,8 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
+from torch.testing._internal.common_device_type import skipXPUIf
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -608,7 +610,7 @@ class DTensorTest(DTensorTestBase):
 class DTensorMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     def sub_mesh_assert_equal(self, mesh, exp_in_mesh, exp_out_of_mesh, tensor):
         if self.rank in mesh:
@@ -618,11 +620,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -630,6 +632,8 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
+    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_dtensor_api_device_mesh_context_manager(self):
         with self.build_device_mesh() as mesh:
             placements = [Shard(0)]
@@ -656,7 +660,7 @@ class DTensorMeshTest(DTensorTestBase):
             self.assertEqual(sharded_tensor.to_local().shape, torch.Size([3, 3]))
 
             mesh_2d = DeviceMesh(
-                self.device_type, torch.arange(self.world_size).reshape(2, 4)
+                self.device_type, torch.arange(self.world_size).reshape(2, self.world_size // 2)
             )
 
             with mesh_2d:
@@ -670,8 +674,8 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_2d_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        mesh_tensor = torch.arange(self.world_size).reshape(2, self.world_size // 2)
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -692,8 +696,10 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
+    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -713,6 +719,8 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
+    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_dtensor_spec_local_shard_offset(self):
         device_mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 4)
@@ -925,23 +933,20 @@ class DTensorMeshTest(DTensorTestBase):
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     def _create_tensor(self, size):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
-        else:
-            return tensor
+        return tensor.to(self.device_type)
 
     @with_comms
     def test_split_tensor_1D(self) -> None:
         mesh = self.build_device_mesh()
         shard_placement = Shard(0)
 
-        for size in range(8):
+        for size in range(self.world_size):
             tensor = self._create_tensor(size)
             splitted_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor,
@@ -990,7 +995,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
 
 class DTensorLogTest(LoggingTestCase):
     def test_dtensor_log(self):
-        if not torch.distributed.is_available() or not torch.cuda.is_available():
+        if not torch.distributed.is_available() or not torch.accelerator.is_available():
             return
 
         env = dict(os.environ)
@@ -1007,7 +1012,7 @@ import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Shard
 
-mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
+mesh = init_device_mesh(torch.accelerator.current_accelerator().type, (1,), mesh_dim_names=("dp",))
 placements = [Shard(0)]
 tensor = torch.randn(12, 8, 8)
 dtensor = distribute_tensor(tensor, mesh, placements)
