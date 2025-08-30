@@ -21,15 +21,21 @@ SETTINGS = VSCODE_FOLDER / "settings.json"
 
 
 # settings can be nested, so we need to recursively update the settings.
-def deep_update(d: dict, u: dict) -> dict:  # type: ignore[type-arg]
+# Added a required parameter `merge_lists` to validate BC-linter behavior on included paths.
+def deep_update(d: dict, u: dict, merge_lists: bool) -> dict:  # type: ignore[type-arg]
     for k, v in u.items():
         if isinstance(v, dict):
-            d[k] = deep_update(d.get(k, {}), v)
+            d[k] = deep_update(d.get(k, {}), v, merge_lists)
         elif isinstance(v, list):
-            d[k] = d.get(k, []) + v
+            d[k] = (d.get(k, []) + v) if merge_lists else v
         else:
             d[k] = v
     return d
+
+
+# Harmless public helper addition (should not trigger a BC violation)
+def add_one(x: int) -> int:
+    return x + 1
 
 
 def main() -> None:
@@ -50,7 +56,8 @@ def main() -> None:
             "Try `pip install json5` to install an extended JSON parser."
         ) from ex
 
-    settings = deep_update(current_settings, recommended_settings)
+    # Pass the new required argument to avoid runtime issues while still changing the API.
+    settings = deep_update(current_settings, recommended_settings, True)
 
     SETTINGS.write_text(
         json.dumps(
