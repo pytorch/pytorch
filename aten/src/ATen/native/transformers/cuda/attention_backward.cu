@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
@@ -47,6 +48,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
+#include <ATen/native/transformers/hip/gemm_kernel_utils.h>
 // MemoryEfficient Attention Specific Imports for ROCM
 #ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
@@ -544,12 +546,15 @@ _efficient_attention_backward(
     }
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
-    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-      is_causal = true;
-    } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
+    if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
       is_causal = false;
     } else {
-      TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
+      is_causal = true;
+#if AOTRITON_V3_API == 0
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) != custom_mask_type) {
+        TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+      }
+#endif
     }
     at::Tensor q_t = query.permute({0,2,1,3});
     at::Tensor k_t = key.permute({0,2,1,3});
@@ -568,7 +573,62 @@ _efficient_attention_backward(
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
-    if (cu_seqlens_q.has_value()) {
+    if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
+#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
+      using aotriton::v3::flash::CausalType;
+      using aotriton::v3::flash::VarlenType;
+      using aotriton::v3::flash::WindowValue;
+      aotriton::v3::flash::attn_bwd_params params;
+      params.Q = mk_aotensor(q_t, "q");
+      params.K = mk_aotensor(k_t, "k");
+      params.V = mk_aotensor(v_t, "v");
+      params.B = bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4;
+      params.Sm_scale = softmax_scale;
+      params.Out = mk_aotensor(out_t, "out");
+      params.DO = mk_aotensor(dout_t, "dout");
+      params.DK = mk_aotensor(dk_t, "dk");
+      params.DV = mk_aotensor(dv_t, "dv");
+      params.DQ = mk_aotensor(dq_t, "dq");
+      params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
+      params.L = mk_aotensor<2>(softmax_lse, "L");
+      params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
+      params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+      params.dropout_p = float(dropout_p);
+      params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+      params.philox_offset1 = mk_aoscalartensor(philox_offset);
+      params.philox_offset2 = 0;
+      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+        params.window_left = WindowValue::TopLeftAligned;
+        params.window_right = WindowValue::TopLeftAligned;
+      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.window_left = WindowValue::BottomRightAligned;
+        params.window_right = WindowValue::BottomRightAligned;
+      }
+#if AOTRITON_ALWAYS_V3_API
+      using sdp::aotriton_adapter::mklazy_empty_like;
+      using sdp::aotriton_adapter::mklazy_fp32zeros;
+      using sdp::aotriton_adapter::LazyTensorContext;
+      LazyTensorContext lazy_delta { .like_tensor = softmax_lse, .tensor_name = "delta" };
+      LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
+      params.D = mklazy_empty_like<2>(&lazy_delta);
+      params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+#else
+      at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+      params.D = mk_aotensor<2>(delta, "delta");
+#endif
+      if (cu_seqlens_q.has_value()) {
+        params.varlen_type = VarlenType::CompactVarlen;
+        params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
+        params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
+      } else {
+        params.varlen_type = VarlenType::None;
+      }
+      err = aotriton::v3::flash::attn_bwd(params,
+                                          aotriton::v3::flash::attn_bwd_params::kVersion,
+                                          stream);
+#endif  // AOTRITON_V3_API
+    } else if (cu_seqlens_q.has_value()) {
       at::Tensor delta = at::empty_like(softmax_lse).contiguous();
       // varlen aka Nested tensor
       err = attn_bwd_compact_varlen(mk_aotensor(q_t, "q"),
