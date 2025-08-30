@@ -222,6 +222,7 @@ def register_onednn_fusion_ops():
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
         cpu_needs_realized_inputs = [
+            torch.ops.mkldnn._gelu,
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
             torch.ops.mkldnn._convolution_transpose_pointwise,
@@ -229,6 +230,10 @@ def register_onednn_fusion_ops():
             aten.mkldnn_rnn_layer.default,
             torch.ops.onednn.qconv_pointwise,
         ]
+
+        @register_lowering(torch.ops.mkldnn._gelu)
+        def gelu(x: TensorBox, algorithm):
+            return TensorBox.create(mkldnn_ir.Gelu.create(x, algorithm))
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
         def convolution_unary(
