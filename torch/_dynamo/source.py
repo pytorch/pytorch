@@ -1060,6 +1060,17 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
+@dataclasses.dataclass(frozen=True)
+class UserSpecifiedSymIntSource(Source):
+    _name: str
+
+    def name(self) -> str:
+        return self._name
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.LOCAL
+
+
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
 ) -> Optional[str]:
