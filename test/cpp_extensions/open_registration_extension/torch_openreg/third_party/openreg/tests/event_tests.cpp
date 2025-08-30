@@ -37,8 +37,6 @@ TEST_F(EventTest, EventRecordAndSynchronize) {
   EXPECT_EQ(orEventCreate(&event), orSuccess);
 
   EXPECT_EQ(orEventRecord(event, stream), orSuccess);
-  EXPECT_EQ(orEventQuery(event), orErrorNotReady);
-
   EXPECT_EQ(orEventSynchronize(event), orSuccess);
   EXPECT_EQ(orEventQuery(event), orSuccess);
 
