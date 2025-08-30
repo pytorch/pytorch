@@ -12,8 +12,9 @@ if torch.backends.mps.is_available():
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: Optional[str] = None,
+        device_type: str = "mps",
         xfail_exclusion: Optional[list[str]] = None,
+        sparse: bool = False,
     ) -> Sequence[OpInfo]:
         if xfail_exclusion is None:
             xfail_exclusion = []
@@ -294,7 +295,7 @@ if torch.backends.mps.is_available():
         }
 
         # Those ops are not expected to work
-        UNIMPLEMENTED_XFAILLIST = {
+        UNIMPLEMENTED_XFAILLIST: dict[str, Optional[list]] = {
             # Failures due to lack of op implementation on MPS backend
             "logspace": None,
             "logspacetensor_overload": None,
@@ -440,6 +441,42 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
         }
+        UNIMPLEMENTED_XFAILLIST_SPARSE: dict[str, Optional[list]] = {
+            "logspace": None,
+            "logspacetensor_overload": None,
+            "linalg.eig": None,
+            "linalg.eigvals": None,
+            "put": None,
+            "deg2rad": None,
+            "erf": None,
+            "expm1": None,
+            "floor": None,
+            "frac": None,
+            "isneginf": None,
+            "isposinf": None,
+            "log1p": None,
+            "nan_to_num": None,
+            "neg": None,
+            "rad2deg": None,
+            "round": None,
+            "sgn": None,
+            "sign": None,
+            "signbit": None,
+            "sin": None,
+            "sinh": None,
+            "sqrt": None,
+            "tan": None,
+            "tanh": None,
+            "asinh": None,
+            "asin": None,
+            "isnan": None,
+            "isinf": None,
+            "atan": None,
+            "atanh": None,
+            "ceil": None,
+            "relu": None,
+            "nn.functional.relu": None,
+        }
 
         if MACOS_VERSION < 15.0:
             UNIMPLEMENTED_XFAILLIST.update(
@@ -448,8 +485,10 @@ if torch.backends.mps.is_available():
                     "nanquantile": None,
                 }
             )
+        if sparse:
+            UNIMPLEMENTED_XFAILLIST.update(UNIMPLEMENTED_XFAILLIST_SPARSE)
 
-        UNDEFINED_XFAILLIST = {
+        UNDEFINED_XFAILLIST: dict[str, Optional[list]] = {
             # Top 60 operators
             # topk fails with duplicate indices
             "topk": [
@@ -526,7 +565,7 @@ if torch.backends.mps.is_available():
             ],
         }
 
-        ON_MPS_XFAILLIST = {
+        ON_MPS_XFAILLIST: dict[str, Optional[list]] = {
             # Failures due to lack of implementation of downstream functions on MPS backend
             # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
             "linalg.matrix_rank": None,
@@ -590,6 +629,11 @@ if torch.backends.mps.is_available():
             # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
+        SKIPLIST_SPARSE = {
+            # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
+            # and does basically a no-op op(positive), which leads to unexpected success
+            "positive": [torch.complex128],
+        }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
@@ -599,6 +643,28 @@ if torch.backends.mps.is_available():
 
         for op in ops:
             key = op.name + op.variant_test_name
+            addDecorator(
+                op,
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    dtypes=[
+                        torch.double,
+                        torch.cdouble,
+                    ],
+                ),
+            )
+            if sparse and op.name in SKIPLIST_SPARSE:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.skip(
+                            "Skipped due to MPS not supporting complex128 tensors"
+                        ),
+                        dtypes=[
+                            torch.complex128,
+                        ],
+                    ),
+                )
             if key in EMPTY_OPS_SKIPLIST:
                 addDecorator(
                     op,
@@ -804,4 +870,13 @@ if torch.backends.mps.is_available():
             if key in XFAILLIST:
                 addDecorator(op, DecorateInfo(unittest.expectedFailure))
 
+        return ops
+else:
+
+    def mps_ops_modifier(
+        ops: Sequence[OpInfo],
+        device_type: str = "mps",
+        xfail_exclusion: Optional[list[str]] = None,
+        sparse: bool = False,
+    ) -> Sequence[OpInfo]:
         return ops
