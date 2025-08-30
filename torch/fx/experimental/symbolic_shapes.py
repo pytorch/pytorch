@@ -69,7 +69,7 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import bitwise_ops, magic_methods, magic_methods_on_operator_with_trailing_underscore, only_float_magic_methods, SymNode, SymTypes
+from torch.fx.experimental.sym_node import SymNode, SymTypes
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
