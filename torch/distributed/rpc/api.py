@@ -35,7 +35,8 @@ from ._utils import _group_membership_management, _update_group_membership
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 from .internal import (
     _build_rpc_profiling_key,
-    _internal_rpc_pickler,
+    get_default_pickler,
+    set_default_pickler,
     PythonUDF,
     RPCExecMode,
 )
@@ -66,7 +67,6 @@ logger = logging.getLogger(__name__)
 #
 # To enable RRef leak checking, set this _ignore_rref_leak to False
 _ignore_rref_leak = True
-_default_pickler = _internal_rpc_pickler
 
 
 @contextlib.contextmanager
@@ -74,12 +74,12 @@ def _use_rpc_pickler(rpc_pickler):
     r"""
     rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
     """
-    global _default_pickler
-    _default_pickler = rpc_pickler
+    default_pickler = get_default_pickler()
+    set_default_pickler(rpc_pickler)
     try:
         yield
     finally:
-        _default_pickler = _internal_rpc_pickler
+        set_default_pickler(default_pickler)
 
 
 def _require_initialized(func):
@@ -681,7 +681,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 **kwargs,
             )
         else:
-            (pickled_python_udf, tensors) = _default_pickler.serialize(
+            (pickled_python_udf, tensors) = get_default_pickler().serialize(
                 PythonUDF(func, args, kwargs)
             )
             rref = _invoke_remote_python_udf(
@@ -737,7 +737,7 @@ def _invoke_rpc(
                 is_async_exec,
             )
         else:
-            (pickled_python_udf, tensors) = _default_pickler.serialize(
+            (pickled_python_udf, tensors) = get_default_pickler().serialize(
                 PythonUDF(func, args, kwargs)
             )
             fut = _invoke_rpc_python_udf(
