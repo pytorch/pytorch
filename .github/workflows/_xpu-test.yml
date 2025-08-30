@@ -275,7 +275,7 @@ jobs:
       - name: Change permissions
         if: ${{ always() && steps.test.conclusion }}
         run: |
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1000:1000 test"
 
       - name: Print remaining test logs
         shell: bash
