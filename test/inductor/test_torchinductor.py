@@ -10713,7 +10713,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_pattern_matcher_unbacked(self):
-        @torch.compile(fullgraph=True, mode="reduce-overhead")
+        @torch.compile(fullgraph=True)
         def get_mask(W: torch.Tensor, percentage_nonzeros: torch.Tensor):
             total_elements = W.numel()
             k = total_elements * percentage_nonzeros
