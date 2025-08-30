@@ -1832,7 +1832,9 @@ def main() -> None:
         help="path to template directory",
     )
     args = parser.parse_args()
-    fm = FileManager(install_dir=args.out, template_dir=args.template_dir, dry_run=False)
+    fm = FileManager(
+        install_dir=args.out, template_dir=args.template_dir, dry_run=False
+    )
     gen_pyi(
         args.native_functions_path,
         args.tags_path,
