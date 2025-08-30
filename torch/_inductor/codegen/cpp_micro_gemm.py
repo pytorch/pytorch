@@ -993,7 +993,7 @@ def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
     ),
     *generate_gemm_config(
         VecAMX,
-        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        [(32, 16, 32), (32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
         extra_check=check_amx_extra,
@@ -2005,9 +2005,14 @@ def create_micro_gemm(
                     + (block_m * block_k + block_k * block_n)
                     * config.input_dtype.itemsize
                 )
+                size_score = register_bytes
+                # if number of mxn blocks can not occupy all the threads,
+                # we favor smaller register blocks.
+                if occupancy_score == 0:
+                    size_score = 0 - register_bytes
                 matched_configs.append(
                     (
-                        (isa_score, dividable_score, occupancy_score, register_bytes),
+                        (isa_score, dividable_score, occupancy_score, size_score),
                         cls,
                         config,
                     )
