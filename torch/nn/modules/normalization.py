@@ -367,7 +367,7 @@ class LazyGroupNorm(LazyModuleMixin, GroupNorm):
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        if not self.has_uninitialized_params() and self.num_channels != 0:
+        if not self.has_uninitialized_params() and self.affine:
             super().reset_parameters()
 
 
