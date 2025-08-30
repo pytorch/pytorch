@@ -309,7 +309,7 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
 
 
 # See Note [Global dependencies]
-def _load_global_deps() -> None:
+def _load_global_deps(force_wheel=False) -> None:
     if platform.system() == "Windows":
         return
 
@@ -327,19 +327,25 @@ def _load_global_deps() -> None:
         # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
         # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
         # See https://github.com/pytorch/pytorch/issues/145580
+        preload_wheels = False
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
             # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
             if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
-                return
+                if force_wheel:
+                    preload_wheels = True
+                else:
+                    return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
             # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
-
+        if preload_wheels:
+            # raise OSError just to trigger the except block below
+            raise OSError('ignore system')
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -366,7 +372,9 @@ def _load_global_deps() -> None:
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
         ]
-        if not is_cuda_lib_err:
+        raise_err = not is_cuda_lib_err
+        raise_err = raise_err and ('ignore system' not in str(err))
+        if raise_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
@@ -412,7 +420,19 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
-    from torch._C import *  # noqa: F403
+    retry_ignore_sys = False
+    retry_reason = ''
+    try:
+        from torch._C import *  # noqa: F403
+    except ImportError as e:
+        retry_ignore_sys = True
+        retry_reason = str(e)
+    if retry_ignore_sys:
+        if USE_GLOBAL_DEPS:
+            print(f"WARNING: system CUDA not compatible, switching to Wheel CUDA. Reason: '{retry_reason}'")
+            _load_global_deps(force_wheel=True)
+        from torch._C import *  # noqa: F403
+
 
 
 class SymInt:
