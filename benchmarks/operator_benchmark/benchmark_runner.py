@@ -1,4 +1,5 @@
 import argparse
+from ast import parse
 
 import benchmark_core
 
@@ -133,6 +134,16 @@ def parse_args():
         const=True,
         default=False,
         help="Run operators with PyTorch JIT mode",
+    )
+
+    parser.add_argument(
+        "--use-compile",
+        "--use_compile",
+        type=benchmark_utils.str2bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help="Run operators with PyTorch Compile mode",
     )
 
     parser.add_argument(
