@@ -96,6 +96,7 @@ Non-linear activation functions
     softmin
     softmax
     softshrink
+    swiglu
     gumbel_softmax
     log_softmax
     tanh
