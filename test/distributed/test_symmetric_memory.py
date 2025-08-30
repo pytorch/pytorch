@@ -2,6 +2,7 @@
 
 import itertools
 import os
+import random
 from contextlib import nullcontext
 from unittest import skip, skipIf
 
@@ -651,19 +652,20 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 
         alloc_args = self._get_test_alloc_args()
 
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        alloc_id = 42 + random.randint(0, 2147483647)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
         data_ptr = t.data_ptr()
 
         # Verify that persistent allocation would fail if there's an active
         # allocation with the same alloc_id.
         with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
 
         # Verify that persistent allocation would succeed in lieu of activate
         # allocations with the same alloc_id, and the returned tensor would
         # have the same data pointer.
         del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
         self.assertEqual(t.data_ptr(), data_ptr)
 
         symm_mem_hdl = _SymmetricMemory.rendezvous(t)

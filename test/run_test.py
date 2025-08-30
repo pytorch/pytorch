@@ -185,28 +185,15 @@ S390X_BLOCKLIST = [
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
-    "test_ao_sparsity",
     "test_jit",
-    "test_metal",
-    "test_mps",
-    "dynamo/test_torchrec",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_coordinate_descent_tuner",
-    "test_jiterator",
-    "inductor/test_cpu_cpp_wrapper",
-    "export/test_converter",
-    "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
-    "functorch/test_ops",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor",
     "inductor/test_torchinductor_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
-    "test_binary_ufuncs",
-    "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
     "inductor/test_best_config",
@@ -225,9 +212,12 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
+    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
+    # sysctl -n hw.memsize is not available
+    "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
     "test_decomp",
     # https://github.com/pytorch/pytorch/issues/146698
@@ -246,6 +236,9 @@ S390X_BLOCKLIST = [
     "inductor/test_config",
     "test_public_bindings",
     "test_testing",
+    # depend on z3-solver
+    "fx/test_z3_gradual_types",
+    "test_proxy_tensor",
 ]
 
 XPU_BLOCKLIST = [
