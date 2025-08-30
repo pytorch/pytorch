@@ -1025,6 +1025,55 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
+class SymToken:
+    def __init__(self, val):
+        self.val = val
+
+
+class SymBoolToken(SymToken):
+    def __bool__(self):
+        node = self.val.node
+        return node.guard_bool("", 0)
+
+
+class SymIntToken(SymToken):
+    def __int__(self):
+        return self.val.node.hint
+
+
+class SymFloatToken(SymToken):
+    def __float__(self):
+        return self.val.node.hint
+
+
+_TOKEN_SHAPE_ENV = None
+
+
+def sym_wrap(val: Union[int, float], name: str) -> Union[SymIntToken, SymFloatToken]:
+    from torch._dynamo.source import UserSideSymTokenSource
+
+    assert isinstance(val, (int, float))
+    global _TOKEN_SHAPE_ENV
+    if _TOKEN_SHAPE_ENV is None:
+        _TOKEN_SHAPE_ENV = ShapeEnv()
+    shape_env = _TOKEN_SHAPE_ENV
+
+    sym = shape_env.create_symbol(
+        val,
+        UserSideSymTokenSource(name),
+        dynamic_dim=DimDynamic.DYNAMIC,
+    )
+    sym.name = name
+    if isinstance(val, int):
+        return SymIntToken(
+            shape_env.create_symintnode(sym, hint=val)
+        )
+    else:
+        return SymFloatToken(
+            shape_env.create_symfloatnode(sym, hint=val)
+        )
+
+
 @dataclass(frozen=True)
 class Specialization:
     """

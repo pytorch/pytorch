@@ -2604,6 +2604,9 @@ class SubgraphTracer(fx.Tracer):
         # tracer is the current tracer that's readily accessible in current tracer's graph.
         self.bound_symbols: dict[sympy.Symbol, Union[torch.fx.Proxy, LazyProxy]] = {}
 
+        # Maps symints from SymTokens -> new symints
+        self.symint_map = {}
+
         self.prev_inst = None
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.

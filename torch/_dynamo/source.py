@@ -527,6 +527,36 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class SymTokenSource(ChainedSource):
+    is_int: bool
+
+    def __post_init__(self) -> None:
+        assert self.base is not None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "int" if self.is_int else "float"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return self.base.name()
+
+
+@dataclasses.dataclass(frozen=True)
+class UserSideSymTokenSource(Source):
+    _name: str
+
+    def name(self) -> str:
+        return self._name
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.LOCAL
+
+
+@dataclasses.dataclass(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
