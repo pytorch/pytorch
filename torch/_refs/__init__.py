@@ -3067,14 +3067,6 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
-"""
-# must register decomp for im
-@register_decomposition(aten.expand_copy)
-@out_wrapper()
-def expand_copy(self, size, *, implicit: bool = False):
-    _expand = torch.ops.aten.expand.default
-    return _expand(self, size, implicit=implicit).clone()
-"""
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> tuple[TensorLikeType, ...]:
     if chunks <= 0:
