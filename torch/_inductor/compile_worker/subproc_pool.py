@@ -130,7 +130,6 @@ class SubprocPool:
         pickler: Optional[SubprocPickler] = None,
         kind: SubprocKind = SubprocKind.FORK,
     ) -> None:
-        entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
         self.kind = kind
 
@@ -142,7 +141,16 @@ class SubprocPool:
 
         cmd = [
             sys.executable,
-            entry,
+            os.path.join(os.path.dirname(__file__), "__main__.py"),
+        ]
+        if path := config.worker_path_override:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                log.info("Using worker at: %s", path)
+                cmd = [path]
+            else:
+                log.error("Invalid worker path: %s", path)
+
+        args = [
             f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
             f"--kind={self.kind.value}",
             f"--workers={nprocs}",
@@ -151,6 +159,8 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
+        cmd.extend(args)
+
         log_path = None
         self.log_file = None
 
