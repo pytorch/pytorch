@@ -350,15 +350,18 @@ persistent_tma_mm_template = TritonTemplate(
         )
 
         if ki == k_tiles - 1:
+            # inductor generates a suffix
+            {%- if TMA_EXPERIMENTAL_API %}
             # rematerialize rm and rn to save registers
             rcm = rm + tl.arange(0, BLOCK_M)
             rcn = rn + tl.arange(0, BLOCK_N)
             idx_m = rcm[:, None]
             idx_n = rcn[None, :]
             mask = (idx_m < M) & (idx_n < N)
-
-            # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+            {%- else %}
+            {{store_output(("rm", "rn"), "acc", indent_width=12, tma_block_sizes=("BLOCK_M", "BLOCK_N"))}}
+            {%- endif %}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 """,
@@ -545,11 +548,15 @@ device_tma = r"""
                 stride_b_scale_n,
             )
 
+            # inductor generates a suffix
+            {%- if TMA_EXPERIMENTAL_API %}
             idx_m = offs_cm[:, None]
             idx_n = offs_cn[None, :]
             mask = (idx_m < M) & (idx_n < N)
-            # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+            {%- else %}
+            {{store_output(("offs_am", "offs_bn"), "accumulator", indent_width=12, tma_block_sizes=("BLOCK_M", "BLOCK_N"))}}
+            {%- endif %}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 """
 
@@ -746,7 +753,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **kwargs,
             )
 
-        if use_triton_tma_template(mat1, mat2):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             # Get TMA template params using the new unified function
             for kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, persistent_tma_mm_template.name, "mm"
@@ -1016,7 +1023,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
-        if use_triton_tma_template(mat1, mat2):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             # Get TMA template params using the new unified function
             for kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, persistent_tma_mm_template.name, "addmm"
@@ -1231,7 +1238,7 @@ def tuned_scaled_mm(
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
-        if use_triton_tma_template(mat_a, mat_b) and not bias:
+        if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
             # Get TMA template params using the new unified function
             for kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, scaled_mm_device_tma_template.name, "scaled_mm"
