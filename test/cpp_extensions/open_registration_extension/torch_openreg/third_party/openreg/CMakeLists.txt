@@ -31,7 +31,6 @@ if(USE_TEST)
     )
 
     add_executable(${LIBRARY_TEST} ${TEST_FILES})
-    add_dependencies(${TESTCAE_NAME} gtest gtest_main)
     target_link_libraries(${LIBRARY_TEST}
         PRIVATE
         ${LIBRARY_NAME}
