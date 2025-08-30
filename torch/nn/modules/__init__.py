@@ -110,6 +110,7 @@ from .loss import (
 from .normalization import (
     CrossMapLRN2d,
     GroupNorm,
+    LazyGroupNorm,
     LayerNorm,
     LocalResponseNorm,
     RMSNorm,
@@ -249,6 +250,7 @@ __all__ = [
     "LazyConvTranspose1d",
     "LazyConvTranspose2d",
     "LazyConvTranspose3d",
+    "LazyGroupNorm",
     "LazyInstanceNorm1d",
     "LazyInstanceNorm2d",
     "LazyInstanceNorm3d",
