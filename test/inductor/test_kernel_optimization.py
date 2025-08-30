@@ -4,6 +4,7 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -26,6 +27,21 @@ class TestEinsumtoPointwise(torch.nn.Module):
         output2 = torch.functional.einsum("bni, bnio -> bno", input2, weights2)
         add2 = output2 + bias2
         return add1 + add2
+
+
+class TestRMSNorm(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        weight: torch.Tensor,
+    ) -> torch.Tensor:
+        normalized_shape = [input.shape[-1]]
+        return torch.nn.functional.rms_norm(
+            input, normalized_shape, weight=weight
+        )
 
 
 class TestKernelOptimization(TestCase):
@@ -85,6 +101,41 @@ class TestKernelOptimization(TestCase):
         self.compare_gradients(module, traced)
         self.assertEqual(
             counters["inductor"]["einsum_to_pointwise_pass"],
+            1,
+        )
+        counters.clear()
+
+
+    @requires_gpu()
+    @skipIf(
+        torch.cuda.get_device_capability()[0] < 9,
+        "need at least B200 GPU",)
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "use_custom_rmsnorm_kernel_pass": {"quack": True},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_replace_rms_norm_with_quack(self):
+        counters.clear()
+        module = TestRMSNorm().to(GPU_TYPE)
+        dtype = torch.bfloat16
+        input = [
+            torch.randn(585936, 384, device=GPU_TYPE, requires_grad=True, dtype=dtype),
+            torch.randn(384, device=GPU_TYPE, requires_grad=True, dtype=dtype),
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        # Create upstream gradients
+        dy = torch.randn_like(ref)
+        torch.autograd.grad(ref, input, grad_outputs=dy, retain_graph=True)
+        torch.autograd.grad(res, input, grad_outputs=dy, retain_graph=True)
+        self.compare_pred(module, traced, input, rtol=0.1, atol=0.1)
+        self.compare_parameters(module, traced, rtol=0.1, atol=0.1)
+        self.compare_gradients(module, traced, rtol=0.1, atol=0.1)
+        self.assertEqual(
+            counters["inductor"]["use_custom_rmsnorm_kernel_pass"],
             1,
         )
         counters.clear()
