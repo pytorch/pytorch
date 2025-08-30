@@ -227,6 +227,21 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
+#if IS_PYTHON_3_14_PLUS
+static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
+  if (PyStackRef_IsNull(src)) {
+    *dst = (_PyStackRef){0};
+  } else {
+    *dst = PyStackRef_DUP(src);
+  }
+}
+#else
+static void dup_obj(PyObject** dst, PyObject* src) {
+  Py_XINCREF(src);
+  *dst = src;
+}
+#endif
+
 static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -271,8 +286,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
 #endif
 
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef* fastlocals_old = frame->localsplus;
+  _PyStackRef* fastlocals_new = shadow->localsplus;
+#else
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+#endif
   Py_ssize_t n_old = F_CODE(frame)->co_nlocalsplus;
   Py_ssize_t n_new = code->co_nlocalsplus;
 
@@ -373,16 +393,14 @@ static PyObject* dynamo_eval_custom_code_impl(
       !!(F_CODE(frame)->co_flags & CO_VARKEYWORDS);
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[i] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[i], fastlocals_old[i]);
   }
 
   // copy free vars
   Py_ssize_t nfrees_old = PyCode_GetNFreevars(F_CODE(frame));
 
   for (Py_ssize_t i = 0; i < nfrees_old; i++) {
-    Py_XINCREF(fastlocals_old[n_old - 1 - i]);
-    fastlocals_new[n_new - 1 - i] = fastlocals_old[n_old - 1 - i];
+    dup_obj(&fastlocals_new[n_new - 1 - i], fastlocals_old[n_old - 1 - i]);
   }
 
   // copy cell vars, from high index to low index, until it meets a variable
@@ -408,8 +426,7 @@ static PyObject* dynamo_eval_custom_code_impl(
     }
 #endif
 
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[j] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[j], fastlocals_old[i]);
   }
 
   // NOTE: if you want to evaluate frame instead of shadow in 3.12+,

@@ -76,6 +76,9 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
   op->func_weakreflist = NULL;
   COPY_FIELD(op, o, module);
   COPY_FIELD(op, o, annotations);
+#if IS_PYTHON_3_14_PLUS
+  COPY_FIELD(op, o, annotate);
+#endif
 #if IS_PYTHON_3_12_PLUS
   COPY_FIELD(op, o, typeparams);
 #endif
