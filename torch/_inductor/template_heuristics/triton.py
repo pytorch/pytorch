@@ -560,7 +560,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             # If CUDA is not available or properties cannot be queried, return None
             return None
 
-        # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation (cuda vs rocm vs whatever).
+        # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
         def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:
             shared_mem_accum = dtype_size * (
                 gemm_config.block_m * gemm_config.block_k
