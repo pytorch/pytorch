@@ -381,11 +381,19 @@ class CommonTemplate:
         input_reader = InputReader()
         load_args(input_reader)
         args = input_reader.args
+        if self.device == "xpu":
+            atol = 1e-7
+            rtol = 1e-5
+        else:
+            atol = None
+            rtol = None
 
         self._run_and_compare(
             forward,
             *args,
             expected_num_block_pointers=4,
+            atol=atol,
+            rtol=rtol,
         )
 
     @parametrize(
