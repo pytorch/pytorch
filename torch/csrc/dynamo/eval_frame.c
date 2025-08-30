@@ -34,8 +34,8 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-// 3.14 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_14_PLUS)
+// 3.15 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_15_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -56,7 +56,13 @@ static PyObject* THPPyInterpreterFrame_f_locals(
   return self->locals;
 }
 
-#if IS_PYTHON_3_13_PLUS
+#if IS_PYTHON_3_14_PLUS
+static PyObject* THPPyInterpreterFrame_f_executable(
+    THPPyInterpreterFrame* self,
+    PyObject* _noargs) {
+  return PyStackRef_AsPyObjectNew(self->frame->f_executable);
+}
+#elif IS_PYTHON_3_13_PLUS
 DECLARE_PYOBJ_ATTR(f_executable)
 #else
 DECLARE_PYOBJ_ATTR(f_code)
@@ -109,11 +115,8 @@ static PyObject* THPPyInterpreterFrame_f_back(
 static PyObject* THPPyInterpreterFrame_closure(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_12_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_funcobj)->func_closure;
-  return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
-#elif IS_PYTHON_3_11_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_func)->func_closure;
+#if IS_PYTHON_3_11_PLUS
+  PyObject* closure = FUNC(self->frame)->func_closure;
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
 #else
   PyCodeObject* code = self->frame->f_code;
@@ -224,6 +227,21 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
+#if IS_PYTHON_3_14_PLUS
+static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
+  if (PyStackRef_IsNull(src)) {
+    *dst = (_PyStackRef){0};
+  } else {
+    *dst = PyStackRef_DUP(src);
+  }
+}
+#else
+static void dup_obj(PyObject** dst, PyObject* src) {
+  Py_XINCREF(src);
+  *dst = src;
+}
+#endif
+
 static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -237,11 +255,10 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
+  PyFunctionObject* old_func = FUNC(frame);
 #if IS_PYTHON_3_12_PLUS
-  PyFunctionObject* old_func = (PyFunctionObject*)frame->f_funcobj;
   size_t size = code->co_framesize;
 #else
-  PyFunctionObject* old_func = frame->f_func;
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
 #endif
 
@@ -259,14 +276,23 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   Py_INCREF(func);
   // consumes reference to func
-#if IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef func_stackref = PyStackRef_FromPyObjectSteal((PyObject*)func);
+  _PyFrame_Initialize(
+      tstate, shadow, func_stackref, NULL, code, 0, frame->previous);
+#elif IS_PYTHON_3_12_PLUS
   _PyFrame_Initialize(shadow, func, NULL, code, 0);
 #else
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
 #endif
 
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef* fastlocals_old = frame->localsplus;
+  _PyStackRef* fastlocals_new = shadow->localsplus;
+#else
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+#endif
   Py_ssize_t n_old = F_CODE(frame)->co_nlocalsplus;
   Py_ssize_t n_new = code->co_nlocalsplus;
 
@@ -367,16 +393,14 @@ static PyObject* dynamo_eval_custom_code_impl(
       !!(F_CODE(frame)->co_flags & CO_VARKEYWORDS);
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[i] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[i], fastlocals_old[i]);
   }
 
   // copy free vars
   Py_ssize_t nfrees_old = PyCode_GetNFreevars(F_CODE(frame));
 
   for (Py_ssize_t i = 0; i < nfrees_old; i++) {
-    Py_XINCREF(fastlocals_old[n_old - 1 - i]);
-    fastlocals_new[n_new - 1 - i] = fastlocals_old[n_old - 1 - i];
+    dup_obj(&fastlocals_new[n_new - 1 - i], fastlocals_old[n_old - 1 - i]);
   }
 
   // copy cell vars, from high index to low index, until it meets a variable
@@ -402,8 +426,7 @@ static PyObject* dynamo_eval_custom_code_impl(
     }
 #endif
 
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[j] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[j], fastlocals_old[i]);
   }
 
   // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
@@ -468,7 +491,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
   return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
-#else // !(IS_PYTHON_3_14_PLUS)
+#else // !(IS_PYTHON_3_15_PLUS)
 
 // Fake definitions for everything we removed
 
@@ -497,7 +520,7 @@ static PyTypeObject THPPyInterpreterFrameType = {
     .tp_getset = THPPyInterpreterFrame_properties,
 };
 
-#endif // !(IS_PYTHON_3_14_PLUS)
+#endif // !(IS_PYTHON_3_15_PLUS)
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
