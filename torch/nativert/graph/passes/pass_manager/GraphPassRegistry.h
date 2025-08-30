@@ -81,4 +81,18 @@ class GraphPassRegistry {
   void operator=(GraphPassRegistry const&) = delete;
 };
 
+// Generic pass registrar template that automatically registers passes during
+// program initialization. Can accept any functor that matches PassSignature.
+template <typename PassFunc>
+class PassRegistrar {
+ public:
+  PassRegistrar(std::string passName, PassFunc func) {
+    GraphPassRegistry::add_pass(std::move(passName), std::move(func));
+  }
+};
+
+#define REGISTER_GRAPH_PASS(pass_name, ...)                         \
+  static torch::nativert::PassRegistrar pass_registrar_##pass_name( \
+      #pass_name, __VA_ARGS__)
+
 } // namespace torch::nativert

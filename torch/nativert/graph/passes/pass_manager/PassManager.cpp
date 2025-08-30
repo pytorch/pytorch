@@ -1,19 +1,13 @@
 #include <torch/nativert/graph/passes/pass_manager/PassManager.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <torch/nativert/graph/Graph.h>
-#include <torch/nativert/graph/passes/pass_manager/GraphPasses.h>
 
 namespace torch::nativert {
 
 GraphPassManager::GraphPassManager(
     GraphPassPipeline pipeline,
     PassManagerOptions opts)
-    : pipeline_(std::move(pipeline)), opts_(opts) {
-  static c10::once_flag flag;
-  c10::call_once(flag, [&]() { register_base_passes(); });
-}
+    : pipeline_(std::move(pipeline)), opts_(opts) {}
 
 bool GraphPassManager::run(Graph* graph) {
   bool changed = false;
