@@ -526,6 +526,8 @@ class TestLazyModules(TestCase):
         num_channels = 8
         num_groups = 4
 
+        assert num_channels % num_groups == 0
+
         for affine in [True, False]:
             module = nn.LazyGroupNorm(num_groups, affine=affine)
 
@@ -583,6 +585,8 @@ class TestLazyModules(TestCase):
         num_channels = 8
         num_groups = 4
 
+        assert num_channels % num_groups == 0
+
         for affine in [True, False]:
             module = nn.LazyGroupNorm(num_groups, affine=affine)
 
@@ -624,6 +628,8 @@ class TestLazyModules(TestCase):
     def test_lazy_groupnorm_reset_parameters(self):
         num_channels = 8
         num_groups = 4
+
+        assert num_channels % num_groups == 0
 
         module = nn.LazyGroupNorm(num_groups, affine=False)
         self.assertFalse(module.has_uninitialized_params())
