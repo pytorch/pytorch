@@ -387,6 +387,10 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # For this test, we currently only fold without dynamic shapes
+    "test_folding_bmm_to_mm_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 add_test_failures(test_failures, dynamic_shapes_test_failures)

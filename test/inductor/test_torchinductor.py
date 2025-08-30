@@ -13879,6 +13879,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inp = torch.randn(100, 100, device=self.device)
         self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
+    
+    def test_folding_bmm_to_mm(self):
+        @torch.compile
+        def linear(x, weight, bias):
+            return F.linear(x, weight, bias) 
+
+
+        weight = torch.randn(2048, 2048, device=self.device)
+        bias = torch.randn(2048, device=self.device)
+
+        bs = 2
+        # we do a transpose here to make a non-contiguous. This can happen in nn.MultiheadAttention when batch_size_first=True
+        x = torch.randn(bs, 512, 2048, device=self.device).transpose(0, 1) # -> (512, bs, 2048)
+
+        _result, code = run_and_get_code(linear, x, weight, bias)
+        res = F.linear(x, weight, bias) 
+
+        # since bs is small, we should fold bmm to mm for better performance
+        self.assertEqual(1, code[0].count("extern_kernels.mm"))
+        self.assertEqual(0, code[0].count("bmm"))
+        self.assertTrue(torch.allclose(res, _result, atol=0.0078, rtol=0.0078))
+
     # end of class CommonTemplate - add new tests here
 
 
