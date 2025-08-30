@@ -660,6 +660,30 @@ class TestLazyModules(TestCase):
         self.assertEqual(module.weight, torch.ones(num_channels))
         self.assertEqual(module.bias, torch.zeros(num_channels))
 
+    def test_lazy_group_norm_state(self) -> None:
+        num_channels = 8
+        num_groups = 4
+
+        self.assertTrue(num_channels % num_groups == 0)
+
+        module = nn.GroupNorm(num_groups, num_channels, affine=True)
+        lazy_module = nn.LazyGroupNorm(num_groups, affine=True)
+
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Conv one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIsInstance(lazy_module, nn.LazyGroupNorm)
+
+        self.assertEqual(lazy_module.weight.shape, (num_channels,))
+        self.assertEqual(lazy_module.bias.shape, (num_channels,))
+
+        module = nn.GroupNorm(num_groups, num_channels, affine=True)
+        lazy_module = nn.LazyGroupNorm(num_groups)
+        with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
+            module.load_state_dict(lazy_module.state_dict())
+
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
