@@ -2298,27 +2298,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 # Form the block pointer or TMA descriptor.
                 self.filter_masks(mask_vars)
-                options_class: type[BlockDescriptorOptions]
-                if config.triton.use_block_ptr:
-                    options_class = BlockPtrOptions
-                else:
-                    nonlocal tma_compatibility_checker
-                    tma_compatibility_checker = cast(
-                        TMACompatibilityChecker, tma_compatibility_checker
-                    )
-                    if not tma_compatibility_checker.are_block_parameters_compatible(
-                        block_params
-                    ):
-                        return None
-                    options_class = TensorDescriptorOptions
 
-                return options_class.create(
+                options_class = (
+                    BlockPtrOptions
+                    if config.triton.use_block_ptr
+                    else TensorDescriptorOptions
+                )
+                options = options_class.create(
                     params=block_params,
                     constant_offset=offset,
                     range_trees=range_trees,
                     mask_vars=mask_vars,
                     get_max_block=self.max_block,
                 )
+
+                if options_class == TensorDescriptorOptions:
+                    nonlocal tma_compatibility_checker
+                    tma_compatibility_checker = cast(
+                        TMACompatibilityChecker, tma_compatibility_checker
+                    )
+                    if not tma_compatibility_checker.are_block_parameters_compatible(
+                        options.params
+                    ):
+                        return None
+
+                return options
 
             # Return a block pointer, if indexing matches the pattern.
             options = match_block_expr()
