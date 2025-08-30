@@ -298,7 +298,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
   // Wrapper class for XPU UUID
   struct XPUuuid {
     XPUuuid(std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
-    std::array<unsigned char, 16> bytes;
+    std::array<unsigned char, 16> bytes{};
   };
   auto m = py::handle(module).cast<py::module>();
 
@@ -344,7 +344,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #endif
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
-          "uuid", [](const DeviceProp& prop) { return XPUuuid(prop.uuid); })
+          "uuid",
+          [](const DeviceProp& prop) -> XPUuuid { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
