@@ -1,50 +1,11 @@
 #pragma once
-
-#ifdef _WIN32
-#include <Windows.h>
-#include <functional> // std::function
-#else
-#include <dlfcn.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
-
-#include <fcntl.h>
-#include <optional>
-#include <regex>
-#include <stdexcept>
-#include <unordered_map>
-#include <utility>
-
-// WARNING: Be careful when adding new includes here. This header will be used
-// in model.so, and should not refer to any aten/c10 headers except the stable
-// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
-#ifdef USE_MPS
-#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
-#endif // USE_MPS
-#ifdef USE_XPU
-#include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
-#else
-#include <torch/csrc/inductor/aoti_runtime/utils.h>
-#endif // USE_XPU
-#include <torch/csrc/inductor/aoti_runtime/constant_type.h>
-
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
-  } while (0)
-
 #ifdef _WIN32
 #include <Windows.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+#include <functional> // std::function
 
 #define PROT_READ 0x1
 #define PROT_WRITE 0x2
@@ -297,7 +258,41 @@ int munmap(void* addr, size_t length) {
   }
   return 0;
 }
+#else
+#include <dlfcn.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
+
+#include <fcntl.h>
+#include <optional>
+#include <regex>
+#include <stdexcept>
+#include <unordered_map>
+#include <utility>
+
+// WARNING: Be careful when adding new includes here. This header will be used
+// in model.so, and should not refer to any aten/c10 headers except the stable
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_MPS
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
+#endif // USE_MPS
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+#else
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
+#endif // USE_XPU
+#include <torch/csrc/inductor/aoti_runtime/constant_type.h>
+
+#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
+  do {                                \
+    bool ok = EXPR;                   \
+    if (!ok) {                        \
+      throw std::runtime_error(MSG);  \
+    }                                 \
+  } while (0)
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
