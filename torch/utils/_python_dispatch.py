@@ -455,7 +455,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
                 that require the stride info to be constructed. In most cases, this arg can be
                 safely ignored.
     """
-    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    is_subclass = isinstance(t, torch.Tensor) and type(t) is not torch.Tensor
     return (
         is_subclass
         and hasattr(t, "__tensor_flatten__")
@@ -467,7 +467,7 @@ def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten
     """Same as above, but takes a type argument instead of an instance."""
     return (
         issubclass(t, torch.Tensor)
-        and t != torch.Tensor
+        and t is not torch.Tensor
         and hasattr(t, "__tensor_flatten__")
         and hasattr(t, "__tensor_unflatten__")
     )
@@ -536,7 +536,16 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         # in theory if a subclass that needs this API wants to sometimes return
         # plain tensors, we could remove the assert and just not perform the aliasing,
         # but it seems safer to learn more about this case first.
-        if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
+        #
+        # Performance note: This is all just to assert that the argument and result
+        # types match, checking that is cheaper than is_traceable_wrapper_subclass_type,
+        # and multiple returns are relatively unlikely, so just check up front!
+        arg_type = type(arg)
+        ret_type = type(ret)
+        if arg_type is not ret_type and (
+            is_traceable_wrapper_subclass_type(arg_type)
+            or is_traceable_wrapper_subclass_type(ret_type)
+        ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
                 assert type(arg) == type(
@@ -561,13 +570,10 @@ and output of type {type(ret)}. But expected types to match."""
             assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
-    num_args = len(func._schema.arguments)
-    num_returns = len(func._schema.returns)
-    for arg_idx in range(num_args):
-        for return_idx in range(num_returns):
-            schema_arg = schema_info.args[arg_idx]
+    for arg_idx, schema_arg in enumerate(schema_info.args):
+        for return_idx, schema_out in enumerate(schema_info.outs):
             is_read_only_alias_match = (
-                schema_arg.alias_set & schema_info.outs[return_idx].alias_set
+                schema_arg.alias_set & schema_out.alias_set
             ) and not schema_arg.is_write
             if is_read_only_alias_match:
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
@@ -587,6 +593,14 @@ class AliasInfo:
 class SchemaInfo:
     args: list[AliasInfo]
     outs: list[AliasInfo]
+
+    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
+    # advantage of our existing caching of data for each OpOverload to paper over an
+    # efficiency problem with pybind11::enum_ (which currently is used to implement
+    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
+    # each element must be converted to int with the __int__ method, which incurs a lot
+    # of overhead. Converting to int once and caching removes this per-op overhead.
+    int_tags: list[int]
 
 
 # Given an OpOverload, returns schema information on it.
@@ -654,8 +668,14 @@ def get_alias_info(func) -> SchemaInfo:
             )
             for a in func._schema.returns
         ]
-    schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
+    schema_info = SchemaInfo(
+        args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
+    )
     return schema_info
+
+
+# See NOTE[SchemaInfo int_tags] above.
+_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
@@ -679,14 +699,14 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     schema_info = get_alias_info(func)
 
     def get_write_alias(x):
-        if len(x.alias_set) == 0:
+        alias_set = x.alias_set
+        if not alias_set or not x.is_write:
             return None
-        alias_set = list(x.alias_set)
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
         assert len(alias_set) == 1
-        if x.is_write:
-            return alias_set[0]
-        return None
+        # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
+        # set of size 1 on Python 3.13.
+        return next(iter(alias_set))
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
         new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
@@ -712,7 +732,8 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
-    if torch.Tag.inplace_view in func.tags:
+    # See NOTE[SchemaInfo int_tags] above.
+    if _TORCH_TAG_INPLACE_VIEW_INT in schema_info.int_tags:
         # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
         # but don't end up dispatching the op anywhere else.
         mutated_args = [
