@@ -385,7 +385,6 @@ class TestSparse(TestSparseBase):
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
 
-    # @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
