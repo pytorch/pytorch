@@ -539,7 +539,7 @@ class TestLazyModules(TestCase):
                 self.assertIsNone(module.bias)
 
             input = torch.ones(5, num_channels, 7, 7)
-            output = module(input)
+            output = module(input)  # fully materialized
 
             self.assertIsInstance(module, nn.GroupNorm)
             self.assertNotIsInstance(module, nn.LazyGroupNorm)
