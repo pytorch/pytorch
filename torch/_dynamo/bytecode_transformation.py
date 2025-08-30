@@ -450,7 +450,7 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("BUILD_LIST", arg=n - 1),
         create_instruction("DUP_TOP"),
         create_instruction("LOAD_CONST", argval=-1),
-        create_instruction("BINARY_SUBSCR"),
+        create_binary_subscr(),
         create_instruction("ROT_THREE"),
         create_instruction("DUP_TOP"),
         create_instruction("ROT_THREE"),
@@ -462,6 +462,13 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("POP_TOP"),
         create_instruction("UNPACK_SEQUENCE", arg=n - 1),
     ]
+
+
+def create_binary_subscr() -> Instruction:
+    if sys.version_info < (3, 14):
+        return create_instruction("BINARY_SUBSCR")
+    # https://github.com/python/cpython/blob/0e46c0499413bc5f9f8336fe76e2e67cf93f64d8/Include/opcode.h#L36
+    return create_instruction("BINARY_OP", arg=26)
 
 
 def lnotab_writer(
@@ -1130,6 +1137,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
 
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
+    "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
     "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
     "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
 }
