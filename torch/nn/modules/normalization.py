@@ -331,7 +331,30 @@ class GroupNorm(Module):
         )
 
 class LazyGroupNorm(LazyModuleMixin, GroupNorm):
-    # inferre num_channels
+    r"""A :class:`torch.nn.GroupNorm` module where `num_channels` is inferred.
+
+    In this module, the `weight` and `bias` of the affine transformation are of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.GroupNorm` module. The ``num_channels`` argument
+    of the :class:`GroupNorm` is inferred from the ``input.shape[1]``.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+
+    Args:
+        num_groups (int): number of groups to separate the channels into
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        affine: a boolean value that when set to ``True``, this module
+            has learnable per-channel affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+
+    Shape:
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
+
+    """
+
     cls_to_become = GroupNorm  # type: ignore[assignment]
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
