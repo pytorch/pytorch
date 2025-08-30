@@ -809,6 +809,14 @@ class PythonPrinter(_PythonPrinter):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
 
+    def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
+
 
 class OpDecompositions:
     """
