@@ -362,7 +362,7 @@ class TestActivationCheckpointingKnapsack(TestCase):
         result_runtime, result_saved, result_recomputable = func(
             memory, runtime, max_memory
         )
-        self.assertAlmostEqual(result_runtime, expected_runtime, places=3)
+        self.assertEqual(result_runtime, expected_runtime)
         self.assertEqual(sorted(result_saved), sorted(expected_saved))
         self.assertEqual(sorted(result_recomputable), sorted(expected_recomputable))
 

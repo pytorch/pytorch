@@ -127,102 +127,141 @@ def dp_knapsack_sliding_hirschberg(
     # Scaling factor to convert floating point weights to integers
     S = 10000
 
-    # Quantize the memory weights
-    quantized_memory = torch.tensor(
-        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
-    )
-    runtimes = torch.tensor(runtime, dtype=torch.float32, device="cpu")
+    # q_ prefix stands for quantized
+    q_memory = [int(round(m * S)) for m in memory]
+    runtimes = [float(v) for v in runtime]
 
-    # Quantized pseudopolynomial DP for 0-1 Knapsack
-    quantized_max_memory = int(round(max_memory * S))
+    q_max_memory = int(round(max_memory * S))
 
-    # Hirschberg algorithm:
-    # split memory, solve dp for each half and recurse with best memory budget
-    saved_items, recomputable_items = dp_knapsack_recurse(
-        memory_indices=list(range(len(memory))),
-        quantized_max_memory=quantized_max_memory,
-        quantized_memory=quantized_memory,
-        runtimes=runtimes,
-    )
+    q_memory_length = len(q_memory)
+    if q_memory_length == 0:
+        return 0.0, [], []
+
+    item_indices = list(range(q_memory_length))
+    dp_profile_size = q_max_memory + 1
+
+    # Current DP profile (row)
+    dp_profile = torch.zeros(dp_profile_size, dtype=torch.float32, device="cpu")
+    # Store a candidate for next dp_profile - current dp row + item
+    candidate_profile = torch.empty(dp_profile_size, dtype=torch.float32, device="cpu")
+    left_profile = torch.empty(dp_profile_size, dtype=torch.float32, device="cpu")
+    right_profile = torch.empty(dp_profile_size, dtype=torch.float32, device="cpu")
+
+    saved_items: list[int] = []
+    recomputable_items: list[int] = []
+
+    # Explicit stack to optimize memory and avoid recursion
+    # Stack stores segments as (start index, end index, capacity for segment)
+    stack: list[tuple[int, int, int]] = [(0, q_memory_length, q_max_memory)]
+
+    # LIFO
+    while stack:
+        start, end, capacity = stack.pop()
+        length = end - start
+        if length == 0:
+            continue
+
+        # Leaf
+        if length == 1:
+            index = item_indices[start]
+            memory_item = q_memory[index]
+            runtime_item = runtimes[index]
+            if memory_item <= capacity and runtime_item > 0.0:
+                saved_items.append(index)
+            else:
+                recomputable_items.append(index)
+            continue
+
+        # Split the segment into two halves
+        middle = start + (length // 2)
+        left_start, left_end = middle, end
+        right_start, right_end = start, middle
+
+        # Assign items to both halves
+        left_items = item_indices[left_start:left_end]
+        right_items = item_indices[right_start:right_end]
+
+        # Working only on items allowed by segment's capacity
+        capacity = capacity + 1
+        dp_view = dp_profile[:capacity]
+        candidate_view = candidate_profile[:capacity]
+        left_dp_local = left_profile[:capacity]
+        right_dp_local = right_profile[:capacity]
+
+        # Left part
+        dp_view.zero_()
+        for index in left_items:
+            memory_item = q_memory[index]
+            runtime_item = runtimes[index]
+
+            if memory_item == 0:
+                # Weight is 0, so add it to all capacities; a "free lunch", essentially
+                dp_view.add_(runtime_item)
+                continue
+
+            # If item is too heavy, we skip it
+            if memory_item >= capacity:
+                continue
+
+            # Add the current item so we can then pick the highest value
+            dp_view_candidate = candidate_view[: capacity - memory_item]
+            torch.add(dp_view[:-memory_item], runtime_item, out=dp_view_candidate)
+            # Take the highest - either previous (without current) or with current
+            torch.maximum(
+                dp_view[memory_item:], dp_view_candidate, out=dp_view[memory_item:]
+            )
+
+        # Store the left profile
+        left_dp_local.copy_(dp_view)
+
+        # Right part
+        dp_view.zero_()
+        for index in right_items:
+            memory_item = q_memory[index]
+            runtime_item = runtimes[index]
+
+            if memory_item == 0:
+                dp_view.add_(runtime_item)
+                continue
+
+            if memory_item >= capacity:
+                continue
+
+            dp_view_candidate = candidate_view[: capacity - memory_item]
+            torch.add(dp_view[:-memory_item], runtime_item, out=dp_view_candidate)
+            torch.maximum(
+                dp_view[memory_item:], dp_view_candidate, out=dp_view[memory_item:]
+            )
+
+        # Store the reversed right profile
+        right_dp_local.copy_(dp_view.flip(-1))
+
+        # In-place compute item-wise sum of left and right to pick the split point where the sum is highest
+        left_dp_local.add_(right_dp_local)
+
+        # Pick the index of highest value of a pair, which we then use as a split point
+        best_split = int(torch.argmax(left_dp_local).item())
+
+        left_capacity = best_split
+        right_capacity = capacity - best_split
+
+        # Clamp (might be removed if we're 100% sure that there is no edge case that will mess up the indices math)
+        if left_capacity < 0:
+            left_capacity = 0
+        if right_capacity < 0:
+            right_capacity = 0
+        if left_capacity > q_max_memory:
+            left_capacity = q_max_memory
+        if right_capacity > q_max_memory:
+            right_capacity = q_max_memory
+
+        # Push right then left, so left is processed next
+        stack.append((right_start, right_end, right_capacity))
+        stack.append((left_start, left_end, left_capacity))
+
+    saved_items = sorted(saved_items)
+    recomputable_items = sorted(recomputable_items)
 
     max_runtime = sum(runtime[i] for i in saved_items)
-
     recomputable_items.reverse()
-
     return max_runtime, saved_items, recomputable_items
-
-
-def dp_knapsack_recurse(
-    memory_indices, quantized_max_memory, quantized_memory, runtimes
-):
-    if len(memory_indices) == 0:
-        return [], []
-    if len(memory_indices) == 1:
-        if quantized_memory[memory_indices[0]] <= quantized_max_memory and runtimes[memory_indices[0]] > 0.0:
-            return memory_indices, []
-        else:
-            return [], memory_indices
-
-    memory_split = len(memory_indices) // 2
-    left_part_memory = memory_indices[memory_split:]
-    right_part_memory = memory_indices[:memory_split]
-
-    # sliding window: for each memory budget, compute dp profile for a half using only a previous one
-    prev_dp_profile = torch.zeros(
-        quantized_max_memory + 1, dtype=torch.float32, device="cpu"
-    )
-    dp_profile = prev_dp_profile
-    for i in left_part_memory:
-        current_memory = quantized_memory[i]
-        current_runtime = runtimes[i]
-
-        if current_memory == 0:
-            dp_profile = prev_dp_profile + current_runtime
-        else:
-            dp_profile[current_memory:] = torch.maximum(
-                prev_dp_profile[current_memory:],
-                prev_dp_profile[:-current_memory] + current_runtime,
-            )
-        prev_dp_profile = dp_profile
-
-    left_part_dp = dp_profile
-
-    prev_dp_profile = torch.zeros(
-        quantized_max_memory + 1, dtype=torch.float32, device="cpu"
-    )
-    dp_profile = prev_dp_profile
-    for i in right_part_memory:
-        current_memory = quantized_memory[i]
-        current_runtime = runtimes[i]
-
-        if current_memory == 0:
-            dp_profile = prev_dp_profile + current_runtime
-        else:
-            dp_profile[current_memory:] = torch.maximum(
-                prev_dp_profile[current_memory:],
-                prev_dp_profile[:-current_memory] + current_runtime,
-            )
-        prev_dp_profile = dp_profile
-
-    right_part_dp = dp_profile.flip(-1)
-
-    _, next_memory_split = torch.max(left_part_dp + right_part_dp, dim=0)
-
-    saved_items_left, recomputable_items_left = dp_knapsack_recurse(
-        memory_indices=left_part_memory,
-        quantized_max_memory=next_memory_split,
-        quantized_memory=quantized_memory,
-        runtimes=runtimes,
-    )
-
-    saved_items_right, recomputable_items_right = dp_knapsack_recurse(
-        memory_indices=right_part_memory,
-        quantized_max_memory=quantized_max_memory - next_memory_split,
-        quantized_memory=quantized_memory,
-        runtimes=runtimes,
-    )
-
-    return (
-        saved_items_left + saved_items_right,
-        recomputable_items_left + recomputable_items_right,
-    )
