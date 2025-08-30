@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
+#include <fmt/core.h>
 
 using namespace torch;
 
@@ -259,6 +260,33 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 }
 
 // XPU module initialization
+inline std::string uuid_to_string(const char* uuid_bytes) {
+  // UUIDs are a 128-bit label. CUDA/HIP and XPU store this as char[16].
+  // For string representation, the code here expands this to
+  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+  return fmt::format(
+      "{:02x}{:02x}{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+      (uint8_t)uuid_bytes[0],
+      (uint8_t)uuid_bytes[1],
+      (uint8_t)uuid_bytes[2],
+      (uint8_t)uuid_bytes[3],
+      (uint8_t)uuid_bytes[4],
+      (uint8_t)uuid_bytes[5],
+      (uint8_t)uuid_bytes[6],
+      (uint8_t)uuid_bytes[7],
+      (uint8_t)uuid_bytes[8],
+      (uint8_t)uuid_bytes[9],
+      (uint8_t)uuid_bytes[10],
+      (uint8_t)uuid_bytes[11],
+      (uint8_t)uuid_bytes[12],
+      (uint8_t)uuid_bytes[13],
+      (uint8_t)uuid_bytes[14],
+      (uint8_t)uuid_bytes[15]);
+}
 
 static void registerXpuDeviceProperties(PyObject* module) {
   // Add _xpuDevicePropertires class to torch._C
@@ -297,6 +325,22 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #endif
   auto m = py::handle(module).cast<py::module>();
 
+  struct XPUuuid {
+    XPUuuid() = default;
+    XPUuuid(std::array<unsigned char, 16> bytes) : bytes(bytes) {}
+    std::array<unsigned char, 16> bytes{};
+  };
+
+  py::class_<XPUuuid>(m, "_XPUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const XPUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes.begin(), uuid.bytes.end());
+          })
+      .def("__str__", [](const XPUuuid& uuid) {
+        return uuid_to_string(reinterpret_cast<const char*>(uuid.bytes.data()));
+      });
+
 #define DEFINE_READONLY_MEMBER(member) \
   def_readonly(#member, &DeviceProp::member)
 
@@ -328,6 +372,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
+      // .def_property_readonly("uuid", [](const DeviceProp& prop) {
+      //   return XPUuuid{};
+      // })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
