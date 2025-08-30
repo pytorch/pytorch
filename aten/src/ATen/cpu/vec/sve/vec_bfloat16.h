@@ -155,6 +155,9 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> atanh() const;
   Vectorized<BFloat16> atan2(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> copysign(const Vectorized<BFloat16>& sign) const;
+  Vectorized<BFloat16> erf_u20() const {
+    return erf();
+  }
   Vectorized<BFloat16> erf() const;
   Vectorized<BFloat16> erfc() const;
   Vectorized<BFloat16> erfinv() const;
