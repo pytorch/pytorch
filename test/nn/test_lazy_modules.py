@@ -521,6 +521,145 @@ class TestLazyModules(TestCase):
             (32,),
         )
 
+    @suppress_warnings
+    def test_lazy_groupnorm(self):
+        num_channels = 8
+        num_groups = 4
+
+        for affine in [True, False]:
+            module = nn.LazyGroupNorm(num_groups, affine=affine)
+
+            if affine:
+                self.assertIsInstance(module.weight, UninitializedParameter)
+                self.assertIsInstance(module.bias, UninitializedParameter)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+
+            input = torch.ones(5, num_channels, 7, 7)
+            output = module(input)
+
+            self.assertIsInstance(module, nn.GroupNorm)
+            self.assertNotIsInstance(module, nn.LazyGroupNorm)
+
+
+            if affine:
+                self.assertNotIsInstance(module.weight, UninitializedParameter)
+                self.assertNotIsInstance(module.bias, UninitializedParameter)
+
+                self.assertIsInstance(module.weight, Parameter)
+                self.assertIsInstance(module.bias, Parameter)
+
+                self.assertTrue(module.weight.shape == (num_channels, ))
+                self.assertTrue(module.bias.shape == (num_channels, ))
+
+                self.assertEqual(module.weight, torch.ones(num_channels))
+                self.assertEqual(module.bias, torch.zeros(num_channels))
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+
+            self.assertEqual(output, torch.nn.functional.group_norm(input, num_groups, module.weight, module.bias))
+
+
+    @suppress_warnings
+    def test_lazy_groupnorm_divisibility_exception(self):
+        num_channels = 7
+        num_groups = 4
+
+        assert num_channels % num_groups != 0
+
+        module = nn.LazyGroupNorm(num_groups, num_channels)
+        input = torch.ones(5, num_channels, 7, 7)
+
+        with self.assertRaisesRegex(ValueError, "num_channels must be divisible by num_groups"):
+            module(input)
+
+
+    @suppress_warnings
+    def test_lazy_groupnorm_pickle(self):
+        num_channels = 8
+        num_groups = 4
+
+        for affine in [True, False]:
+            module = nn.LazyGroupNorm(num_groups, affine=affine)
+
+            module = pickle.loads(pickle.dumps(module))
+            self.assertIsInstance(module, nn.LazyGroupNorm)
+
+            if affine:
+                self.assertIsInstance(module.weight, UninitializedParameter)
+                self.assertIsInstance(module.bias, UninitializedParameter)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+
+            input = torch.ones(5, num_channels, 7, 7)
+            module(input) # fully materialized
+            module = pickle.loads(pickle.dumps(module))
+
+            self.assertNotIsInstance(module, nn.LazyGroupNorm)
+            self.assertIsInstance(module, nn.GroupNorm)
+
+            if affine:
+                self.assertNotIsInstance(module.weight, UninitializedParameter)
+                self.assertNotIsInstance(module.bias, UninitializedParameter)
+
+                self.assertIsInstance(module.weight, Parameter)
+                self.assertIsInstance(module.bias, Parameter)
+
+                self.assertTrue(module.weight.shape == (num_channels, ))
+                self.assertTrue(module.bias.shape == (num_channels, ))
+
+                self.assertEqual(module.weight, torch.ones(num_channels))
+                self.assertEqual(module.bias, torch.zeros(num_channels))
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+
+    def test_lazy_groupnorm_reset_parameters(self):
+        num_channels = 8
+        num_groups = 4
+
+        module = nn.LazyGroupNorm(num_groups, affine=False)
+        self.assertFalse(module.has_uninitialized_params())
+        module.reset_parameters()
+        self.assertIsNone(module.weight)
+        self.assertIsNone(module.bias)
+
+        input = torch.ones(5, num_channels, 7, 7)
+        module(input) # fully materialized
+
+        module.reset_parameters()
+        self.assertIsNone(module.weight)
+        self.assertIsNone(module.bias)
+
+        module = nn.LazyGroupNorm(num_groups, affine=True)
+        self.assertTrue(module.has_uninitialized_params())
+        module.reset_parameters()
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        self.assertIsInstance(module.bias, UninitializedParameter)
+
+        input = torch.ones(5, num_channels, 7, 7)
+        module(input) # fully materialized
+
+        module.reset_parameters()
+        self.assertIsInstance(module.weight, Parameter)
+        self.assertIsInstance(module.bias, Parameter)
+        self.assertNotIsInstance(module.weight, UninitializedParameter)
+        self.assertNotIsInstance(module.bias, UninitializedParameter)
+        self.assertEqual(module.weight.shape, (num_channels, ))
+        self.assertEqual(module.bias.shape, (num_channels, ))
+        self.assertEqual(module.weight, torch.ones(num_channels))
+        self.assertEqual(module.bias, torch.zeros(num_channels))
+
+
+
+
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
