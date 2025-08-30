@@ -15,7 +15,9 @@ from ..cpu_vec_isa import (
     VecAVX512,
     VecISA,
     VecNEON,
+    VecSVE128,
     VecSVE256,
+    VecSVE512,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -222,7 +224,6 @@ inline void {{kernel_name}}(
     def is_woq_int4(self):
         return False
 
-
 @dataclasses.dataclass
 class CppMicroGemmConfig:
     input_dtype: torch.dtype
@@ -425,7 +426,23 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
+        VecSVE128,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
         VecSVE256,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE512,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
@@ -1035,6 +1052,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // we cache K * {{block_n}} elements of dequantized B
     {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
     const auto buf_size = K * {{block_n}};
+
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
@@ -1374,7 +1392,6 @@ class CppMicroBrgemm(CppMicroGemm):
     def get_b_layout(self):
         assert self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()
         return LayoutType.VNNI2
-
 
 def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
