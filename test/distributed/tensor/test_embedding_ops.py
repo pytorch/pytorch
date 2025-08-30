@@ -11,6 +11,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -137,6 +138,7 @@ class TestEmbeddingOp(DTensorTestBase):
         )
         self.assertEqual(local_output, sharded_output.full_tensor())
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_sharded_embedding_colwise(self):
         mesh = self.build_device_mesh()
@@ -159,6 +161,7 @@ class TestEmbeddingOp(DTensorTestBase):
                 mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
             )
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_sharded_embedding_rowwise(self):
         mesh = self.build_device_mesh()

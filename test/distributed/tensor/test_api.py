@@ -13,6 +13,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -45,6 +46,7 @@ class DTensorAPITest(DTensorTestBase):
         return 4
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_distribute_tensor_rank(self):
         comm_mode = CommDebugMode()
 
@@ -133,6 +135,7 @@ class DTensorAPITest(DTensorTestBase):
             distribute_tensor(dtensor, device_mesh, new_spec)
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_distribute_tensor_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
         input_sizes_and_shard_dims = [
