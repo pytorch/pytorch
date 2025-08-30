@@ -81,7 +81,8 @@ fi
 
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
-export PATCHELF_BIN=/usr/local/bin/patchelf
+PATCHELF_BIN="$(command -v patchelf)"
+export PATCHELF_BIN
 patchelf_version=$($PATCHELF_BIN --version)
 echo "patchelf version: " $patchelf_version
 if [[ "$patchelf_version" == "patchelf 0.9" ]]; then
