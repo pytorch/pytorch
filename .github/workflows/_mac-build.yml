@@ -71,7 +71,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@malfet-patch-1
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Set xcode version
         env:
