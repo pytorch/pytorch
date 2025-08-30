@@ -1672,6 +1672,55 @@ class TestFSDPOptimState(FSDPTest):
             state_dicts[0], state_dicts[1], check_same_param_keys=True
         )
 
+    @skip_if_lt_x_gpu(4)
+    def test_optim_state_with_specific_param_group(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                torch.manual_seed(0)
+                self.net1 = nn.Sequential(nn.Linear(2, 4), nn.ReLU())
+
+            def forward(self, x):
+                return self.net1(x)
+
+        # place the model / optim on the latter half of the ranks
+        total_ranks = dist.get_world_size()
+        target_ranks = list(range(total_ranks // 2, total_ranks))
+        current_rank = dist.get_rank()
+        is_fsdp_rank = current_rank >= total_ranks // 2
+        mesh = dist.DeviceMesh(
+            "cuda",
+            mesh=target_ranks,
+            mesh_dim_names=("shard",),
+        )
+        if is_fsdp_rank:
+            model = SimpleModel().to(current_rank)
+            model = FSDP(
+                model,
+                device_mesh=mesh,
+            )
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            batch = torch.rand(3, 2, device=torch.device("cuda"))
+            for param in model.parameters():
+                if param.requires_grad:
+                    t = torch.zeros_like(param)
+                    param.grad = torch.autograd.Variable(t)
+            optim.step()
+            loss = model(batch).sum()
+            loss.backward()
+
+            # test FSDP.optim_state_dict with specific process group
+            with FSDP.state_dict_type(
+                model,
+                StateDictType.SHARDED_STATE_DICT,
+                ShardedStateDictConfig(),
+                ShardedOptimStateDictConfig(offload_to_cpu=False),
+            ):
+                osd = FSDP.optim_state_dict(model, optim, group=mesh.get_group())
+                ref_osd = optim.state_dict()
+                self._check_same_state(osd, ref_osd, check_same_param_keys=False)
+        dist.barrier()
+
     @skip_if_lt_x_gpu(2)
     def test_optim_state_without_param_groups(self):
         class SimpleModel(torch.nn.Module):
