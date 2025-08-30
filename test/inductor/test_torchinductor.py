@@ -250,7 +250,6 @@ def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
         )
-        
         libtest.impl(id_, fn, "CPU")
         libtest.impl(id_, fn, "CUDA")
         libtest.impl(id_, fn, "XPU")
