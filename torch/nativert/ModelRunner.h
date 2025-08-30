@@ -32,7 +32,17 @@ class TORCH_API ModelRunner {
   std::vector<c10::IValue> runWithFlatInputsAndOutputs(
       std::vector<c10::IValue> flatInputs);
 
+  std::shared_ptr<Weights> loadWeightsDefault(
+      Graph& graph,
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>& reader);
+
  private:
+  std::unordered_map<std::string, std::string> getPayloadConfig(
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+          pytorchStreamReader,
+      std::string_view configFormat,
+      const std::string& modelName);
+
   // original non-delegated graph from torch.export()
   std::shared_ptr<Graph> graph_;
 
@@ -42,5 +52,9 @@ class TORCH_API ModelRunner {
   ITreeSpec outputSpec_;
 
   torch::_export::ExportedProgram exportedProgram_;
+
+  std::unordered_map<std::string, std::string> tensorPaths_;
+
+  std::unordered_map<std::string, std::string> constantPaths_;
 };
 } // namespace torch::nativert
