@@ -551,8 +551,8 @@ class TestLazyModules(TestCase):
                 self.assertIsInstance(module.weight, Parameter)
                 self.assertIsInstance(module.bias, Parameter)
 
-                self.assertTrue(module.weight.shape == (num_channels, ))
-                self.assertTrue(module.bias.shape == (num_channels, ))
+                self.assertEqual(module.weight.shape, (num_channels,))
+                self.assertEqual(module.bias.shape, (num_channels,))
 
                 self.assertEqual(module.weight, torch.ones(num_channels))
                 self.assertEqual(module.bias, torch.zeros(num_channels))
@@ -613,8 +613,8 @@ class TestLazyModules(TestCase):
                 self.assertIsInstance(module.weight, Parameter)
                 self.assertIsInstance(module.bias, Parameter)
 
-                self.assertTrue(module.weight.shape == (num_channels,))
-                self.assertTrue(module.bias.shape == (num_channels,))
+                self.assertEqual(module.weight.shape, (num_channels,))
+                self.assertEqual(module.bias.shape, (num_channels,))
 
                 self.assertEqual(module.weight, torch.ones(num_channels))
                 self.assertEqual(module.bias, torch.zeros(num_channels))
