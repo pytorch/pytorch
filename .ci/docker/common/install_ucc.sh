@@ -44,8 +44,12 @@ function install_ucc() {
 
   ./autogen.sh
 
-  # We only run distributed tests on Tesla M60 and A10G
-  NVCC_GENCODE="-gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_86,code=compute_86"
+  if [[ -n "$CUDA_VERSION"  && $CUDA_VERSION == 13* ]]; then
+    NVCC_GENCODE="-gencode=arch=compute_86,code=compute_86"
+  else
+    # We only run distributed tests on Tesla M60 and A10G
+    NVCC_GENCODE="-gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_86,code=compute_86"
+  fi
 
   if [[ -n "$ROCM_VERSION" ]]; then
     if [[ -n "$PYTORCH_ROCM_ARCH" ]]; then
