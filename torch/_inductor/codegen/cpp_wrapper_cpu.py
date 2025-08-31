@@ -735,9 +735,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return [s[i : i + length] for i in range(0, len(s), length)]
 
         if len(arg_str_val) > max_truncate_length:
-            serialized_in_spec_strs = truncate_string(arg_str_val, max_truncate_length)
+            truncated_strs = truncate_string(arg_str_val, max_truncate_length)
             self.prefix.writeline(f"{arg_name} =")
-            for truncate_str in serialized_in_spec_strs:
+            for truncate_str in truncated_strs:
                 self.prefix.writeline(f'R"({truncate_str})"')
             self.prefix.writeline(";")
         else:
