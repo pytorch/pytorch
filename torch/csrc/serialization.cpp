@@ -359,7 +359,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
+    cpu_data = std::make_unique<char[]>(nbytes);
     data = (uint8_t*)cpu_data.get();
   }
 

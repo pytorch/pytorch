@@ -312,6 +312,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_module: Optional[GraphLowering] = None,
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
+        fx_wrapper: bool = False,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -392,8 +393,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
-        # See `ProxyExecutor Design Note` in ir.py for more details
-        self.extern_kernel_nodes: list[ir.ExternKernelNode] = []
 
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
@@ -413,6 +412,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
+        self.fx_wrapper = fx_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -2018,7 +2018,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.device_ops = get_device_op_overrides(self.device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(
-            self.device_type, self.cpp_wrapper
+            self.device_type, self.cpp_wrapper, self.fx_wrapper
         )
         assert wrapper_code_gen_cls is not None, (
             f"Device {self.device_type} not supported"

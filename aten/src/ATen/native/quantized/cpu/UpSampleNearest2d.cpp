@@ -53,7 +53,7 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
-  std::unique_ptr<int64_t []> input_offset_arr(new int64_t[output_width]);
+  auto input_offset_arr = std::make_unique<int64_t[]>(output_width);
   int64_t* input_offset = input_offset_arr.get();
 
   for (const auto w2 : c10::irange(output_width)) {

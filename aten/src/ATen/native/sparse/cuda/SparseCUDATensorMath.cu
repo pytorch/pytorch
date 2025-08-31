@@ -800,7 +800,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   Tensor indices_dim1 = indices[1].to(ScalarType::Int);
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
-  std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
+  auto mat_el_end_indices_host = std::make_unique<int64_t[]>(num_matrices);
 
   {
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
