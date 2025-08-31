@@ -704,12 +704,17 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune_gemm_backends="TRITON")
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_baddmm(self, search_space):
-        if TEST_WITH_ROCM and get_triton_version() == (3, 4) and search_space == "EXHAUSTIVE":
+        if (
+            TEST_WITH_ROCM
+            and get_triton_version() == (3, 4)
+            and search_space == "EXHAUSTIVE"
+        ):
             self.skipTest(
                 "To investigate. Error info: RuntimeError: PassManager::run failed"
             )
         if search_space == "EXHAUSTIVE" and GPU_TYPE == "xpu":
             raise unittest.SkipTest("EXHAUSTIVE search take too much time on XPU")
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
