@@ -4546,7 +4546,7 @@ class TestCudaMallocAsync(TestCase):
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
         with self.assertRaises(ValueError):

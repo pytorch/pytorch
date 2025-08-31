@@ -1076,7 +1076,9 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
 
 
 # Keep for BC only
-_set_allocator_settings = torch._C._accelerator_setAllocatorSettings
+_set_allocator_settings = deprecated(
+    "Use torch._C._accelerator_setAllocatorSettings instead.", category=FutureWarning
+)(torch._C._accelerator_setAllocatorSettings)
 
 
 def get_allocator_backend() -> str:
