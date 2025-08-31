@@ -129,6 +129,39 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_fullgraph_skip_error_torch_dispatch_mode(self):
+        """Test that Dynamo errors when trying to skip frames with fullgraph=True due to TorchDispatchMode."""
+        
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        class ChecksumFoo(TorchDispatchMode):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                if func is torch.ops.mylib.foo.default:
+                    pass  # Just a placeholder
+                return func(*args, **kwargs)
+
+        @torch.compile(fullgraph=True)
+        def g(x):
+            return x.sin().cos()
+
+        x = torch.randn(3)
+
+        with ChecksumFoo():
+            foo(x)
+            # This should raise an error because fullgraph=True requires compilation
+            # but TorchDispatchMode causes Dynamo to skip the frame
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "TorchDispatchMode with fullgraph=True.*Dynamo attempted to skip frame due to TorchDispatchMode"
+            ):
+                g(x)
+
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod

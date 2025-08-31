@@ -1801,16 +1801,35 @@ class CatchErrorsWrapper:
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
             has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
+        # Check for reasons to skip the frame
+        should_skip_for_torch_dispatch = (
+            should_skip_due_to_torch_dispatch_mode()
+            and not getattr(self._torchdynamo_orig_backend, "_export", False)
+        )
+        
         if (
             # TODO: the first condition is not covered by any test
             has_started_execution
             or is_skipfile
             or config.disable
-            or (
-                should_skip_due_to_torch_dispatch_mode()
-                and not getattr(self._torchdynamo_orig_backend, "_export", False)
-            )
+            or should_skip_for_torch_dispatch
         ):
+            # Check if we're trying to skip due to TorchDispatchMode with fullgraph=True
+            if should_skip_for_torch_dispatch and _get_error_on_graph_break():
+                from . import exc
+                exc.unimplemented_v2(
+                    gb_type="TorchDispatchMode with fullgraph=True",
+                    context="Dynamo attempted to skip frame due to TorchDispatchMode",
+                    explanation="fullgraph=True was specified, which requires compilation of the entire function. "
+                    "However, a TorchDispatchMode is active, which is not supported with torch.compile. "
+                    "TorchDispatchMode causes Dynamo to skip the frame and fall back to eager execution.",
+                    hints=[
+                        "Remove the TorchDispatchMode context manager if compilation is required.",
+                        "Use fullgraph=False to allow partial compilation with graph breaks.",
+                        "Consider implementing the TorchDispatchMode logic within the compiled region if possible.",
+                    ],
+                )
+            
             if log.isEnabledFor(logging.DEBUG):
                 if has_started_execution:
                     skip_reason = "traced frame already"
