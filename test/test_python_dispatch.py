@@ -594,12 +594,18 @@ class TestPythonRegistration(TestCase):
         import re
 
         # Create first library
-        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER
-        lib1.define("duplicate_op(Tensor x) -> Tensor")
+        # NOTE: Using Library directly instead of _scoped_library because this test
+        # specifically verifies filename tracking in error messages, and _scoped_library
+        # would report library.py locations instead of the actual test file locations
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: TOR901
+        try:
+            lib1.define("duplicate_op(Tensor x) -> Tensor")
 
-        # Try to create another library with same namespace - this should trigger error
-        with self.assertRaises(RuntimeError) as cm:
-            lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER
+            # Try to create another library with same namespace - this should trigger error
+            with self.assertRaises(RuntimeError) as cm:
+                lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER  # noqa: TOR901
+        finally:
+            lib1._destroy()
 
         error_msg = str(cm.exception)
 
