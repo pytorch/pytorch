@@ -38,7 +38,9 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     tf32_on_and_off,
 )
@@ -1451,6 +1453,12 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(
+        # for archs where this isn't lowered to flash attention, the math
+        # backend will be used and it doesn't work for bfloat16
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Some archs don't support SDPA with bfloat16",
+    )
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1723,6 +1731,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
+    )
     def test_fallback_kernel_with_symexpr_output(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -2470,7 +2481,6 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
         class Model(nn.Module):
@@ -4197,7 +4207,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    # @skipIfXpu(msg="torch.xpu.memory_allocated not supported yet")
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != GPU_TYPE:
@@ -4293,6 +4302,9 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
+    )
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6772,6 +6784,49 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
+    def test_custom_op_in_subgraph(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo_add1",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo_add1", "CompositeExplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo_add1", lib=lib)
+            def foo_add1_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            torch.library.define(
+                "mylib::foo_add2",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo_add2", "CompositeExplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo_add2", lib=lib)
+            def foo_add2_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 2
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(
+                        x.shape[0] < 5,
+                        torch.ops.mylib.foo_add1,
+                        torch.ops.mylib.foo_add2,
+                        (x,),
+                    )
+
+            list_example_inputs = [
+                (torch.ones(6, device=self.device),),
+                (torch.ones(3, device=self.device),),
+            ]
+            self.check_model_with_multiple_inputs(
+                M(), list_example_inputs, dynamic_shapes=({0: Dim.DYNAMIC},)
+            )
+
     def test_clamp_decomposition(self):
         class Model1(torch.nn.Module):
             def forward(self, x):
@@ -6839,12 +6894,19 @@ class AOTInductorTestsTemplate:
                 },
             )
 
+        def get_module_ext_type():
+            if IS_WINDOWS:
+                return "pyd"
+            else:
+                return "so"
+
         with zipfile.ZipFile(package_path, "r") as zip_ref:
             all_files = zip_ref.namelist()
             base_dir = "test_model.wrapper/data/aotinductor/model/test_model"
+            ext_type = get_module_ext_type()
             self.assertTrue(f"{base_dir}.wrapper.cpp" in all_files)
             self.assertTrue(f"{base_dir}.kernel.cpp" in all_files)
-            self.assertTrue(f"{base_dir}.wrapper.so" in all_files)
+            self.assertTrue(f"{base_dir}.wrapper.{ext_type}" in all_files)
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
