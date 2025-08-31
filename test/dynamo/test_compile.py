@@ -31,6 +31,17 @@ class InPlaceCompilationTests(TestCase):
         model(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensor_item(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            x = torch.tensor([5])
+            torch._check(x.item() == 5)
+            return x
+
+        x = f()
+        self.assertEqual(x.item(), 5)
+
     def test_overwrite_call_impl(self):
         torch._dynamo.reset()
         model = ToyModel()
