@@ -10730,6 +10730,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_pattern_matcher_unbacked(self):
+        @torch.compile(fullgraph=True)
+        def get_mask(W: torch.Tensor, percentage_nonzeros: torch.Tensor):
+            total_elements = W.numel()
+            k = total_elements * percentage_nonzeros
+            top_k_indices = torch.topk(torch.abs(W).flatten(), k.int())[1]
+            mask = torch.zeros(total_elements, dtype=torch.bool, device=W.device)
+            mask.scatter_(0, top_k_indices, True)
+            mask = mask.view(W.shape)
+            return mask
+
+        x = torch.randn((128, 64), device=self.device)
+        p = torch.tensor(0.50, device=self.device)
+        get_mask(x, p)
+
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
