@@ -71,7 +71,7 @@ def has_triton_tma_device() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -103,7 +103,7 @@ def has_triton_stable_tma_api() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 

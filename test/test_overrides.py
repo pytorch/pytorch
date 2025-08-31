@@ -639,9 +639,6 @@ class TestTorchFunctionOverride(TestCase):
                 # Fallback
                 return torch.tensor(42.0)
 
-            def __index__(self):
-                return self.value
-
         # Test with F.pad which takes int list
         import torch.nn.functional as F
         x = torch.randn(2, 3)
@@ -674,9 +671,6 @@ class TestTorchFunctionOverride(TestCase):
                 if func.__name__ == 'layer_norm':
                     return torch.ones_like(args[0])
                 return torch.tensor(42.0)
-
-            def __float__(self):
-                return self.value
 
         import torch.nn.functional as F
         x = torch.randn(2, 3, 4)

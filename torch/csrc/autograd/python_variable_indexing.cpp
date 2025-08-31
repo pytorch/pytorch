@@ -63,7 +63,8 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 
 // We only go one deep, because that's all torchdim needs (it supports
 // a tuple/list of FCDs which triggers a split behavior, but you can
-// only do it at the top level).
+// only do it at the top level) and it's all the dispatcher will do
+// as well.
 static bool sequence_has_torch_function(PyObject* seq) {
   auto length = PySequence_Length(seq);
   if (length < 0) {
