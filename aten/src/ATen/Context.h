@@ -183,7 +183,7 @@ class TORCH_API Context {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
   static bool hasXLA() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::XLA);
+    return detail::getXLAHooks().hasXLA();
   }
   static bool hasXPU() {
     return detail::getXPUHooks().hasXPU();

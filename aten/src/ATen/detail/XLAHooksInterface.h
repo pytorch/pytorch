@@ -44,10 +44,6 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get XLA generator without torch_xla library. ", XLA_HELP);
   }
 
-  virtual DeviceIndex getNumDevices() const {
-    return 0;
-  }
-
   virtual DeviceIndex current_device() const {
     TORCH_CHECK(false, "Cannot get current device on XLA without torch_xla library. ", XLA_HELP);
   }
