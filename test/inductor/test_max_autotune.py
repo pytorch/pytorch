@@ -700,6 +700,9 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune_gemm_backends="TRITON")
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_baddmm(self, search_space):
+        if search_space == "EXHAUSTIVE" and GPU_TYPE == "xpu":
+            raise unittest.SkipTest("EXHAUSTIVE search take too much time on XPU")
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1940,6 +1943,8 @@ class TestMaxAutotuneSubproc(TestCase):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
+        if search_space == "EXHAUSTIVE" and GPU_TYPE == "xpu":
+            raise unittest.SkipTest("EXHAUSTIVE search take too much time on XPU")
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
