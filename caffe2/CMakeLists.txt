@@ -1062,7 +1062,7 @@ elseif(USE_CUDA)
         UNFUSE_FMA                      # Addressing issue #121558
       )
     target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
-    target_include_directories(torch_cuda PUBLIC
+    target_include_directories(torch_cuda SYSTEM PUBLIC
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
@@ -1122,6 +1122,11 @@ elseif(USE_CUDA)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
+  # Set driver api defined for PeerToPeerAccess
+  if(NOT WIN32)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1")
+  endif()
+
 endif()
 
 if(USE_XPU)
