@@ -14,7 +14,7 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,12 +35,14 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._traceback import CapturedTraceback
+from torch.utils._triton import has_triton
 
 from ..utils import remove_proxy_from_state_dict
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     ArgumentKind,
     BufferMutationSpec,
+    ComplexValue,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -256,6 +258,31 @@ def deserialize_device(d: Device) -> torch.device:
     return torch.device(type=d.type, index=d.index)
 
 
+def deserialize_size(sizes: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_size in sizes:
+        assert sym_int_size.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_size.type}"
+        )
+    return tuple(sym_int_size.as_int for sym_int_size in sizes)
+
+
+def deserialize_stride(strides: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_stride in strides:
+        assert sym_int_stride.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_stride.type}"
+        )
+    return tuple(sym_int_stride.as_int for sym_int_stride in strides)
+
+
+def deserialize_scalar_type(st: ScalarType) -> torch.dtype:
+    return _SERIALIZE_TO_TORCH_DTYPE[st]
+
+
+def deserialize_storage_offset(offset: SymInt) -> int:
+    assert offset.type == "as_int", f"Only as_int is supported, got {offset.type}"
+    return offset.as_int
+
+
 def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
     if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
         s = s.node.expr
@@ -326,7 +353,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
         requires_grad=t.requires_grad,
         device=Device(type=t.device.type, index=t.device.index),
         strides=[serialize_sym_int(s) for s in t.stride()],
-        storage_offset=serialize_sym_int(0),  # TODO needs to be fixed.
+        storage_offset=serialize_sym_int(t.storage_offset()),
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
@@ -645,6 +672,76 @@ class GraphModuleSerializer(metaclass=Final):
                     metadata=self.serialize_metadata(node),
                     is_hop_single_tensor_return=False,
                 )
+            elif (
+                node.target
+                is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
+            ):
+                assert has_triton(), "triton required to serialize triton kernels"
+                from triton.runtime.autotuner import Autotuner
+
+                meta_val = node.meta["val"]
+                assert isinstance(meta_val, dict)
+
+                output_keys = meta_val.keys()
+                output_indices = []
+
+                assert isinstance(node.kwargs["kernel_idx"], int)
+                kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
+                    node.kwargs["kernel_idx"]
+                )
+
+                if isinstance(kernel, Autotuner):
+                    assert len(kernel.configs) == 1
+                    num_warps = kernel.configs[0].num_warps
+                    assert kernel.configs[0].num_ctas == 1, (
+                        "serialization only supports num_ctas == 1"
+                    )
+                    kernel = kernel.fn
+                else:
+                    num_warps = 4
+
+                constexpr_keys = set()
+                for p in kernel.params:
+                    if p.is_constexpr:
+                        constexpr_keys.add(p.name)
+
+                found_constexpr = False
+                args_new = ()
+                i = 0
+
+                assert isinstance(node.kwargs["kwargs"], dict)
+                for k, v in node.kwargs["kwargs"].items():
+                    # don't serialize constexpr since they will
+                    # be embedded into the binary and don't
+                    # need to be passed around as attributes
+                    if k in constexpr_keys:
+                        found_constexpr = True
+                        continue
+
+                    assert not found_constexpr, (
+                        "non-constexpr args found after constexpr arg(s)"
+                    )
+
+                    if k in output_keys:
+                        output_indices.append(i)
+                    args_new += (v,)  # type: ignore[assignment]
+                    i += 1
+
+                assert isinstance(node.kwargs["grid"], list)
+                kwargs_new = {
+                    "name": kernel.fn.__name__,
+                    "grid": node.kwargs["grid"][0],
+                    "output_indices": output_indices,
+                    "num_warps": num_warps,
+                }
+
+                ex_node = Node(
+                    target=self.serialize_operator(node.target),
+                    inputs=self.serialize_hoo_inputs(args_new, kwargs_new),
+                    outputs=self.serialize_hoo_outputs(node),
+                    metadata=self.serialize_metadata(node),
+                    is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
+                )
             else:
                 ex_node = Node(
                     target=self.serialize_operator(node.target),
@@ -952,6 +1049,10 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(as_int=arg)
         elif type(arg) is float:
             return Argument.create(as_float=arg)
+        elif type(arg) is complex:
+            return Argument.create(
+                as_complex=ComplexValue(real=arg.real, imag=arg.imag)
+            )
         elif arg is None:
             return Argument.create(as_none=True)
         elif isinstance(arg, (list, tuple)):
@@ -1516,6 +1617,17 @@ class GraphModuleSerializer(metaclass=Final):
                     outputs.append(self.serialize_output(name, element_meta_val))
 
             return outputs
+        elif isinstance(meta_val, dict):
+            tensor_args = []
+            # use the dict key as the idx
+            for idx, meta in meta_val.items():
+                if not isinstance(meta, torch.Tensor):
+                    raise SerializeError(
+                        f"Serialize list output with type {type(meta)} nyi"
+                    )
+                name = self._output_node_name_at_index(node, idx)
+                tensor_args.append(self.serialize_tensor_output(name, meta))
+            return [Argument.create(as_tensors=tensor_args)]
         else:
             return [self.serialize_output(node.name, meta_val)]
 
@@ -2042,7 +2154,13 @@ class GraphModuleDeserializer(metaclass=Final):
 
             fx_node = self.graph.create_node("call_function", target, args, {}, name)
             self.deserialize_sym_op_outputs(serialized_node, fx_node)
-
+        elif (
+            target
+            is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
+        ):
+            raise SerializeError(
+                "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional"
+            )
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             metadata = self.deserialize_metadata(serialized_node.metadata)
@@ -2468,6 +2586,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return inp.as_bool
         elif typ_ == "as_string":
             return inp.as_string
+        elif typ_ == "as_complex":
+            return complex(inp.as_complex.real, inp.as_complex.imag)
         elif typ_ == "as_sym_int":
             return self.deserialize_sym_argument(inp.as_sym_int)
         elif typ_ == "as_sym_float":
@@ -3019,6 +3139,13 @@ def _dict_to_dataclass(cls, data):
     return data
 
 
+def _bytes_to_dataclass(cls: Any, artifact_bytes: bytes) -> Any:
+    artifact_str = artifact_bytes.decode("utf-8")
+    artifact_dict = json.loads(artifact_str)
+    artifact_dataclass = _dict_to_dataclass(cls, artifact_dict)
+    return artifact_dataclass
+
+
 def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: Optional[dict[str, int]] = None,
@@ -3026,10 +3153,8 @@ def deserialize(
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
     assert isinstance(artifact.exported_program, bytes)
-    exported_program_str = artifact.exported_program.decode("utf-8")
-    exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
+    serialized_exported_program = _bytes_to_dataclass(
+        ExportedProgram, artifact.exported_program
     )
     return ExportedProgramDeserializer(expected_opset_version).deserialize(
         serialized_exported_program,
@@ -3061,6 +3186,8 @@ def _canonicalize_graph(
         elif a.type == "as_string":
             return None
         elif a.type == "as_strings":
+            return None
+        elif a.type == "as_complex":
             return None
         elif a.type == "as_sym_int":
             return a.as_sym_int
