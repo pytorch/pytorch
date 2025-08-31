@@ -4692,6 +4692,7 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
         ]:
             # When doing native matmul, the codegen assumes the following loop order
+            # regardless of stride of A and B.
             #
             # for z:
             #  for y:

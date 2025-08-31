@@ -431,6 +431,9 @@ class BaseSchedulerNode:
     def is_reduction(self) -> bool:
         return False
 
+    def is_native_matmul(self) -> bool:
+        return False 
+
     def is_split_scan(self) -> bool:
         return False
 
@@ -1030,7 +1033,6 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-
         self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
@@ -1166,6 +1168,12 @@ class SchedulerNode(BaseSchedulerNode):
             f"{type(self.node)=}"
         )
         return bool(self.node.get_reduction_type())
+
+    def is_native_matmul(self) -> bool:
+        assert isinstance(self.node, ir.ComputedBuffer), (
+            f"{type(self.node)=}"
+        )
+        return self.node.get_reduction_type() == "dot"
 
     def is_split_scan(self) -> bool:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
@@ -1496,6 +1504,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self) -> bool:
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_native_matmul(self) -> bool:
+        return any(x.is_native_matmul() for x in self.snodes)
 
     @cache_on_self
     def is_split_scan(self) -> bool:

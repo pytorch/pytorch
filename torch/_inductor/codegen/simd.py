@@ -879,11 +879,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         try:
             new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
         except CantSplit:
+            # For debugging purpose in CI
             print("groups: ", groups)
             print("lengths: ", lengths)
             print("isnative: ", V.kernel.is_native_matmul)
             print("node_schedule: ", V.kernel.features.node_schedule)
-            print("node: ", V.kernel.features.node_schedule[0].node)
+            print("node0: ", V.kernel.features.node_schedule[0].node)
+            print("node1: ", V.kernel.features.node_schedule[1].node)
             raise CantSplit
 
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
@@ -1257,6 +1259,25 @@ class SIMDScheduling(BaseScheduling):
                     rnumel1,
                     rnumel2,
                 )
+            
+            if node1.is_native_matmul():
+                # 1. native matmul node fixes the loop order and keep the original order.
+                # C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) -> LoopBody keeps (z,y,x) order
+                # (see simplify_and_reorder in ir.py)
+                # 2. A kernel that includes native matmul always tile the loop as (z,y,x)
+                # (see get_tiling_and_scores in this file)
+                # 
+                # Given two, if there was other reduction node that has a different 
+                # three dimensional loop order without loop being merged. (so (y,z,x,r) order)
+                # _split_iteration_ranges([z,y,x,r], ([y,z,x],[r])) will fail. So don't fuse them.
+                group = (*node1.get_ranges()[0], *node1.get_ranges()[1])
+                if not all(
+                    SIMDKernel.is_compatible(group, n2.get_ranges()) 
+                    for n2 in node2.get_nodes()
+                ):
+                   why("invalid loop order and tiling for native matmul")
+                   return False
+ 
             return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
