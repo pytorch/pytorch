@@ -13,7 +13,7 @@ from torch.autograd import (
     _record_function_with_args_exit,
 )
 from torch.autograd.profiler import profile as _profile
-from torch.profiler import record_function
+from torch.profiler import kineto_available, record_function
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
