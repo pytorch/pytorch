@@ -1270,13 +1270,13 @@ class SIMDScheduling(BaseScheduling):
                 # Given two, if there was other reduction node that has a different 
                 # three dimensional loop order without loop being merged. (so (y,z,x,r) order)
                 # _split_iteration_ranges([z,y,x,r], ([y,z,x],[r])) will fail. So don't fuse them.
-                group = (*node1.get_ranges()[0], *node1.get_ranges()[1])
+                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
                 if not all(
-                    SIMDKernel.is_compatible(group, n2.get_ranges()) 
+                    SIMDKernel.is_compatible(tiling.values(), n2.get_ranges(), reduction_numel=rnumel1) 
                     for n2 in node2.get_nodes()
                 ):
-                   why("invalid loop order and tiling for native matmul")
-                   return False
+                    why("invalid loop order and tiling for native matmul")
+                    return False
  
             return reduction_can_fuse
 
