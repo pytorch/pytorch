@@ -1315,18 +1315,26 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-        ):
-            torch._scaled_mm(
+        def e5m2():
+            out = torch._scaled_mm(
                 x_fp8,
                 y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
+            return out
+
+        if torch.cuda.get_device_capability() == (9, 0):
+            out = e5m2()
+            self.assertEqual(out, torch.ones_like(out) * 128.)
+        else:
+            # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+            ):
+                e5m2()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
@@ -1565,12 +1573,12 @@ class TestFP8Matmul(TestCase):
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
-            return unittest.skip("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
+            raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
 
         device = "cuda"
         M, K, N = mkn
         if (recipe == "nvfp4" or recipe == "mxfp4") and K % 32 != 0:
-            return unittest.skip("K must be divisible by 32 for nvfp4/mxfp4 cublas gemm, skipping")
+            raise unittest.SkipTest("K must be divisible by 32 for nvfp4/mxfp4 cublas gemm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
         BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
@@ -1718,7 +1726,7 @@ class TestFP8Matmul(TestCase):
 
         elif test_case_name == "data_random_scales_from_data":
             if not K % BLOCK_SIZE == 0:
-                return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
+                raise unittest.SkipTest(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
             # random data, scales from data
             A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
