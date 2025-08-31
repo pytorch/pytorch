@@ -1260,17 +1260,18 @@ class SIMDScheduling(BaseScheduling):
                     rnumel2,
                 )
             
-            if node1.is_native_matmul():
-                # 1. native matmul node fixes the loop order and keep the original order.
-                # C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) -> LoopBody keeps (z,y,x) order
-                # (see simplify_and_reorder in ir.py)
-                # 2. A kernel that includes native matmul always tile the loop as (z,y,x)
-                # (see get_tiling_and_scores in this file)
-                # 
-                # Given two, if there was other reduction node that has a different 
-                # three dimensional loop order without loop being merged. (so (y,z,x,r) order)
-                # _split_iteration_ranges([z,y,x,r], ([y,z,x],[r])) will fail. So don't fuse them.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+            if reduction_can_fuse and node1.is_native_matmul():
+                # 1. A native matmul node keeps its original loop order.
+                #    For example: C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) keeps (z,y,x) order.
+                #    (see simplify_and_reorder in ir.py)
+                #
+                # 2. Triton kernels with native matmul always tile loops as (z,y,x)
+                #    (see get_tiling_and_scores in this file)
+                #
+                # 3. If a candidate node (node2) uses a different loop order (e.g., (y,z,x,r)),
+                #    its tiling is incompatible with native matmul tiling (z,y,x,r). 
+                #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
+                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1) 
                 if not all(
                     SIMDKernel.is_compatible(tiling.values(), n2.get_ranges(), reduction_numel=rnumel1) 
                     for n2 in node2.get_nodes()
