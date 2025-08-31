@@ -195,10 +195,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return nullptr;
   }
 
-  size_t get_offset() override {
-    return offset_;
-  }
-
   at::Tensor get_buffer(
       int rank,
       c10::IntArrayRef sizes,

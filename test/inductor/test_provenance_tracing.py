@@ -536,9 +536,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         # Extract last non-empty line
         return s.split("\n")[-2].strip()
 
-    @torch._inductor.config.patch(
-        {"fx_graph_cache": False, "trace.provenance_tracking_level": 2}
-    )
+    @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_cuda_and_triton
     def test_tlparse_kernel_stack_traces(self):
         device = "cuda"
@@ -570,21 +568,25 @@ class TestProvenanceTracingStackTraces(TestCase):
             ],
         }
 
-        with self._setup_provenance_capture() as payload_buffer:
+        compiled = torch.compile(model)
+        # should produce the same provenance if there's cache hit
+        for _ in range(2):
+            # reset cache
+            torch._dynamo.reset()
             reset_inductor_kernel_provenance_debug_handle()
-            compiled = torch.compile(model)
-            compiled(*example_inputs)
-            payload_content = payload_buffer.getvalue().strip()
-            if payload_content:
-                data = json.loads(payload_content)
-                self.assertEqual(set(data.keys()), set(expected.keys()))
-                for key, expected_lines in expected.items():
-                    actual_lines = [self.extract_code_line(s) for s in data[key]]
-                    self.assertEqual(
-                        sorted(actual_lines),
-                        sorted(expected_lines),
-                        f"Mismatch for key: {key}",
-                    )
+            with self._setup_provenance_capture() as payload_buffer:
+                compiled(*example_inputs)
+                payload_content = payload_buffer.getvalue().strip()
+                if payload_content:
+                    data = json.loads(payload_content)
+                    self.assertEqual(set(data.keys()), set(expected.keys()))
+                    for key, expected_lines in expected.items():
+                        actual_lines = [self.extract_code_line(s) for s in data[key]]
+                        self.assertEqual(
+                            sorted(actual_lines),
+                            sorted(expected_lines),
+                            f"Mismatch for key: {key}",
+                        )
 
     def _check_kernel_information_json(self, kernel_info, expected_kernels):
         """Validate kernel information JSON structure and content."""
