@@ -2805,6 +2805,8 @@ class BuiltinVariable(VariableTracker):
                 UserDefinedObjectVariable,
             ),
         ):
+            # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
+            # a.__ror__(b) returns NotImplemented
             return a.call_method(tx, "__or__", [b], {})
 
         # None no-ops this handler and lets the driving function proceed
