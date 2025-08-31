@@ -1820,9 +1820,8 @@ class CatchErrorsWrapper:
                 exc.unimplemented_v2(
                     gb_type="TorchDispatchMode with fullgraph=True",
                     context="Dynamo attempted to skip frame due to TorchDispatchMode",
-                    explanation="fullgraph=True was specified, which requires compilation of the entire function. "
-                    "However, a TorchDispatchMode is active, which is not supported with torch.compile. "
-                    "TorchDispatchMode causes Dynamo to skip the frame and fall back to eager execution.",
+                    explanation="fullgraph=True was specified, which requires compilation of the entire function. ",
+
                     hints=[
                         "Remove the TorchDispatchMode context manager if compilation is required.",
                         "Use fullgraph=False to allow partial compilation with graph breaks.",
