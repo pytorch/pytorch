@@ -227,7 +227,9 @@ class TestPyCodeCache(TestCase):
                 f(torch.ones(2))
                 """
             )
-            out = subprocess.check_output([sys.executable, "-c", step3], env=env).decode()
+            out = subprocess.check_output(
+                [sys.executable, "-c", step3], env=env
+            ).decode()
             self.assertIn("debug", out)
 
 
