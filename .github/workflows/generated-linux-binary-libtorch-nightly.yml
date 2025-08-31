@@ -122,7 +122,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -145,7 +145,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -154,7 +154,7 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-release
       build_environment: linux-binary-libtorch
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
+      runs_on: linux.4xlarge.nvidia.gpu  # 12.6 build can use maxwell (sm_50) runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
@@ -169,7 +169,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -190,7 +190,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -213,7 +213,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -222,7 +222,7 @@ jobs:
       build_name: libtorch-cuda12_8-shared-with-deps-release
       build_environment: linux-binary-libtorch
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
@@ -237,7 +237,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -258,7 +258,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -281,7 +281,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -290,7 +290,7 @@ jobs:
       build_name: libtorch-cuda12_9-shared-with-deps-release
       build_environment: linux-binary-libtorch
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
@@ -305,7 +305,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -326,7 +326,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -350,7 +350,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: libtorch-cxx11-builder
@@ -419,7 +419,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -440,7 +440,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -464,7 +464,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: libtorch-cxx11-builder
@@ -533,7 +533,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
