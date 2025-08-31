@@ -5636,17 +5636,16 @@ class TestMemPool(TestCase):
 
             s2.wait_stream(s1)
             with torch.cuda.stream(s2):
-                data1.fill_(2.0)
+                # Mark data1 as used on stream 2
                 data1.record_stream(s2)
 
-            data1.fill_(1.0)
             del data1
 
             s1.wait_stream(s2)
 
-            # the graph would be joined after this kernel
+            # Insert a dummy operation to ensure the graph is joined after this point
             unrelated.fill_(1.0)
-            # this new allocation should reuse data1 if the graph_capture_record_stream_reuse is enabled
+            # The next allocation should reuse data1's memory if graph_capture_record_stream_reuse is enabled
             data2 = torch.rand(8, device="cuda")
             data2_ptr = data2.data_ptr()
 
@@ -5686,37 +5685,44 @@ class TestMemPool(TestCase):
 
             s2.wait_stream(s1)
             with torch.cuda.stream(s2):
-                data1.fill_(2.0)
+                # Mark data1 as used on stream 2
                 data1.record_stream(s2)
 
             s3.wait_stream(s1)
             with torch.cuda.stream(s3):
-                data1.fill_(3.0)
+                # Mark data1 as used on stream 3
                 data1.record_stream(s3)
 
             s4.wait_stream(s1)
             with torch.cuda.stream(s4):
-                data1.fill_(4.0)
+                # Mark data1 as used on stream 4
                 data1.record_stream(s4)
 
-            data1.fill_(1.0)
             del data1
 
+            # Synchronize s1 with s2 to join their execution in the graph
             s1.wait_stream(s2)
+            # Dummy operation to create a node in the graph for s1-s2 join
             unrelated.fill_(1.0)
 
+            # Synchronize s3 with s4 to join their execution in the graph
             s3.wait_stream(s4)
             with torch.cuda.stream(s3):
+                # Dummy operation to create a node in the graph for s3-s4 join
                 unrelated.fill_(3.0)
                 unrelated.record_stream(s3)
 
-            unrelated.fill_(3.0)
+            # At this point, data1's uses are not fully joined, so the allocator should not reuse data1 for data2
             data2 = torch.ones(8, device="cuda")
             data2_ptr = data2.data_ptr()
 
+            # Join s1 and s3 to further synchronize the graph
             s1.wait_stream(s3)
 
+            # Dummy operation to create a node in the graph for s1-s3 join
             unrelated.fill_(4.0)
+
+            # Now, the allocator should be able to reuse data1 for data3 if graph_capture_record_stream_reuse is enabled
             data3 = torch.ones(8, device="cuda")
             data3_ptr = data3.data_ptr()
 
