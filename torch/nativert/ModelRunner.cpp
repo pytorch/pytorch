@@ -10,6 +10,7 @@
 #include <torch/nativert/executor/Placement.h>
 #include <torch/nativert/graph/GraphPasses.h>
 #include <torch/nativert/graph/Serialization.h>
+#include <torch/nativert/kernels/KernelHandlerRegistry.h>
 
 namespace torch::nativert {
 
@@ -55,6 +56,7 @@ std::shared_ptr<Weights> loadWeightsDefault(
 ModelRunner::ModelRunner(
     const std::string& packagePath,
     const std::string& modelName) {
+  register_kernel_handlers();
   auto pytorchStreamReader =
       std::make_shared<caffe2::serialize::PyTorchStreamReader>(
           std::make_unique<caffe2::serialize::FileAdapter>(packagePath));
