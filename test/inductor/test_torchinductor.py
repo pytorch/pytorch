@@ -10723,8 +10723,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             mask = mask.view(W.shape)
             return mask
 
-        x = torch.randn((128, 64), device=GPU_TYPE)
-        p = torch.tensor(0.50, device=GPU_TYPE)
+        x = torch.randn((128, 64), device=self.device)
+        p = torch.tensor(0.50, device=self.device)
         get_mask(x, p)
 
     def test_sqrt_dynamic_shapes(self):
