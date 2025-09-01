@@ -1713,8 +1713,9 @@ def _register_qconv_weight_prepack_pass(
 
 
 def _generate_dequant_convolution_node_pattern(
-    _dequant_per_channel_pattern, with_dtype_convert=False
+    _dequant_per_channel_pattern, dtype=torch.float32, with_dtype_convert=False
 ):
+    assert dtype in [torch.float32, torch.bfloat16]
     dequant_convolution_node_pattern = CallFunction(
         aten.convolution.default,
         _may_generate_pattern_with_dtype_convert(
@@ -1743,6 +1744,7 @@ def _generate_qconv_weight_prepack_patterns(
             dequantize_per_channel_weight_pattern
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_weight_pattern,
+            dtype,
             with_dtype_convert,
         ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
@@ -1753,6 +1755,7 @@ def _generate_qconv_weight_prepack_patterns(
             dequantize_per_channel_clone_weight_pattern
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_clone_weight_pattern,
+            dtype,
             with_dtype_convert,
         ),
     )
