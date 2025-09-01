@@ -4703,16 +4703,16 @@ class ComputedBuffer(OperationBuffer):
             # For now, the tiling and the loop order is fixed. This may not be the
             # optimal loop order when strides does not align with this default order.
             # Maybe sth we should modify tl.dot codegen to support random loop order
-            resizes: list[int]
+            newsizes: list[int]
             reindex0: Callable[[Sequence[int]], Sequence[int]]
             reindex1: Callable[[Sequence[int]], Sequence[int]]
             if self.get_reduction_type() == "dot":
                 order = list(range(len(sizes)))  # Dont reorder
-                resizes = [sizes[i] for i in order]
+                newsizes = [sizes[i] for i in order]
                 reindex0 = same_reorder(order)
                 reindex1 = inverse_reorder(order)
             else:
-                resizes, reindex0, reindex1 = self._apply_loop_reordering(
+                newsizes, reindex0, reindex1 = self._apply_loop_reordering(
                     x_vars, support_vars, sizes, memory_addrs
                 )
 
@@ -4720,15 +4720,15 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
+                newsizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
-                    resizes,
-                    index_prevent_reordering(index_formulas, x_vars, resizes),
+                    newsizes,
+                    index_prevent_reordering(index_formulas, x_vars, newsizes),
                 )
                 reindex = fuse_reindexing(reindex1, reindex2)
             else:
                 reindex = reindex1
-            return resizes, reindex, reindex1
+            return newsizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
