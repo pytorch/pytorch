@@ -57,19 +57,37 @@ inline Tensor narrow(Tensor& self, int64_t dim, int64_t start, int64_t length) {
 inline Tensor new_empty(
     const Tensor& self,
     std::vector<int64_t> size,
-    std::optional<c10::ScalarType> dtype = std::nullopt) {
-  int32_t device_type;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
-
-  int32_t device_index;
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_get_device_index(self.get(), &device_index));
-
+    std::optional<c10::ScalarType> dtype = std::nullopt,
+    std::optional<int32_t> device_type = std::nullopt,
+    std::optional<DeviceIndex> device_index = std::nullopt) {
   int32_t target_dtype;
   if (dtype.has_value()) {
     target_dtype = to<int32_t>(from(dtype.value()));
   } else {
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(self.get(), &target_dtype));
+  }
+
+  int32_t self_device_type;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &self_device_type));
+
+  int32_t device_type_;
+  if (device_type.has_value()) {
+    device_type_ = to<int32_t>(from(device_type.value()));
+  } else {
+    device_type_ = self_device_type;
+  }
+
+  int32_t device_index_;
+  if (device_index.has_value()) {
+    device_index_ = to<int32_t>(from(device_index.value()));
+  } else {
+    if (device_type_ == self_device_type) {
+      TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_index(self.get(), &device_index_));
+    } else {
+      // It is unmeaningul to use self device index when self device
+      // type is different from target device type.
+      device_index_ = 0;
+    }
   }
 
   int32_t layout;
@@ -82,8 +100,8 @@ inline Tensor new_empty(
       static_cast<int64_t>(size.size()),
       &target_dtype,
       &layout,
-      &device_type,
-      device_index,
+      &device_type_,
+      device_index_,
       nullptr, // pin_memory (nullptr for default)
       &ret0));
 
@@ -198,6 +216,18 @@ inline Tensor zero_(Tensor& self) {
   std::array<StableIValue, num_args> stack{from(self)};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
+  return to<Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the copy_ op with
+// identical semantics to the existing copy_ op (except that it will
+// not be called as a tensor method but only as a function
+// i.e. copy_(dst, src) not dst.zero_(src)).
+inline Tensor copy_(Tensor& self, const Tensor& src, std::optional<bool> non_blocking = std::nullopt) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{from(self), from(src), from(non_blocking.value_or(false))};
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
   return to<Tensor>(stack[0]);
 }
 
