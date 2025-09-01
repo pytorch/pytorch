@@ -135,6 +135,7 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
+    DynamicIntSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
     TorchSource,
@@ -1243,6 +1244,9 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, DynamicIntSource):
+            import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
+            # TODO...
         elif istype(source, GlobalStateSource):
             # Don't do anything here. We guard on global state completely in
             # C++. So just return the root mgr.

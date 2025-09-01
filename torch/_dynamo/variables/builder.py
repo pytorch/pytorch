@@ -99,6 +99,7 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
+    DynamicIntSource,
     DictSubclassGetItemSource,
     FloatTensorSource,
     GetItemSource,
@@ -1100,6 +1101,37 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif isinstance(value, torch.DynamicInt):
+            source = DynamicIntSource(self.source)
+
+            sym = self.tx.output.shape_env.create_unspecified_symbol(
+                int(value),
+                source=source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+
+            node = self.tx.output.shape_env.create_symintnode(
+                sym,
+                hint=int(value),
+                source=source
+            )
+            # TODO: map id(value) to the same symint
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(node),
+                node,
+                source=source
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                source,
+                node,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=node,
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
+            return SymNodeVariable(sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
