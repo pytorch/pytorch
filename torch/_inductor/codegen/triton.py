@@ -975,7 +975,7 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
 
 
 class TritonOverrides(OpOverrides):
-    """Map element-wise ops to Triton"""
+    """Map element-wise ops to Triton e.g., ops.to_dtype(x,...) -> x.to(...)"""
 
     _LOG_2_E = math.log2(math.e)
 
@@ -1173,20 +1173,20 @@ class TritonOverrides(OpOverrides):
 
         The logic is as follows:
 
-        1. Downcasting for performance  
+        1. Downcasting for performance
            If the data was previously upcasted to fp32, we downcast back to the
            original dtype (e.g., fp16 or bf16) for better performance. While
            surrounding operations may run in fp32, matmul itself is executed at the
            original precision to optimize throughput.
 
-        2. Handling non-constant reduction masks  
+        2. Handling non-constant reduction masks
            If the reduction mask is not constant and there was any operation between
            tl.load and tl.dot, we zero out regions outside the mask using
            tl.where(r0_mask, val, 0).
            This ensures that values outside the mask do not contribute to the dot
            product, preventing incorrect results.
 
-        3. Shape alignment for tl.dot  
+        3. Shape alignment for tl.dot
            We massage shapes to match the tl.dot requirement of (Y, R) x (R, X).
            Current codegen eagerly broadcasts tl.arange to create unique axes. We
            reshape, transpose, or broadcast to align with the (Y, R) x (R, X) shape.
@@ -3227,6 +3227,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        """
+        codegen reduction of value to Triton according the reduction_type
+        """
+
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
             # automatically promote to FP32 for accumulation. Additionally, max/min reductions
@@ -3312,6 +3316,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif reduction_type == "dot":
                 # Native matmul is a special case because accumulator shape is fixed to (Y,X)
                 is_bmm = len(self.dense_size_list()) == 4
+                assert value.shape is not None
                 if is_bmm:
                     result = f"{value}[None,:,:,None]"  # (Y,X) to (Z=1,Y,X,R=1)
                     shape = [1, *value.shape, 1]
