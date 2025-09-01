@@ -313,8 +313,8 @@ class AOTInductorTestsTemplate:
         self.assertTrue(actual_path == expected_path)
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul, 
-        "different # of input/output/constants in native matmul"
+        config.triton.enable_native_matmul,
+        "different # of input/output/constants in native matmul",
     )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
@@ -2163,8 +2163,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul, 
-        "FIXME: cannot do get_size on FakeTensor during lowering."
+        config.triton.enable_native_matmul,
+        "FIXME: cannot do get_size on FakeTensor during lowering.",
     )
     def test_while_loop_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
@@ -2758,9 +2758,7 @@ class AOTInductorTestsTemplate:
         model = Model()
 
         # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
-        self.check_model(
-            model, example_inputs, atol=1e-4, rtol=1e-4
-        )  
+        self.check_model(model, example_inputs, atol=1e-4, rtol=1e-4)
 
         if self.device == "mps":
             self.code_check_count(
@@ -2835,13 +2833,14 @@ class AOTInductorTestsTemplate:
         model = Model(self.device).to(dtype=torch.float)
         if config.triton.enable_native_matmul:
             self.check_model(
-                model, example_inputs, dynamic_shapes=dynamic_shapes,
-                atol = 1e-5, rtol = 1e-5
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                atol=1e-5,
+                rtol=1e-5,
             )
         else:
-            self.check_model(
-                model, example_inputs, dynamic_shapes=dynamic_shapes
-            )
+            self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_fake_tensor_device_validation(self):
         if self.device != GPU_TYPE:
@@ -4947,10 +4946,8 @@ class AOTInductorTestsTemplate:
             "target_size": None,
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
-    
-    @unittest.skipIf(
-        config.triton.enable_native_matmul, "matmul is generated"
-    )
+
+    @unittest.skipIf(config.triton.enable_native_matmul, "matmul is generated")
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -5648,9 +5645,9 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
 
         if config.triton.enable_native_matmul:
-            atol, rtol = 3e-4, 3e-4 
-        else :
-            atol, rtol = None, None 
+            atol, rtol = 3e-4, 3e-4
+        else:
+            atol, rtol = None, None
 
         self.assertEqual(expected, output, atol=atol, rtol=rtol)
 
@@ -5694,9 +5691,9 @@ class AOTInductorTestsTemplate:
             loaded1 = pt2_contents.aoti_runners["model"]
 
         if config.triton.enable_native_matmul:
-            atol, rtol = 3e-4, 3e-4 
-        else :
-            atol, rtol = None, None 
+            atol, rtol = 3e-4, 3e-4
+        else:
+            atol, rtol = None, None
 
         self.assertEqual(loaded1(a), model(a), atol=atol, rtol=rtol)
 

@@ -1493,6 +1493,22 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
 
 
 def native_matmul_pass(graph: torch.fx.Graph):
+    """
+    Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
+    into native matmul IR using `ops.dot`. When we see a matmul pattern
+    (C[y, x] = A[y, r] * B[r, x]), the core idea is to emulate a broadcasted
+    multiply followed by a sum.
+
+    For example, given `C = torch.matmul(A, B)`, this can be rewritten as:
+
+        Prod = A.unsqueeze(-1) * B.unsqueeze(0)
+        C = Prod.sum(dim=1)
+
+    Instead of explicitly using `ops.mul` and `ops.reduction("sum")`, we lower
+    these into `ops.dot` (pointwise) and `ops.reduction("dot")`. These IR nodes
+    are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
+    combination, but are lowered to `tl.dot` during the code generation phase.
+    """
     graph_pass = [
         PatternMatcherPass(),
         PatternMatcherPass(),

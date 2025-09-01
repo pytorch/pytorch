@@ -342,8 +342,8 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     @unittest.skipIf(
-        torch._inductor.config.triton.enable_native_matmul, 
-        "FIXME : native matmul fails. RuntimeError: Cannot access data pointer of Tensor"
+        torch._inductor.config.triton.enable_native_matmul,
+        "FIXME : native matmul fails. RuntimeError: Cannot access data pointer of Tensor",
     )
     def test_hf_bert_ddp_inductor(self):
         model, inputs = get_hf_bert(0)

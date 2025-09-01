@@ -848,8 +848,7 @@ def forward(self, primals_1):
         out_dt.sum().backward()
 
     @unittest.skipIf(
-        torch._inductor.config.triton.enable_native_matmul, 
-        "Matmul is now generated"
+        torch._inductor.config.triton.enable_native_matmul, "Matmul is now generated"
     )
     def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
@@ -915,9 +914,7 @@ def forward(self, primals_1):
         code = run_and_get_triton_code(compiled_model, inp)
         FileCheck().check(
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
-        ).check(
-            "torch.ops._c10d_functional.wait_tensor.default(buf0"
-        ).check(
+        ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
             "extern_kernels.mm(buf0,"
         ).run(code)
 

@@ -47,19 +47,19 @@ class CoordescTuner:
     """
 
     def __init__(
-        self, 
-        is_mm=False, 
-        is_native_matmul=False, 
-        name="unknown", 
-        size_hints=None, 
-        inductor_meta=None
+        self,
+        is_mm=False,
+        is_native_matmul=False,
+        name="unknown",
+        size_hints=None,
+        inductor_meta=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
-        
+
         # Native matmul codegen assumes ZBLOCK=1 always.
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
-        self.is_native_matmul = is_native_matmul 
+        self.is_native_matmul = is_native_matmul
         assert not (self.is_mm and self.is_native_matmul)
         self.cached_benchmark_results = {}
         self.name = name
@@ -114,7 +114,7 @@ class CoordescTuner:
             out.append("waves_per_eu")
         if self.is_native_matmul:
             out.append("num_stages")
-            out.remove("ZBLOCK") # ZBLOCK=1 always in native matmul
+            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
         return out
 
@@ -134,11 +134,10 @@ class CoordescTuner:
         # In native matmul, block size should be >= 16 for tl.dot
         if self.is_native_matmul:
             if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:
-                return val < 16 
-        
+                return val < 16
+
         # Break if value becomes 0/neg
         return val <= 0
-
 
     def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
         """
