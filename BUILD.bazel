@@ -746,6 +746,7 @@ cc_library(
             "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
             "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
             "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+            "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
             "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
         ],
     )) + torch_sources,
