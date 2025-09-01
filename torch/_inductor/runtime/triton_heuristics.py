@@ -1314,7 +1314,7 @@ class CachingAutotuner(KernelInterface):
                 return [
                     x
                     for i, x in enumerate(self.triton_meta["signature"].keys())
-                    if x not in cfg.kwargs.keys() and i not in self.fn.constexprs
+                    if i not in self.fn.constexprs
                 ]
         else:
 
