@@ -6767,6 +6767,13 @@ class UserDefinedTritonKernel(ExternKernel):
                 args.append(arg.codegen_reference())
                 arg_types.append(arg.get_dtype())
             elif isinstance(arg, (int, float, bool, sympy.Expr)):
+                # See #160000 and #145515, equals-to-1 args are treated as constexpr
+                if (
+                    name in named_args
+                    and V.graph.sizevars.statically_known_equals(arg, 1)
+                    and triton_version_uses_attrs_dict()
+                ):
+                    continue
                 args.append(arg)
                 arg_types.append(type(arg))
             elif name in constexpr_names:
