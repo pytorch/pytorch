@@ -5621,38 +5621,50 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:True"
         )
         torch.cuda.empty_cache()
-        s1 = torch.cuda.Stream()
-        s2 = torch.cuda.Stream()
+
+        s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
         g = torch.cuda.CUDAGraph(keep_graph=True)
 
         torch.cuda.synchronize()
 
         with torch.cuda.stream(s1):
             g.capture_begin()
-            unrelated = torch.rand(8, device="cuda")
 
-            data1 = torch.rand(8, device="cuda")
+            # A sink node allocated up-front so it doesn't steal data1's block later.
+            sink1 = torch.empty(8, device="cuda")
+
+            # Source tensor on s1; this block is the reuse candidate.
+            data1 = torch.empty(8, device="cuda")
             data1_ptr = data1.data_ptr()
 
+            # Fork: do real work on s2 that READS data1 and writes to its own buffer.
             s2.wait_stream(s1)
             with torch.cuda.stream(s2):
-                # Mark data1 as used on stream 2
+                buf2 = torch.empty_like(data1)
+                torch.add(data1, 2.0, out=buf2)
                 data1.record_stream(s2)
 
             del data1
 
-            s1.wait_stream(s2)
-
-            # Insert a dummy operation to ensure the graph is joined after this point
-            unrelated.fill_(1.0)
-            # The next allocation should reuse data1's memory if graph_capture_record_stream_reuse is enabled
-            data2 = torch.rand(8, device="cuda")
+            # BEFORE JOIN: must NOT reuse
+            data2 = torch.empty(8, device="cuda")
             data2_ptr = data2.data_ptr()
+
+            # Join s2 -> s1 and add a sink node on s1.
+            s1.wait_stream(s2)
+            sink1.fill_(1.0)
+
+            # AFTER JOIN: now reuse is allowed
+            data3 = torch.empty(8, device="cuda")
+            data3_ptr = data3.data_ptr()
 
             g.capture_end()
 
         torch.cuda.synchronize()
-        self.assertTrue(data1_ptr == data2_ptr)
+
+        # No reuse before join; reuse after join.
+        self.assertNotEqual(data1_ptr, data2_ptr)
+        self.assertEqual(data1_ptr, data3_ptr)
 
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:False"
@@ -5667,70 +5679,78 @@ class TestMemPool(TestCase):
         )
 
         torch.cuda.empty_cache()
-        s1 = torch.cuda.Stream()
-        s2 = torch.cuda.Stream()
-
-        s3 = torch.cuda.Stream()
-        s4 = torch.cuda.Stream()
+        s1, s2, s3, s4 = (
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+        )
         g = torch.cuda.CUDAGraph(keep_graph=True)
 
         torch.cuda.synchronize()
 
         with torch.cuda.stream(s1):
             g.capture_begin()
-            unrelated = torch.rand(8, device="cuda")
 
+            # Source tensor allocated on s1. This block is the candidate for reuse.
             data1 = torch.ones(8, device="cuda")
             data1_ptr = data1.data_ptr()
+            sink1 = torch.empty_like(data1)
+            sink3 = torch.empty_like(data1)
 
             s2.wait_stream(s1)
             with torch.cuda.stream(s2):
-                # Mark data1 as used on stream 2
+                buf2 = torch.empty_like(data1)
+                torch.add(data1, 2.0, out=buf2)
                 data1.record_stream(s2)
 
             s3.wait_stream(s1)
             with torch.cuda.stream(s3):
-                # Mark data1 as used on stream 3
+                buf3 = torch.empty_like(data1)
+                torch.add(data1, 3.0, out=buf3)
                 data1.record_stream(s3)
 
             s4.wait_stream(s1)
             with torch.cuda.stream(s4):
-                # Mark data1 as used on stream 4
+                buf4 = torch.empty_like(data1)
+                torch.add(data1, 4.0, out=buf4)
                 data1.record_stream(s4)
 
+            # Free data1 inside capture; allocator may reuse later when it's safe.
             del data1
 
-            # Synchronize s1 with s2 to join their execution in the graph
+            # PARTIAL JOINS: should NOT allow reuse yet
+            # Join s2 -> s1 and add a sink node on s1.
             s1.wait_stream(s2)
-            # Dummy operation to create a node in the graph for s1-s2 join
-            unrelated.fill_(1.0)
+            sink1.fill_(1.0)
 
-            # Synchronize s3 with s4 to join their execution in the graph
+            # Join s4 -> s3 and add a sink node on s3.
             s3.wait_stream(s4)
             with torch.cuda.stream(s3):
-                # Dummy operation to create a node in the graph for s3-s4 join
-                unrelated.fill_(3.0)
-                unrelated.record_stream(s3)
+                sink3.fill_(3.0)
+                sink3.record_stream(s3)
 
-            # At this point, data1's uses are not fully joined, so the allocator should not reuse data1 for data2
-            data2 = torch.ones(8, device="cuda")
+            # At this point, s1 and s3 subgraphs are NOT yet joined together.
+            # Allocating data2 here must NOT reuse data1's block.
+            data2 = torch.empty(8, device="cuda")
             data2_ptr = data2.data_ptr()
 
-            # Join s1 and s3 to further synchronize the graph
+            # FINAL JOIN: now reuse is allowed
+            # Join s3 -> s1 and add a sink node on s1.
             s1.wait_stream(s3)
+            sink1.add_(sink3)
 
-            # Dummy operation to create a node in the graph for s1-s3 join
-            unrelated.fill_(4.0)
-
-            # Now, the allocator should be able to reuse data1 for data3 if graph_capture_record_stream_reuse is enabled
-            data3 = torch.ones(8, device="cuda")
+            # Now allocator should safely reuse data1's block.
+            data3 = torch.empty(8, device="cuda")
             data3_ptr = data3.data_ptr()
 
             g.capture_end()
 
         torch.cuda.synchronize()
-        self.assertTrue(data1_ptr != data2_ptr)
-        self.assertTrue(data1_ptr == data3_ptr)
+
+        # No reuse before full join; reuse after full join.
+        self.assertNotEqual(data1_ptr, data2_ptr)
+        self.assertEqual(data1_ptr, data3_ptr)
 
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:False"
