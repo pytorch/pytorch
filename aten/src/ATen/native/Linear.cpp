@@ -93,7 +93,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    bool is_contiguous = definitely_contiguous(input.sym_sizes(), input.sym_strides(), input.sym_numel());
+    bool is_contiguous = input.is_contiguous_or_false();
     if (is_contiguous && input_dim == 3) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
@@ -185,6 +185,17 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // right:  "lro, summed, ro" permuted with rpermutation and the three flattened
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
+  // By default the output is "lro, lo, 1-for-summed-dims, ro" with original shape dimensions.
+  // However, if all dimensions from the right operand appear before those from the left
+  // operand in the final output, we can swap the operands so that bmm directly produces
+  // the result in the correct memory order.
+
+  bool swap_lo_ro = !lo.empty() && !ro.empty() && ro.back() < lo.front();
+  if (swap_lo_ro) {
+    std::swap(left, right);
+    std::swap(lo, ro);
+    std::swap(lo_size, ro_size);
+  }
   auto out_num_dim = lro.size() + lo.size() + sum_dims_.size() + ro.size();
   std::vector<SymInt> out_size;
   out_size.reserve(out_num_dim);

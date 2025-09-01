@@ -613,6 +613,7 @@ std::string Result::name() const {
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
       ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
+      ATTRIBUTE(PythonGC, std::string("Python GC")),
       [](const auto& e) -> std::string { return e.name_; }));
 }
 
@@ -631,6 +632,7 @@ libkineto::ActivityType Result::kinetoType() const {
       ATTRIBUTE(OutOfMemory, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
       ATTRIBUTE(PyCCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(PythonGC, libkineto::ActivityType::PYTHON_FUNCTION),
       ATTRIBUTE(Kineto, e.activity_type_)));
 }
 
@@ -650,6 +652,7 @@ int64_t Result::endTimeNS() const {
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_ns_),
+      ATTRIBUTE(PythonGC, start_time_ns_ + e.duration_ns_),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
 
   // In rare cases we're willing to tolerate ops which are missing an end time
@@ -700,11 +703,18 @@ RecordQueue::RecordQueue(
       activities_{std::move(activities)} {
   if (tracePython()) {
     python_tracer_ = python_tracer::PythonTracerBase::make(this);
+    if (getPythonGcEvents()) {
+      python_tracer_->register_gc_callback();
+    }
   }
 }
 
 bool RecordQueue::tracePython() const {
   return config_.with_stack && activities_.count(ActivityType::CPU);
+}
+
+bool RecordQueue::getPythonGcEvents() const {
+  return config_.experimental_config.record_python_gc_info;
 }
 
 ThreadLocalSubqueue* RecordQueue::getSubqueue() {
@@ -1487,6 +1497,31 @@ RecordQueue::getRecords(
     }
     queue.allocations_.clear();
     materialize(queue.ooms_);
+
+    std::optional<int64_t> pending_start;
+    for (auto& e : queue.pythongc_) {
+      if (e.first.find("start") != std::string::npos) {
+        pending_start = e.second;
+      } else if (e.first.find("stop") != std::string::npos) {
+        if (pending_start.has_value()) {
+          out.emplace_back(Result::create(
+              /*start_time_ns_=*/converter(pending_start.value()),
+              /*start_tid_=*/queue.tid(),
+              /*kineto_info_=*/queue.kineto_info(),
+              /*extra_fields_=*/
+              // NOLINTNEXTLINE
+              ExtraFields<EventType::PythonGC>{
+                  e.first,
+                  converter(e.second) - converter(pending_start.value())}));
+          pending_start.reset();
+        } else {
+          // Handle the case where "stop" is found without a matching "start"
+          // For example, you might want to log a warning or take other action:
+          LOG(WARNING) << R"("stop" event found without a matching "start": )"
+                       << e.first;
+        }
+      }
+    }
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(
