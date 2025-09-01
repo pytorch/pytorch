@@ -368,12 +368,13 @@ class RangeVariable(BaseListVariable):
 
         return [start, stop, step]
 
-    def apply_index(self, tx, index):
+    def apply_index(self, index):
         length = self.range_length()
         if index < 0:
             index = length + index
 
         if index < 0 or index >= length:
+            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
             raise_observed_exception(
                 IndexError,
                 tx,
@@ -413,7 +414,7 @@ class RangeVariable(BaseListVariable):
         if isinstance(index, slice):
             return self.apply_slice(index)
         else:
-            return self.apply_index(tx, index)
+            return self.apply_index(index)
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
