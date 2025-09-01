@@ -2,10 +2,14 @@
 import inspect
 import itertools
 import logging
-from typing import Optional
+from typing import Any, Optional
 
+import torch
+import torch.utils._pytree as pytree
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
+from torch.fx import GraphModule
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.types import _dtype
 
 
@@ -227,7 +231,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
         }
         return checkpoint_kwargs, gmod_kwargs
 
-    def tag_nodes(self, gmod, is_sac):
+    @staticmethod
+    def tag_nodes(gmod, is_sac):
         from torch.utils.checkpoint import CheckpointPolicy
 
         unique_graph_id = next(uid)
@@ -243,44 +248,85 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
-        import torch.fx.traceback as fx_traceback
-        from torch.fx import Interpreter
+        dispatch_key_set = torch._ops._compute_keyset(
+            args, kwargs, self.non_fallthrough_keys
+        )
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+        if dispatch_key == torch._C.DispatchKey.PreDispatch:
+            return super().__call__(gmod, *args, **kwargs)
 
-        if "_checkpoint_context_fn" in gmod.meta:
-            warning_once(
-                log,
-                """
-Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
-Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-""",
-            )
-            # use_reentrant is set to False because this op is going to be traced.
-            # And we ensure that AOT Autograd traces through the non reentrant
-            # version of checkpointing.
-            kwargs["use_reentrant"] = False
-            # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
-            # `torch.random.fork_rng` op (which is not supported yet under CUDA).
-            # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
-            # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
-            # instead of in AOTAutograd).
-            kwargs["preserve_rng_state"] = False
-            kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
-            # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
-            # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-            gmod = self.tag_nodes(gmod, is_sac=True)
-            # Using interpreter allows preservation of metadata through torch.compile stack.
-            with fx_traceback.preserve_node_meta():
-                from torch.utils.checkpoint import checkpoint
-
-                return checkpoint(Interpreter(gmod).run, *args, **kwargs)
-        else:
-            gmod = self.tag_nodes(gmod, is_sac=False)
-            # Using interpreter allows preservation of metadata through torch.compile stack.
-            # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
-            # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
-            # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
-            with fx_traceback.preserve_node_meta():
-                return Interpreter(gmod).run(*args)
+        return tag_activation_checkpoint_impl(gmod, *args, **kwargs)
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()
+
+
+def tag_activation_checkpoint_impl(gmod, *args, **kwargs):
+    import torch.fx.traceback as fx_traceback
+    from torch.fx import Interpreter
+
+    if "_checkpoint_context_fn" in gmod.meta:
+        warning_once(
+            log,
+            """
+Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
+Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
+""",
+        )
+        # use_reentrant is set to False because this op is going to be traced.
+        # And we ensure that AOT Autograd traces through the non reentrant
+        # version of checkpointing.
+        kwargs["use_reentrant"] = False
+        # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
+        # `torch.random.fork_rng` op (which is not supported yet under CUDA).
+        # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
+        # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
+        # instead of in AOTAutograd).
+        kwargs["preserve_rng_state"] = False
+        kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
+        # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
+        # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
+        gmod = TagActivationCheckpoint.tag_nodes(gmod, is_sac=True)
+        # Using interpreter allows preservation of metadata through torch.compile stack.
+        with fx_traceback.preserve_node_meta():
+            from torch.utils.checkpoint import checkpoint
+
+            return checkpoint(Interpreter(gmod).run, *args, **kwargs)
+    else:
+        gmod = TagActivationCheckpoint.tag_nodes(gmod, is_sac=False)
+        # Using interpreter allows preservation of metadata through torch.compile stack.
+        # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
+        # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
+        # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
+        with fx_traceback.preserve_node_meta():
+            return Interpreter(gmod).run(*args)
+
+
+@tag_activation_checkpoint.py_impl(ProxyTorchDispatchMode)
+def proxy_mode_key(
+    proxy_mode: ProxyTorchDispatchMode,
+    gmod: GraphModule,
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[torch.Tensor]:
+    assert proxy_mode.pre_dispatch, (
+        "post-dispatch mode should have inlined in the Autograd key"
+    )
+    example_out = tag_activation_checkpoint(gmod, *args, **kwargs)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
+    proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]
+    qualname = proxy_mode.tracer.get_fresh_qualname("wrap_body")  # type: ignore[union-attr]
+    proxy_mode.tracer.root.register_module(qualname, gmod)  # type: ignore[union-attr]
+    proxy_gmod = proxy_mode.tracer.unwrap_proxy(gmod)  # type: ignore[union-attr, call-overload]
+    for node in proxy_gmod.graph.nodes:
+        if "example_value" in node.meta:
+            node.meta["val"] = node.meta["example_value"]
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function",
+        tag_activation_checkpoint,
+        (proxy_gmod, *proxy_args),
+        proxy_kwargs,
+    )
+    return track_tensor_tree(
+        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+    )
