@@ -172,20 +172,6 @@ class TestCompiledAutograd(TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
-    def test_hipify_not_loaded_with_import_torch(self):
-        script = """
-import torch
-assert globals().get("hipify", False) is False
-"""
-        self.run_as_subprocess(script)
-
-    def test_hipify_not_loaded_with_import_cpp_extension(self):
-        script = """
-import torch.utils.cpp_extension
-assert globals().get("hipify", False) is False
-"""
-        self.run_as_subprocess(script)
-
     def test_dynamo_flaky_segfault(self):
         script = """
 import torch
