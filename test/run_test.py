@@ -918,7 +918,7 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
-def run_test_with_openreg(test_module, test_directory, options):
+def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
@@ -927,7 +927,8 @@ def run_test_with_openreg(test_module, test_directory, options):
         return return_code
 
     with extend_python_path([install_dir]):
-        return run_test(test_module, test_directory, options)
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
+        return shell(cmd, cwd=openreg_dir, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1256,8 +1257,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_openreg": run_test_with_openreg,
-    "test_transformers_privateuse1": run_test_with_openreg,
+    "test_openreg": test_openreg,
 }
 
 
