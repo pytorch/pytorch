@@ -1428,7 +1428,7 @@ class AOTInductorModelCache:
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
             # We can't support this in non-strict
-            if hasattr(model_clone, "name") and model.name == "levit_128":
+            if hasattr(model_clone, "name") and model.name in ["levit_128", "demucs"]:
                 ep = torch.export.export(
                     model_clone,
                     example_args,
