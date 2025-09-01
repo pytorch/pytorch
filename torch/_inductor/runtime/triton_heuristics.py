@@ -351,7 +351,7 @@ class CachingAutotuner(KernelInterface):
             inductor_meta=self.inductor_meta,
         )
         self.filename = filename
-        
+
         # used for profiling
         self.kernel_hash: str = ""
 
@@ -2494,7 +2494,8 @@ def pointwise(
         filename=filename,
     )
 
-def make_matmul_triton_config(sizes: dict, num_warps: int, num_stages: int):
+
+def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages: int):
     config = {
         "XBLOCK": sizes.get("x"),
         "YBLOCK": sizes.get("y"),
@@ -2589,12 +2590,13 @@ triton_native_persistent_bmm_configs = [
     ({"z": 1, "x": 128, "y": 128}, 8, 5),
 ]
 
+
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
     inductor_meta: dict[str, Any],
     triton_meta: dict[str, Any],
-    num_dynamic=0
+    num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
@@ -2624,12 +2626,12 @@ def _reduction_configs(
 
     if triton_meta["native_matmul"]:
         if len(size_hints) == 3:
-            return [    
+            return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_mm_configs
             ]
         elif len(size_hints) == 4:
-            return [    
+            return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_bmm_configs
             ]
@@ -2871,10 +2873,10 @@ def reduction(
             num_dynamic += 1
 
     configs = _reduction_configs(
-        size_hints=size_hints, 
-        inductor_meta=inductor_meta, 
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
         triton_meta=triton_meta,
-        num_dynamic=num_dynamic
+        num_dynamic=num_dynamic,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
@@ -2914,10 +2916,10 @@ def cooperative_reduction(
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
-            {"x": xnumel, "r0_": rnumel // split}, 
-            reduction_hint, 
-            inductor_meta, 
-            triton_meta
+            {"x": xnumel, "r0_": rnumel // split},
+            reduction_hint,
+            inductor_meta,
+            triton_meta,
         )
     else:
         configs = _reduction_configs(
@@ -2953,12 +2955,12 @@ def _persistent_reduction_configs(
 
     if triton_meta["native_matmul"]:
         if len(size_hints) == 3:
-            return [    
+            return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
             ]
         elif len(size_hints) == 4:
-            return [    
+            return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
             ]

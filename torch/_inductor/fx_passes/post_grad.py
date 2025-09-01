@@ -757,7 +757,7 @@ def is_valid_mm_plus_mm(match: Match):
     if config.triton.enable_native_matmul:
         shapes = [m1, m2, k1, k2, k3, k4, n1, n2]
         # if shape is unbacked symint, skip
-        if any([has_free_unbacked_symbols(var) for var in shapes]):
+        if any(map(has_free_unbacked_symbols, shapes)):
             return False
 
         if (
@@ -1512,9 +1512,9 @@ def native_matmul_pass(graph: torch.fx.Graph):
         if not config.triton.enable_native_matmul:
             return False
 
-        # If tma matmul is on, don't do native matmul 
+        # If tma matmul is on, don't do native matmul
         if (
-            config.triton.enable_persistent_tma_matmul 
+            config.triton.enable_persistent_tma_matmul
             and torch.utils._triton.has_triton_tma_device()
         ):
             return False
@@ -1546,7 +1546,7 @@ def native_matmul_pass(graph: torch.fx.Graph):
         K, N = mat2.shape[-2], mat2.shape[-1]
 
         # if shape is unbacked symint, skip
-        if any([has_free_unbacked_symbols(var) for var in [M, K, N]]):
+        if any(map(has_free_unbacked_symbols, [M, K, N])):
             return False
 
         # Skip if size is zero or one.
@@ -1559,9 +1559,12 @@ def native_matmul_pass(graph: torch.fx.Graph):
     # TODO : support aten.baddmm
     @register_graph_pattern(
         CallFunction(
-            aten.addmm, 
-            KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2"),
-            beta = KeywordArg("beta"), alpha = KeywordArg("alpha")
+            aten.addmm,
+            KeywordArg("inp"),
+            KeywordArg("mat1"),
+            KeywordArg("mat2"),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
         ),
         pass_dict=graph_pass[0],
         extra_check=native_matmul_extra_check,
@@ -1580,9 +1583,12 @@ def native_matmul_pass(graph: torch.fx.Graph):
 
     @register_graph_pattern(
         CallFunction(
-            aten.baddbmm, 
-            KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2"),
-            beta = KeywordArg("beta"), alpha = KeywordArg("alpha")
+            aten.baddbmm,
+            KeywordArg("inp"),
+            KeywordArg("mat1"),
+            KeywordArg("mat2"),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
         ),
         pass_dict=graph_pass[0],
         extra_check=native_matmul_extra_check,
