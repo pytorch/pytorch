@@ -133,12 +133,12 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         "resize_ called on tensor with symbolic shape")
     TORCH_CHECK(
         sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
-        "number of dimensions must be sparse_dim (",
+        "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+        size.size(),
+        ", sparse_dim = ",
         sparse_dim,
-        ") + dense_dim (",
-        dense_dim,
-        "), but got ",
-        size.size());
+        ", dense_dim = ",
+        dense_dim);
     if (nnz() > 0) {
       [[maybe_unused]] auto constexpr alt_options_msg =
           "You could try the following options:\n\
@@ -254,12 +254,12 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         "resize_and_clear_ called on tensor with symbolic shape")
     TORCH_CHECK(
         sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
-        "number of dimensions must be sparse_dim (",
+        "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+        size.size(),
+        ", sparse_dim = ",
         sparse_dim,
-        ") + dense_dim (",
-        dense_dim,
-        "), but got ",
-        size.size());
+        ", dense_dim = ",
+        dense_dim);
 
     set_sizes_and_strides(size, std::vector<int64_t>(size.size()));
     sparse_dim_ = sparse_dim;
