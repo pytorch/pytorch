@@ -710,6 +710,36 @@ class TensorLikePair(Pair):
         if isinstance(tensor_like, torch.Tensor):
             return tensor_like
 
+        # Handle numpy arrays explicitly
+        if HAS_NUMPY and isinstance(tensor_like, np.ndarray):
+            return torch.from_numpy(tensor_like)
+        
+        # Handle Python scalars
+        if isinstance(tensor_like, (int, float, complex, bool)):
+            return torch.tensor(tensor_like)
+        
+        # Handle sequences that can be converted to tensors
+        if isinstance(tensor_like, (list, tuple)):
+            try:
+                return torch.tensor(tensor_like)
+            except Exception:
+                pass
+        
+        # Handle objects with __array__ method (numpy array protocol)
+        if hasattr(tensor_like, '__array__'):
+            try:
+                return torch.from_numpy(tensor_like.__array__())
+            except Exception:
+                pass
+        
+        # Handle objects with __array_interface__ (legacy numpy array protocol)
+        if hasattr(tensor_like, '__array_interface__'):
+            try:
+                return torch.from_numpy(np.asarray(tensor_like))
+            except Exception:
+                pass
+
+        # Fallback to torch.as_tensor
         try:
             return torch.as_tensor(tensor_like)
         except Exception:
