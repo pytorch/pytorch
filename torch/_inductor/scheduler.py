@@ -475,7 +475,7 @@ class BaseSchedulerNode:
         return False
 
     def is_native_matmul(self) -> bool:
-        return False 
+        return False
 
     def is_split_scan(self) -> bool:
         return False
@@ -1345,9 +1345,7 @@ class SchedulerNode(BaseSchedulerNode):
         return bool(self.node.get_reduction_type())
 
     def is_native_matmul(self) -> bool:
-        assert isinstance(self.node, ir.ComputedBuffer), (
-            f"{type(self.node)=}"
-        )
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
         return self.node.get_reduction_type() == "dot"
 
     def is_split_scan(self) -> bool:
