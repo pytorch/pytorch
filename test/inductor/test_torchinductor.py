@@ -6082,7 +6082,7 @@ class CommonTemplate:
         )
 
     def test_unsigned_constant_tensors(self):
-        def foo(x):
+        def fn(x):
             c = torch.tensor(7, dtype=torch.uint8)
             return c + x, torch.neg(c), torch.neg(c) + x
 
