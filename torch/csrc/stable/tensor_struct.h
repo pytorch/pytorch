@@ -1,7 +1,8 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <ATen/core/TensorAccessor.h>
 #include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
@@ -181,6 +182,19 @@ class Tensor {
     int64_t* ptr;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &ptr));
     return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
+  template<typename T, size_t N>
+  at::TensorAccessor<T,N> accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    STD_TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+    T* ptr = nullptr;
+    if constexpr (std::is_const_v<T>) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return at::TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
   }
 
   bool defined() const {
