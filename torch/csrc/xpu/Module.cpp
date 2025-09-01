@@ -13,12 +13,6 @@
 
 using namespace torch;
 
-// Wrapper class for XPU UUID
-struct XPUuuid {
-  XPUuuid(const std::array<unsigned char, 16> uuid) : bytes(uuid) {}
-  std::array<unsigned char, 16> bytes;
-};
-
 // XPU management methods
 
 static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
@@ -266,11 +260,6 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 
 // XPU module initialization
 
-XPUUuid get_xpu_uuid(const DeviceProp& prop) {
-  std::array<unsigned char, 16> uuid{};
-  return XPUuuid(uuid);
-};
-
 static void registerXpuDeviceProperties(PyObject* module) {
   // Add _xpuDevicePropertires class to torch._C
   using namespace c10::xpu;
@@ -308,6 +297,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #endif
 
   auto m = py::handle(module).cast<py::module>();
+
+  // Wrapper class for XPU UUID
+  struct XPUuuid {
+    XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
+    const std::array<unsigned char, 16> bytes;
+  };
 
   py::class_<XPUuuid>(m, "_XPUuuid")
       .def_property_readonly(
@@ -350,7 +345,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
-      .def_property_readonly("uuid", &get_xpu_uuid)
+      .def_property_readonly(
+          "uuid",
+          [](const DeviceProp& prop) -> XPUuuid {
+            XPUuuid uuid(prop.uuid);
+            return uuid;
+          })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
@@ -358,9 +358,10 @@ static void registerXpuDeviceProperties(PyObject* module) {
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
-                   << std::uppercase << prop.device_id << std::dec << ", uuid="
-                  //  << uuid_to_string(
-                  //         reinterpret_cast<const char*>(prop.uuid.data()))
+                   << std::uppercase << prop.device_id << std::dec
+                   << ", uuid="
+                   //  << uuid_to_string(
+                   //         reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
