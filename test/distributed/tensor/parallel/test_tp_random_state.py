@@ -15,9 +15,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class TensorParallelRandomStateTests(DTensorTestBase):
     def get_tensor_slice(self, idx, n, large_tensor):
         shape = large_tensor.shape
@@ -69,7 +66,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # in the following way:
             #   - within a tensor parallel group, the RNG is set with the same seed
             #   - across data parallel groups, the RNG is set with different seeds
-            torch.get_device_module(device_type).manual_seed(0)
+            torch.get_device_module(self.device_type).manual_seed(0)
 
             # disable/enable parallel RNG feature
             if random._rng_tracker:
