@@ -250,7 +250,6 @@ XPU_BLOCKLIST = [
     "profiler/test_profiler_tree",
     "profiler/test_record_function",
     "profiler/test_torch_tidy",
-    "test_openreg",
 ]
 
 XPU_TEST = [

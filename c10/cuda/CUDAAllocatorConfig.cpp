@@ -25,7 +25,6 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
 #endif
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
-      m_graph_capture_record_stream_reuse(false),
       m_pinned_use_background_threads(false) {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
@@ -374,9 +373,6 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
     } else if (config_item_view == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(config, i);
       used_native_specific_option = true;
-    } else if (config_item_view == "graph_capture_record_stream_reuse") {
-      i = parseGraphCaptureRecordStreamReuse(config, i);
-      used_native_specific_option = true;
     } else {
       TORCH_CHECK(
           false, "Unrecognized CachingAllocator option: ", config_item_view);
@@ -407,23 +403,6 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
     TORCH_CHECK(
         false, "Error, expecting pinned_use_cuda_host_register value", "");
   }
-  return i;
-}
-
-size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  if (++i < config.size()) {
-    TORCH_CHECK(
-        (config[i] == "True" || config[i] == "False"),
-        "Expected a single True/False argument for graph_capture_record_stream_reuse");
-    m_graph_capture_record_stream_reuse = (config[i] == "True");
-  } else {
-    TORCH_CHECK(
-        false, "Error, expecting graph_capture_record_stream_reuse value", "");
-  }
-
   return i;
 }
 
