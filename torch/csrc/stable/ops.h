@@ -68,7 +68,8 @@ inline Tensor new_empty(
   }
 
   int32_t self_device_type;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &self_device_type));
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_type(self.get(), &self_device_type));
 
   int32_t device_type_;
   if (device_type.has_value()) {
@@ -82,7 +83,8 @@ inline Tensor new_empty(
     device_index_ = to<int32_t>(from(device_index.value()));
   } else {
     if (device_type_ == self_device_type) {
-      TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_index(self.get(), &device_index_));
+      TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_device_index(self.get(), &device_index_));
     } else {
       // It is unmeaningul to use self device index when self device
       // type is different from target device type.
@@ -223,9 +225,13 @@ inline Tensor zero_(Tensor& self) {
 // identical semantics to the existing copy_ op (except that it will
 // not be called as a tensor method but only as a function
 // i.e. copy_(dst, src) not dst.zero_(src)).
-inline Tensor copy_(Tensor& self, const Tensor& src, std::optional<bool> non_blocking = std::nullopt) {
+inline Tensor copy_(
+    Tensor& self,
+    const Tensor& src,
+    std::optional<bool> non_blocking = std::nullopt) {
   const auto num_args = 3;
-  std::array<StableIValue, num_args> stack{from(self), from(src), from(non_blocking.value_or(false))};
+  std::array<StableIValue, num_args> stack{
+      from(self), from(src), from(non_blocking.value_or(false))};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
   return to<Tensor>(stack[0]);
