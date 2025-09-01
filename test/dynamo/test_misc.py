@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # ruff: noqa: F841
 import abc
+import builtins
 import collections
 import collections.abc
 import copy
@@ -1705,16 +1706,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             if hasattr(packed, "b"):
                 b = packed.b + 1
             c = packed[2]
-            return a + b + c
+            d = len(packed._fields)
+            return a + b + c + d
 
         v1 = torch.Tensor([1])
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 10)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_namedtuple3(self):
         def fn(x, packed):
@@ -1960,6 +1962,31 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         act = opt_fn(a, b)
 
         self.assertEqual(exp, act)
+
+    def test_class_binop(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __add__(self, other):
+                return Foo(self.x + other.x)
+
+        def fn(a, b):
+            return a + b
+
+        x = torch.randn(2)
+        a, b = Foo(x), Foo(x + 1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(a, b).x, 2 * x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        def fn(a, b):
+            return a - b
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertRaises(torch._dynamo.exc.Unsupported, opt_fn, a, b)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -6365,6 +6392,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
 
+    def test_inference_mode_param(self):
+        def fn(x):
+            p = torch.nn.Parameter(x, requires_grad=False)
+            return x * p
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with torch.inference_mode():
+            x = torch.rand(4)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
@@ -8523,48 +8563,52 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
 
     def test_fullgraph_capture(self):
+        from torch._dynamo.convert_frame import (
+            FrameInfo,
+            fullgraph_capture,
+            get_compile_id,
+        )
+        from torch._dynamo.utils import dynamo_timed, get_metrics_context
+        from torch._guards import compile_context, CompileContext
+
         def foo(x):
             return x + x.shape[0]
 
-        compiled_foo = torch._dynamo.eval_frame.fullgraph_capture(foo)
-        compiled_foo(torch.randn(3, 2))
-        compiled_foo(torch.randn(4))
-        artifacts = compiled_foo.get_artifacts()
-
-        guarded_codes = artifacts.dynamo_artifacts.guarded_codes
-        backend_ids = list(artifacts.backend_inputs.keys())
-        gms = [b.graph_module for b in artifacts.backend_inputs.values()]
-
-        def _convert_to_ep_demo(code, backend_id, gm, args):
-            # Inject compiled function as the original gm
-            new_globals = copy.copy(globals())
-            new_globals[backend_id] = gm
-            # Minimal boilerplate to setup a callable.
-            SerializedCode = type(code.dynamo_code)
-            dynamo_bytecode = SerializedCode.to_code_object(code.dynamo_code)
-            guards_state = pickle.loads(code.guards_state)
-            guard_manager = torch._dynamo.guards.CheckFunctionManager(
-                foo.__code__,
-                guards_state.output_graph,
-                guards_serialization_mode="load",
-                shape_code_parts=guards_state.shape_code_parts,
-                runtime_global_scope=new_globals,
-            ).guard_manager
-
-            class ModuleForExport(torch.nn.Module):
-                def forward(self, x):
-                    return types.FunctionType(dynamo_bytecode, new_globals)(x)
-
-            m = ModuleForExport()
-            return guard_manager, torch.export.export(m, args)
-
-        guards0, ep0 = _convert_to_ep_demo(
-            guarded_codes[0], backend_ids[0], gms[0], (torch.randn(3, 2),)
+        x = torch.randn(4, 3)
+        f_locals = {"x": x}
+        with (
+            compile_context(CompileContext(get_compile_id({}))),
+            dynamo_timed(""),
+            get_metrics_context(),
+        ):
+            capture_output = fullgraph_capture(
+                FrameInfo(
+                    foo.__code__,
+                    foo.__globals__,
+                    f_locals,
+                    builtins,
+                    (),
+                )
+            )
+            dynamo_output = capture_output.dynamo_output
+            backend_input = capture_output.backend_input
+            self.assertTrue(
+                dynamo_output.build_guards(foo.__code__).guard_manager.check(f_locals)
+            )
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in dynamo_output.tracer_output.output_graph.import_sources.items()
+        }
+        self.assertEqual(
+            foo(x),
+            types.FunctionType(
+                dynamo_output.bytecode,
+                {
+                    **import_sources,
+                    backend_input.backend_id: backend_input.graph_module,
+                },
+            )(x),
         )
-        self.assertTrue(guards0.check({"x": torch.randn(3, 2)}))
-        self.assertFalse(guards0.check({"x": torch.randn(4)}))
-        input0 = torch.randn(3, 2)
-        self.assertEqual(ep0.module()(input0), foo(input0))
 
     def test_torch_guards_stack_frame_register_inlining_deep(self):
         x = torch.tensor([0.5, 0.5])
@@ -12773,6 +12817,37 @@ fn
         ref = f(x)
         res = opt_f(x)
         self.assertEqual(ref, res)
+
+    def test_builtin_complex(self):
+        def f(x):
+            c = (
+                complex(),
+                complex(1),
+                complex(2, 3),
+                complex(imag=2),
+                complex(real=1),
+                complex(imag=1, real=2),
+                complex("1+2j"),
+                complex(1, 2).conjugate(),
+            )
+            return [x + z for z in c]
+
+        x = torch.randn(1)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+
+    def test_builtin_complex_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(*args, **kwargs):
+            return torch.tensor(complex(*args, **kwargs))
+
+        self.assertRaises(Unsupported, f, 1, 1, 1)
+        self.assertRaises(Unsupported, f, 1, 1, fake_arg=1)
+        self.assertRaises(Unsupported, f, fake_arg=1)
+        self.assertRaises(Unsupported, f, [])
+        self.assertRaises(Unsupported, f, "1 + j")
 
 
 class TestTracer(JitTestCase):
