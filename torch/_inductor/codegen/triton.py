@@ -213,13 +213,17 @@ class TritonSymbols:
     @classmethod
     def get_block_shape(cls, expr: sympy.Expr) -> BlockShapeType:
         # return block shape of sympy Expression
-        # e.g., tmp13 = y1 -> (YBLOCK,1,1)
-        # e.g., x0 - tmp13 -> (YBLOCK,XBLOCK,1)
-        from torch._inductor.shape_propagation import get_broadcasted_shape 
-        
-        expr_shape: BlockShapeType = () 
+        # e.g.,
+        # tmp13 = y1
+        # tmp14 = x0 - tmp13
+        #
+        # get_block_shape(y1) = (YBLOCK,1,1)
+        # get_block_shape(x0-tmp13) = (YBLOCK,XBLOCK,1)
+        from torch._inductor.shape_propagation import get_broadcasted_shape
+
+        expr_shape: BlockShapeType = ()
         expr_vars = expr.free_symbols
-        for var in expr_vars :
+        for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
                 var_shape = cse_var.shape
@@ -234,18 +238,16 @@ class TritonSymbols:
                     SymT.UNBACKED_FLOAT,
                 ),
             ):
-                var_shape = () 
+                var_shape = ()
             else:
                 symbol_matches = [
-                    symt 
-                    for symt in cls.block_types
-                    if symbol_is_type(var, symt)
+                    symt for symt in cls.block_types if symbol_is_type(var, symt)
                 ]
                 assert len(symbol_matches) == 1, f"Ambiguous type: {var.name}"
 
                 sym = symbol_matches[0]
                 ndim = V.kernel.triton_tensor_ndim()
-                shape: BlockShapeType = [1]*ndim
+                shape = ["1"] * ndim
 
                 tree_match = [
                     tree
@@ -253,13 +255,14 @@ class TritonSymbols:
                     if prefix_str[sym] == tree.prefix
                 ]
                 assert len(tree_match) == 1, "# of Match expected to 1"
-                
+
                 shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
                 var_shape = tuple(shape)
-            
+
             # Union current variable shape
             expr_shape = get_broadcasted_shape(expr_shape, var_shape)
 
+        assert expr_shape is not None
         return expr_shape
 
     @classmethod
@@ -539,7 +542,7 @@ class BlockDescriptorOptions:
 
     def has_mask(self) -> bool:
         return bool(self.boundary_check())
-    
+
     def codegen_broadcast_and_reshape(
         self,
         value: str,
@@ -1075,7 +1078,7 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
-        
+
         return f"{x}.to({out_dtype})"
 
     @staticmethod
@@ -1206,7 +1209,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def dot(a, b):
-        assert V.kernel.is_native_matmul 
+        assert V.kernel.is_native_matmul
         orig_a, orig_b = a, b
 
         # Downcast if we upcasted to fp32 before
@@ -1217,17 +1220,17 @@ class TritonOverrides(OpOverrides):
                 continue
             if not node.node.get_reduction_type() == "dot":
                 continue
-            
+
             matmul_dtype = node.node.dtype
             # TODO : float8 support?
-            if (
-                not (a.dtype == matmul_dtype)
-                and matmul_dtype in (torch.float16, torch.bfloat16)
+            if not (a.dtype == matmul_dtype) and matmul_dtype in (
+                torch.float16,
+                torch.bfloat16,
             ):
                 a = V.kernel.cse.generate(
                     V.kernel.compute,
                     TritonKernelOverrides.to_dtype(
-                      a, matmul_dtype, use_compute_types=False
+                        a, matmul_dtype, use_compute_types=False
                     ),
                     dtype=matmul_dtype,
                     shape=a.shape,
@@ -1236,24 +1239,23 @@ class TritonOverrides(OpOverrides):
                 b = V.kernel.cse.generate(
                     V.kernel.compute,
                     TritonKernelOverrides.to_dtype(
-                      b, matmul_dtype, use_compute_types=False
+                        b, matmul_dtype, use_compute_types=False
                     ),
                     dtype=matmul_dtype,
                     shape=b.shape,
                 )
-            
+
             # can multiple matmuls in horizontal fusion have different dtypes?
             break
-
 
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
             if not any(map(prefix_is_reduction, var.mask_vars)):
-                return False 
-            
+                return False
+
             reduction_range = V.kernel.range_trees[-1]
             assert reduction_range.is_reduction
-            
+
             # Skip if reduction mask was already constant
             if V.kernel._has_constant_mask(reduction_range):
                 return False
@@ -1261,21 +1263,17 @@ class TritonOverrides(OpOverrides):
             # Skip if the variable is already zeroed outside the mask
             # (e.g., from tl.load(..., other=0.0))
             # TODO : track the value of outside of mask region with cse
-            for k,v in V.kernel.cse._cache.items():
-                if (
-                    v == var
-                    and "tl.load" in k
-                    and "other=0.0" in k
-                ):
+            for k, v in V.kernel.cse._cache.items():
+                if v == var and "tl.load" in k and "other=0.0" in k:
                     return False
 
             return True
-        
+
         def where_cond(var):
             default = ir.Reduction.default_value("dot", var.dtype)
             reduction_mask = [
-                f"{tree.prefix}mask" 
-                for tree in V.kernel.range_trees 
+                f"{tree.prefix}mask"
+                for tree in V.kernel.range_trees
                 if tree.is_reduction
             ]
 
@@ -1283,22 +1281,19 @@ class TritonOverrides(OpOverrides):
 
             where_var = TritonKernelOverrides.where(reduction_mask[0], var, default)
             return V.kernel.cse.generate(
-                V.kernel.compute,
-                where_var,
-                dtype = var.dtype,
-                shape = var.shape
+                V.kernel.compute, where_var, dtype=var.dtype, shape=var.shape
             )
 
-        # When computing expressions like ((A+1) @ (B+2)), 
-        # native codegen will do 
+        # When computing expressions like ((A+1) @ (B+2)),
+        # native codegen will do
         #
-        # a = tl.load(..., r0_mask, other=0.0) 
-        # b = tl.load(..., r0_mask, other=0.0) 
+        # a = tl.load(..., r0_mask, other=0.0)
+        # b = tl.load(..., r0_mask, other=0.0)
         # tmp0 = a+1
         # tmp1 = b+2
         # tmp2 = tl.dot(tmp0, tmp1)
         #
-        # This produces incorrect results because outside of r0_mask is not zero. 
+        # This produces incorrect results because outside of r0_mask is not zero.
         # So before calling tl.dot, apply tl.where to zero out values properly.
         # TODO: Optimize - We don't need both operands to be zeroed except NaN * 0
         if is_where_needed(orig_a):
@@ -1330,81 +1325,84 @@ class TritonOverrides(OpOverrides):
 
             TODO : eventually we want to remove this function when lazy broadcasting arrives
             """
-            
-            # Triton 3d dot is slower than 2d dot, so we want to keep block shape in 2d 
+
+            # Triton 3d dot is slower than 2d dot, so we want to keep block shape in 2d
             # by fixing ZBLOCK=1 in the autotune config
             if ZBLOCK in initial_shape:
                 initial_shape = ["1" if dim == ZBLOCK else dim for dim in initial_shape]
 
-            if final_shape == [YBLOCK,RBLOCK]:
-                assert XBLOCK not in initial_shape, "left tl.dot operand cannot depend on x"
+            if final_shape == [YBLOCK, RBLOCK]:
+                assert XBLOCK not in initial_shape, (
+                    "left tl.dot operand cannot depend on x"
+                )
 
-                shape_2d = [1, 1]
+                shape_2d = ["1", "1"]
                 if YBLOCK in initial_shape:
                     shape_2d[0] = YBLOCK
                 if RBLOCK in initial_shape:
                     shape_2d[1] = RBLOCK
-               
+
                 # reshape it into 2d
                 value = triton_reshape(value, initial_shape, shape_2d)
 
-                # broadcast if needed 
+                # broadcast if needed
                 broadcast_needed = not (shape_2d == [YBLOCK, RBLOCK])
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({YBLOCK}, {RBLOCK}))"
-            
-            elif final_shape == [RBLOCK,XBLOCK]:
-                assert YBLOCK not in initial_shape, "right tl.dot operand cannot depend on y"
- 
-                shape_2d = [1, 1]
+
+            elif final_shape == [RBLOCK, XBLOCK]:
+                assert YBLOCK not in initial_shape, (
+                    "right tl.dot operand cannot depend on y"
+                )
+
+                shape_2d = ["1", "1"]
                 if XBLOCK in initial_shape:
                     shape_2d[0] = XBLOCK
                 if RBLOCK in initial_shape:
                     shape_2d[1] = RBLOCK
-               
+
                 # reshape it into 2d (X,R)
                 value = triton_reshape(value, initial_shape, shape_2d)
-                
-                # tranpose to (R,X) 
-                value = f"tl.trans({value})" 
-                
-                # broadcast if needed 
+
+                # transpose to (R,X)
+                value = f"tl.trans({value})"
+
+                # broadcast if needed
                 broadcast_needed = not (shape_2d == [XBLOCK, RBLOCK])
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({RBLOCK}, {XBLOCK}))"
-            else :
+            else:
                 raise NotImplementedError
 
             return value
 
         assert len(V.kernel.dense_size_list()) >= 3, "tl.dot can only do mm and bmm"
-        
+
         XBLOCK = str(TritonSymbols.block_sizes[SymT.XBLOCK])
         YBLOCK = str(TritonSymbols.block_sizes[SymT.YBLOCK])
         ZBLOCK = str(TritonSymbols.block_sizes[SymT.ZBLOCK])
         RBLOCK = str(TritonSymbols.block_sizes[SymT.R0_INDEX])
-        
+
         a = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(a, list(a.shape), [YBLOCK,RBLOCK]),
-            dtype = a.dtype,
-            shape = tuple([YBLOCK, RBLOCK])
+            reshape_transpose_broadcast_for_dot(a, list(a.shape), [YBLOCK, RBLOCK]),
+            dtype=a.dtype,
+            shape=(YBLOCK, RBLOCK),
         )
-            
+
         b = V.kernel.cse.generate(
             V.kernel.compute,
-            reshape_transpose_broadcast_for_dot(b, list(b.shape), [RBLOCK,XBLOCK]),
-            dtype = b.dtype,
-            shape = tuple([RBLOCK, XBLOCK])
+            reshape_transpose_broadcast_for_dot(b, list(b.shape), [RBLOCK, XBLOCK]),
+            dtype=b.dtype,
+            shape=(RBLOCK, XBLOCK),
         )
-         
+
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
             input_precision = "tf32"
         else:
             input_precision = "ieee"
 
-        return f"tl.dot({a}, {b}, input_precision=\"{input_precision}\")"
-
+        return f'tl.dot({a}, {b}, input_precision="{input_precision}")'
 
     @staticmethod
     def inline_asm_elementwise(
@@ -1755,10 +1753,11 @@ class TritonKernelOverrides(TritonOverrides):
             expr, block_ptr=False, tma_compatibility_checker=None
         )
         assert isinstance(indexing, IndexingOptions)
-        
-        if indexing.expand_shape :
+
+        shape: BlockShapeType
+        if indexing.expand_shape:
             shape = indexing.expand_shape
-        else :
+        else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
         # Our sympy expr printing casts to the current kernel index dtype.
@@ -1779,7 +1778,7 @@ class TritonKernelOverrides(TritonOverrides):
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
-        
+
         if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2250,7 +2249,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.init_cooperative_reduction()
 
         self.codegen_range_tree()
-        
+
         if self.cooperative_reduction:
             self.init_cooperative_reduction_mask()
 
@@ -2467,7 +2466,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or dense_indexing
             or self._load_mask is not None
         ) and index != 0
-        
+
         have_dense = True
         have_loop_vars = False
         dense_mask_vars: OrderedSet[str] = OrderedSet()
@@ -2755,7 +2754,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1]*len(self.dense_size_list()))
             else :
                 expand_str, expand_shape = _get_expand_str()
-            
+
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
@@ -2799,7 +2798,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 mask_shape = mask_vars.copy()
                 if self._load_mask:
                     mask_shape.add(self._load_mask)
-                
+
                 xyzr = OrderedSet(["xmask", "ymask", "zmask", "r0_mask"])
                 while not mask_shape.issubset(xyzr):
                     tmp_masks = mask_shape.difference(xyzr)
@@ -2807,21 +2806,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     assert isinstance(tmp, TritonCSEVariable)
                     mask_shape.discard(tmp)
                     mask_shape.update(tmp.mask_vars)
-                
+
                 # e.g., expand_list becomes ['ZBLOCK', 1, 1, 'R0_BLOCK']
-                expand_list = [1] * len(self.dense_size_list())
+                expand_list = ["1"] * len(self.dense_size_list())
                 for mask in mask_shape:
                     assert isinstance(mask, str)
                     for tree in self.active_range_trees():
                         if mask.startswith(tree.prefix):
                             dim = tree.tensor_dim
+                            assert isinstance(dim, int)
                             expand_list[dim] = self.dense_size_list()[dim]
 
                 expand_str = "[" + ",".join(map(str, expand_list)) + "]"
-                expand_shape = tuple(map(str, expand_list))
+                expand_shape = tuple(expand_list)
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             else:
+<<<<<<< HEAD
                 expand_str, expand_shape = _get_expand_str()
+=======
+                expand_str = (
+                    f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+                )
+                expand_shape = None if copy_shape else tuple(self.dense_size_list())
+>>>>>>> lint fix
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -2842,7 +2849,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_vars.add(self._load_mask)
 
         self.filter_masks(mask_vars)
-        
+
         return IndexingOptions(
             index_str,
             mask_vars,
@@ -3159,14 +3166,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape = ()
             else:
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
-                
+
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
                 # Inferring from indexing.expand_shape alone may also fail when dense indexing is absent.
                 # so, iterate over variables in the indexexpr to accurately infer the block shape.
-                if indexing.expand_shape :
+                if indexing.expand_shape:
                     shape = indexing.expand_shape
-                else :
+                else:
                     shape = TritonSymbols.get_block_shape(indexing.index)
 
             if (
@@ -5216,8 +5223,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.is_native_matmul:
             # tl.dot requires the shape to be >= 16,
             # so when matmul shape is smaller than 16, we always keep the mask.
-            if V.graph.sizevars.statically_known_lt(tree.numel, 16) :
-                return False 
+            if V.graph.sizevars.statically_known_lt(tree.numel, 16):
+                return False
 
         if not self.optimize_mask:
             return False

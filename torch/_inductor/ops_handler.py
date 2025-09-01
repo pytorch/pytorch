@@ -30,6 +30,7 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
+    "dot",
     "xor_sum",
     "online_softmax_reduce",
 ]
