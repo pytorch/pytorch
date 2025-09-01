@@ -875,18 +875,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             for x, g in zip(lengths, groups)
         ):
             return set_ranges(*lengths)
-        
-        try:
-            new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
-        except CantSplit:
-            # For debugging purpose in CI
-            print("groups: ", groups)
-            print("lengths: ", lengths)
-            print("isnative: ", V.kernel.is_native_matmul)
-            print("node_schedule: ", V.kernel.features.node_schedule)
-            print("node0: ", V.kernel.features.node_schedule[0].node)
-            print("node1: ", V.kernel.features.node_schedule[1].node)
-            raise CantSplit
+
+        new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
 
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
@@ -1259,7 +1249,7 @@ class SIMDScheduling(BaseScheduling):
                     rnumel1,
                     rnumel2,
                 )
-            
+
             if reduction_can_fuse and node1.is_native_matmul():
                 # 1. A native matmul node keeps its original loop order.
                 #    For example: C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) keeps (z,y,x) order.
@@ -1269,16 +1259,18 @@ class SIMDScheduling(BaseScheduling):
                 #    (see get_tiling_and_scores in this file)
                 #
                 # 3. If a candidate node (node2) uses a different loop order (e.g., (y,z,x,r)),
-                #    its tiling is incompatible with native matmul tiling (z,y,x,r). 
+                #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1) 
+                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
                 if not all(
-                    SIMDKernel.is_compatible(tiling.values(), n2.get_ranges(), reduction_numel=rnumel1) 
+                    SIMDKernel.is_compatible(
+                        tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
+                    )
                     for n2 in node2.get_nodes()
                 ):
                     why("invalid loop order and tiling for native matmul")
                     return False
- 
+
             return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
