@@ -255,6 +255,16 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
   });
 }
 
+AOTITorchError aoti_torch_cpu__gelu(
+    AtenTensorHandle X,
+    const char* algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = at::native::mkldnn_gelu(*tensor_handle_to_tensor_pointer(X), algorithm);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
 AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
