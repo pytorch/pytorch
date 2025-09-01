@@ -1292,6 +1292,7 @@ class CompilationMetrics:
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
     stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
     graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
@@ -1556,9 +1557,14 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
 
     keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
-    inductor_config_copy = (
-        torch._inductor.config.get_config_copy() if torch._inductor.config else None
-    )
+    inductor_config_copy = None
+
+    if torch._inductor.config:
+        try:
+            inductor_config_copy = torch._inductor.config.get_config_copy()
+        except (TypeError, AttributeError):
+            inductor_conf_str = "Inductor Config cannot be pickled"
+
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
@@ -4726,6 +4732,11 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
+class CompileCounterInt(int):
+    def __add__(self, other: Any) -> CompileCounterInt:
+        return CompileCounterInt(super().__add__(other))
+
+
 def set_feature_use(feature: str, usage: bool) -> None:
     """
     Records whether we are using a feature
@@ -4838,22 +4849,3 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
-
-
-class CreateNestedFnCache:
-    cache: dict[str, types.FunctionType] = {}
-
-    @classmethod
-    def get(cls, key: str) -> Optional[types.FunctionType]:
-        return cls.cache.get(key, None)
-
-    @classmethod
-    def set(cls, key: str, value: types.FunctionType) -> None:
-        cls.cache[key] = value
-
-    @classmethod
-    def clear(cls: type[CreateNestedFnCache]) -> None:
-        cls.cache.clear()
-
-
-create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()

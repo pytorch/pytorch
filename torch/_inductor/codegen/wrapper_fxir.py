@@ -10,6 +10,11 @@ from typing import Any, Callable, Optional, Union
 import sympy
 
 import torch
+from torch._export.passes._node_metadata_hook import (
+    _node_metadata_hook,
+    _set_node_metadata_hook,
+)
+from torch._export.utils import _detect_fake_mode_from_gm
 from torch._higher_order_ops.triton_kernel_wrap import (
     TraceableTritonKernelWrapper,
     tracing_triton_hopifier_singleton,
@@ -28,6 +33,7 @@ from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
 
 from .. import config, ir
+from ..runtime.triton_compat import Config
 from ..utils import LineContext
 from .common import (
     CodegenSymbol,
@@ -198,11 +204,6 @@ class FxConverter:
                 device=device,
             )
 
-    def _create_meta_from_buffer(
-        self, node: torch.fx.Node, buffer: CodegenBuffer
-    ) -> None:
-        node.meta["val"] = buffer.get_example()
-
     def _create_as_strided(
         self,
         input_node: torch.fx.Node,
@@ -266,31 +267,6 @@ class FxConverter:
         Converts graph inputs to FX placeholders.
         """
 
-        def _codegen_symbol(
-            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
-            base_node: torch.fx.Node,
-            target: torch._ops.OpOverload,
-            dim: int,
-        ) -> None:
-            if isinstance(sym_or_exp, sympy.Symbol):
-                buffer = SymbolBuffer(sym_or_exp)
-
-                if buffer.get_name() in self.buffer_to_node:
-                    return
-
-                size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-
-                self._create_meta_from_buffer(size_node, buffer)
-                self._record_allocation(buffer, size_node)
-                self.expr_to_proxy[sym_or_exp] = size_proxy
-
-            elif isinstance(sym_or_exp, sympy.Integer):
-                return
-
-            elif isinstance(sym_or_exp, sympy.Expr):
-                self._sympy_interp(sym_or_exp)
-
         for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
             if name in V.graph.graph_inputs:
@@ -303,18 +279,48 @@ class FxConverter:
                     else self._get_buffer(ir_node)
                 )
                 placeholder_node = self.gm.graph.placeholder(buffer.get_name())
-                self._create_meta_from_buffer(placeholder_node, buffer)
+                placeholder_node.meta["val"] = buffer.get_example()
                 self._record_allocation(buffer, placeholder_node)
 
-                # not sure if this is needed...
-                if isinstance(ir_node, (sympy.Symbol)):
-                    placeholder_proxy = torch.fx.Proxy(
-                        placeholder_node, tracer=self.tracer
-                    )
-                    self.expr_to_proxy[ir_node] = placeholder_proxy
+            elif V.aot_compilation:
+                # Create dummy input nodes to match the input signature
+                self.gm.graph.placeholder(name)
 
-                # Generate nodes for dynamic input sizes/strides.
+    def _generate_graph_input_shapes(self) -> None:
+        """
+        Generate nodes creating symints that are part of graph input
+        shape/strides.
+        """
+
+        def _codegen_symbol(
+            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
+            base_node: torch.fx.Node,
+            target: torch._ops.OpOverload,
+            dim: int,
+        ) -> None:
+            if isinstance(sym_or_exp, sympy.Symbol):
+                if sym_or_exp in self.expr_to_proxy:
+                    return
+
+                size_node = self.gm.graph.call_function(target, (base_node, dim))
+                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
+
+                self.expr_to_proxy[sym_or_exp] = size_proxy
+
+            elif isinstance(sym_or_exp, sympy.Integer):
+                return
+
+            elif isinstance(sym_or_exp, sympy.Expr):
+                self._sympy_interp(sym_or_exp)
+
+        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
+            name = node.name
+            if name in V.graph.graph_inputs:
+                ir_node = V.graph.graph_inputs[name]
                 if isinstance(ir_node, ir.TensorBox):
+                    buffer = self._get_buffer(ir_node)
+                    placeholder_node = self.buffer_to_node[buffer.get_name()]
+
                     for dim, size in enumerate(ir_node.get_size()):
                         _codegen_symbol(
                             size, placeholder_node, torch.ops.aten.sym_size.int, dim
@@ -323,10 +329,6 @@ class FxConverter:
                         _codegen_symbol(
                             stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
                         )
-
-            elif V.aot_compilation:
-                # Create dummy input nodes to match the input signature
-                self.gm.graph.placeholder(name)
 
     def _generate_graph_constants(self) -> None:
         for name, value in V.graph.constants.items():
@@ -346,7 +348,7 @@ class FxConverter:
                 return node
             elif isinstance(node, ir.NoneAsConstantBuffer):
                 return None
-            elif isinstance(node, ir.StorageBox):
+            elif isinstance(node, ir.MutableBox):
                 return generate_to_buffer(node.data)
             elif isinstance(node, ir.ReinterpretView):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
@@ -397,24 +399,32 @@ class FxConverter:
         self._generate_graph_inputs()
         self._generate_graph_constants()
 
-        # Generate FX IR from Wrapper IR lines.
-        for line in self.lines:
-            if isinstance(line, WrapperLine):
-                line.codegen_fx(self)(line)
-            elif isinstance(line, LineContext):
-                # Ignore line context in FX IR.
-                pass
-            else:
-                raise NotImplementedError(
-                    textwrap.dedent(
-                        f"""
-                    Found line of unrecognized type '{type(line)}':
-                        '{line}'
+        fake_mode = _detect_fake_mode_from_gm(self.gm)
 
-                    FX conversion only supports Wrapper IR lines.
-                    """
+        with _set_node_metadata_hook(
+            self.gm,
+            functools.partial(_node_metadata_hook, fake_mode=fake_mode),
+        ):
+            self._generate_graph_input_shapes()
+
+            # Generate FX IR from Wrapper IR lines.
+            for line in self.lines:
+                if isinstance(line, WrapperLine):
+                    line.codegen_fx(self)(line)
+                elif isinstance(line, LineContext):
+                    # Ignore line context in FX IR.
+                    pass
+                else:
+                    raise NotImplementedError(
+                        textwrap.dedent(
+                            f"""
+                        Found line of unrecognized type '{type(line)}':
+                            '{line}'
+
+                        FX conversion only supports Wrapper IR lines.
+                        """
+                        )
                     )
-                )
 
         self._generate_output()
         self.gm.recompile()
@@ -458,10 +468,11 @@ class FxConverter:
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
 
-            def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+            def replace_floor_div(orig_expr: sympy.Expr) -> sympy.Expr:
                 """
                 Converts floor(x / c) to x // c.
                 """
+                expr = sympy.together(orig_expr, deep=False)
                 if isinstance(expr, sympy.core.mul.Mul) and isinstance(
                     expr.args[0], sympy.Rational
                 ):
@@ -478,7 +489,7 @@ class FxConverter:
                     # Undo the python division trick and replace with explicit CeilDiv
                     return -CeilDiv(-numerator, denominator)
                 else:
-                    return sympy.floor(expr)
+                    return sympy.floor(orig_expr)
 
             s = s.replace(sympy.floor, replace_floor_div)
             return self._sympy_interp(s).node
@@ -512,7 +523,6 @@ class FxConverter:
         )
         assert name
         node.name = name
-        self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
 
     def _generate_comment(self, line: WrapperLine) -> None:
@@ -583,7 +593,6 @@ class FxConverter:
         # Map ReinterpretView to as_strided.
         result_node = self._create_as_strided(input_node, size, stride, offset)
         result_node.name = name
-        result_node.meta["val"] = layout.get_example()
         self._record_allocation(result_buffer, result_node)
 
     def _generate_reuse(self, line: WrapperLine) -> None:
@@ -606,7 +615,6 @@ class FxConverter:
             or old.get_offset() != offset
         ):
             result_node = self._create_as_strided(old_node, size, stride, offset)
-            self._create_meta_from_buffer(result_node, new)
 
         self._record_allocation(new, result_node)
 
@@ -635,7 +643,6 @@ class FxConverter:
         idx = inds[0]
 
         node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
-        node.meta["val"] = arg_node.meta["val"][idx]
         node.name = line.result_name
         self.buffer_to_node[line.result_name] = node
 
@@ -695,9 +702,40 @@ class FxConverter:
                 kernel_name,
             )
 
+        triton_meta = tuner.triton_meta
+        signature = triton_meta["signature"]
+
+        def add_constants_to_call_args(
+            call_args: Sequence[Any], cfg: Config
+        ) -> tuple[Any, ...]:
+            """
+            Add constant kwargs to the arg list.
+            """
+            # Add args from the proper Triton signature.
+            new_call_args = []
+            call_arg_idx = 0
+            constants = triton_meta["constants"]
+            for arg_name in signature:
+                # Config kwargs are tracked separately.
+                if arg_name in cfg.kwargs:
+                    continue
+
+                try:
+                    new_arg = constants[arg_name]
+                except KeyError:
+                    new_arg = call_args[call_arg_idx]
+                    call_arg_idx += 1
+                new_call_args.append(new_arg)
+
+            # Add Inductor's extra call args to the end.
+            new_call_args.extend(call_args[call_arg_idx:])
+
+            return tuple(new_call_args)
+
         kernel_config = tuner.compile_results[0].config
+        call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
-        call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
+        call_kwargs = dict(zip(signature, call_args))
         call_kwargs.update(kernel_config.kwargs)
 
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
@@ -761,14 +799,11 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unrecognized output layout: {kernel.layout}")
 
-        # Look up the kernel function from its name.
-        kernel_name = kernel.get_kernel_name()
-        module_name, kernel_name = kernel_name.split(".", 1)
-        op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
-        for subname in kernel_name.split("."):
-            op = getattr(op, subname)  # E.g. extern_kernels.addmm
-
-        fx_node = self.gm.graph.call_function(op, args=args, kwargs=kwargs)
+        fx_node = self.gm.graph.call_function(
+            kernel.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
 
         # Assign the result to the given name.
         if result_buffer:
@@ -777,14 +812,6 @@ class FxConverter:
             )
             fx_node.name = result_buffer
             self.buffer_to_node[result_buffer] = fx_node
-
-            arg_tensors = [
-                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in args
-            ]
-
-            # Run the operation to propagate metadata.
-            fx_node.meta["val"] = op(*arg_tensors, **kwargs)
 
     def _generate_kernel_call(self, line: WrapperLine) -> None:
         assert isinstance(line, KernelCallLine)
