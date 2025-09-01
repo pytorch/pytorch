@@ -1714,6 +1714,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skipCUDAIf(True, "Not supported on CUDA")
+    @skipXPUIf(True, "Not supported on XPU")
     @common_utils.parametrize("partition_size", [128, 256, 1024])
     def test_flash_decoding_partition_size(self, device, partition_size):
         def score_mod(score, b, h, m, n):
