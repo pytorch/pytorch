@@ -69,7 +69,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   IntArrayRef strides_custom() const override;
   SymIntArrayRef sym_strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-  bool is_contiguous_custom(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
+  c10::SymBool sym_is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(

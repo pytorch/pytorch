@@ -1437,7 +1437,7 @@ void nnc_aten_embedding(
     r = at::embedding(weight, indices);
   } catch (...) {
   }
-  // TODO: have to copy output because at::embedding doesnt have an out
+  // TODO: have to copy output because at::embedding doesn't have an out
   // variant and NNC's external calls don't support allocations
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }

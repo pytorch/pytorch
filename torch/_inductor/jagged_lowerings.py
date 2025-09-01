@@ -6,7 +6,6 @@ import sympy
 import torch
 
 from .ir import Pointwise, ShapeAsConstantBuffer, TensorBox
-from .lowering import fallback_handler, is_integer_type, register_lowering
 from .virtualized import ops
 
 
@@ -109,6 +108,9 @@ def jagged_idx_to_dense_idx(
 
 
 def register_jagged_ops():
+    # Avoid circular import by importing here
+    from .lowering import fallback_handler, is_integer_type, register_lowering
+
     # pyre-ignore[56]
     @register_lowering(torch.ops.aten._jagged_to_padded_dense_forward.default)
     def _jagged_to_padded_dense_forward(
