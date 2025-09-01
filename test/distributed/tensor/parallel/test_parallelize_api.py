@@ -13,7 +13,6 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -99,7 +98,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_params(local_module, dist_module, rank0_only, rowwise)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_mlp_with_module_api(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -118,7 +116,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_mlp_with_module_api_nested(self):
         inp_size = [12, 10]
         model = torch.nn.Sequential(
@@ -139,7 +136,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_linear_row_wise_parallel(self):
         # test RowwiseParallel
         inp_size = [9, 16]
@@ -158,7 +154,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rowwise=True)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_linear_col_wise_parallel(self):
         # test ColwiseParallel
         inp_size = [8, 10]
@@ -231,7 +226,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(inp, output)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_with_star(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -248,7 +242,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_src_data_rank(self):
         # set seed different for each rank
         torch.manual_seed(self.rank)
@@ -291,7 +284,6 @@ class TensorParallelAPITests(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_with_question(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -308,7 +300,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_with_digit(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -325,7 +316,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_multi_wildcard(self):
         inp_size = [12, 10]
         model = MLPStacked(self.device_type, n_layers=2)
@@ -343,7 +333,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_with_root_module(self):
         inp_size = [16, 10]
         model = MLPModule(self.device_type)
@@ -367,7 +356,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_parallelize_module_with_no_match(self):
         inp_size = [16, 10]
         model = MLPModule(self.device_type)
@@ -388,7 +376,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_under_devicemesh_context(self):
         # test ColwiseParallel
         inp_size = [8, 10]

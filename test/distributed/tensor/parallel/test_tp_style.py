@@ -17,7 +17,7 @@ from torch.distributed.tensor.parallel.style import (
     SequenceParallel,
 )
 from torch.distributed.tensor.placement_types import _Partial
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     NUM_DEVICES,
@@ -339,7 +339,6 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output, expected_tensor)
 
     @with_comms
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1674
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         # early init RNG tracker
