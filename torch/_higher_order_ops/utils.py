@@ -114,9 +114,7 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
-    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
-    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
@@ -126,9 +124,6 @@ def reenter_make_fx(fn):
         gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
-        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
-            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
-            gm.recompile()
         return gm
 
     return wrapped
@@ -1139,12 +1134,22 @@ def materialize_as_graph(
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
                 unfunc_t = [_from_fun(arg) for arg in args]
+
             with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch.utils._python_dispatch._disable_current_modes()
+                )
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
+                # fake_mode is needed because parent tracer's fake_mode might
+                # be None but the associated inputs have fake mode or there
+                # is a global tracing context with fake mode. We nneed to
+                # make sure the fake mode when tracing subgraph is consistent.
+                if fake_mode := detect_fake_mode(unfunc_t):
+                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(fn)(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
@@ -1217,3 +1222,13 @@ def _has_gen_schema(op: HigherOrderOperator):
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
     )
+
+
+def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    assert len(data) == len(masks)
+    return [item for item, keep in zip(data, masks) if keep]
+
+
+def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    data_iter = iter(data)
+    return [next(data_iter) if kept else None for kept in masks]
