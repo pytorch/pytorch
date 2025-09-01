@@ -1615,8 +1615,31 @@ def assert_close(
     )
 
     if error_metas:
-        # TODO: compose all metas into one AssertionError
-        raise error_metas[0].to_error(msg)
+        # Compose all metas into one comprehensive AssertionError
+        if len(error_metas) == 1:
+            # Single error case - use the existing behavior
+            raise error_metas[0].to_error(msg)
+        else:
+            # Multiple errors case - combine all error messages
+            combined_messages = []
+            for i, error_meta in enumerate(error_metas):
+                error_msg = error_meta.to_error().args[0]
+                if len(error_metas) > 1:
+                    combined_messages.append(f"Error {i + 1}: {error_msg}")
+                else:
+                    combined_messages.append(error_msg)
+            
+            # Join all messages with clear separators
+            full_message = "\n\n".join(combined_messages)
+            
+            # Apply custom message formatting if provided
+            if msg is not None:
+                if callable(msg):
+                    full_message = msg(full_message)
+                else:
+                    full_message = f"{msg}\n\n{full_message}"
+            
+            raise AssertionError(full_message)
 
 
 @deprecated(
