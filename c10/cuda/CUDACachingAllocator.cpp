@@ -504,7 +504,16 @@ struct ExpandableSegment {
   SegmentRange share(SegmentRange range, std::ostream& buf) {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
-    ShareHeader header{getpid(), segment_size_, end - begin};
+
+    // header.pid needs to be padded with 4 bytes and initialized with
+    // 0 values ​​to avoid random padding of different bytes each time,
+    // thereby ensuring that the handle can be correctly matched in
+    // ipcMemHandle_to_devptr.
+    ShareHeader header{};
+    header.pid = getpid();
+    header.segment_size = segment_size_;
+    header.num_handles = end - begin;
+
     buf.write((const char*)&header, sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
