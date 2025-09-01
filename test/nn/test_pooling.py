@@ -662,6 +662,12 @@ class TestPoolingNNDeviceType(NNTestCase):
             nn.FractionalMaxPool3d(
                 [0, 0, 0], output_size=[1, 1, 1], _random_samples=samples
             )
+        samples = torch.randn(1, 3, 10, 10, 10)
+        with self.assertRaisesRegex(RuntimeError, "too large relative to"):
+            nn.FractionalMaxPool3d(
+                kernel_size=9223372036854775803,
+                output_size=[1, 1, 1],
+            )(samples)
 
     @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
