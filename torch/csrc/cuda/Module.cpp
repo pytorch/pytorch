@@ -908,8 +908,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   py::str pinned_use_host_register_s = "pinned_use_cuda_host_register";
   py::str roundup_power2_divisions_s = "roundup_power2_divisions";
-  py::str graph_capture_record_stream_reuse_s =
-      "graph_capture_record_stream_reuse";
 
   allocator_settings[last_allocator_settings_s] =
       snapshot.config_metadata.last_allocator_settings;
@@ -925,8 +923,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       snapshot.config_metadata.release_lock_on_malloc;
   allocator_settings[pinned_use_host_register_s] =
       snapshot.config_metadata.pinned_use_host_register;
-  allocator_settings[graph_capture_record_stream_reuse_s] =
-      snapshot.config_metadata.graph_capture_record_stream_reuse;
   unsigned int roundup_key = 1;
   py::dict roundup_settings;
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

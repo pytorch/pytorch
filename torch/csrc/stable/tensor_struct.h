@@ -184,17 +184,24 @@ class Tensor {
     return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
   }
 
-  template<typename T, size_t N>
-  at::TensorAccessor<T,N> accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
-    STD_TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+  template <typename T, size_t N>
+  at::TensorAccessor<T, N> accessor() const& {
+    static_assert(
+        N > 0,
+        "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    STD_TORCH_CHECK(
+        dim() == N,
+        "TensorAccessor expected ",
+        N,
+        " dims but tensor has ",
+        dim());
     T* ptr = nullptr;
     if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
     }
-    return at::TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
+    return at::TensorAccessor<T, N>(ptr, sizes().data(), strides().data());
   }
 
   bool defined() const {
