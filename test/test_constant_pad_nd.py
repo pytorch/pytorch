@@ -29,7 +29,7 @@ class TestConstantPadNd(TestCase):
         assert z.numel() == 0
 
     @onlyNativeDeviceTypes
-    @dtypes(*floating_types)
+    @dtypes(*floating_types())
     def test_constant_pad_nd_devices(self, device, dtype):
         x = torch.ones(5, 3, device=device, dtype=dtype)
         y = torch.ops.aten.constant_pad_nd.default(x, [-1, -2, 1, 1], 0)
