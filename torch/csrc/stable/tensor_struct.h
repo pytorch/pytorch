@@ -1,9 +1,8 @@
 #pragma once
 
 #include <ATen/core/TensorAccessor.h>
-
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
