@@ -70,6 +70,7 @@ __all__ = [
     "CharTensor",
     "DoubleStorage",
     "DoubleTensor",
+    "DynamicInt",
     "FloatStorage",
     "FloatTensor",
     "GradScaler",
@@ -610,6 +611,80 @@ class SymInt:
 
     def conjugate(self) -> "SymInt":
         return self
+
+class DynamicInt:
+    def __init__(self, x):
+        self.tensor = torch.empty((0, x))
+        torch._dynamo.mark_dynamic(self.tensor, 1)
+
+    def __int__(self):
+        return self.tensor.size(1)
+
+    def __index__(self):
+        return int(self)
+
+    def __repr__(self):
+        return f"DynamicInt({int(self)})"
+
+    def __eq__(self, other):
+        return int(self) == int(other)
+
+    def __ne__(self, other):
+        return int(self) != int(other)
+
+    def __lt__(self, other):
+        return int(self) < int(other)
+
+    def __le__(self, other):
+        return int(self) <= int(other)
+
+    def __gt__(self, other):
+        return int(self) > int(other)
+
+    def __ge__(self, other):
+        return int(self) >= int(other)
+
+    def __add__(self, other):
+        return int(self) + int(other)
+
+    def __radd__(self, other):
+        return int(other) + int(self)
+
+    def __sub__(self, other):
+        return int(self) - int(other)
+
+    def __rsub__(self, other):
+        return int(other) - int(self)
+
+    def __mul__(self, other):
+        return int(self) * int(other)
+
+    def __rmul__(self, other):
+        return int(other) * int(self)
+
+    def __floordiv__(self, other):
+        return int(self) // int(other)
+
+    def __rfloordiv__(self, other):
+        return int(other) // int(self)
+
+    def __truediv__(self, other):
+        return int(self) / int(other)
+
+    def __rtruediv__(self, other):
+        return int(other) / int(self)
+
+    def __mod__(self, other):
+        return int(self) % int(other)
+
+    def __rmod__(self, other):
+        return int(other) % int(self)
+
+    def __pow__(self, other):
+        return int(self) ** int(other)
+
+    def __rpow__(self, other):
+        return int(other) ** int(self)
 
 
 class SymFloat:

@@ -533,6 +533,19 @@ class FlattenScriptObjectSource(ChainedSource):
     def name(self) -> str:
         return f"{self.base.name()}.__obj_flatten__()"
 
+@dataclasses.dataclass(frozen=True)
+class DynamicIntSource(ChainedSource):
+    def __post_init__(self) -> None:
+        assert self.base is not None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return self.base.name()
 
 @dataclasses.dataclass(frozen=True)
 class ScriptObjectQualifiedNameSource(ChainedSource):
