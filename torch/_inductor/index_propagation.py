@@ -74,6 +74,8 @@ class TypedExpr:
                 if self.dtype.is_signed:
                     expr = expr + 2 ** (bits - 1)
                 expr = expr % 2**bits
+                if self.dtype.is_signed:
+                    expr = expr - 2 ** (bits - 1)
             self.expr = expr
 
 
