@@ -1,6 +1,9 @@
 #pragma once
 
+#include <ATen/core/TensorAccessor.h>
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
@@ -74,10 +77,26 @@ class Tensor {
   // semantics as their counterparts in TensorBase.h.
   // =============================================================================
 
+  // Do not add new uses of data_ptr(), use const_data_ptr() if
+  // possible, mutable_data_ptr() otherwise.
   void* data_ptr() const {
     void* data_ptr;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
+  }
+
+  template <typename T>
+  T* mutable_data_ptr() const {
+    void* data_ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    return reinterpret_cast<T*>(data_ptr);
+  }
+
+  template <typename T>
+  const T* const_data_ptr() const {
+    void* data_ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    return reinterpret_cast<const T*>(data_ptr);
   }
 
   int64_t dim() const {
@@ -154,10 +173,63 @@ class Tensor {
     return size;
   }
 
+  auto sizes() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
+  auto strides() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
+  template<typename T, size_t N>
+  at::TensorAccessor<T,N> accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    STD_TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+    T* ptr = nullptr;
+    if constexpr (std::is_const_v<T>) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return at::TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
+  }
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = at::DefaultPtrTraits, typename index_t = int64_t>
+  at::GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+    T* ptr = nullptr;
+    if constexpr (std::is_const_v<T>) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return at::GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(ptr),sizes().data(),strides().data());
+  }
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = at::DefaultPtrTraits>
+  at::PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    STD_TORCH_CHECK(
+        numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
+    return generic_packed_accessor<T,N,PtrTraits,int32_t>();
+  }
+
   bool defined() const {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  Tensor clone() const {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_clone(get(), &ret));
+    return Tensor(ret);
   }
 
   // defined in tensor-inl.h to avoid circular dependencies
