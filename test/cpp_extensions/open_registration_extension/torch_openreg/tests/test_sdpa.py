@@ -9,7 +9,7 @@ import torch
 import torch_openreg  # noqa: F401
 from torch.nn.attention import SDPBackend
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TEST_XPU
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 
 
 SdpaShape = collections.namedtuple(
@@ -17,7 +17,6 @@ SdpaShape = collections.namedtuple(
 )
 
 
-@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_privateuseone(self):
