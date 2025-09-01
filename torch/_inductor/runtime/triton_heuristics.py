@@ -1313,11 +1313,8 @@ class CachingAutotuner(KernelInterface):
                 # constexprs are not passed in as args
                 return [
                     x
-                    for x in self.triton_meta["signature"].keys()
-                    # Also include constants that are None or equal to 1 as these
-                    # are marked as constexpr
-                    if x not in cfg.kwargs.keys()
-                    and x not in self.triton_meta["constants"]
+                    for i, x in enumerate(self.triton_meta["signature"].keys())
+                    if x not in cfg.kwargs.keys() and i not in self.fn.constexprs
                 ]
         else:
 
@@ -1427,23 +1424,12 @@ class CompileResult(Generic[_T]):
         if triton_version_uses_attrs_dict():
             call_args = arg_names
             def_args = arg_names
-            equals_to_1 = OrderedSet(
-                [
-                    c
-                    for c in compile_meta["constants"]
-                    if compile_meta["constants"][c] == 1
-                ]
-            )
-            implicit_constants = (
-                OrderedSet(
-                    (
-                        "num_warps",
-                        "num_stages",
-                    )
+            implicit_constants = OrderedSet(
+                (
+                    "num_warps",
+                    "num_stages",
                 )
-                .union(OrderedSet(k for k in known_constants))
-                .union(equals_to_1)
-            )
+            ).union(OrderedSet(k for k in known_constants))
             if implicit_constants := implicit_constants & OrderedSet(
                 compile_meta["constants"].keys()
             ):
