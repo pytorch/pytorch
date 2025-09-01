@@ -6082,6 +6082,16 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    def test_unsigned_constant_tensors(self):
+        def fn(x):
+            c = torch.tensor(7, dtype=torch.uint8)
+            return c + x, torch.neg(c), torch.neg(c) + x
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     # Disable size_asserts for this test due to https://github.com/pytorch/pytorch/issues/145963
     @config.patch(size_asserts=os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS") == "1")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
