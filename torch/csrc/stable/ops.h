@@ -68,7 +68,8 @@ inline Tensor new_empty(
   }
 
   int32_t self_device_type;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &self_device_type));
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_type(self.get(), &self_device_type));
 
   int32_t device_type_;
   if (device_type.has_value()) {
@@ -82,7 +83,8 @@ inline Tensor new_empty(
     device_index_ = to<int32_t>(from(device_index.value()));
   } else {
     if (device_type_ == self_device_type) {
-      TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_index(self.get(), &device_index_));
+      TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_device_index(self.get(), &device_index_));
     } else {
       // It is unmeaningul to use self device index when self device
       // type is different from target device type.
