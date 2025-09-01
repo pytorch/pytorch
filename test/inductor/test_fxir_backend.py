@@ -599,8 +599,6 @@ class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def check(self, model, inp, dynamic_shapes=None, strict=False):
-        if self.device == "xpu":
-            raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
             ep = torch.export.export(
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
