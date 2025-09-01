@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
@@ -74,10 +75,26 @@ class Tensor {
   // semantics as their counterparts in TensorBase.h.
   // =============================================================================
 
+  // Do not add new uses of data_ptr(), use const_data_ptr() if
+  // possible, mutable_data_ptr() otherwise.
   void* data_ptr() const {
     void* data_ptr;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
+  }
+
+  template <typename T>
+  T* mutable_data_ptr() const {
+    void* data_ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    return reinterpret_cast<T*>(data_ptr);
+  }
+
+  template <typename T>
+  const T* const_data_ptr() const {
+    void* data_ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    return reinterpret_cast<const T*>(data_ptr);
   }
 
   int64_t dim() const {
@@ -152,6 +169,18 @@ class Tensor {
     int64_t size;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
     return size;
+  }
+
+  auto sizes() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
+  auto strides() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
   }
 
   bool defined() const {
