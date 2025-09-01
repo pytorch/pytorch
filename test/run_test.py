@@ -655,8 +655,16 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
-    # FIXME: change setup.py command to pip command
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
         return None, return_code
@@ -815,8 +823,17 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    install_cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -901,7 +918,7 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
-def run_test_with_openreg(test_module, test_directory, options):
+def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
@@ -910,7 +927,8 @@ def run_test_with_openreg(test_module, test_directory, options):
         return return_code
 
     with extend_python_path([install_dir]):
-        return run_test(test_module, test_directory, options)
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
+        return shell(cmd, cwd=openreg_dir, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1239,8 +1257,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_openreg": run_test_with_openreg,
-    "test_transformers_privateuse1": run_test_with_openreg,
+    "test_openreg": test_openreg,
 }
 
 
