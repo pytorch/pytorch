@@ -1124,7 +1124,7 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> builtins.bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
