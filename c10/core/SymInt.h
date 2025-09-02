@@ -239,11 +239,7 @@ class C10_API SymInt {
     if (!is_heap_allocated()) {
       return data_;
     }
-    auto* node = toSymNodeImplUnowned();
-    if (auto c = node->constant_int()) {
-      return c;
-    }
-    return node->maybe_as_int();
+    return maybe_as_int_slow_path();
   }
 
   // Return whether the integer is directly coercible to a SymInt
@@ -264,6 +260,8 @@ class C10_API SymInt {
 
  private:
   void promote_to_negative();
+
+  std::optional<int64_t> maybe_as_int_slow_path() const;
 
   // Constraints on the internal representation:
   //
