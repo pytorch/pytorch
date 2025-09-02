@@ -343,6 +343,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
       " greater than input_tensor.numel() ", input_tensor.numel());
   const float* input_row = input_tensor.const_data_ptr<float>();
+  TORCH_CHECK(input_row != nullptr, "input tensor is empty and has no data");
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
   float n_bins_float = static_cast<float>(n_bins);
