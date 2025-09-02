@@ -55,7 +55,7 @@ class TestGraphTransformObserver(TestCase):
             )
         )
 
-    @torch._inductor.config.patch("trace.provenance_tracking", True)
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
     def test_graph_transform_observer_node_tracking(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -156,7 +156,7 @@ class TestGraphTransformObserver(TestCase):
             [NodeSourceAction.REPLACE, NodeSourceAction.CREATE],
         )
 
-    @torch._inductor.config.patch("trace.provenance_tracking", True)
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
     def test_graph_transform_observer_deepcopy(self):
         class SimpleLinearModel(torch.nn.Module):
             def forward(self, x):
@@ -179,7 +179,7 @@ class TestGraphTransformObserver(TestCase):
         self.assertEqual(len(gm2._erase_node_hooks), 0)
         self.assertEqual(len(gm2._deepcopy_hooks), 0)
 
-    @torch._inductor.config.patch("trace.provenance_tracking", True)
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
     def test_graph_transform_observer_replace(self):
         # the node sohuld should not be duplicated
         class Model(torch.nn.Module):
