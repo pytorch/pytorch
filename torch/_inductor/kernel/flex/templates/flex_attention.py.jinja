@@ -45,9 +45,9 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    q_start = tl.program_id(0)
-    off_zq = tl.program_id(1)
-    off_hq = tl.program_id(2)
+    q_start = tl.program_id(0).to(INDEX_DTYPE)
+    off_zq = tl.program_id(1).to(INDEX_DTYPE)
+    off_hq = tl.program_id(2).to(INDEX_DTYPE)
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
@@ -114,19 +114,6 @@
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
-    K_block_ptr = None
-    V_block_ptr = None
-    Q_block_ptr = None
-
-    if not USE_TMA:
-        Q_block_ptr = tl.make_block_ptr(
-            base=Q ,
-            shape=(Q_LEN, QK_HEAD_DIM),
-            strides=(stride_qm, stride_qk),
-            offsets=(q_start * BLOCK_M, 0),
-            block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
-            order=(1, 0)
-        )
 
     {%- if USE_TMA %}
     q = tl.load_tensor_descriptor(
@@ -134,7 +121,9 @@
         [(q_start * BLOCK_M).to(tl.int32), 0],
     )
     {%- else %}
-        q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    q = load_checked_2d(Q, offs_m, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
     {%- endif %}
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -146,31 +135,14 @@
     block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
 
-    if not USE_TMA:
-        K_block_ptr = tl.make_block_ptr(
-            base=K,
-            shape=(QK_HEAD_DIM, KV_LEN),
-            strides=(stride_kk, stride_kn),
-            offsets=(0, kv_start),
-            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-            order=(0, 1)
-        )
-
-        V_block_ptr = tl.make_block_ptr(
-            base=V,
-            shape=(KV_LEN, V_HEAD_DIM),
-            strides=(stride_vn, stride_vk),
-            offsets=(kv_start, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
-            order=(1, 0)
-        )
+    # K and V pointers will be passed directly to forward_inner
 
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr,
+        q, K, V,
         desc_k, desc_v, Q_LEN, KV_LEN,
         acc, l_i, m_i,
         off_zq, off_hq, offs_m[:, None], offs_n[None, :],
@@ -178,6 +150,7 @@
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
+        stride_kk, stride_kn, stride_vn, stride_vk,
         IS_FULL_BLOCKS=False,
     )
 
@@ -190,28 +163,12 @@
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
         block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
-        if not USE_TMA:
-            K_block_ptr = tl.make_block_ptr(
-                base=K,
-                shape=(QK_HEAD_DIM, KV_LEN),
-                strides=(stride_kk, stride_kn),
-                offsets=(0, kv_start),
-                block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-                order=(0, 1)
-            )
-            V_block_ptr = tl.make_block_ptr(
-                base=V,
-                shape=(KV_LEN, V_HEAD_DIM),
-                strides=(stride_vn, stride_vk),
-                offsets=(kv_start, 0),
-                block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
-                order=(1, 0)
-            )
+        # K and V pointers will be passed directly to forward_inner
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr,
+            q, K, V,
             desc_k, desc_v, Q_LEN, KV_LEN,
             acc, l_i, m_i,
             off_zq, off_hq, offs_m[:, None], offs_n[None, :],
@@ -219,6 +176,7 @@
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
+            stride_kk, stride_kn, stride_vn, stride_vk,
             IS_FULL_BLOCKS=True,
         )
 
@@ -229,10 +187,10 @@
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1)
-    idx_hq = tl.program_id(2)
-    idx_m = offs_m[:, None]
-    idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
+    idx_zq = tl.program_id(1).to(INDEX_DTYPE)
+    idx_hq = tl.program_id(2).to(INDEX_DTYPE)
+    idx_m = offs_m[:, None].to(INDEX_DTYPE)
+    idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
 
