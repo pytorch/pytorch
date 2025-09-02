@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Any, Callable, Union
+
 import torch
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
@@ -33,7 +35,9 @@ def strict_mode(callable, operands):
                 modes = [metadata_mode, predispatch_mode]
                 modes = [mode for mode in modes if mode is not None]
                 if modes:
-                    backend = make_eager_backend_with_torch_function_modes(modes)
+                    backend: Union[str, Callable[..., Any]] = (
+                        make_eager_backend_with_torch_function_modes(modes)
+                    )
                 else:
                     backend = "eager"
                 with torch._dynamo.utils.disable_cache_limit():
