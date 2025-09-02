@@ -307,7 +307,7 @@ class DTensor(torch.Tensor):
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], (self._spec, self.requires_grad)
+        return ["_local_tensor"], (self._spec,)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -315,7 +315,7 @@ class DTensor(torch.Tensor):
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
         local_tensor = inner_tensors["_local_tensor"]
-        spec, requires_grad = flatten_spec
+        spec, = flatten_spec
         unflatten_tensor_meta = TensorMeta(
             shape=outer_size,
             stride=outer_stride,
@@ -329,7 +329,6 @@ class DTensor(torch.Tensor):
         return DTensor(
             local_tensor,
             unflatten_spec,
-            requires_grad=requires_grad,
         )
 
     def __coerce_tangent_metadata__(self):
