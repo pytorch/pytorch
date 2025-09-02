@@ -133,6 +133,9 @@ class InductorChoices:
 
         cs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
         extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+        # We also return the layout and the input_nodes as part of the extra_kwargs
+        extra_kwargs["layout"] = layout
+        extra_kwargs["input_nodes"] = kernel_inputs.nodes()
         overrides = kwarg_overrides if kwarg_overrides is not None else {}
         for c in cs:
             # yield in a comprehensive package what the extra kwargs are

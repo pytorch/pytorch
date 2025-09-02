@@ -721,8 +721,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
         ):
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
@@ -734,8 +732,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout,
                     **kwargs,
                     **extra_kwargs,
                 )
@@ -747,8 +743,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
             ):
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout,
                     **kwargs,
                     **extra_kwargs,
                 )
@@ -888,8 +882,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         ):
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
@@ -995,8 +987,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
@@ -1011,8 +1001,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout,
                     **kwargs,
                     **extra_kwargs,
                 )
@@ -1224,8 +1212,6 @@ def tuned_scaled_mm(
             ):
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout,
                     **kwargs,
                     **extra_kwargs,
                 )
@@ -1241,8 +1227,6 @@ def tuned_scaled_mm(
             # possibly appends a TritonTemplateCaller to choices
             mm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
