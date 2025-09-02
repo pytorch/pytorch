@@ -4511,6 +4511,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(ref[0], actual[0]))
         self.assertTrue(torch.allclose(ref[1], actual[1]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_layer_norm_unbacked_normalized_shape(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, scalar, weight, bias):
+                u1 = scalar.item()
+                y = torch.ones(2, u1)
+
+                return torch.nn.functional.layer_norm(
+                    input=y, normalized_shape=(u1,), weight=weight, bias=bias
+                )
+
+        model = MyModel()
+        inputs = (
+            torch.scalar_tensor(16, dtype=torch.int32),
+            torch.randn(16),
+            torch.randn(16),
+        )
+        ep = export(model, inputs)
+
+        actual = ep.module()(*inputs)
+        ref = model(*inputs)
+        self.assertTrue(torch.allclose(ref[0], actual[0]))
+
     def test_unbacked_3d_matmul(self):
         class Model(torch.nn.Module):
             def forward(self, x, repeat):

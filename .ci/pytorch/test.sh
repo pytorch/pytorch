@@ -1701,7 +1701,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
-  PYTHONPATH=/torchbench:$PYTHONPATH test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti
   fi

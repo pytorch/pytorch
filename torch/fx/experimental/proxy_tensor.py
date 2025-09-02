@@ -2345,7 +2345,8 @@ def make_fx(
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops,
-        record_stack_traces=record_stack_traces or config.trace.provenance_tracking,
+        record_stack_traces=record_stack_traces
+        or config.trace.provenance_tracking_level == 1,
     )
 
     @functools.wraps(f)
