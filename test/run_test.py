@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections import defaultdict
@@ -250,7 +251,6 @@ XPU_BLOCKLIST = [
     "profiler/test_profiler_tree",
     "profiler/test_record_function",
     "profiler/test_torch_tidy",
-    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -648,11 +648,11 @@ def run_test(
     return ret_code
 
 
-def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+def install_cpp_extensions(extensions_dir, env=os.environ):
     # Wipe the build folder, if it exists already
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
+    build_dir = os.path.join(extensions_dir, "build")
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     # Build the test cpp extensions modules
     cmd = [
@@ -665,18 +665,16 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         "--root",
         "./install",
     ]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    return_code = shell(cmd, cwd=extensions_dir, env=env)
     if return_code != 0:
         return None, return_code
 
-    install_directory = ""
-    # install directory is the one that is named site-packages
-    for root, directories, _ in os.walk(
-        os.path.join(cpp_extensions_test_dir, "install")
-    ):
-        for directory in directories:
-            if "-packages" in directory:
-                install_directory = os.path.join(root, directory)
+    # Get the site-packages directory prepared for PYTHONPATH
+    platlib_path = sysconfig.get_paths()["platlib"]
+    platlib_rel = os.path.relpath(
+        platlib_path, os.path.splitdrive(platlib_path)[0] + os.sep
+    )
+    install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
     assert install_directory, "install_directory must not be empty"
     return install_directory, 0
@@ -927,8 +925,16 @@ def test_openreg(test_module, test_directory, options):
         return return_code
 
     with extend_python_path([install_dir]):
-        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
-        return shell(cmd, cwd=openreg_dir, env=os.environ)
+        cmd = [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            os.path.join(openreg_dir, "tests"),
+            "-v",
+        ]
+        return shell(cmd, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
