@@ -127,54 +127,6 @@ def collect_node_descendants(
     return node_descendants
 
 
-def _greedy_bucket(
-    ns, bucket_cap_mb_by_bucket_idx: Callable[[int], float], node_descendents
-):
-    buckets: list[list[torch.fx.Node]] = []
-    cur_bucket: list[torch.fx.Node] = []
-    cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
-    cur_bucket_size_bytes: int = 0
-    cur_bucket_id: int = 0
-    bucket_size_bytes = int(bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024)
-    left_ns = []
-    for node in ns:
-        if node in cur_bucket_descendents:
-            print(f"XXX cur_bucket:{cur_bucket} node:{node} in cur_bucket_descendents")
-            # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
-            left_ns.append(node)
-            continue
-        assert "val" in node.meta
-        n_val = node.meta["val"]
-        out_size_bytes = n_val.numel() * n_val.element_size()
-        n_input_val = node.all_input_nodes[0].meta["val"]
-        in_size_bytes = n_input_val.numel() * n_input_val.element_size()
-        size_bytes = max(out_size_bytes, in_size_bytes)
-        if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
-            # Current bucket is full, create new bucket
-            if len(cur_bucket) > 1:
-                buckets.append(cur_bucket)
-            elif len(cur_bucket) == 1:
-                left_ns.append(cur_bucket[0])
-            cur_bucket = []
-            cur_bucket_size_bytes = 0
-            cur_bucket_id += 1
-            cur_bucket_descendents = OrderedSet()
-        cur_bucket_size_bytes += size_bytes
-        cur_bucket.append(node)
-        cur_bucket_descendents |= node_descendents[node]
-    if len(cur_bucket) > 1:
-        buckets.append(cur_bucket)
-    elif len(cur_bucket) == 1:
-        left_ns.append(cur_bucket[0])
-
-    if len(left_ns) > 1 and len(left_ns) < len(ns):
-        left_buckets = _greedy_bucket(
-            left_ns, bucket_cap_mb_by_bucket_idx, node_descendents
-        )
-        buckets.extend(left_buckets)
-    return buckets
-
-
 def greedy_bucket_collective_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
@@ -932,7 +884,6 @@ def get_collectives_trie(
 
 def bucket_collectives_trie(gm, config):
     root_cts = get_collectives_trie(gm)
-    node_descendents = collect_node_descendants(gm.graph)
 
     def should_bucket(ctype):
         if ctype == CType.AG:
@@ -976,11 +927,74 @@ def bucket_collectives_trie(gm, config):
             group_key = (path, dtype)
             ns_groups[group_key].append(n)
 
+        def _greedy_bucket(
+            ns,
+            bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+            node_descendents,
+            try_left=3,
+        ):
+            buckets: list[list[torch.fx.Node]] = []
+            cur_bucket: list[torch.fx.Node] = []
+            cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
+            cur_bucket_size_bytes: int = 0
+            cur_bucket_id: int = 0
+            bucket_size_bytes = int(
+                bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
+            )
+            left_ns = []
+
+            def _add_bucket(bucket_ns, bucket_descendents):
+                if len(cur_bucket) <= 1:
+                    return False
+                buckets.append(bucket_ns)
+                for bn in bucket_ns:
+                    node_descendents[bn] |= bucket_descendents
+                return True
+
+            for node in ns:
+                if node in cur_bucket_descendents:
+                    print(
+                        f"XXX cur_bucket:{cur_bucket} node:{node} in cur_bucket_descendents"
+                    )
+                    # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
+                    left_ns.append(node)
+                    continue
+                assert "val" in node.meta
+                n_val = node.meta["val"]
+                out_size_bytes = n_val.numel() * n_val.element_size()
+                n_input_val = node.all_input_nodes[0].meta["val"]
+                in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+                size_bytes = max(out_size_bytes, in_size_bytes)
+                if (
+                    cur_bucket_size_bytes + size_bytes > bucket_size_bytes
+                    and cur_bucket
+                ):
+                    # Current bucket is full, create new bucket
+                    if not _add_bucket(cur_bucket, cur_bucket_descendents):
+                        left_ns.extend(cur_bucket)
+                    cur_bucket = []
+                    cur_bucket_size_bytes = 0
+                    cur_bucket_id += 1
+                    cur_bucket_descendents = OrderedSet()
+                cur_bucket_size_bytes += size_bytes
+                cur_bucket.append(node)
+                cur_bucket_descendents |= node_descendents[node]
+            if not _add_bucket(cur_bucket, cur_bucket_descendents):
+                left_ns.extend(cur_bucket)
+            # if try_left > 0:
+            #     if len(left_ns) > 1 and len(left_ns) < len(ns):
+            #         left_buckets = _greedy_bucket(
+            #             left_ns, bucket_cap_mb_by_bucket_idx, node_descendents, try_left = try_left - 1
+            #         )
+            #         buckets.extend(left_buckets)
+            return buckets
+
         ret_buckets = []
         for group_key, ns_group in ns_groups.items():
             print(f"XXX {group_key} -> GROUP:{ns_group}")
+            node_descendents = collect_node_descendants(gm.graph)
             g_buckets = _greedy_bucket(
-                ns_group, bucket_cap_mb_by_bucket_idx, node_descendents
+                ns_group, bucket_cap_mb_by_bucket_idx, node_descendents, try_left=0
             )
             print(f"XXX {group_key} -> BUCKETS:{g_buckets}")
             for bucket_idx, g_bucket in enumerate(g_buckets):
