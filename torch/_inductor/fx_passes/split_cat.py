@@ -10,7 +10,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_or_false
 from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import (
@@ -310,8 +310,6 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     cat_node = match.nodes[0]
     graph = match.graph
     tensors = get_arg_value(cat_node, 0, "tensors")
@@ -336,7 +334,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     def is_empty_tensor(x):
         # special case where torch.cat supports cat'ing with an empty tensor
         x_shape = x.meta["example_value"].shape
-        return len(x_shape) == 1 and guard_size_oblivious(x_shape[0] == 0)
+        return len(x_shape) == 1 and guard_or_false(x_shape[0] == 0)
 
     assert all(
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors

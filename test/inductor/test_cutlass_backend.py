@@ -2215,11 +2215,15 @@ class TestCutlassBackend(TestCase):
         ),
     )
     @parametrize("use_fast_accum", (True,))
+    @parametrize("use_aoti", (False, True))
+    @parametrize("dynamic", (False, True))
     def test_fp8_rowwise_scaling_multiple_linear(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int],
         use_fast_accum: bool,
+        use_aoti: bool = False,
+        dynamic: bool = False,
     ):
         """
         This test is meant to simulate a more realistic scenario.
@@ -2266,10 +2270,27 @@ class TestCutlassBackend(TestCase):
                 return y2
 
         model = TestModule(w1, w2, float8_dtype).cuda()
-        compiled_model = torch.compile(model, fullgraph=True)
+
+        dynamic_shapes = (
+            {
+                "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
 
         expected = model(x)
-        actual = compiled_model(x)
+
+        if use_aoti:
+            actual = AOTIRunnerUtil.run(
+                model,
+                (x,),
+                dynamic_shapes=dynamic_shapes,
+            )
+        else:
+            compiled_model = torch.compile(model, fullgraph=True, dynamic=dynamic)
+            actual = compiled_model(x)
+
         torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
