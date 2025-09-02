@@ -5,7 +5,7 @@ import subprocess
 import traceback
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from logging import getLogger
 from subprocess import run
@@ -113,7 +113,7 @@ def maybe_wrap_command_with_numa_bindings(
     kwargs = {
         "command_args": command_args,
         "gpu_index": gpu_index,
-        "numa_options": numa_options,
+        "numa_options": asdict(numa_options),
     }
     logger.info("Attempting to wrap command with NUMA bindings, given input %r", kwargs)
 

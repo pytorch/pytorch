@@ -62,7 +62,7 @@ class Model3(torch.nn.Module):
 
 
 @config.patch("trace.enabled", True)
-@config.patch("trace.provenance_tracking", True)
+@config.patch("trace.provenance_tracking_level", 1)
 class TestProvenanceTracingArtifact(TestCase):
     """
     This test checks that generated provenance tracing artifact from "post_grad" to
