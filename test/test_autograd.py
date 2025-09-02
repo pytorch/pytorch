@@ -614,8 +614,6 @@ class TestAutograd(TestCase):
 
         with disable_gc():
             unpack_hook_ref = scope()
-            if torch._dynamo.is_compiling():
-                torch._dynamo.reset()
             self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):
@@ -3889,6 +3887,38 @@ class TestAutograd(TestCase):
         y = double2(x)
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
+
+    def test_custom_autograd_ac_early_stop(self):
+        refs = []
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.clone()
+                ctx.save_for_backward(y)
+                refs.append(weakref.ref(y))
+                return y
+
+            @staticmethod
+            def backward(ctx, *args):
+                _ = ctx.saved_tensors
+                return None
+
+        def fn(inp):
+            return Test.apply(inp)
+
+        inp = torch.randn(5, 5, requires_grad=True)
+
+        def scope():
+            # Early-stop is true by default in non-reentrant torch.utils.checkpoint
+            out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=False)
+            out.sum().backward()
+
+        with disable_gc():
+            scope()
+
+            for ref in refs:
+                self.assertIsNone(ref())
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)

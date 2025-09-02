@@ -1062,9 +1062,9 @@ class TritonOverrides(OpOverrides):
         more details.
         """
         if config.use_fast_math:
-            return f"libdevice.exp2({x} * {TritonOverrides._LOG_2_E})"
-        else:
             return f"tl_math.exp({x})"
+        else:
+            return f"libdevice.exp({x})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1577,6 +1577,10 @@ class TritonKernelOverrides(TritonOverrides):
         )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
+
+    @staticmethod
+    def device_assert_async(cond, msg):
+        return f"tl.device_assert({cond}, {repr(msg)})"
 
 
 class HelperFunctions:
@@ -2294,27 +2298,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 # Form the block pointer or TMA descriptor.
                 self.filter_masks(mask_vars)
-                options_class: type[BlockDescriptorOptions]
-                if config.triton.use_block_ptr:
-                    options_class = BlockPtrOptions
-                else:
-                    nonlocal tma_compatibility_checker
-                    tma_compatibility_checker = cast(
-                        TMACompatibilityChecker, tma_compatibility_checker
-                    )
-                    if not tma_compatibility_checker.are_block_parameters_compatible(
-                        block_params
-                    ):
-                        return None
-                    options_class = TensorDescriptorOptions
 
-                return options_class.create(
+                options_class = (
+                    BlockPtrOptions
+                    if config.triton.use_block_ptr
+                    else TensorDescriptorOptions
+                )
+                options = options_class.create(
                     params=block_params,
                     constant_offset=offset,
                     range_trees=range_trees,
                     mask_vars=mask_vars,
                     get_max_block=self.max_block,
                 )
+
+                if options_class == TensorDescriptorOptions:
+                    nonlocal tma_compatibility_checker
+                    tma_compatibility_checker = cast(
+                        TMACompatibilityChecker, tma_compatibility_checker
+                    )
+                    if not tma_compatibility_checker.are_block_parameters_compatible(
+                        options.params
+                    ):
+                        return None
+
+                return options
 
             # Return a block pointer, if indexing matches the pattern.
             options = match_block_expr()
@@ -4018,7 +4026,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         return inductor_meta
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name=None) -> str:
+        """
+        Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
+        metadata, and benchmarking infra.
+        """
+
         code = IndentedBuffer()
 
         size_hints = {}
@@ -4159,6 +4172,53 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+
+        # Bail on 3d tiling, which has more complicated coalesce patterns
+        looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
+        tiling_scores = self.tiling_scores
+        two_d_red = (
+            len(self.tiling) == 2 and tiling_scores is not None and "x" in tiling_scores
+        )
+        if looped_red and two_d_red:
+            assert tiling_scores is not None
+            memory_stats = self.features.memory_stats(self.tiling)
+            dim_stats = memory_stats.persistent.memory.dim[0]
+            mem_ops_per_thread = dim_stats.count_per_thread
+
+            # check if majority of reads are coalesced by the rblock
+            r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+
+            looped_mem = memory_stats.looped.memory.bytes
+            persistent_mem = memory_stats.persistent.memory.bytes
+            # check that we save significant memory by doing persistent
+            saved_bytes_ratio = V.graph.sizevars.size_hint(
+                looped_mem, fallback=config.unbacked_symint_fallback
+            ) / max(
+                V.graph.sizevars.size_hint(
+                    persistent_mem, fallback=config.unbacked_symint_fallback
+                ),
+                1,
+            )
+
+            # TODO - rnumel should be reasonably close to power of 2
+            if (
+                # significant memory bandwidth savings
+                saved_bytes_ratio >= 1.3
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
+                # reads coalesced by xblock
+                and r_coalesce_ratio >= 8.0
+                # TODO - need more detailed register analysis
+                and V.graph.sizevars.statically_known_leq(
+                    self.features.reduction_numel, 32768
+                )
+                # We will already generate a persistent config in this case
+                and V.graph.sizevars.statically_known_gt(
+                    self.features.reduction_numel, 2048
+                )
+                and mem_ops_per_thread <= 10
+            ):
+                inductor_meta["add_persistent_rblock"] = True
+
         if self.tiling_scores:
             inductor_meta["tiling_scores"] = self.tiling_scores
 
