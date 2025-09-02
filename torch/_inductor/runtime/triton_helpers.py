@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from functools import wraps
 from typing import Any, Callable, TypeVar
 
 from .triton_compat import (  # noqa: F401
@@ -169,9 +168,9 @@ def max_with_index(value, index, dim):
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
-        return libdevice.exp2(x * _LOG_2_E)
-    else:
         return math.exp(x)
+    else:
+        return libdevice.exp(x)
 
 
 @triton.jit
@@ -315,8 +314,8 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = (
-            mid * BOUNDARIES_STRIDE + boundary_indices
-        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+            (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None
@@ -723,10 +722,9 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
     """
     if builtins_use_semantic_kwarg:
         # support Triton before and after https://github.com/triton-lang/triton/pull/7054
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            kwargs["_builder"] = kwargs["_semantic"]
-            del kwargs["_semantic"]
+        # and after https://github.com/triton-lang/triton/pull/7239
+        def wrapper(*args, _semantic, **kwargs):
+            kwargs["_builder"] = _semantic
             return f(*args, **kwargs)
     else:
         wrapper = f  # type: ignore[assignment]

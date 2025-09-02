@@ -184,7 +184,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(round, round);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
@@ -418,6 +417,7 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.dtype() != at::kComplexDouble);
   mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph conjugateWithTensor:inputTensor name:nil];
   });
