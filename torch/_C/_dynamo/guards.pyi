@@ -1,7 +1,13 @@
-# mypy: allow-untyped-defs
-from typing import Any, Callable
+import enum
+from typing import Any, Callable, Optional
+from typing_extensions import TypeAlias
 
 import torch
+
+# TODO: We should move the `GuardManagerType`
+# defined in `guards.py` here and update other
+# imports
+GuardManagerType: TypeAlias = enum.Enum
 
 class GlobalStateGuard:
     def check(self) -> bool: ...
@@ -18,163 +24,163 @@ class GuardDebugInfo:
     num_guards_executed: int
 
 class GuardManager:
-    def check(self, value) -> bool: ...
-    def check_verbose(self, value) -> GuardDebugInfo: ...
+    def check(self, value: Any) -> bool: ...
+    def check_verbose(self, value: Any) -> GuardDebugInfo: ...
 
     # Accessors
     def globals_dict_manager(
         self,
         f_globals: dict[str, Any],
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def framelocals_manager(
         self,
         key: tuple[str, int],
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def dict_getitem_manager(
         self,
-        key,
-        source,
-        example_value,
-        guard_manager_enum,
+        key: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def grad_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def generic_getattr_manager(
         self,
         attr: str,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def getitem_manager(
         self,
-        key,
-        source,
-        example_value,
-        guard_manager_enum,
+        key: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def get_generic_dict_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def list_getitem_manager(
         self,
-        key,
-        source,
-        example_value,
-        guard_manager_enum,
+        key: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def tuple_getitem_manager(
         self,
-        key,
-        source,
-        example_value,
-        guard_manager_enum,
+        key: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def set_getitem_manager(
         self,
-        index,
-        source,
-        example_value,
-        guard_manager_enum,
+        index: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def func_defaults_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def func_kwdefaults_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def tuple_iterator_getitem_manager(
         self,
-        index,
-        source,
-        example_value,
-        guard_manager_enum,
+        index: Any,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def weakref_call_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def call_function_no_args_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def global_weakref_manager(
         self,
         global_name: str,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def type_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def getattr_manager(
         self,
         attr: str,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def tensor_property_size_manager(
         self,
         idx: int,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def tensor_property_shape_manager(
         self,
         idx: int,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def tensor_property_storage_offset_manager(
         self,
-        idx: None,
-        source,
-        example_value,
-        guard_manager_enum,
+        idx: int,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def indexed_manager(
         self,
         idx: int,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def lambda_manager(
         self,
-        python_lambda,
-        source,
-        example_value,
-        guard_manager_enum,
+        python_lambda: Callable[..., Any],
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def get_root(self) -> RootGuardManager: ...
     def get_source(self) -> str: ...
@@ -192,47 +198,55 @@ class GuardManager:
     def get_type_of_guarded_value(self) -> type: ...
     def type_dict_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def type_mro_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def code_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def closure_manager(
         self,
-        source,
-        example_value,
-        guard_manager_enum,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     # Leaf guards
-    def add_lambda_guard(self, user_lambda, verbose_code_parts: list[str]) -> None: ...
-    def add_id_match_guard(self, id_val, verbose_code_parts: list[str]) -> None: ...
+    def add_lambda_guard(
+        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
+    ) -> None: ...
+    def add_id_match_guard(
+        self, id_val: int, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_equals_match_guard(
         self,
-        equals_val,
+        equals_val: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_global_state_guard(
-        self, initial_state, verbose_code_parts: list[str]
+        self, initial_state: Any, verbose_code_parts: list[str]
     ) -> None: ...
     def add_torch_function_mode_stack_guard(
-        self, initial_stack, verbose_code_parts: list[str]
+        self, initial_stack: list[Any], verbose_code_parts: list[str]
     ) -> None: ...
-    def add_mapping_keys_guard(self, value, verbose_code_parts: list[str]) -> None: ...
+    def add_mapping_keys_guard(
+        self, value: Any, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_dict_length_check_guard(
-        self, value, verbose_code_parts: list[str]
+        self, value: int, verbose_code_parts: list[str]
     ) -> None: ...
-    def add_length_check_guard(self, value, verbose_code_parts: list[str]) -> None: ...
+    def add_length_check_guard(
+        self, value: int, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
@@ -251,63 +265,63 @@ class GuardManager:
     ) -> None: ...
     def add_dispatch_key_set_guard(
         self,
-        dispatch_key,
+        dispatch_key: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_tensor_match_guard(
         self,
-        value,
-        sizes,
-        strides,
-        tensor_name,
+        value: Any,
+        sizes: list[int],
+        strides: list[int],
+        tensor_name: str,
         verbose_code_parts: list[str],
-        ptype,
-        dispatch_keys,
+        ptype: Any,
+        dispatch_keys: Any,
     ) -> None: ...
     def add_dynamic_indices_guard(
         self,
-        value,
+        value: set[Any],
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_no_hasattr_guard(
         self,
-        attr_name,
+        attr_name: str,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_dict_contains_guard(
         self,
-        contains,
-        key,
+        contains: bool,
+        key: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_type_match_guard(
         self,
-        value,
+        value: int,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_dict_version_guard(
         self,
-        value,
+        value: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_set_contains_guard(
         self,
-        contains,
-        item,
+        contains: bool,
+        item: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_tuple_iterator_length_guard(
         self,
-        length,
-        type_id,
+        length: int,
+        type_id: int,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_range_iterator_match_guard(
         self,
-        start,
-        stop,
-        step,
-        type_id,
+        start: int,
+        stop: int,
+        step: int,
+        type_id: int,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_default_device_guard(
@@ -332,17 +346,17 @@ class RootGuardManager(GuardManager):
 class DictGuardManager(GuardManager):
     def get_key_manager(
         self,
-        index,
-        source,
-        example_value,
-        guard_manager_enum,
+        index: int,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def get_value_manager(
         self,
-        index,
-        source,
-        example_value,
-        guard_manager_enum,
+        index: int,
+        source: str,
+        example_value: Any,
+        guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     def get_key_value_managers(
         self,
@@ -368,17 +382,17 @@ def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
     verbose_code_parts: list[str],
-): ...
+) -> None: ...
 def install_no_tensor_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
     verbose_code_parts: list[str],
-): ...
+) -> None: ...
 def install_storage_overlapping_guard(
     overlapping_guard_managers: list[GuardManager],
     non_overlapping_guard_managers: list[GuardManager],
     verbose_code_parts: list[str],
-): ...
+) -> None: ...
 def install_symbolic_shape_guard(
     guard_managers: list[GuardManager],
     nargs_int: int,
@@ -386,7 +400,7 @@ def install_symbolic_shape_guard(
     py_addr: int,
     py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
-): ...
+) -> None: ...
 def profile_guard_manager(
     guard_manager: GuardManager,
     f_locals: dict[str, Any],
@@ -400,20 +414,22 @@ class TensorGuards:
         dynamic_dims_sizes: list[torch.SymInt | None] | None = None,
         dynamic_dims_strides: list[torch.SymInt | None] | None = None,
     ) -> None: ...
-    def check(self, *args) -> bool: ...
-    def check_verbose(self, *args, tensor_check_names=None) -> bool | str: ...
+    def check(self, *args: Any) -> bool: ...
+    def check_verbose(
+        self, *args: Any, tensor_check_names: Optional[list[str]] = None
+    ) -> bool | str: ...
 
 def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
     op_name: str | None = None,
-): ...
+) -> None: ...
 def assert_alignment(
     item: torch.Tensor,
     alignment: int,
     op_name: str | None = None,
-): ...
+) -> None: ...
 def check_obj_id(obj: object, expected: int) -> bool: ...
 def check_type_id(obj: object, expected: int) -> bool: ...
 def dict_version(d: dict[Any, Any]) -> int: ...
