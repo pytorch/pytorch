@@ -21,7 +21,7 @@ from torch._inductor.comm_analysis import (
     NCCL_PROTO,
     NVIDIA_GPU_TYPE,
 )
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import add_scheduler_init_hook, run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
@@ -266,7 +266,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     )
     @patch.object(
         torch._inductor.config,
-        "runtime_estimations_comp_benchmark",
+        "runtime_estimations_mms_benchmark",
+        False,
+    )
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_triton_benchmark",
         False,
     )
     def test_reorder_compute_for_overlap(self):
@@ -371,6 +376,54 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_use_nccl_lib_estimations",
+        True,
+    )
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_mms_benchmark",
+        True,
+    )
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_triton_benchmark",
+        True,
+    )
+    def test_nccl_lib_estimations_comp_benchmark(self):
+        def func(a, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
+            g = torch.matmul(a, a)
+            c = torch.relu(a)
+            d = torch.matmul(c, c)
+            f = d * c * ar
+            fr = _functional_collectives.all_reduce(f, "sum", ranks, tag)
+            e = torch.matmul(d + ar + fr, g)
+            return (e,)
+
+        def test_runtime(sched, nodes):
+            for node in sched.nodes:
+                runtime = node.get_estimated_runtime()
+                assert runtime >= 0
+
+        with add_scheduler_init_hook(post_fn=test_runtime):
+            with _dynamo_dist_per_rank_init(
+                self.rank,
+                self.world_size,
+                self.backend(device_type),
+                fake_pg=not at_least_x_gpu(2),
+            ):
+                inputs = (
+                    torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+                )
+                compiled = torch.compile(func)
+                compiled(inputs, **self.get_world_trs())
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm

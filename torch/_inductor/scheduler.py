@@ -853,7 +853,10 @@ class BaseSchedulerNode:
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
 
-        if config.runtime_estimations_comp_benchmark:
+        if (
+            config.runtime_estimations_mms_benchmark
+            or config.runtime_estimations_triton_benchmark
+        ):
             ret = estimate_runtime_benchmark(self)
             if ret is not None:
                 return ret
@@ -926,86 +929,82 @@ class EstimateRuntimeCache:
 
 
 def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
-    # Extern Kernels(e.g. mm) perf will depend on backends.
-    if not isinstance(snode, ExternKernelSchedulerNode):
-        try:
-            src_code = sched.generate_kernel_code_from_nodes(snode.get_nodes(), benchmark_kernel=True)
-            module = PyCodeCache.load(src_code)
+    # Kernels(e.g. mm) perf will depend on backends.
+    if config.runtime_estimations_triton_benchmark and not isinstance(
+        snode, ExternKernelSchedulerNode
+    ):
+        mean_op_time_ns, _ = snode.scheduler.benchmark_fused_nodes(snode.get_nodes())
+        return mean_op_time_ns * 1e3
 
-            time, _ = sched.benchmark_codegened_module(module=module, device=device)
-        except Exception:
-            # if there is dynamic shape in generated triton code, the benchmark will throw errors.
-            # falling back to 0 for such cases
-            time = 0
-        return time * 1e3
+    if config.runtime_estimations_mms_benchmark:
+        mms_fns = {
+            "extern_kernels.mm": torch.ops.aten.mm,
+            "extern_kernels.bmm": torch.ops.aten.bmm,
+            "extern_kernels.addmm": torch.ops.aten.addmm,
+        }
+        python_kernel_name = getattr(snode.node, "python_kernel_name", "")
+        if python_kernel_name not in mms_fns:
+            return None
+        fn = mms_fns[python_kernel_name]
+        if not isinstance(snode.node, ir.ExternKernel):
+            return None
+        args = snode.node.inputs
+        args = snode.node.fill_non_provided_args(
+            [*args, *snode.node.constant_args], snode.node.kwargs
+        )
+        kwargs = snode.node.kwargs
+        flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
-    mms_fns = {
-        "extern_kernels.mm": torch.ops.aten.mm,
-        "extern_kernels.bmm": torch.ops.aten.bmm,
-        "extern_kernels.addmm": torch.ops.aten.addmm,
-    }
-    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
-    if python_kernel_name not in mms_fns:
-        return None
-    fn = mms_fns[python_kernel_name]
-    if not isinstance(snode.node, ir.ExternKernel):
-        return None
-    args = snode.node.inputs
-    args = snode.node.fill_non_provided_args(
-        [*args, *snode.node.constant_args], snode.node.kwargs
-    )
-    kwargs = snode.node.kwargs
-    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+        def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
+            return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
 
-    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
-        return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
+        cache_key = (python_kernel_name,) + tuple(
+            tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args
+        )
+        cache = snode.scheduler.estimate_runtime_cache
 
-    cache_key = (python_kernel_name,) + tuple(
-        tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args
-    )
-    cache = snode.scheduler.estimate_runtime_cache
+        cache_val = cache.get(cache_key)
+        if cache_val is not None:
+            return cache_val
 
-    cache_val = cache.get(cache_key)
-    if cache_val is not None:
-        return cache_val
+        flat_args = [
+            ir.ir_node_to_tensor(a, guard_shape=False) if _is_tensor_ir(a) else a
+            for a in flat_args
+        ]
 
-    flat_args = [
-        ir.ir_node_to_tensor(a, guard_shape=False) if _is_tensor_ir(a) else a
-        for a in flat_args
-    ]
+        def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
+            return torch.empty(size, dtype=dtype, device=device)
 
-    def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        return torch.empty(size, dtype=dtype, device=device)
+        with no_dispatch():
 
-    with no_dispatch():
+            def to_real_tensor(e: Any) -> Any:
+                if not isinstance(e, torch.Tensor):
+                    return e
+                out = _tensor(e.size(), e.dtype, e.device)
+                return out
 
-        def to_real_tensor(e: Any) -> Any:
-            if not isinstance(e, torch.Tensor):
-                return e
-            out = _tensor(e.size(), e.dtype, e.device)
-            return out
-
-        flat_args = [to_real_tensor(a) for a in flat_args]
-        args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
-        fn(*args, **kwargs)
-
-        num_iters = 3
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        cpu_start = time.time()
-        start_event.record(torch.cuda.current_stream())
-        for _ in range(num_iters):
+            flat_args = [to_real_tensor(a) for a in flat_args]
+            args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
             fn(*args, **kwargs)
-        end_event.record(torch.cuda.current_stream())
-        cpu_end = time.time()
-        torch.cuda.synchronize()
-        cpu_time = cpu_end - cpu_start
-        total_op_time = start_event.elapsed_time(end_event) - cpu_time
-        mean_op_time_ms = total_op_time / num_iters
-        del flat_args
-        mean_op_time_ns = mean_op_time_ms * 1e6
-        cache.put(cache_key, mean_op_time_ns)
-        return mean_op_time_ns
+
+            num_iters = 3
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            cpu_start = time.time()
+            start_event.record(torch.cuda.current_stream())
+            for _ in range(num_iters):
+                fn(*args, **kwargs)
+            end_event.record(torch.cuda.current_stream())
+            cpu_end = time.time()
+            torch.cuda.synchronize()
+            cpu_time = cpu_end - cpu_start
+            total_op_time = start_event.elapsed_time(end_event) - cpu_time
+            mean_op_time_ms = total_op_time / num_iters
+            del flat_args
+            mean_op_time_ns = mean_op_time_ms * 1e6
+            cache.put(cache_key, mean_op_time_ns)
+            return mean_op_time_ns
+    return None
 
 
 class WhyNoFuse:
