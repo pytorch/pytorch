@@ -319,10 +319,7 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     linear_weight = self.linear.weight
     linear_bias = self.linear.bias
-    sym_size_int_2 = torch.ops.aten.sym_size.int(x, 1)
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
-    eq = sym_size_int_2 == 4;  sym_size_int_2 = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
     return pytree.tree_unflatten((linear,), self._out_spec)""",
         )
 
@@ -381,7 +378,7 @@ def forward(self, x):
         export_inputs = ((dct, lst, 56), {})
         eager_inputs = copy.deepcopy(export_inputs)
 
-        from torch._dynamo.export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
         graph_module = _dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]

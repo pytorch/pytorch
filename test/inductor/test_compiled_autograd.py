@@ -5183,6 +5183,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
+    "test_custom_autograd_ac_early_stop",  # marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
