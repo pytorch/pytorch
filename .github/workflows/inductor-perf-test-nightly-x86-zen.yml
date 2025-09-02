@@ -69,14 +69,14 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  linux-jammy-zen-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-zen-cpu-py3.9-gcc11-inductor
+  inductor-build:
+    name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_cpu_x86_zen", shard: 1, num_shards: 3, runner: "linux.24xlarge.amd" },
@@ -95,16 +95,16 @@ jobs:
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets: inherit
 
-  linux-jammy-zen-cpu-py3_9-gcc11-inductor-test-nightly:
-    name: linux-jammy-zen-cpu-py3.9-gcc11-inductor
+  inductor-test-nightly:
+    name: inductor-test-nightly
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
+    needs: inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
-      docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests
       disable-monitor: false
@@ -112,17 +112,16 @@ jobs:
       monitor-data-collect-interval: 4
     secrets: inherit
 
-
-  linux-jammy-zen-cpu-py3_9-gcc11-inductor-test:
-    name: linux-jammy-zen-cpu-py3.9-gcc11-inductor
+  inductor-test:
+    name: inductor-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
+    needs: inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
-      docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests
       disable-monitor: false
