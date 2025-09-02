@@ -253,7 +253,7 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const at::Tensor& tensor,
     const std::optional<std::string>& group_name) {
   auto allocator = get_allocator(tensor.device().type());
-  return allocator->rendezvous(tensor, group_name);
+  return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
 TORCH_API bool has_multicast_support(
@@ -266,6 +266,167 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
+
+// MemPool Support
+
+// A map from device type to allocator for MemPool.
+// TODO: Consolidate with `AllocatorMap` above.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+class MemPoolAllocatorMap {
+ public:
+  MemPoolAllocatorMap(const MemPoolAllocatorMap&) = delete;
+  MemPoolAllocatorMap& operator=(const MemPoolAllocatorMap&) = delete;
+  static MemPoolAllocatorMap& get() {
+    static MemPoolAllocatorMap instance;
+    return instance;
+  }
+
+  // Register allocator for MemPool given device type
+  void register_mempool_allocator(
+      c10::DeviceType device_type,
+      std::shared_ptr<c10::Allocator> allocator) {
+    mempool_allocators_[device_type] = std::move(allocator);
+  }
+
+  // Get allocator for MemPool given device
+  std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
+    auto it = mempool_allocators_.find(device.type());
+    if (it == mempool_allocators_.end()) {
+      TORCH_CHECK(
+          false,
+          "SymmetricMemory MemPool did not find backend for device type ",
+          device.type());
+    }
+    return it->second;
+  }
+
+ private:
+  MemPoolAllocatorMap() = default;
+
+  std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
+      mempool_allocators_;
+};
+
+// Register allocator for MemPool given device type
+C10_EXPORT void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator) {
+  return MemPoolAllocatorMap::get().register_mempool_allocator(
+      device_type, std::move(allocator));
+}
+
+// Get allocator for MemPool given device
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device) {
+  return MemPoolAllocatorMap::get().get_mempool_allocator(device);
+}
+
+// Helper function:
+// Calculate the number of bytes of a tensor given its shape and dtype
+static inline size_t nbytes_of(c10::IntArrayRef sizes, c10::ScalarType dtype) {
+  const auto numel = std::accumulate(
+      sizes.begin(), sizes.end(), static_cast<size_t>(1), std::multiplies<>());
+  return numel * c10::elementSize(dtype);
+}
+
+// Helper function:
+// Get the buffer pointer for a peer at a given offset
+static at::Tensor get_buffer_at_byte_offset(
+    SymmetricMemory* handle,
+    int peer,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype,
+    size_t offset_bytes) {
+  TORCH_CHECK(
+      peer >= 0 && peer < handle->get_world_size(),
+      "Invalid peer rank: ",
+      peer);
+  auto peer_ptr = handle->get_buffer_ptrs()[peer];
+  TORCH_CHECK(
+      peer_ptr != nullptr,
+      "Cannot get buffer across nodes, my rank: ",
+      handle->get_rank(),
+      ", peer: ",
+      peer);
+  const size_t tensor_bytes = nbytes_of(sizes, dtype);
+  const auto req_size = offset_bytes + tensor_bytes;
+  const auto buffer_size = handle->get_buffer_size();
+  TORCH_CHECK(
+      req_size <= buffer_size,
+      "SymmetricMemory::get_buffer: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      buffer_size,
+      " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(peer_ptr) + offset_bytes;
+  auto device = handle->get_device();
+  auto options = at::TensorOptions().dtype(dtype).device(device);
+  return at::for_blob(data_ptr, sizes)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
+// Implementation of SymmetricMemory APIs common to all backends
+
+at::Tensor SymmetricMemory::get_buffer(
+    int rank,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype,
+    int64_t storage_offset) {
+  // storage_offset is in element, convert to byte
+  const auto offset_bytes = storage_offset * c10::elementSize(dtype);
+  return get_buffer_at_byte_offset(this, rank, sizes, dtype, offset_bytes);
+}
+
+at::Tensor SymmetricMemory::get_remote_tensor(
+    int peer,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype) {
+  return get_buffer_at_byte_offset(this, peer, sizes, dtype, get_offset());
+}
+
+at::Tensor SymmetricMemory::get_signal_pad(
+    int rank,
+    c10::IntArrayRef sizes,
+    std::optional<c10::ScalarType> dtype,
+    int64_t storage_offset) {
+  // If the dtype is unspecified, default it to UInt32, as it
+  // is the most common type for signaling purposes.
+  if (!dtype.has_value()) {
+    dtype = c10::ScalarType::UInt32;
+  }
+
+  // If the shape is unspecified, treat the signal pad as a 1d tensor.
+  const auto element_size = c10::elementSize(*dtype);
+  const auto signal_pad_size = get_signal_pad_size();
+  std::vector<int64_t> shape;
+  if (!sizes.empty()) {
+    shape = sizes.vec();
+  } else {
+    shape.push_back(static_cast<int64_t>(signal_pad_size / element_size));
+  }
+
+  const auto req_pad_bytes = nbytes_of(shape, *dtype);
+  const auto offset_bytes = storage_offset * element_size;
+  const auto req_size = offset_bytes + req_pad_bytes;
+  TORCH_CHECK(
+      req_size <= signal_pad_size,
+      "SymmetricMemory::get_signal_pad: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      signal_pad_size,
+      " bytes)");
+  auto data_ptr =
+      reinterpret_cast<uint8_t*>(get_signal_pad_ptrs()[rank]) + offset_bytes;
+  auto device = get_device();
+  auto options = at::TensorOptions().dtype(dtype).device(device);
+  return at::for_blob(data_ptr, shape)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
 } // namespace c10d::symmetric_memory
 
 namespace {

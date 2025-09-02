@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
-from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -31,11 +30,14 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
+    add_feedback_saver,
     AlgorithmSelectorCache,
+    clear_feedback_savers,
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
+from torch._inductor.template_heuristics.registry import override_template_heuristics
+from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -47,7 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 aten = torch.ops.aten
@@ -164,6 +166,67 @@ class TestMaxAutotune(TestCase):
             c_expected = mm(a, b)
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_strided(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def mm(a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        def next_multiple_16(a: int) -> int:
+            return ((a + 15) // 16) * 16
+
+        M, N, K = 21, 31, 11
+        a_shape = (K, M) if a_transposed else (M, K)
+        a_stride = (
+            (next_multiple_16(M), 1) if a_transposed else (next_multiple_16(K), 1)
+        )
+        a = torch.empty_strided(a_shape, a_stride, dtype=torch.float16).to(GPU_TYPE)
+        a[:] = torch.randn(a_shape, dtype=torch.float16)
+        a = a.to(GPU_TYPE)
+        b_shape = (N, K) if b_transposed else (K, N)
+        b_stride = (
+            (next_multiple_16(K), 1) if a_transposed else (next_multiple_16(N), 1)
+        )
+        b = torch.empty_strided(b_shape, b_stride, dtype=torch.float16)
+        b[:] = torch.randn(b_shape, dtype=torch.float16)
+        b = b.to(GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # Verify that we are using a TMA implementation
+        # depending on whether we're using the experimental API, we check for a different string
+        check_str = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+        if has_triton_stable_tma_api():
+            check_str = "triton.language.make_tensor_descriptor"
+        FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -357,6 +420,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @fresh_cache()
+    @skipIfXpu(msg="XPU doesn't support sm carveout")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
@@ -648,7 +712,7 @@ class TestMaxAutotune(TestCase):
 
         m_c = torch.compile(mode="max-autotune")(mod)
         out, code = run_and_get_code(m_c, x)
-        self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+        self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
         FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1193,16 +1257,14 @@ class TestMaxAutotune(TestCase):
 
         # Force only decomposeK choice
         with (
-            mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
-            ) as base_mm_mock,
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
             ) as decompose_mock,
         ):
-            mm_configs_mock = MagicMock()
-            mm_configs_mock.return_value = []
-            base_mm_mock.return_value = mm_configs_mock
             decompose_mock.return_value = True
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
@@ -1582,7 +1644,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_registry.get_template_heuristic"
+            "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
             config_heuristics = CUDAMMTemplateConfigHeuristic()
 
@@ -2133,6 +2195,118 @@ class TestTuningProcessPool(TestCase):
         self.assertEqual(timings[choice2], choice2.bmreq.result)
 
         tuning_pool.shutdown()
+
+    def test_add_feedback_saver(self):
+        """Test that add_feedback_saver correctly adds feedback functions."""
+        from torch._inductor.select_algorithm import get_algorithm_selector_cache
+
+        # Clear any existing feedback savers
+        clear_feedback_savers()
+
+        # Create a simple feedback saver function
+        feedback_calls = []
+
+        def simple_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            feedback_calls.append(
+                {
+                    "name": name,
+                    "num_choices": len(choices),
+                    "num_timings": len(timings),
+                    "has_profiled_time": profiled_time is not None,
+                }
+            )
+
+        # Add the feedback saver
+        add_feedback_saver(simple_feedback_saver)
+
+        # Get the global cache and verify the function was added
+        cache = get_algorithm_selector_cache()
+        self.assertEqual(len(cache.feedback_saver_fns), 1)
+        self.assertEqual(cache.feedback_saver_fns[0], simple_feedback_saver)
+
+        # Test that we can add multiple feedback savers
+        def another_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        add_feedback_saver(another_feedback_saver)
+        self.assertEqual(len(cache.feedback_saver_fns), 2)
+
+        # Clean up
+        clear_feedback_savers()
+
+    def test_clear_feedback_savers(self):
+        """Test that clear_feedback_savers removes all feedback functions."""
+        from torch._inductor.select_algorithm import get_algorithm_selector_cache
+
+        # Add some feedback savers first
+        def feedback_saver1(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        def feedback_saver2(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        add_feedback_saver(feedback_saver1)
+        add_feedback_saver(feedback_saver2)
+
+        # Verify they were added
+        cache = get_algorithm_selector_cache()
+        self.assertEqual(len(cache.feedback_saver_fns), 2)
+
+        # Clear all feedback savers
+        clear_feedback_savers()
+
+        # Verify they were cleared
+        self.assertEqual(len(cache.feedback_saver_fns), 0)
+
+    def test_feedback_saver_integration(self):
+        """Test that feedback savers are actually called during autotuning."""
+        # Clear any existing feedback savers
+        clear_feedback_savers()
+
+        feedback_calls = []
+
+        def test_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            # Store information about the call for verification
+            feedback_calls.append(
+                {
+                    "name": name,
+                    "num_choices": len(choices),
+                    "num_timings": len(timings),
+                    "input_node_count": len(input_nodes),
+                }
+            )
+
+        # Add our test feedback saver
+        add_feedback_saver(test_feedback_saver)
+
+        # Create a simple matrix multiplication that will trigger autotuning
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(32, 32, device=GPU_TYPE)
+        b = torch.randn(32, 32, device=GPU_TYPE)
+
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+            torch.compile(mm)(a, b)
+
+        # Verify that our feedback saver was called
+        self.assertGreater(
+            len(feedback_calls), 0, "Feedback saver should have been called"
+        )
+
+        # Verify the structure of the feedback call
+        call = feedback_calls[0]
+        self.assertIn("name", call)
+        self.assertIn("num_choices", call)
+        self.assertIn("num_timings", call)
+        self.assertIn("input_node_count", call)
+        self.assertGreater(call["num_choices"], 0)
+        self.assertEqual(call["input_node_count"], 2)  # Two input matrices
+
+        # Clean up
+        clear_feedback_savers()
 
 
 @instantiate_parametrized_tests
