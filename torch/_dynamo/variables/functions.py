@@ -1066,6 +1066,18 @@ class UserMethodVariable(UserFunctionVariable):
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
         self.source_fn = source_fn
+        # Note on source and source_fn
+        # Be careful with `source` when delegating to UserFunctionVariable
+        # (base-class) methods. In this __init__, `source` is a *bound method*
+        # object, but the base class expects the underlying *function* object.
+        # One way is to simplly use `__func__` to unwrap it.
+        #
+        # For recursive dict-tag optimizations, it can be faster to fetch the
+        # function directly from `cls.__dict__`; that’s why we pass on
+        # `source_fn`. Whenever it is possible to access the function from
+        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
+        # operates on the unbound function, most guards should target
+        # `source_fn` rather than the original `source`.
         if source_fn is None and kwargs.get("source") is not None:
             self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
@@ -1838,10 +1850,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         if constant_args:
-            value = self.fn(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+            try:
+                value = self.fn(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except TypeError as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
