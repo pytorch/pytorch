@@ -2466,7 +2466,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # One exception is when this is an indirect_load.
             return self.body
         else:
-            eturn self.loads
+            return self.loads
 
     def _handle_pdl_before_load(self, wait_buffer):
         GDC_WAIT = "tl.extra.cuda.gdc_wait()"
