@@ -13,6 +13,8 @@ mappings between nodes and their duplicates, enabling efficient graph analysis a
 optimization operations.
 """
 
+from __future__ import annotations
+
 import copyreg
 import io
 import logging
@@ -163,7 +165,7 @@ class BackwardBfsArgIter:
         self._queue: deque[Optional[Node]] = deque()
 
     @staticmethod
-    def create(origin: Node) -> "BackwardBfsArgIter":
+    def create(origin: Node) -> BackwardBfsArgIter:
         it = BackwardBfsArgIter(origin)
         it.add_children(origin)
         # pop the origin node, since it is the origin of
@@ -238,20 +240,23 @@ class GraphRegionTracker:
             and n0 is not n1
         )
 
-    def track_node(self, tx: "InstructionTranslatorBase", node: Node) -> None:
+    def track_node(self, tx: InstructionTranslatorBase, node: Node) -> None:
         """
         The main entry point for tracking a node. This function will hash the node argument and group
         nodes with the same hash together. It updates the hash_to_duplicates and node_to_duplicates dictionaries
         to track the new node.
         """
         try:
-            duplicates = self.hash_to_duplicates[
-                self._hash_node(
-                    tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
-                )
-            ]
-            duplicates.append(node)
-            self.node_to_duplicates[node] = duplicates
+            if (
+                node not in self.node_to_duplicates
+            ):  # don't allow nodes to be added twice
+                duplicates = self.hash_to_duplicates[
+                    self._hash_node(
+                        tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+                    )
+                ]
+                duplicates.append(node)
+                self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
