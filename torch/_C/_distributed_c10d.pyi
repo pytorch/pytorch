@@ -769,6 +769,8 @@ class _SymmetricMemory:
     def set_backend(name: str) -> None: ...
     @staticmethod
     def get_backend(device: torch.device) -> Optional[str]: ...
+    @staticmethod
+    def get_mempool_allocator(device: torch.device) -> Any: ...
     @property
     def rank(self) -> int: ...
     @property
@@ -804,6 +806,12 @@ class _SymmetricMemory:
         channel: int = 0,
         timeout_ms: int = 0,
     ) -> None: ...
+    def get_remote_tensor(
+        self,
+        peer: int,
+        sizes: torch.types._size,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -843,3 +851,12 @@ class ProcessGroupXCCL(Backend):
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
+def _dump_nccl_trace_json(
+    includeCollectives: Optional[bool] = ...,
+    onlyActive: Optional[bool] = ...,
+) -> bytes: ...
+def _dump_nccl_trace(
+    includeCollectives: Optional[bool] = ...,
+    includeStackTraces: Optional[bool] = ...,
+    onlyActive: Optional[bool] = ...,
+) -> bytes: ...
