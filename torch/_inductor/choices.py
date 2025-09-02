@@ -164,8 +164,7 @@ class InductorChoices:
             extra_kwargs["layout"] = layout_val
             extra_kwargs["input_nodes"] = input_nodes_val
             for c in cs:
-                # Create choice using the new choice_or_None method
-                choice = template.choice_or_None(**{**c, **overrides}, **extra_kwargs)
+                choice = template.choice_or_none(**{**c, **overrides}, **extra_kwargs)
                 if choice is not None:
                     yield choice
 
