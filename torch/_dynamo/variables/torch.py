@@ -160,6 +160,7 @@ constant_fold_functions = [
     torch.accelerator.is_available,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
+    torch._C._nn._parse_to,
     torch.distributed.is_available,
     torch.get_autocast_dtype,
     torch.get_autocast_gpu_dtype,
