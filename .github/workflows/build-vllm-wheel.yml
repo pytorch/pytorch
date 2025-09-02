@@ -62,18 +62,6 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
-
-  torch-wheel-dir:
-    description: Directory to built torch wheel
-    type: string
-    required: false
-    default: dist
-  output-dir:
-    description: Directory to store build artifact
-    default: external
-    type: string
-    required: false
-
       - name: Get latest PyTorch nightly
         env:
         shell: bash
