@@ -34,7 +34,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
-from .ir import ExternKernel
+from .ir import ExternKernelOut
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -1093,7 +1093,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
     kernel_name: str,
     is_extern: bool = False,
 ) -> Optional[int]:
@@ -1114,7 +1114,7 @@ def set_kernel_post_grad_provenance_tracing(
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernel)
+            assert isinstance(node_schedule, ExternKernelOut)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )

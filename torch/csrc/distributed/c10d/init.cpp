@@ -1202,12 +1202,6 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
-      .def(
-          "get_remote_tensor",
-          &SymmetricMemory::get_remote_tensor,
-          py::arg("peer"),
-          py::arg("sizes"),
-          py::arg("dtype"))
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(

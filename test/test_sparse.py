@@ -21,12 +21,12 @@ from packaging import version
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, largeTensorTest)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
-    all_types, all_types_and_complex, all_mps_types, all_types_and_complex_and, floating_and_complex_types,
+    all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
@@ -224,12 +224,10 @@ class TestSparse(TestSparseBase):
         return torch.empty(*args, **kwargs).normal_()
 
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32)
     def test_print_coalesced(self, device, dtype):
         self._test_print(device, dtype, True)
 
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32)
     def test_print_uncoalesced(self, device, dtype):
         self._test_print(device, dtype, False)
 
@@ -268,7 +266,7 @@ class TestSparse(TestSparseBase):
             if values.dtype == torch.double:
                 dtypes.append(torch.float)
             else:
-                dtypes.append(torch.double if values.device != torch.device("mps:0") else torch.float32)
+                dtypes.append(torch.double)
             for dtype in dtypes:
                 printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
@@ -288,7 +286,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_basic(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
@@ -323,7 +320,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     @precisionOverride({torch.bfloat16: 1e-2})
     def test_coalesce(self, device, dtype, coalesced):
 
@@ -386,7 +382,6 @@ class TestSparse(TestSparseBase):
         sparse_matrix = sparse_matrix.coalesce()
 
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
         # Test coalesce doesn't create autograd graph cycles (gh-52253)
@@ -414,7 +409,6 @@ class TestSparse(TestSparseBase):
         self.assertTrue(ref.expired())
 
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32)
     def test_ctor_large_sizes(self, device, dtype):
         # Test that integer overflow is detected when computing numel
         # of a sparse tensor with large dimensions (gh-57416). Notice
@@ -429,7 +423,6 @@ class TestSparse(TestSparseBase):
                               indices, values, (N + 1,) * 4, device=device))
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_ctor_size_checks(self, device, dtype):
         indices = self.index_tensor([
             [0, 0, 0],
@@ -453,7 +446,6 @@ class TestSparse(TestSparseBase):
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double)
     def test_ctor_is_coalesced_with_gradcheck(self, device, dtype, coalesced):
@@ -479,7 +471,6 @@ class TestSparse(TestSparseBase):
                                                 "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
                         torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
 
-    @expectedFailureMPS
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
@@ -545,7 +536,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.float16, torch.bfloat16, torch.float64, torch.int, torch.cfloat, torch.cdouble)
-    @expectedFailureMPS  # unique_dim not implemented for MPS device
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
         max_nnz = 1
@@ -565,7 +555,6 @@ class TestSparse(TestSparseBase):
                     self.assertEqual(dim, result.sparse_dim())
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_bool(self, device, dtype):
         a = torch.tensor([True, False], dtype=dtype, device=device).to(torch.bool)
         b = a.to_sparse().to_dense()
@@ -573,7 +562,6 @@ class TestSparse(TestSparseBase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_scalar(self, device, dtype):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([], device=device).unsqueeze(1), 12.3, [], dtype=dtype, device=device)
@@ -604,7 +592,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(a, a.to_dense().to_sparse())
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_shared(self, device, dtype):
         i = self.index_tensor([[2]], device=device)
         v = torch.tensor([5], dtype=dtype, device=device)
@@ -620,7 +607,6 @@ class TestSparse(TestSparseBase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
@@ -670,7 +656,6 @@ class TestSparse(TestSparseBase):
         test_tensor(x, res)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_contig(self, device, dtype):
         def test_tensor(x, exp_i, exp_v):
             x = x.coalesce()
@@ -752,7 +737,6 @@ class TestSparse(TestSparseBase):
         test_tensor(x, exp_i, exp_v)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_contig_hybrid(self, device, dtype):
         def test_tensor(x, exp_i, exp_v):
             x = x.coalesce()
@@ -840,7 +824,6 @@ class TestSparse(TestSparseBase):
         test_tensor(x, exp_i, exp_v)
 
     @coalescedonoff
-    @dtypesIfMPS(torch.float32, torch.complex64)
     @dtypes(torch.double, torch.cdouble)
     def test_clone(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
@@ -859,7 +842,6 @@ class TestSparse(TestSparseBase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
@@ -962,7 +944,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_transpose(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
@@ -983,7 +964,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
@@ -1063,7 +1043,6 @@ class TestSparse(TestSparseBase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_t_empty(self, device, dtype):
         def test_in_place(x):
             shape_original = x.shape
@@ -1093,7 +1072,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_add_zeros(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -1108,7 +1086,6 @@ class TestSparse(TestSparseBase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_add_sub_nnz(self, device, dtype):
         # nnz should not grow unbounded (gh-34964)
@@ -1121,7 +1098,6 @@ class TestSparse(TestSparseBase):
         x.sub_(2 * x)
         self.assertLessEqual(x._nnz(), 10)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_cat(self, device, dtype, coalesced):
@@ -1164,7 +1140,6 @@ class TestSparse(TestSparseBase):
                                     "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_unsqueeze(self, device, dtype, coalesced):
@@ -1199,7 +1174,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_select(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -1245,7 +1219,6 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.dtype, t[0, 0].dtype)
             self.assertEqual(t.dtype, t[1, 1].dtype)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select(self, device, dtype, coalesced):
@@ -1298,21 +1271,18 @@ class TestSparse(TestSparseBase):
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select_exhaustive_index_small(self, device, dtype, coalesced):
         # will trigger brute-force algo
         self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select_exhaustive_index_large(self, device, dtype, coalesced):
         # will trigger more sophisticated algos
         self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select_empty_and_non_contiguous_index(self, device, dtype, coalesced):
@@ -1411,7 +1381,6 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_bmm(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
@@ -1622,7 +1591,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @coalescedonoff
-    @expectedFailureMPS
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     def test_sparse_addmm(self, device, dtype, coalesced):
@@ -1664,7 +1632,6 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
@@ -1687,7 +1654,6 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
@@ -1711,7 +1677,6 @@ class TestSparse(TestSparseBase):
         # test_shape(2, 3, [2, 2, 0])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_dsmm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
@@ -1731,7 +1696,6 @@ class TestSparse(TestSparseBase):
         test_shape(1000, 100, 0, 20)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_hsmm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
@@ -1751,7 +1715,6 @@ class TestSparse(TestSparseBase):
         test_shape(1000, 100, 0, 20)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_spadd(self, device, dtype, coalesced):
 
@@ -1839,7 +1802,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_norm(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
@@ -1868,7 +1830,6 @@ class TestSparse(TestSparseBase):
                 x.norm(**kwargs)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
     def test_sparse_sum(self, device, dtype, coalesced):
@@ -1933,7 +1894,6 @@ class TestSparse(TestSparseBase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
-    @expectedFailureMPS
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape, dtype, device, coalesced)
@@ -2042,7 +2002,6 @@ class TestSparse(TestSparseBase):
         _test_basic_ops_hybrid()
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_add_dense_sparse_mismatch(self, device, dtype):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=dtype, device=device)
@@ -2059,7 +2018,6 @@ class TestSparse(TestSparseBase):
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_add_noncontiguous(self, device, dtype):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
         values = torch.tensor([1.], dtype=dtype, device=device).expand(2, 3, 4, 5)
@@ -2082,7 +2040,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(y2), expected)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
@@ -2153,7 +2110,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_mask_hybrid(self, device, dtype, coalesced):
         def _test_sparse_mask_hybrid_fixed():
             i = self.index_tensor([
@@ -2215,7 +2171,6 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
 
     @dtypes(torch.double, torch.cdouble)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
         from itertools import product, repeat
@@ -2250,7 +2205,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_zeros(self, device, dtype, coalesced):
         def _test_zeros(nnzs, shape, out_shape_i, out_shape_v=None):
             out_shape = out_shape_i + (out_shape_v or [])
@@ -2275,7 +2229,6 @@ class TestSparse(TestSparseBase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [2, 3, 0], [9, 12])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_zeros_like(self, device, dtype, coalesced):
         def _test_zeros_like(nnzs, template_shape_i, template_shape_v=None):
@@ -2359,7 +2312,6 @@ class TestSparse(TestSparseBase):
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_empty_like(self, device, dtype, coalesced):
         # tests https://github.com/pytorch/pytorch/issues/43699
@@ -2416,7 +2368,6 @@ class TestSparse(TestSparseBase):
                     yield [dim, start, length]
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_narrow(self, device, dtype, coalesced):
         shape = [3, 3, 4, 2]
@@ -2459,7 +2410,6 @@ class TestSparse(TestSparseBase):
                 sparse_tensor.requires_grad_()
 
     @coalescedonoff
-    @dtypesIfMPS(*all_mps_types())
     @dtypes(*all_types())
     def test_log1p(self, device, dtype, coalesced):
         if coalesced:
@@ -2525,7 +2475,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_neg_negative(self, device, dtype, coalesced):
 
         if coalesced:
@@ -2607,7 +2556,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(*all_types())
-    @dtypesIfMPS(*all_mps_types())
     def test_asin_arcsin(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2653,7 +2601,6 @@ class TestSparse(TestSparseBase):
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_mv(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
@@ -2681,7 +2628,6 @@ class TestSparse(TestSparseBase):
             res = x.mv(y)
 
     @dtypes(*floating_and_complex_types())
-    @dtypesIfMPS(torch.float32, torch.bfloat16, torch.complex64)
     def test_sparse_add_coalesce(self, device, dtype):
         i = self.index_tensor([[1, 2, 1]], device=device)
         v = torch.tensor([3, 4, 5], dtype=dtype, device=device)
@@ -2759,7 +2705,6 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_new(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x, indices, values = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
@@ -2816,7 +2761,6 @@ class TestSparse(TestSparseBase):
                             self.assertEqual(True, sparse_tensor.requires_grad)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_factory_size_check(self, device, dtype):
         indices = self.index_tensor([[1, 2],
                                     [0, 2]], device=device)
@@ -2871,7 +2815,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(tensor._indices(), expected_indices)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_factory_nnz(self, device, dtype):
         indices = self.index_tensor([[0]], device=device)  # (sparse_dim, nnz): (1, 1)
         values = torch.tensor([[1, 1], [1, 1]], dtype=dtype, device=device)  # (nnz, ...): (2, 2)
@@ -2886,7 +2829,6 @@ class TestSparse(TestSparseBase):
             torch.sparse_coo_tensor(indices, values, sizes, dtype=dtype, device=device)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_factory_nnz_zero(self, device, dtype):
         def test_shape(i_shape, v_shape, size, expected_size):
             if size:
@@ -2908,7 +2850,6 @@ class TestSparse(TestSparseBase):
         test_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_factory_dense_dim(self, device, dtype):
         indices = self.index_tensor([[0]], device=device)
         values = torch.tensor([[[1, 1, 1], [1, 1, 1]]], dtype=dtype, device=device)
@@ -3149,7 +3090,6 @@ class TestSparse(TestSparseBase):
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_resize(self, device, dtype):
         # 1. Expand the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
@@ -3235,7 +3175,6 @@ class TestSparse(TestSparseBase):
                          .is_nonzero())
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_change_tensor_metadata(self, device, dtype):
         i = self.index_tensor([[0], [1]], device=device)
         v = torch.tensor([[3, 4, 5]], dtype=dtype, device=device)
@@ -3278,7 +3217,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_pickle(self, device, dtype, coalesced):
         import pickle
@@ -3310,7 +3248,6 @@ class TestSparse(TestSparseBase):
             sp_tensor_loaded = pickle.loads(serialized)
             self.assertEqual(sp_tensor, sp_tensor_loaded)
 
-    @expectedFailureMPS
     def test_any(self, device):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]), device=device)
         t_any = torch.tensor(False)
@@ -3328,7 +3265,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.float32, torch.float64)
     def test_div_rounding_mode(self, device, dtype, coalesced):
         sparse, _, _ = self._gen_sparse(2, 10, (10, 10), dtype,
@@ -3349,13 +3285,11 @@ class TestSparse(TestSparseBase):
             torch.div(sparse, -2, rounding_mode=mode, out=actual)
             self.assertEqual(self.safeToDense(actual), expect)
 
-    @expectedFailureMPS
     def test_div_by_sparse_error(self, device):
         self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
                                / torch.tensor(1., device=device).to_sparse())
 
-    @expectedFailureMPS
     def test_floor_divide_by_sparse_error(self, device):
         self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
@@ -3368,7 +3302,6 @@ class TestSparse(TestSparseBase):
         self.assertRaises(TypeError, lambda: t.numpy())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     def test_softmax(self, device, dtype, coalesced):
         import torch.nn.functional as F
@@ -3681,14 +3614,12 @@ class TestSparse(TestSparseBase):
 
 
     @dtypes(torch.double, torch.float)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
     @dtypes(torch.double, torch.float)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
@@ -3697,7 +3628,6 @@ class TestSparse(TestSparseBase):
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
@@ -3828,7 +3758,6 @@ class TestSparse(TestSparseBase):
 
         self.assertRaises(TypeError, assign_to)
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_full_broadcast_to(self, device, dtype):
         def can_broadcast(s0, s1):
@@ -3859,7 +3788,6 @@ class TestSparse(TestSparseBase):
                         torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_broadcast_to(self, device, dtype, coalesced):
         def test(sparse_dims, nnz, with_size, new_size):
@@ -3889,7 +3817,6 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    @expectedFailureMPS
     # NOTE: addcmul_out is not implemented for bool.
     @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
@@ -3941,7 +3868,6 @@ class TestSparse(TestSparseBase):
                 # check_autograd(x, y)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_dense_mul(self, device, dtype, coalesced):
@@ -4127,7 +4053,6 @@ class TestSparse(TestSparseBase):
         self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(*all_types_and_complex_and(torch.bool))
     def test_sum(self, device, dtype, coalesced):
         def run_test(shape, nnz):
@@ -5606,7 +5531,7 @@ instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 
 # e.g., TestSparseCPU and TestSparseCUDA
-instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, except_for='meta')
+instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
 
