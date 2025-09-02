@@ -1479,7 +1479,13 @@ def _build_table(
             f"Self {use_device.upper() if use_device is not None else 'None'} "
             f"time total: {override_time_unit(sum_self_device_time_total, _format_time(sum_self_device_time_total), time_unit)}"
         )
-    return "".join(result)
+
+    res = "".join(result)
+
+    if show_func_name_map:
+        res += show_name.get_map_as_str()
+
+    return res
 
 
 # Collect all events with stack traces and format them canonically
