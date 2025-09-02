@@ -1641,8 +1641,13 @@ class DeviceCachingAllocator {
       cudaGraph_t graph{};
       const cudaGraphNode_t* deps = nullptr;
       size_t num_deps = 0;
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+          stream, &status, nullptr, &graph, &deps, nullptr, &num_deps));
+#else
       C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
           stream, &status, nullptr, &graph, &deps, &num_deps));
+#endif
 
       TORCH_INTERNAL_ASSERT(
           status != cudaStreamCaptureStatusInvalidated,
@@ -1654,8 +1659,13 @@ class DeviceCachingAllocator {
 
       cudaGraphNode_t node{};
       C10_CUDA_CHECK(cudaGraphAddEmptyNode(&node, graph, deps, num_deps));
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+          stream, &node, nullptr, 1, cudaStreamSetCaptureDependencies));
+#else
       C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
           stream, &node, 1, cudaStreamSetCaptureDependencies));
+#endif
       empty_nodes.push_back(node);
       return true;
     };
@@ -1689,13 +1699,19 @@ class DeviceCachingAllocator {
     const cudaGraphNode_t* dependencies = nullptr;
     size_t num_dependencies = 0;
 
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
         stream,
         &status,
-        /*id=*/nullptr,
+        nullptr,
         &graph,
         &dependencies,
+        nullptr,
         &num_dependencies));
+#else
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+        stream, &status, nullptr, &graph, &dependencies, &num_dependencies));
+#endif
 
     TORCH_INTERNAL_ASSERT(
         status == cudaStreamCaptureStatusActive,
@@ -1724,14 +1740,27 @@ class DeviceCachingAllocator {
       return {};
     }
 
-    // Helper to retrieve all parent nodes (dependencies) of a given node.
-    auto get_parents = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
-      size_t count = 0;
+    auto get_dependencies = [](cudaGraphNode_t node,
+                               cudaGraphNode_t* pDependencies,
+                               size_t* pNumDependencies) -> void {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          node, pDependencies, nullptr, pNumDependencies));
+#else
       C10_CUDA_CHECK(
-          cudaGraphNodeGetDependencies(n, /*pDependencies=*/nullptr, &count));
+          cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies));
+#endif
+    };
+
+    // Helper to retrieve all parent nodes (dependencies) of a given node.
+    auto get_parents =
+        [&](cudaGraphNode_t node) -> std::vector<cudaGraphNode_t> {
+      size_t count = 0;
+
       std::vector<cudaGraphNode_t> out(count);
+      get_dependencies(node, nullptr, &count);
       if (count) {
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, out.data(), &count));
+        get_dependencies(node, out.data(), &count);
         out.resize(count);
       }
       return out;
