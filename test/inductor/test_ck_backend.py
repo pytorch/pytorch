@@ -273,7 +273,9 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager)
 
-    @unittest.skip("FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25")
+    @unittest.skip(
+        "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
+    )
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
