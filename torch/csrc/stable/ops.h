@@ -221,4 +221,20 @@ inline Tensor zero_(Tensor& self) {
   return to<Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the copy_ op with
+// identical semantics to the existing copy_ op (except that it will
+// not be called as a tensor method but only as a function
+// i.e. copy_(dst, src) not dst.zero_(src)).
+inline Tensor copy_(
+    Tensor& self,
+    const Tensor& src,
+    std::optional<bool> non_blocking = std::nullopt) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      from(self), from(src), from(non_blocking.value_or(false))};
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
+  return to<Tensor>(stack[0]);
+}
+
 } // namespace torch::stable
