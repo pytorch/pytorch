@@ -172,6 +172,8 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
                 "libnvrtc.so.13"
                 "libcupti.so.13")
             export USE_CUPTI_SO=1
+            export ATEN_STATIC_CUDA=0
+            export USE_CUDA_STATIC_LINK=0
         else
             DEPS_LIST+=(
                 "/usr/local/cuda/lib64/libnvToolsExt.so.1"
