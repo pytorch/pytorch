@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/TensorAccessor.h>
 #include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
