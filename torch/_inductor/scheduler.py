@@ -920,18 +920,6 @@ class BaseSchedulerNode:
         return prologue, template_node, epilogue
 
 
-class EstimateRuntimeCache:
-    def __init__(self) -> None:
-        self.dict: dict[Any, float] = {}
-
-    def get(self, cache_key: Any) -> Optional[float]:
-        return self.dict.get(cache_key, None)
-
-    def put(self, cache_key: Any, value: float) -> float:
-        self.dict[cache_key] = value
-        return value
-
-
 @functools.cache
 def get_estimate_runtime_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
