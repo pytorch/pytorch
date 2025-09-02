@@ -1769,7 +1769,9 @@ class CUDAPersistentTMATemplateConfigHeuristic(
     "mm_persistent_tma",
     "xpu",
 )
-class XPUPersistentTMATemplateConfigHeuristic(TMAConfigMixin, XPUConfigHeuristic):
+class XPUPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, XPUConfigHeuristic
+):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
