@@ -19,6 +19,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
+// Maximum number of GPUs within a CUDA P2P domain (e.g. NVL72)
+#define MAX_CUDA_P2P_DOMAIN_SIZE 72
+
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
 #define INT_SWITCH_CASE(name, val, ...) \
@@ -112,9 +115,9 @@ void init_elementwise_launch_config(
 
   if (numel_per_split <= max_num_threads * numel_per_thread) {
     num_blocks = 1;
-    num_threads = at::round_up(
-        at::ceil_div(numel_per_split, numel_per_thread),
-        static_cast<size_t>(at::cuda::warp_size()));
+    num_threads = at::ceil_div(numel_per_split, numel_per_thread);
+    num_threads = max(num_threads, MAX_CUDA_P2P_DOMAIN_SIZE);
+    num_threads = at::round_up(num_threads, at::cuda::warp_size());
   } else {
     num_blocks = std::min(
         at::ceil_div(numel_per_split, max_num_threads * numel_per_thread),
