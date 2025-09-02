@@ -3277,6 +3277,8 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     normalized_ndim = len(normalized_shape)
     torch._check(
         normalized_ndim >= 1,
@@ -3288,7 +3290,7 @@ def native_layer_norm(
     # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
     # therefore we use tuple(normalized_shape)
     torch._check(
-        weight is None or weight.shape == tuple(normalized_shape),
+        weight is None or sym_eq(weight.shape, tuple(normalized_shape)),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
         + str(weight.shape)  # type: ignore[union-attr]
@@ -3296,7 +3298,7 @@ def native_layer_norm(
         + str(normalized_shape),
     )
     torch._check(
-        bias is None or bias.shape == tuple(normalized_shape),
+        bias is None or sym_eq(bias.shape, tuple(normalized_shape)),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
         + str(bias.shape)  # type: ignore[union-attr]
@@ -3305,7 +3307,9 @@ def native_layer_norm(
     )
     torch._check(
         input.ndim >= normalized_ndim
-        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        and sym_eq(
+            input.shape[(input.ndim - normalized_ndim) :], tuple(normalized_shape)
+        ),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
         + ", expected input with shape "

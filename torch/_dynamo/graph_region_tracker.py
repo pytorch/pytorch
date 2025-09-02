@@ -245,13 +245,16 @@ class GraphRegionTracker:
         to track the new node.
         """
         try:
-            duplicates = self.hash_to_duplicates[
-                self._hash_node(
-                    tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
-                )
-            ]
-            duplicates.append(node)
-            self.node_to_duplicates[node] = duplicates
+            if (
+                node not in self.node_to_duplicates
+            ):  # don't allow nodes to be added twice
+                duplicates = self.hash_to_duplicates[
+                    self._hash_node(
+                        tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+                    )
+                ]
+                duplicates.append(node)
+                self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 

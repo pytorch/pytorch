@@ -62,7 +62,7 @@ class VllmBuildParameters:
     )
 
     # OUTPUT_DIR: where docker buildx (local exporter) will write artifacts
-    output_dir: Path = env_path_field("OUTPUT_DIR", "shared")
+    output_dir: Path = env_path_field("OUTPUT_DIR", "external/vllm")
 
     # --- Build args ----------------------------------------------------------
     target_stage: str = env_str_field("TARGET_STAGE", "export-wheels")

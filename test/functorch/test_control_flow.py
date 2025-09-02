@@ -737,8 +737,7 @@ def forward(self, pred_1, x_1):
     getitem_1 = cond_1[0];  getitem_1 = None
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  getitem_4 = None
-    getitem_5 = cond_1[4];  cond_1 = getitem_5 = None
+    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
     return (getitem_2,)""",  # noqa: B950
         )
 
@@ -854,10 +853,7 @@ def forward(self, pred_1, a_1, b_1, c_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2, ones_like));  pred_1 = true_graph_1 = false_graph_1 = a_1 = b_1 = sym_size_int = sym_size_int_1 = c_1 = sym_size_int_2 = ones_like = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  getitem_4 = None
-    getitem_5 = cond_1[4];  getitem_5 = None
-    getitem_6 = cond_1[5];  cond_1 = getitem_6 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
         # Forward
@@ -877,7 +873,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     clone = torch.ops.aten.clone.default(arg6_1)
     clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
     zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
-    return [clone, clone_1, None, None, zeros_like, None]""",
+    return [clone, clone_1, zeros_like]""",
         )
 
     def test_cond_autograd_pytree_input(self):
@@ -1302,15 +1298,11 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
-    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
-    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
-    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
-    @unittest.expectedFailure
     def test_cond_autograd_zeros_unused_branch_complex_compile_fail(
         self, compile_mode, scalar
     ):
@@ -8712,6 +8704,202 @@ class TestHopSchema(TestCase):
         flat_schema = schema_gen.gen_schema()
         self.assertExpectedInline(
             str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
+        )
+
+    def test_cond_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.cond.gen_schema(
+            torch.tensor(True),
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_cond_gen_schema_symbool_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_bool = torch.randn(3, 4).nonzero().size(0) == 0
+
+        schema = torch.ops.higher_order.cond.gen_schema(
+            sym_bool,
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_while_loop_gen_schema_tensor_inputs(self):
+        def cond_fn(x, y):
+            return x.sum() < 10
+
+        def body_fn(x, y):
+            return x + 1, y.sin()
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1) -> (Tensor, Tensor)""",
+        )
+
+    def test_while_loop_gen_schema_with_additional_inputs(self):
+        def cond_fn(x, y, z):
+            return x.sum() < z
+
+        def body_fn(x, y, z):
+            return x + 1, y.sin()
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (torch.tensor(10),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(carry, x):
+            return carry + x, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0) -> (Tensor, Tensor)""",
+        )
+
+    def test_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(carry, x, scale):
+            return carry + x * scale, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(carry1, carry2, x1, x2):
+            return carry1 + x1, carry2 * x2, carry1 - x1, carry2 + x2
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_associative_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(x, y):
+            return x + y
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(x, y, scale):
+            return x * y * scale
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor additional_input0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(x1, x2, y1, y2):
+            return x1 + y1, x2 * y2
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
+        )
+
+    def test_while_loop_gen_schema_with_int_carries(self):
+        def cond_fn(x, y, z, c):
+            return x < y
+
+        def body_fn(x, y, z, c):
+            return x + 1, y - 1, z.sin(), c + x
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (2, 10, torch.randn(2, 3)),
+            (torch.tensor(10),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, int carried_input0, int carried_input1, Tensor carried_input2, Tensor additional_input0) -> (int, int, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_while_loop_gen_schema_with_input_mutation(self):
+        def cond_fn(x, y, z, c):
+            return x < y
+
+        def body_fn(x, y, z, c):
+            x.add_(1)
+            y.sub_(1)
+            z.sin_()
+            c.add_(x)
+            return x, y, z
+
+        c = torch.randn(3, 3)
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
+            (c,),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor(a2!) carried_input0, Tensor(a3!) carried_input1, Tensor(a4!) carried_input2, Tensor(a5!) additional_input0) -> (Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
 

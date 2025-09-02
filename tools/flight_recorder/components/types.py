@@ -394,7 +394,9 @@ class Op:
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-        self.pg_name, self.pg_desc = event["process_group"]
+        # Store the hashed pg_name for accessing memberships, and original pg info for display
+        self.pg_name = pg_name  # This is the hashed version used for memberships lookup
+        self.original_pg_name, self.pg_desc = event["process_group"]
         assert type in COLLECTIVES | P2P | {"coalesced"}, (
             f"{type} is not a supported operation"
         )
@@ -426,9 +428,9 @@ class Op:
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
-        pg_ranks = sorted(pg_ranks)
-        self._src_g = pg_ranks[self._src] if self._src is not None else None
-        self._dst_g = pg_ranks[self._dst] if self._dst is not None else None
+        pg_ranks_sorted = sorted(pg_ranks)
+        self._src_g = pg_ranks_sorted[self._src] if self._src is not None else None
+        self._dst_g = pg_ranks_sorted[self._dst] if self._dst is not None else None
 
     @property
     def src(self) -> int:
