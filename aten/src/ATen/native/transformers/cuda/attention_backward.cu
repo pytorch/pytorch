@@ -260,7 +260,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
                           attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
                           out /*const Tensor& o*/,
                           grad_out/*const Tensor& dO*/,
-                          logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
+                          logsumexp/*const Tensor& softmaxstats*/,
                           dq/*Tensor& dQ*/,
                           dk/*Tensor& dK*/,
                           dv/*Tensor& dV*/,
