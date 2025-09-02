@@ -120,7 +120,8 @@
     # Offset the kv_indices tensor by the correct batch and head
     kv_indices = KV_IDX + sparse_idx_hz_offset
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
-    indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+    MAX_KV_IDX = {{size("KV_IDX", -1)}}
+    indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
     # first kv block we're loading
@@ -156,7 +157,7 @@
         # Assign full block in a reverse order for off_t. Prioritize the last CTA.
         block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
         block_n_end = block_n_start + TILE_KV_MULTIPLE
-        indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+        indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
