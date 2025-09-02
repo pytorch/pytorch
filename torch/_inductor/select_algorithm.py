@@ -613,6 +613,8 @@ class TritonTemplateKernel(TritonKernel):
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
 
+        inductor_meta["config_args"] = self.meta
+
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},

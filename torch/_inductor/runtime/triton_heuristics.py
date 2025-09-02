@@ -772,7 +772,10 @@ class CachingAutotuner(KernelInterface):
             and getattr(knobs.runtime, "jit_post_compile_hook", None)
         ):
             try:
-                knobs.runtime.jit_post_compile_hook(
+                hook = knobs.runtime.jit_post_compile_hook
+
+                # base args everyone should get
+                call_kwargs = dict(
                     key=getattr(self.fn, "cache_key", self.kernel_hash or str(self.fn)),
                     repr=getattr(self.fn, "src", None),
                     fn=self.fn,
@@ -780,6 +783,14 @@ class CachingAutotuner(KernelInterface):
                     is_manual_warmup=False,
                     already_compiled=True,
                 )
+
+                # only add inductor_args if the hook takes it
+                sig = inspect.signature(hook)
+                params = sig.parameters
+                if "inductor_args" in params:
+                    call_kwargs["inductor_args"] = self.inductor_meta["config_args"]
+
+                hook(**call_kwargs)
             except Exception:
                 log.exception("jit_post_compile_hook failed")
 
