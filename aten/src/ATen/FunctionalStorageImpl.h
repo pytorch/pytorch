@@ -86,7 +86,7 @@ struct ViewMeta {
         is_as_strided(is_as_strided),
         has_symbolic_inputs(has_symbolic_inputs) {}
 
-  virtual ~ViewMeta() {}
+  virtual ~ViewMeta() = default;
 
   virtual Tensor forward(const Tensor& base) = 0;
   virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;

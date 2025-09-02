@@ -930,7 +930,7 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(
         name = functionalization.classname(self.f.func, with_namespace=True)
         return [f"  create_binding_with_pickle<{name}>(functionalization);"]
 
-    # Generate an instanciation of this specialized class.
+    # Generate an instantiation of this specialized class.
     def new(self, out_index: str = "0") -> str:
         name = functionalization.classname(self.f.func, with_namespace=True)
         ctor_arguments = functionalization.base_ctor_arguments(
