@@ -1334,13 +1334,8 @@ def _assert_async(cond, msg):
     cond = to_dtype(cond, torch.bool)
 
     def inner_fn(index):
-        if hasattr(cond.data, "data") and hasattr(cond.data.data, "force_realize"):
-            with cond.data.data.force_realize():
-                cond_loader = cond.make_loader()
-                return ops.device_assert_async(cond_loader(index), msg)
-        else:
-            cond_loader = cond.make_loader()
-            return ops.device_assert_async(cond_loader(index), msg)
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
 
     assertion_op = Pointwise.create(
         device=cond.get_device(),
