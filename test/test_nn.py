@@ -12052,7 +12052,7 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn((10,), device=device)  # 1D input: single sample, 10 classes
         t = torch.zeros((10,), dtype=torch.int64, device=device)  # 1D target: 10 class indices
 
-        with self.assertRaisesRegex(RuntimeError, "Expected target to be 0D when input is 1D"):
+        with self.assertRaisesRegex(ValueError, "Expected target to be 0D when input is 1D"):
             F.nll_loss(x, t)
 
     def test_nll_loss_mismatched_batch(self, device):
