@@ -109,7 +109,7 @@ class CUTLASSScheduling(BaseScheduling):
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.cuda(r'''")
+            compile_wrapper.writeline(f"async_compile.{V.graph.device_type}(r'''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline(
                 f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
