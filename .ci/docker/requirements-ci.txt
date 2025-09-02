@@ -10,9 +10,9 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-build
+build==1.3.0
 #Description: A simple, correct Python build frontend.
-#Pinned versions:
+#Pinned versions: 1.3.0
 #test that import:
 
 click
