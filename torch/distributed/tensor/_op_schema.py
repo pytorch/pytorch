@@ -30,7 +30,6 @@ from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
-
 from torch._C import (
     _DTensor_OpSchema_post_init,
     _DTensor_OpSchema_recompute_comparison_key,
