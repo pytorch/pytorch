@@ -1,0 +1,146 @@
+name: Build vLLM wheels
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-vllm-wheel.yml
+      - .github/ci_commit_pins/vllm.txt
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/build-vllm-wheel.yml
+      - .github/ci_commit_pins/vllm.txt
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-wheel:
+    name: "Build vLLM Wheel"
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.12" ]
+        include:
+          - device: cuda
+            cuda-version: cu128
+            docker-image: 'pytorch/manylinux2_28-builder:cuda12.8'
+            runs_on: "linux.12xlarge"
+          - device: cuda
+            cuda-version: cu129
+            docker-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+            runs_on: "linux.12xlarge"
+    timeout-minutes: 240
+    env:
+      PY_VERS: ${{ matrix.py_vers }}
+      DOCKER_IMAGE: ${{ matrix.docker-image }}
+      PLATFORM: 'manylinux_2_28_x86_64'
+      BUILD_DEVICE: ${{ matrix.device }}
+      BUILD_VERSION: ${{ matrix.device == 'cuda' && matrix.cuda-version || '' }}
+      # CUDA specific env variables
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.device == 'cuda' && '8.0;8.9;9.0' || '' }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+
+  torch-wheel-dir:
+    description: Directory to built torch wheel
+    type: string
+    required: false
+    default: dist
+  output-dir:
+    description: Directory to store build artifact
+    default: external
+    type: string
+    required: false
+
+      - name: Get latest PyTorch nightly
+        env:
+        shell: bash
+        run: |
+          set -eux
+
+          # Keep PyTorch nightly wheel here so that we can install it later during
+          # vLLM build process
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}"
+          )
+
+          # Determine python executable for given version (copied from build-triton-wheel)
+          case $PY_VERS in
+          3.10)
+            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            ;;
+          3.11)
+            PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            ;;
+          3.12)
+            PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
+          3.13)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
+            ;;
+          3.13t)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
+            ;;
+          3.14)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
+            ;;
+          3.14t)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314t/bin/python
+            ;;
+          *)
+            echo "Unsupported python version ${PY_VERS}"
+            exit 1
+            ;;
+          esac
+
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip download \
+            --pre torch \
+            --index-url https://download.pytorch.org/whl/nightly/"${BUILD_VERSION}"
+
+      - name: Build vLLM wheel
+        uses: ./.github/actions/build-external-packages
+        with:
+          build-targets: vllm
+          docker-image: ${{ matrix.docker-image }}
+          cuda-arch-list: ${{ env.TORCH_CUDA_ARCH_LIST }}
+          torch-wheel-dir: ${{ runner.temp }}/artifacts
+          output-dir: ${{ runner.temp }}/vllm
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: vllm-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.BUILD_VERSION }}-${{ env.PLATFORM }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/vllm/*
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
