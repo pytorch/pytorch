@@ -46,7 +46,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"DeviceIndex", ParameterType::INT64},
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
-    {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
     {"::std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
