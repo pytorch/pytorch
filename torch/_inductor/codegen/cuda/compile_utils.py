@@ -18,6 +18,17 @@ if config.is_fbcode():
 log = logging.getLogger(__name__)
 
 
+def use_re_build() -> bool:
+    """
+    Use for CUTLASS compilation only right now.
+    """
+    if config.is_fbcode() and not cuda_env.nvcc_exist(_cuda_compiler()):
+        from triton.fb.re_build_helper import should_build_locally
+
+        return not should_build_locally()
+    return False
+
+
 def _cutlass_path() -> str:
     if config.is_fbcode():
         from libfb.py import parutil
@@ -87,9 +98,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -159,17 +173,6 @@ def _nvcc_compiler_options() -> list[str]:
     return options
 
 
-def use_re_build() -> bool:
-    """
-    Use for CUTLASS compilation only right now.
-    """
-    if config.is_fbcode() and not cuda_env.nvcc_exist(_cuda_compiler()):
-        from triton.fb.re_build_helper import should_build_locally
-
-        return not should_build_locally()
-    return False
-
-
 def cuda_compile_command(
     src_files: list[str],
     dst_file: str,
@@ -209,8 +212,12 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
+
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):

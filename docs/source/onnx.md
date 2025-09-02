@@ -84,8 +84,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     :noindex:
 .. autofunction:: is_in_onnx_export
     :noindex:
-.. autofunction:: enable_fake_mode
-    :noindex:
 ```
 
 ### Classes
