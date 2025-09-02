@@ -70,7 +70,7 @@ bool is_nvshmem_available() {
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
-  NVSHMEM_CHECK(
+  NVSHMEM_CHECK_MSG(
     ::nvshmemx_cumodule_init(cumodule),
     "nvshmemx_cumodule_init failed");
 }
@@ -91,7 +91,7 @@ nvshmem_team_t group_to_team(
   }
 
   nvshmem_team_t team;
-  NVSHMEM_CHECK(
+  NVSHMEM_CHECK_MSG(
       nvshmem_team_split_strided(
           NVSHMEM_TEAM_WORLD,
           global_ranks[0],
@@ -301,13 +301,13 @@ at::Tensor all_to_all_vdev(
       &splits_ptr,
       &rank,
       &world_size};
-  nvshmemx_collective_launch(
+  NVSHMEM_CHECK(nvshmemx_collective_launch(
       (const void*)exchangeSplitAndOffset,
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
       0,
-      stream);
+      stream));
 
   // CTA Tuning
   // Intra-node: use multiple blocks per peer to increase data parallelism, up to 8.
@@ -344,13 +344,13 @@ at::Tensor all_to_all_vdev(
       &stride_bytes,
       &rank,
       &world_size};
-  nvshmemx_collective_launch(
+  C10_CUDA_CHECK(cudaLaunchKernel(
       (const void*)allToAllV,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
       args1,
       0,
-      stream);
+      stream));
   return out;
 }
 
@@ -666,13 +666,13 @@ void all_to_all_vdev_2d(
       &ne,
       &input_dim0,
       &rank_is_row_in};
-  nvshmemx_collective_launch(
+  NVSHMEM_CHECK(nvshmemx_collective_launch(
       (const void*)exchangeSplitAndOffset_2d<false>,  // false: input offsets not provided
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
       0,
-      stream);
+      stream));
 
   // CTA Tuning
   // Naive for now, use 1 block per expert.
@@ -694,13 +694,13 @@ void all_to_all_vdev_2d(
       &ne,
       &major_align_val,
       &rank_is_row_out};
-  nvshmemx_collective_launch(
+  C10_CUDA_CHECK(cudaLaunchKernel(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
       args1,
       0,
-      stream);
+      stream));
 }
 
 void all_to_all_vdev_2d_offset(
@@ -799,13 +799,13 @@ void all_to_all_vdev_2d_offset(
       &ne,
       &input_dim0,
       &rank_is_row_in};
-  nvshmemx_collective_launch(
+  NVSHMEM_CHECK(nvshmemx_collective_launch(
       (const void*)exchangeSplitAndOffset_2d<true>,  // true: input offsets provided
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
       0,
-      stream);
+      stream));
 
   // CTA Tuning
   // Naive for now, use 1 block per expert.
@@ -827,13 +827,13 @@ void all_to_all_vdev_2d_offset(
       &world_size,
       &major_align_val,
       &rank_is_row_out};
-  nvshmemx_collective_launch(
+  C10_CUDA_CHECK(cudaLaunchKernel(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
       args1,
       0,
-      stream);
+      stream));
 }
 } // namespace c10d::nvshmem_extension
 

@@ -275,7 +275,7 @@ void initialize_nvshmem_with_store(
   maybe_initialize_env_vars();
 
   nvshmemx_uniqueid_t unique_id;
-  NVSHMEM_CHECK(
+  NVSHMEM_CHECK_MSG(
       nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
 
   // Using an existing store_all_gather due to laziness.
@@ -285,7 +285,7 @@ void initialize_nvshmem_with_store(
   nvshmemx_init_attr_t attr;
   nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
 
-  NVSHMEM_CHECK(
+  NVSHMEM_CHECK_MSG(
       nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
       "nvshmemx_init_attr failed");
 

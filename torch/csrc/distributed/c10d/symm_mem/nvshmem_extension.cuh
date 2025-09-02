@@ -3,7 +3,15 @@
 #include <c10/macros/Macros.h>
 #include <ATen/ATen.h>
 
-#define NVSHMEM_CHECK(stmt, msg)                                             \
+#define NVSHMEM_CHECK(stmt)                                             \
+  do {                                                                  \
+    int result = (stmt);                                                \
+    TORCH_CHECK(                                                        \
+        result == 0,                                                    \
+        "NVSHMEM call failed, error code: " + std::to_string(result));  \
+  } while (0)
+
+#define NVSHMEM_CHECK_MSG(stmt, msg)                                         \
   do {                                                                       \
     int result = (stmt);                                                     \
     TORCH_CHECK(                                                             \
