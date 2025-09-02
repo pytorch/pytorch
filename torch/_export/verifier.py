@@ -223,6 +223,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
+                torch._functorch.predispatch._add_batch_dim,
+                torch._functorch.predispatch._remove_batch_dim,
+                torch._functorch.predispatch._vmap_increment_nesting,
+                torch._functorch.predispatch._vmap_decrement_nesting,
+                torch._functorch.predispatch.lazy_load_decompositions,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -463,7 +468,12 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     num_tokens = len(gs.output_tokens)
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    end = (
+        len(gs.buffers_to_mutate)
+        + len(gs.parameters_to_mutate)
+        + len(gs.user_inputs_to_mutate)
+        + num_tokens
+    )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
@@ -474,6 +484,13 @@ def _verify_exported_program_signature(exported_program) -> None:
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
                     f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
+                )
+        elif mutation_node in gs.parameters_to_mutate:
+            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+                raise SpecViolationError(
+                    f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
+                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Parameter nodes available: {gs.parameters} \n"
                 )
         elif mutation_node in gs.user_inputs_to_mutate:
             if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
