@@ -2,19 +2,6 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void flatten_indices_kernel(
-    device const int64_t* indices [[buffer(0)]],
-    device const int64_t* strides [[buffer(1)]],
-    device int64_t* flat_indices [[buffer(2)]],
-    constant uint& sparse_dim [[buffer(3)]],
-    constant uint& nnz [[buffer(4)]],
-    uint gid [[thread_position_in_grid]]) {
-  int64_t flat_idx = 0;
-  for (uint d = 0; d < sparse_dim; d++) {
-    flat_idx += indices[d * nnz + gid] * strides[d];
-  }
-  flat_indices[gid] = flat_idx;
-}
 
 kernel void compute_output_positions_kernel(
     device const bool* is_unique [[buffer(0)]],
