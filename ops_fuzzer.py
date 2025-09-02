@@ -1,6 +1,6 @@
 import random
 from re import L
-from typing import List, Tuple, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from tensor_fuzzer import (
@@ -16,42 +16,42 @@ from tensor_fuzzer import (
 class ArgumentTracker:
     """
     Tracks existing arguments by their specifications to enable argument reuse.
-    
+
     When we need a new argument, we can choose to either:
     1. Reuse an existing argument of the same type
     2. Create a new argument
-    
+
     This reduces redundant argument generation and tests more realistic scenarios
     where the same inputs are used in multiple operations.
     """
-    
+
     def __init__(self):
         # Maps arg_id to (spec, reuse_count)
         self._args: Dict[int, Tuple[Spec, int]] = {}
-        # Maps spec key to arg_id for quick lookup  
+        # Maps spec key to arg_id for quick lookup
         self._spec_to_arg_id: Dict[str, int] = {}
         self._next_arg_id = 0
         self.reuse_probability = 0.7  # 70% chance to reuse existing arg
-        
+
     def reset(self):
         """Reset the tracker for a new fuzzing session."""
         self._args.clear()
         self._spec_to_arg_id.clear()
         self._next_arg_id = 0
-        
+
     def get_or_create_arg(self, spec: Spec, enable_reuse: bool = True) -> int:
         """
         Get an existing argument ID for the given spec, or create a new one.
-        
+
         Args:
             spec: The specification for the argument
             enable_reuse: Whether to enable reusing existing arguments
-            
+
         Returns:
             int: The argument ID to use
         """
         spec_key = self._spec_to_key(spec)
-        
+
         # Check if we have an existing argument of this type
         if enable_reuse and spec_key in self._spec_to_arg_id:
             # Decide whether to reuse or create new
@@ -61,14 +61,14 @@ class ArgumentTracker:
                 old_spec, reuse_count = self._args[arg_id]
                 self._args[arg_id] = (old_spec, reuse_count + 1)
                 return arg_id
-        
+
         # Create new argument
         new_arg_id = self._next_arg_id
         self._next_arg_id += 1
         self._args[new_arg_id] = (spec, 0)  # 0 reuses initially
         self._spec_to_arg_id[spec_key] = new_arg_id
         return new_arg_id
-        
+
     def _spec_to_key(self, spec: Spec) -> str:
         """Convert a spec to a string key for tracking."""
         if isinstance(spec, ScalarSpec):
@@ -80,13 +80,13 @@ class ArgumentTracker:
             return f"tensor_size[{size_str}]_stride[{stride_str}]_{spec.dtype}"
         else:
             return f"unknown_{type(spec)}"
-            
+
     def get_all_args(self) -> List[Tuple[int, Spec]]:
         """Get all unique arguments that were created."""
         result = [(arg_id, spec) for arg_id, (spec, _) in self._args.items()]
         # Sort by arg_id to ensure consistent order
         return sorted(result, key=lambda x: x[0])
-        
+
     def get_stats(self) -> Dict[str, int]:
         """Get statistics about argument reuse."""
         total_args = len(self._args)
@@ -94,7 +94,7 @@ class ArgumentTracker:
         return {
             "total_unique_args": total_args,
             "total_reuses": total_reuses,
-            "total_arg_references": total_args + total_reuses
+            "total_arg_references": total_args + total_reuses,
         }
 
 
@@ -160,8 +160,8 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> Tuple[str, List[Spec]]:
     """
     if isinstance(target_spec, ScalarSpec):
         if target_spec.constant is not None:
-                # At depth 0, only allow constant operation
-                return _get_constant_args_specs(target_spec)
+            # At depth 0, only allow constant operation
+            return _get_constant_args_specs(target_spec)
         if depth == 0:
             # At depth 0, only allow leaf operations
             ops = ["constant", "arg"]
@@ -172,7 +172,7 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> Tuple[str, List[Spec]]:
             leaf_ops = ["constant", "arg"]
 
             # Reduce probability of leaf operations when stack_size < 10
-            if stack_size < 10 or depth>7:
+            if stack_size < 10 or depth > 7:
                 # 80% chance of non-leaf, 20% chance of leaf
                 if random.random() < 0.8:
                     chosen_op = random.choice(non_leaf_ops)
@@ -197,7 +197,7 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> Tuple[str, List[Spec]]:
     elif isinstance(target_spec, TensorSpec):
         if depth == 0:
             # At depth 0, only allow leaf operations
-            ops = [ "arg"]
+            ops = ["arg"]
             chosen_op = random.choice(ops)
         else:
             # At higher depths, allow all tensor operations
@@ -240,6 +240,22 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> Tuple[str, List[Spec]]:
             return _get_constant_args_specs(target_spec)
         else:  # arg
             return _get_arg_args_specs(target_spec)
+
+    else:
+        raise ValueError(f"Unknown target spec type: {type(target_spec)}")
+
+
+def fuzz_op_output(target_specs: List[Spec]) -> Tuple[str, List[Spec]]:
+    """
+    Generate an output operation that takes multiple inputs and returns them as a tuple.
+
+    Args:
+        target_specs: List of input specifications to be returned as outputs
+
+    Returns:
+        Tuple of ("output", input_specs_list)
+    """
+    return "output", target_specs
 
 
 def _get_scalar_add_args_specs(target_spec: ScalarSpec) -> Tuple[str, List[Spec]]:
@@ -465,7 +481,7 @@ def _get_aten_cat_args_specs(target_spec: TensorSpec) -> Tuple[str, List[Spec]]:
     # Make sure we don't choose a dimension that's out of range
     if len(target_size) == 0:
         raise RuntimeError("torch.cat does not support 0-dimensional tensors")
-    
+
     cat_dim = random.randint(0, len(target_size) - 1)
     target_cat_size = target_size[cat_dim]
 
@@ -527,13 +543,17 @@ def _get_aten_cat_args_specs(target_spec: TensorSpec) -> Tuple[str, List[Spec]]:
             for j in range(len(arg_specs)):
                 # Check that dimension i of tensor j matches target
                 if i < len(arg_specs[j].size):  # Make sure dimension exists
-                    assert arg_specs[j].size[i] == sz, f"Tensor {j} dim {i}: expected {sz}, got {arg_specs[j].size[i]}"
-    
+                    assert (
+                        arg_specs[j].size[i] == sz
+                    ), f"Tensor {j} dim {i}: expected {sz}, got {arg_specs[j].size[i]}"
+
     # Ensure cat_dim is valid (should already be, but double-check)
     if cat_dim >= len(target_size) or cat_dim < 0:
-        print(f"ERROR: cat_dim {cat_dim} is out of range for target tensor with {len(target_size)} dimensions")
+        print(
+            f"ERROR: cat_dim {cat_dim} is out of range for target tensor with {len(target_size)} dimensions"
+        )
         cat_dim = 0  # Fallback to dimension 0
-    
+
     dim_spec = ScalarSpec(
         dtype=torch.int64, constant=cat_dim
     )  # concatenate along the chosen dimension
@@ -548,13 +568,15 @@ def _get_constant_args_specs(target_spec: Spec) -> Tuple[str, List[Spec]]:
     return "constant", []
 
 
-def _get_arg_args_specs(target_spec: Spec, enable_reuse: bool = True) -> Tuple[str, List[Spec]]:
+def _get_arg_args_specs(
+    target_spec: Spec, enable_reuse: bool = True
+) -> Tuple[str, List[Spec]]:
     """Get argument specifications for arg operation with optional reuse."""
     global _arg_tracker
-    
+
     # Get or create an argument ID for this specification
     arg_id = _arg_tracker.get_or_create_arg(target_spec, enable_reuse=enable_reuse)
-    
+
     # Return the operation name with the arg_id embedded and no input specs
     # We'll use the arg_id in code generation to decide whether to reuse
     return f"arg_{arg_id}", []
