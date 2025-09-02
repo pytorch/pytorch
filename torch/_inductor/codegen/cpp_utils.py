@@ -710,9 +710,6 @@ def _get_dtype_from_loopbodies(loop_bodies):
     return dtypes
 
 
-from ..scheduler import BaseSchedulerNode, SchedulerBuffer
-
-
 def template_fusion_with_epilogues_supported(
     template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
 ) -> tuple[bool, bool]:
