@@ -205,7 +205,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, bmm_template.name, name
         ):
             bmm_template.maybe_append_choice(
@@ -213,6 +213,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
             )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
@@ -274,7 +275,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
 
     if use_triton_template(layout):
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, bmm_template.name, name
         ):
             bmm_template.maybe_append_choice(
@@ -282,6 +283,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
