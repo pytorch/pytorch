@@ -934,7 +934,7 @@ def test_openreg(test_module, test_directory, options):
             os.path.join(openreg_dir, "tests"),
             "-v",
         ]
-        return shell(cmd, env=os.environ)
+        return shell(cmd, cwd=test_directory, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
