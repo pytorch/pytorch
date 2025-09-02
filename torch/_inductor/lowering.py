@@ -1329,6 +1329,34 @@ def quantized_decomposed_quantize_per_channel(
     )
 
 
+def _assert_async(cond, msg):
+    cond.realize()
+    cond = to_dtype(cond, torch.bool)
+
+    def inner_fn(index):
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
+
+    assertion_op = Pointwise.create(
+        device=cond.get_device(),
+        dtype=cond.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(cond.get_size()),
+    )
+    assertion_op.realize()
+    return assertion_op
+
+
+@register_lowering(aten._assert_async.msg)
+def lower_assert_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
+@register_lowering(aten._functional_assert_async.msg)
+def lower_assert_functional_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
 @register_lowering(
     quantized_decomposed.dequantize_per_channel, type_promotion_kind=None
 )
@@ -2986,7 +3014,7 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]

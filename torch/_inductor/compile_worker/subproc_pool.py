@@ -90,8 +90,14 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str) -> None:
-        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+    def __init__(self, details: str, name: str = "<unknown>") -> None:
+        self.details = details
+        super().__init__(
+            f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
+        )
+
+    def with_name(self, name: str) -> "SubprocException":
+        return SubprocException(self.details, name)
 
 
 class SubprocPickler:

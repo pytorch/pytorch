@@ -456,7 +456,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     errMessage += ": reduction dim must be in the range of input shape";
     for (const auto dim : dim_value) {
       auto wrap_dim = maybe_wrap_dim(dim, num_input_dims);
-      TORCH_CHECK(wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size()), errMessage.c_str())
+      TORCH_CHECK(wrap_dim < (num_input_dims ? num_input_dims : 1), errMessage.c_str())
     }
   }
 
