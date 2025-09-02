@@ -899,7 +899,7 @@ class CaptureOutput:
     """
 
     dynamo_output: DynamoOutput
-    backend_input: BackendInput
+    backend_input: Optional[BackendInput]
 
 
 @dataclass
@@ -957,7 +957,7 @@ def fullgraph_capture(
         frame.closure,
         compiler_fn=fullgraph_compiler,
         export=_is_export_deprecated_do_not_use,
-        export_constraints=_export_constraints,
+        export_constraints=_export_constraints,  # type: ignore[arg-type]
         one_graph=True,
         restart_reasons=set(),
     )
