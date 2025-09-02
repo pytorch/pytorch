@@ -8,12 +8,12 @@ import weakref
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
 
 import torch
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from typing_extensions import ParamSpec
 
 from . import trace_rules, variables
 from .comptime import comptime
