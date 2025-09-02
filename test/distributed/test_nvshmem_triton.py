@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
-from torch.testing._internal.common_distributed import MultiProcContinousTest
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -246,7 +246,7 @@ def nvshmem_reduce_kernel(
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
-class NVSHMEMTritonTest(MultiProcContinousTest):
+class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)

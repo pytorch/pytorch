@@ -1303,6 +1303,27 @@ default](args = (%x, %b_state), kwargs = {})
             )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_to(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.ops.aten.to.device(x, device="cuda:0", dtype=torch.float32)
+                return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,  # noqa: B950
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_device_submod(self):
         class M(torch.nn.Module):
             def forward(self, x):

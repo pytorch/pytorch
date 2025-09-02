@@ -3311,8 +3311,12 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
     assert imag.dtype.is_floating_point
-    out_shape = _broadcast_shapes(real.shape, imag.shape)
-    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+    result = elementwise_meta(
+        real.to(corresponding_complex_dtype(real.dtype)),
+        imag.to(corresponding_complex_dtype(imag.dtype)),
+        type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    return result
 
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
@@ -4187,6 +4191,18 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
+
+
+@register_meta(
+    [
+        aten.add.Scalar,
+        aten.sub.Scalar,
+    ],
+)
+def meta_binop_alpha(self, other, alpha=1):
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 @register_meta([aten.round.default, aten.round.decimals])
