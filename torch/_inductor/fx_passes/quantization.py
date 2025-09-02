@@ -1530,7 +1530,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv_pattern(dtype):
+def _is_valid_dequant_conv_pattern(dtype, with_dtype_convert):
     def _inner(match):
         # Here we do some further check to ensure:
         # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
@@ -1552,7 +1552,7 @@ def _is_valid_dequant_conv_pattern(dtype):
 
         assert dtype in [torch.float32, torch.bfloat16]
 
-        if dtype == torch.float32:
+        if not with_dtype_convert:
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
@@ -1567,10 +1567,12 @@ def _is_valid_dequant_conv_pattern(dtype):
     return _inner
 
 
-def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float32):
+def _register_qconv_weight_prepack_pass(
+    pattern, pass_number, dtype=torch.float32, with_dtype_convert=False
+):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_conv_pattern(dtype),
+        extra_check=_is_valid_dequant_conv_pattern(dtype, with_dtype_convert),
         pass_number=pass_number,
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
@@ -1590,7 +1592,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         assert dtype in [torch.float32, torch.bfloat16]
         conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
-        if dtype == torch.float32:
+        if not with_dtype_convert:
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
@@ -1695,7 +1697,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             # Erase the original conv node
             graph.erase_node(conv_node)
             # Erase the dequant pattern
-            if dtype == torch.bfloat16:
+            if with_dtype_convert:
                 graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined, arg-type]
             graph.erase_node(dequant_node)  # type: ignore[arg-type]
             # Erase the dequant per channel pattern
@@ -1711,7 +1713,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
 
 
 def _generate_dequant_convolution_node_pattern(
-    _dequant_per_channel_pattern, dtype=torch.float32
+    _dequant_per_channel_pattern, dtype=torch.float32, with_dtype_convert=False
 ):
     assert dtype in [torch.float32, torch.bfloat16]
     dequant_convolution_node_pattern = CallFunction(
@@ -1719,7 +1721,7 @@ def _generate_dequant_convolution_node_pattern(
         _may_generate_pattern_with_dtype_convert(
             get_dequantize_per_tensor_activation_pattern(),
             KeywordArg("autocast_act_dtype"),
-            dtype == torch.bfloat16,
+            with_dtype_convert,
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1733,7 +1735,9 @@ def _generate_dequant_convolution_node_pattern(
     return dequant_convolution_node_pattern
 
 
-def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
+def _generate_qconv_weight_prepack_patterns(
+    dtype=torch.float32, with_dtype_convert=False
+):
     assert dtype in [torch.float32, torch.bfloat16]
     return (
         _generate_dequant_convolution_node_pattern(
@@ -1741,6 +1745,7 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_weight_pattern,
             dtype,
+            with_dtype_convert,
         ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
@@ -1751,6 +1756,7 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_clone_weight_pattern,
             dtype,
+            with_dtype_convert,
         ),
     )
 
@@ -2293,12 +2299,21 @@ def _register_dequant_promotion():
 
 
 def _register_qconv_weight_prepack():
-    for dtype in [torch.float32, torch.bfloat16]:
-        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(dtype)
+    for dtype, with_dtype_convert in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    ):
+        if dtype == torch.float32 and with_dtype_convert:
+            continue
+        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(
+            dtype, with_dtype_convert
+        )
         for weight_prepack_pattern in weight_prepack_patterns:
             # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
             _register_qconv_weight_prepack_pass(
-                weight_prepack_pattern, pass_number=1, dtype=dtype
+                weight_prepack_pattern,
+                pass_number=1,
+                dtype=dtype,
+                with_dtype_convert=with_dtype_convert,
             )
 
 
