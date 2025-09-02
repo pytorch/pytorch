@@ -49,6 +49,18 @@ def gen_transformer_inputs(vocab_size, bs, seq_length):
     return input_dict
 
 
+def get_padded_stride(shape, alignment_bytes, pad_output, itemsize):
+    align = alignment_bytes // itemsize
+    new_strides = [0 for _ in range(len(shape))]
+    new_strides[len(shape) - 1] = 1
+    for i in range(len(shape) - 1, 0, -1):
+        stride = shape[i] * new_strides[i]
+        if pad_output and stride % align != 0:
+            stride = (stride + align - 1) // align * align
+        new_strides[i - 1] = stride
+    return tuple(new_strides)
+
+
 class LinearAndSoftmax(nn.Module):
     """
     It's very common that a transformer model will do a matmul and then
@@ -767,7 +779,137 @@ class PaddingTest(TestCaseBase):
         output_shape = (shape[0] * num_inputs, shape[1])
         output_stride = input_tensors[0].stride()
         output_line = f"buf12 = empty_strided_{GPU_TYPE}({output_shape}, {output_stride}, torch.float32)"
-        self.assertTrue(any(output_line in line for line in code))
+        self.assertTrue(output_line in code[0])
+
+    @parametrize(
+        "shape,alignment_bytes,enable_pad",
+        [
+            ((512, 1), 32, False),
+            ((512, 1), 32, True),
+            ((32, 30), 64, False),
+            ((32, 30), 64, True),
+            ((512, 100, 1), 32, False),
+            ((512, 100, 1), 32, True),
+            ((32, 50, 30), 64, False),
+            ((32, 50, 30), 64, True),
+        ],
+    )
+    def test_outer_dynamic_shape_padding(self, shape, alignment_bytes, enable_pad):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration.
+        """
+        num_inputs = 2
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": True,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+        }
+        with config.patch(config_patches):
+            torch._dynamo.mark_dynamic(input_tensors[0], 0)
+            torch._dynamo.mark_dynamic(input_tensors[1], 0)
+            compiled = torch.compile(torch.add)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
+
+    @parametrize(
+        "shape,perm,alignment_bytes,enable_pad",
+        [
+            ((500, 10, 1), (2, 1, 0), 32, False),
+            ((500, 20, 1), (2, 1, 0), 32, True),
+            ((30, 10, 20), (2, 1, 0), 64, True),
+            ((30, 10, 20), (2, 1, 0), 64, False),
+            ((500, 10, 1), (1, 2, 0), 32, False),
+            ((500, 20, 1), (1, 2, 0), 32, True),
+            ((30, 10, 20), (1, 2, 0), 64, True),
+            ((30, 10, 20), (1, 2, 0), 64, False),
+        ],
+    )
+    def test_perm_outer_dynamic_shape_padding(
+        self, shape, perm, alignment_bytes, enable_pad
+    ):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration. Test when this occurs after a permute op.
+        """
+
+        def permute_contig(x):
+            return torch.permute(x, perm).contiguous()
+
+        num_inputs = 1
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": True,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+            "triton.use_block_ptr": True,
+        }
+        with config.patch(config_patches):
+            torch._dynamo.mark_dynamic(input_tensors[0], 2)
+            compiled = torch.compile(permute_contig)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
+
+    @parametrize(
+        "shape,alignment_bytes,enable_pad",
+        [
+            ((512, 1), 32, False),
+            ((512, 1), 32, True),
+            ((32, 30), 64, False),
+            ((32, 30), 64, True),
+            ((512, 100, 1), 32, False),
+            ((512, 100, 1), 32, True),
+            ((32, 50, 30), 64, False),
+            ((32, 50, 30), 64, True),
+        ],
+    )
+    def test_dynamic_shape_padding(self, shape, alignment_bytes, enable_pad):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration.
+        """
+        num_inputs = 2
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": enable_pad,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+        }
+        with config.patch(config_patches):
+            compiled = torch.compile(torch.add, dynamic=True)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
 
 
 if __name__ == "__main__":
