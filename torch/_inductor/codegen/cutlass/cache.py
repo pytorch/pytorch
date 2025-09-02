@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import torch._inductor.config as config
 from torch._inductor.codecache import cutlass_key
-from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch, get_cuda_version
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cutlass import serialization, utils
 from torch._inductor.codegen.cutlass.serialization import (
     get_cutlass_operation_serializer,
@@ -65,7 +65,7 @@ def _generate_config_filename(request_key: str) -> str:
 
 @clear_on_fresh_cache
 @functools.cache
-def maybe_fetch_ops() -> Optional[list[Any]]:
+def maybe_fetch_ops(device_type: str) -> Optional[list[Any]]:
     """
     Fetch ops from databases.
     """
@@ -73,10 +73,13 @@ def maybe_fetch_ops() -> Optional[list[Any]]:
         return None
 
     # setup
-    arch: str = get_cuda_arch()
-    # get_cuda_version might return "12.4.0" or "12.4"
-    # but we want to use "12.4"
-    version: str = ".".join(get_cuda_version().split(".")[:2])
+    device_op_overrides = get_device_op_overrides(device_type)
+    arch: str = device_op_overrides.get_device_arch()
+    version: str = device_op_overrides.get_toolkit_version()
+    if device_type == "cuda":
+        # get_cuda_version might return "12.4.0" or "12.4"
+        # but we want to use "12.4"
+        version = ".".join(version.split(".")[:2])
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
 
     # filename and filepath

@@ -20,7 +20,7 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
-from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
+from ..common import get_device_op_overrides
 
 
 log = logging.getLogger(__name__)
@@ -175,7 +175,10 @@ def try_import_cutlass() -> bool:
 
 
 @functools.lru_cache(8)
-def _normalize_cuda_arch(arch: str) -> str:
+def _normalize_cutlass_arch(arch: str) -> str:
+    if torch.xpu.is_available():
+        return arch
+
     if int(arch) >= 100:
         log.warning(
             "Detected CUDA architecture >= 100: %s. We will generate operations with "
@@ -227,7 +230,7 @@ class CUTLASSArgs:
             raise RuntimeError(
                 f"{self.architectures=} or {self.cuda_version=} is None!"
             )
-        self.architectures = _normalize_cuda_arch(self.architectures)
+        self.architectures = _normalize_cutlass_arch(self.architectures)
 
 
 @clear_on_fresh_cache
@@ -249,7 +252,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
             version,
         )
         return {}
-    arch = _normalize_cuda_arch(arch)
+    arch = _normalize_cutlass_arch(arch)
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
@@ -264,6 +267,13 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+    if arch == "11":
+        if hasattr(cutlass_generator, "GeneratePVC"):
+            cutlass_generator.GeneratePVC(manifest, args.cuda_version)
+        else:
+            raise NotImplementedError(
+                "Arch PVC is not supported by current cutlass lib."
+            )
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
@@ -281,24 +291,32 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     return manifest.operations
 
 
-def gen_ops() -> dict[Any, Any]:
+def gen_ops(device_type: str) -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
     with dynamo_timed("cutlass_utils.gen_ops"):
-        arch = get_cuda_arch()
-        version = get_cuda_version()
+        device_op_overrides = get_device_op_overrides(device_type)
+        arch = device_op_overrides.get_device_arch()
+        version = device_op_overrides.get_toolkit_version()
         return _gen_ops_cached(arch, version)
 
 
 from ..cpp_utils import DTYPE_TO_CPP
 
 
+# DTYPE_TO_CUTLASS_TYPE = {
+#     **DTYPE_TO_CPP,
+#     torch.float16: "__half",
+#     torch.bfloat16: "__nv_bfloat16",
+#     torch.float8_e4m3fn: "__nv_fp8_e4m3",
+# }
+
 DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
-    torch.float16: "__half",
-    torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "__nv_fp8_e4m3",
+    torch.float16: "half_t",
+    torch.bfloat16: "bfloat16_t",
+    torch.float8_e4m3fn: "float_e4m3_t",
 }
 
 

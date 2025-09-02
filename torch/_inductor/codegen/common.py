@@ -370,6 +370,12 @@ class DeviceOpOverrides:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
+    def get_device_arch(self) -> str:
+        raise NotImplementedError
+
+    def get_toolkit_version(self) -> str:
+        raise NotImplementedError
+
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
@@ -539,7 +545,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
-            TritonScheduling,
+            CombinedScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
