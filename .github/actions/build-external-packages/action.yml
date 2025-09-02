@@ -47,8 +47,8 @@ runs:
         TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
         BASE_IMAGE: ${{ inputs.docker-image }}
         BUILD_TARGETS: ${{ inputs.build-targets }}
-        PARENT_OUTPUT_DIR: ${{ inputs.output-dir}}
-
+        PARENT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        TORCH_WHEELS_PATH: ${{ inputs.torch-wheel-dir }}
       shell: bash
       run: |
         set -euo pipefail

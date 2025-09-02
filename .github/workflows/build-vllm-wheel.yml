@@ -19,24 +19,24 @@ concurrency:
 
 jobs:
   build-wheel:
-    name: "Build vLLM Wheel"
-    runs-on: ${{ matrix.runs_on }}
+    name: "Build ${{ matrix.device }} vLLM wheel"
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.12" ]
+        python-version: [ '3.12' ]
+        device: [ 'cuda' ]
+        runner: linux.12xlarge
         include:
           - device: cuda
             cuda-version: cu128
             docker-image: 'pytorch/manylinux2_28-builder:cuda12.8'
-            runs_on: "linux.12xlarge"
           - device: cuda
             cuda-version: cu129
             docker-image: 'pytorch/manylinux2_28-builder:cuda12.9'
-            runs_on: "linux.12xlarge"
     timeout-minutes: 240
     env:
-      PY_VERS: ${{ matrix.py_vers }}
+      PY_VERS: ${{ matrix.python-version }}
       DOCKER_IMAGE: ${{ matrix.docker-image }}
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
@@ -118,13 +118,13 @@ jobs:
           docker-image: ${{ matrix.docker-image }}
           cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
-          output-dir: ${{ runner.temp }}/vllm
+          output-dir: ${{ runner.temp }}/externals
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: vllm-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.BUILD_VERSION }}-${{ env.PLATFORM }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/vllm/*
+          path: ${{ runner.temp }}/externals/vllm/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
