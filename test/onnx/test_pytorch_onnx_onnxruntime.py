@@ -41,7 +41,9 @@ from pytorch_test_common import (
 import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import errors, verification
+from torch.onnx import errors
+from torch.onnx._internal.torchscript_exporter import verification
+from torch.onnx._internal.torchscript_exporter._type_utils import JitScalarType
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -13705,7 +13707,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = torch.onnx.JitScalarType.from_value(x).onnx_type()
+        expected_elem_type = JitScalarType.from_value(x).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
