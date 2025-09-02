@@ -9,7 +9,7 @@ import sympy
 import torch
 
 from . import ir
-from .utils import get_dtype_size, sympy_product
+from .utils import get_dtype_size, snode_args_kwargs, sympy_product
 from .virtualized import V
 
 
@@ -166,85 +166,6 @@ llMaxBws = [
 ]
 
 
-def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
-    return torch.empty(size, dtype=dtype, device=device)
-
-
-def _tensor_from_layout(layout):  # type: ignore[no-untyped-def]
-    return _tensor(layout.size, layout.dtype, layout.device)
-
-
-def _get_collective_fn_kwargs(snode, tensor_arg_from_layout):  # type: ignore[no-untyped-def]
-    kernel = snode.node
-    from torch.distributed.distributed_c10d import _resolve_process_group
-
-    constant_args = kernel.constant_args
-    pg_name = constant_args[-1]
-    pg = _resolve_process_group(pg_name)
-    pg_size = pg.size()
-    input_layout = kernel.inputs[0].layout
-    in_t = tensor_arg_from_layout(input_layout)
-
-    name = getattr(kernel, "python_kernel_name", "")
-
-    # schemes are defined torch/csrc/distributed/c10d/Functional.cpp
-    if name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
-        fn = torch.ops._c10d_functional.all_gather_into_tensor
-        return fn, {
-            "input": in_t,
-            "group_size": pg_size,
-            "group_name": pg_name,
-        }
-    elif name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
-        # TODO: use real all_gather_into_tensor_out
-        fn = torch.ops._c10d_functional.all_gather_into_tensor
-        return fn, {
-            "input": in_t,
-            "group_size": pg_size,
-            "group_name": pg_name,
-        }
-    elif name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
-        fn = torch.ops._c10d_functional.reduce_scatter_tensor
-        reduce_op = constant_args[0]
-        return fn, {
-            "input": in_t,
-            "reduce_op": reduce_op,
-            "group_size": pg_size,
-            "group_name": pg_name,
-        }
-    elif name == "torch.ops._c10d_functional.all_reduce_.default":
-        fn = torch.ops._c10d_functional.all_reduce
-        reduce_op = constant_args[0]
-        return fn, {
-            "input": in_t,
-            "reduce_op": reduce_op,
-            "group_name": pg_name,
-        }
-    elif name == "torch.ops._c10d_functional.all_to_all_single.default":
-        fn = torch.ops._c10d_functional.all_to_all_single
-        # Artificial uniform split assumption,
-        # which can be not true in case of uneven sharding.
-        split_sizes = [in_t.size(0) // pg_size] * pg_size
-        return fn, {
-            "input": in_t,
-            "output_split_sizes": split_sizes,
-            "input_split_sizes": split_sizes,
-            "group_name": pg_name,
-        }
-    elif name == "torch.ops._dtensor.shard_dim_alltoall.default":
-        fn = torch.ops._dtensor.shard_dim_alltoall
-        gather_dim = constant_args[0]
-        shard_dim = constant_args[1]
-        return fn, {
-            "input": in_t,
-            "gather_dim": gather_dim,
-            "shard_dim": shard_dim,
-            "group_name": pg_name,
-        }
-
-    raise AssertionError(f"Unsupported collective:{name}")
-
-
 def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  # type: ignore[no-untyped-def]
     try:
         kernel = snode.node
@@ -263,11 +184,16 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
         # without cuda allocations.
         device = torch.device(f"cuda:{rank}")
 
-        fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
+        fn = eval(py_kernel_name)
+        args, kwargs = snode_args_kwargs(snode)
+        # TODO(ivankobzarev): fix out variants snode_args_kwargs
+        if "all_gather_into_tensor_out" in py_kernel_name:
+            args = args[1:] + args[0]
+
         with torch.distributed._time_estimator(
             group=pg, device=device
         ) as time_estimator:
-            w = fn(**kwargs)
+            w = fn(*args, **kwargs)
             torch.ops._c10d_functional.wait_tensor.default(w)
 
         est_time_us = time_estimator.estimated_time
