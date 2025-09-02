@@ -1105,7 +1105,7 @@ class VariableBuilder:
             source = SymTokenSource(self.source)
 
             # map to existing symnode
-            token_to_symnode = self.tx.output.root_tracer.sym_token_to_symbol
+            token_to_symnode = self.tx.output.root_tracer.symtoken_to_symnode
             if (token_id := id(value)) not in token_to_symnode:
                 sym = self.tx.output.shape_env.create_unspecified_symbol(
                     value.val,

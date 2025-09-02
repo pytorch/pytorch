@@ -626,7 +626,6 @@ class TestPySymInt(TestCase):
             """Eq(FloorToInt(3.0*ToFloat(s97)), 15)""",
         )
 
-    @unittest.expectedFailure
     def test_sym_wrap(self):
         from torch.fx.experimental.symbolic_shapes import sym_wrap
 
