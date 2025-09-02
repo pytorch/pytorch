@@ -63,6 +63,7 @@ class DebugPrinterManager:
         kernel=None,
         arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
+        save_dir=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
         self.use_array_ref = use_array_ref
@@ -74,6 +75,7 @@ class DebugPrinterManager:
         self.kernel = kernel
         self.filtered_kernel_names_to_print = self._get_debug_filtered_kernel_names()
         self.kernel_type = None
+        self.save_dir = save_dir
 
     def __enter__(self):
         self._perform_debug_print_or_save_helper(
@@ -204,8 +206,8 @@ class DebugPrinterManager:
                     f'aoti_torch_save_tensor_handle({arg}, "{arg}", "{launch_prefix}", "{kernel_name}");'
                 )
             else:
-                cwd = os.getcwd()
-                saved_dir = cwd + "/tmp/jit_inductor/"
+                base_dir = self.save_dir if self.save_dir else os.getcwd()
+                saved_dir = base_dir + "/tmp/jit_inductor/"
                 if not os.path.exists(saved_dir):
                     log.info(
                         "Creating directory to save inductor intermediate tensor values."
