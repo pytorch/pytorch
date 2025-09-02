@@ -422,7 +422,10 @@ for i, arg in enumerate(sys.argv):
         EMIT_BUILD_WARNING = True
     if arg == "develop":
         print(
-            "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276",
+            (
+                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
             file=sys.stderr,
         )
         result = subprocess.run(
@@ -440,7 +443,10 @@ for i, arg in enumerate(sys.argv):
         sys.exit(result.returncode)
     if arg == "install":
         print(
-            "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation', for more info see https://github.com/pytorch/pytorch/issues/152276",
+            (
+                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
             file=sys.stderr,
         )
         result = subprocess.run(
