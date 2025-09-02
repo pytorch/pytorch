@@ -402,7 +402,7 @@ class _PipelineSchedule(ABC):
         kwarg_mbs: Optional[list] = None,
         target_mbs: Optional[list] = None,
         losses: Optional[list] = None,
-    ):
+    ) -> tuple[list, list]:
         """
         Pre-process/check inputs
         """
@@ -1232,7 +1232,7 @@ def _add_send_recv(
             )
             action = compute_actions[rank][0]
             # handle new case where parent action (OVERLAP_F_B) can be comprised of subactions
-            if action.sub_actions is not None:
+            if action is not None and action.sub_actions is not None:
                 all_actions = action.sub_actions
             else:
                 all_actions = (action,)
