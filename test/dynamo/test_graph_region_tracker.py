@@ -267,22 +267,14 @@ class GraphRegionTrackerTests(TestCase):
                 ),
                 # (lambda: torch.use_deterministic_algorithms(True, warn_only=True),
                 # lambda: torch.use_deterministic_algorithms(False)), : Unsupported
-            ]:
-                self.assertExpectedInline(
-                    self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                    """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
-[['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
-                )
-
-            for ctx in [
                 create_toggle_fns("allow_bf16_reduced_precision_reduction"),
                 create_toggle_fns("allow_fp16_reduced_precision_reduction"),
                 create_toggle_fns("allow_tf32"),
             ]:
                 self.assertExpectedInline(
                     self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                    """[[['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5'], \
-['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']]]""",
+                    """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
+[['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
                 )
 
     def test_mutation_tracking_simple(self):
