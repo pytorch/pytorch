@@ -33,6 +33,9 @@
 #define LOCK_SH 0x00000010
 #define LOCK_UN 0x00000100
 
+#if defined(_WIN32) && defined(USE_ROCM)
+static
+#endif
 int flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
