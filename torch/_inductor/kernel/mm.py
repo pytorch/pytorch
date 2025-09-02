@@ -3,8 +3,6 @@ import functools
 import logging
 from typing import Any, Optional
 
-import sympy
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -50,13 +48,7 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .mm_common import (
-    _is_static_problem,
-    mm_args,
-    mm_grid,
-    persistent_mm_grid,
-    scale_mm_epilogue,
-)
+from .mm_common import _is_static_problem, mm_args, mm_grid, persistent_mm_grid
 
 
 try:
@@ -589,16 +581,6 @@ aten__fp8_mm = ExternKernelChoice(
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
-
-
-@functools.lru_cache
-def using_b200() -> bool:
-    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
-    if not torch.cuda.is_available():
-        return False
-    # compute capability 10.0 or 10.0a is NVIDIA B200
-    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
-    return device_properties.major == 10
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -1221,10 +1203,8 @@ def tuned_scaled_mm(
             triton_scale_b,
             triton_bias,
         ]
-        suffix_args = 3
     else:
         triton_input_nodes = [mat_a, mat_b, triton_scale_a, triton_scale_b]
-        suffix_args = 2
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
     kernel_inputs = MMKernelInputs(triton_input_nodes, mat1_idx=0, mat2_idx=1)
@@ -1258,15 +1238,6 @@ def tuned_scaled_mm(
             "scaled_mm",
             overriders,
         ):
-            if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
-                # Triton crashes however uncommon for real workloads
-                continue
-
-            # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
-            # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
-                continue
-
             # possibly appends a TritonTemplateCaller to choices
             mm_template.maybe_append_choice(
                 choices,
@@ -1274,9 +1245,6 @@ def tuned_scaled_mm(
                 layout=layout,
                 **kwargs,
                 **extra_kwargs,
-                suffix_args=suffix_args,
-                epilogue_fn=scale_mm_epilogue(),
-                epilogue_fn_hash="scale_mm_epilogue",
             )
 
     if (

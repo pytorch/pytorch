@@ -22,6 +22,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    using_b200,
 )
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
@@ -1382,6 +1383,9 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
     ]
     _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
 
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        return True
+
     def _get_config_generator(
         self,
     ) -> partial[Generator[TritonConfig, None, None]]:
@@ -1411,7 +1415,8 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
-
+        if not self._valid(kernel_inputs):
+            return
         # Extract M, N, K from kernel_inputs
         m, n, k = kernel_inputs.mnk_symbolic()
 
@@ -1567,7 +1572,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 
 # Scaled MM-specific mixin for scaled MM templates
-class ScaledMMConfigMixin(MMTemplateConfigMixin):
+class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     """
     This is a base that handles the common case for ScaledMM
 
@@ -1585,7 +1590,6 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
         Handles the remaining logic from mm_common including assertions and SCALING_ROWWISE.
         """
         input_nodes = kernel_inputs.nodes()
-
         # Initial assertion from mm_common.scaled_mm_options
         assert len(input_nodes) >= 4, (
             f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
@@ -1618,6 +1622,13 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
         )
 
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
+
+        if not self._valid(kernel_inputs):
+            return
+
         # Get base template configs from superclass
         for template_kwargs in super().get_template_configs(
             kernel_inputs, layout, op_name
@@ -1632,12 +1643,47 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             yield template_kwargs
 
 
+class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
+    """Mixing for scaled mm with the regular mm template"""
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        from ..kernel.mm_common import scale_mm_epilogue
+
+        return {
+            **kwargs,
+            "suffix_args": kernel_inputs.count - 2,
+            "epilogue_fn": scale_mm_epilogue(),
+            "epilogue_fn_hash": "scale_mm_epilogue",
+        }
+
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
+        )
+        _, _, k = kernel_inputs.mnk_symbolic()
+        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+            # Triton crashes however uncommon for real workloads
+            return False
+
+        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
+            return False
+        return True
+
+
 # Scaled TMA-specific mixin for scaled MM templates with TMA
-class ScaledTMAConfigMixin(TMAWorkspaceMixin, ScaledMMConfigMixin):
+class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     """
-    Scaled TMA-specific mixin that extends ScaledMMConfigMixin with TMA functionality.
+    Scaled TMA-specific mixin that extends BaseScaledMMConfigMixin with TMA functionality.
     This is for scaled MM templates that use device TMA.
-    This inherits from ScaledMMConfigMixin and adds TMA-specific options.
+    This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
     def get_template_configs(
