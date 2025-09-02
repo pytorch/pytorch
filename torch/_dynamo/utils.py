@@ -1362,6 +1362,7 @@ class CompilationMetrics:
     # the number of distinct type of params.
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
+    inline_inbuilt_nn_modules_candidate: Optional[bool] = False
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:

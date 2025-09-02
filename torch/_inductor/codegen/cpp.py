@@ -5385,7 +5385,7 @@ class CppScheduling(BaseScheduling):
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         # below add provenance tracing info for cpu CppKernel types
-        if config.trace.provenance_tracking:
+        if config.trace.provenance_tracking_level != 0:
             set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
 
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"

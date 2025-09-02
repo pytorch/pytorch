@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 
 import torch
-from ops_fuzzer import fuzz_op, fuzz_spec
+from ops_fuzzer import fuzz_op, fuzz_spec, reset_arg_tracker, get_arg_tracker
 from tensor_fuzzer import (
     fuzz_scalar,
     fuzz_tensor,
@@ -130,6 +130,9 @@ def fuzz_operation_stack(
     Returns:
         List of Operation dataclass instances with target-producing operation at index 0
     """
+
+    # Reset the argument tracker for a new program
+    reset_arg_tracker()
 
     # Set seed for reproducible generation
     if seed is not None:
@@ -499,10 +502,25 @@ def convert_stack_to_python_code(
         output_var_name = f"tmp_{op_idx}"
 
         # Handle different operation types
-        if op_name == "arg":
-            # Track arg operations for later function signature generation
-            arg_operations.append((op_idx, output_spec))
-            arg_name = f"arg_{len(arg_operations) - 1}"
+        if op_name.startswith("arg_"):
+            # Extract the argument ID from the operation name
+            arg_id = int(op_name.split("_")[1])
+            # Track unique arg operations for function signature generation
+            # Only add to arg_operations if this arg_id hasn't been seen yet
+            existing_arg_idx = None
+            for idx, (existing_op_idx, existing_arg_id, existing_spec) in enumerate(arg_operations):
+                if existing_arg_id == arg_id:
+                    existing_arg_idx = idx
+                    break
+            
+            if existing_arg_idx is None:
+                # New argument ID - add to function signature
+                arg_operations.append((op_idx, arg_id, output_spec))
+                arg_name = f"arg_{arg_id}"
+            else:
+                # Reusing existing argument ID
+                arg_name = f"arg_{arg_id}"
+            
             operation_lines = [f"{output_var_name} = {arg_name}"]
         elif op_name.startswith("reuse_"):
             # Handle reuse operations - reference the variable from the reused operation
@@ -536,7 +554,9 @@ def convert_stack_to_python_code(
 
     # Generate function signature based on discovered arg operations
     if arg_operations:
-        arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
+        # Sort arg_operations by arg_id to ensure consistent order
+        arg_operations.sort(key=lambda x: x[1])  # Sort by arg_id (second element)
+        arg_names = [f"arg_{arg_id}" for _, arg_id, _ in arg_operations]
         function_signature = f"def fuzzed_program({', '.join(arg_names)})"
     else:
         function_signature = "def fuzzed_program()"
@@ -649,25 +669,23 @@ def convert_stack_to_python_code(
     # Generate argument creation code with deterministic seeds
     if arg_operations:
         code_lines.append("# Create arguments for the fuzzed program")
-        for i, (_, spec) in enumerate(arg_operations):
-            arg_name = f"arg_{i}"
-            # Use a deterministic seed based on the argument index and main seed
-            arg_seed = (seed + 10000 + i) if seed is not None else None
+        for i, (_, arg_id, spec) in enumerate(arg_operations):
+            arg_name = f"arg_{arg_id}"
+            # Use a deterministic seed based on the argument ID and main seed
+            arg_seed = (seed + 10000 + arg_id) if seed is not None else None
 
             if isinstance(spec, ScalarSpec):
                 dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
                 if arg_seed is not None:
                     code_lines.extend(
                         [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec, seed={arg_seed})",
+                            f"{arg_name} = fuzz_scalar(ScalarSpec(dtype={dtype_str}), seed={arg_seed})",
                         ]
                     )
                 else:
                     code_lines.extend(
                         [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec)",
+                            f"{arg_name} = fuzz_scalar(ScalarSpec(dtype={dtype_str}))",
                         ]
                     )
             elif isinstance(spec, TensorSpec):

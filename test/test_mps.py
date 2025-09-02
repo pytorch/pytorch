@@ -12245,6 +12245,9 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
+            if op.name in "grid_sampler_3d":
+                atol, rtol = 1e-4, 1e-4
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -12345,6 +12348,39 @@ class TestConsistency(TestCaseMPS):
                 # together, introducing significant error for float16.
                 atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+    # The CPU impl of grid_sampler_3d gives a large amount of error for half
+    # precision types. So instead of testing MPS-vs-CPU outputs, test
+    # full-vs-half precision dtypes for MPS.
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_grid_sampler_3d_half_precision(self, device, dtype):
+        op = next((op for op in test_consistency_op_db if op.name == "grid_sampler_3d"), None)
+        include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
+
+        def get_samples():
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                include_conjugated_inputs=include_conjugated_inputs,
+                set_seed=True,
+            )
+
+        for half_sample in get_samples():
+            half_input = half_sample.input
+            half_grid, mode, padding_mode, align_corners = half_sample.args
+
+            full_input = half_input.to(torch.float).detach()
+            full_grid = half_grid.to(torch.float).detach()
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                half_out = op(half_input, half_grid, mode, padding_mode, align_corners)
+                full_out = op(full_input, full_grid, mode, padding_mode, align_corners)
+
+            atol, rtol = 1e-4, 1e-4
+
+            self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
         # Regression tesing for https://github.com/pytorch/pytorch/issues/149951

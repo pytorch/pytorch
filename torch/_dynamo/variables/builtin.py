@@ -46,6 +46,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
     Unsupported,
@@ -109,6 +110,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
@@ -1865,6 +1867,12 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
+    def call_dir(self, tx: "InstructionTranslator", arg):
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            return VariableTracker.build(tx, dir(arg.value))
+        if isinstance(arg, BuiltinVariable):
+            return VariableTracker.build(tx, dir(arg.fn))
+
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
@@ -2133,9 +2141,14 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def call_next(self, tx: "InstructionTranslator", *args):
+        arg = args[0]
         try:
             return arg.next_variable(tx)
+        except ObservedUserStopIteration:
+            if len(args) == 2:
+                return args[1]
+            raise
         except Unsupported as ex:
             if isinstance(arg, variables.BaseListVariable):
                 ex.remove_from_stats()
@@ -2255,7 +2268,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2537,6 +2549,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2742,6 +2761,7 @@ class BuiltinVariable(VariableTracker):
             (
                 ConstDictVariable,
                 DictKeysVariable,
+                MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
                 UserDefinedSetVariable,
@@ -2770,7 +2790,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                MutableMappingVariable,
+                SetVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
 
