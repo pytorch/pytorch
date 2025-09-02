@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+import unittest
 import zipfile
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from torch._inductor.debug import (
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -532,9 +534,9 @@ class TestProvenanceTracingStackTraces(TestCase):
         finally:
             trace_log.removeHandler(payload_handler)
 
-    def extract_code_line(self, s):
-        # Extract last non-empty line
-        return s.split("\n")[-2].strip()
+    def extract_code_line(self, s, i=-2):
+        # Extract ith line
+        return s.split("\n")[i].strip()
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_cuda_and_triton
@@ -575,18 +577,18 @@ class TestProvenanceTracingStackTraces(TestCase):
             torch._dynamo.reset()
             reset_inductor_kernel_provenance_debug_handle()
             with self._setup_provenance_capture() as payload_buffer:
+                compiled = torch.compile(model)
                 compiled(*example_inputs)
                 payload_content = payload_buffer.getvalue().strip()
-                if payload_content:
-                    data = json.loads(payload_content)
-                    self.assertEqual(set(data.keys()), set(expected.keys()))
-                    for key, expected_lines in expected.items():
-                        actual_lines = [self.extract_code_line(s) for s in data[key]]
-                        self.assertEqual(
-                            sorted(actual_lines),
-                            sorted(expected_lines),
-                            f"Mismatch for key: {key}",
-                        )
+                data = json.loads(payload_content)
+                self.assertEqual(set(data.keys()), set(expected.keys()))
+                for key, expected_lines in expected.items():
+                    actual_lines = [self.extract_code_line(s) for s in data[key]]
+                    self.assertEqual(
+                        sorted(actual_lines),
+                        sorted(expected_lines),
+                        f"Mismatch for key: {key}",
+                    )
 
     def _check_kernel_information_json(self, kernel_info, expected_kernels):
         """Validate kernel information JSON structure and content."""
@@ -748,6 +750,50 @@ class TestProvenanceTracingStackTraces(TestCase):
         result = create_kernel_information_json()
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 0)  # Should be empty with no provenance data
+
+    @unittest.skipIf(
+        IS_MACOS,
+        "MacOS generates different debug handles",
+    )
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
+    def test_cpu_extern_kernel(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        expected = {
+            "aoti_torch_cpu_convolution:3": [
+                "return self.conv(x)",
+            ],
+            "cpp_fused_convolution_0:1": [
+                "return self.conv(x)",
+            ],
+            "cpp_fused_convolution_1:2": [
+                "return self.conv(x)",
+            ],
+        }
+
+        model = Foo()
+        x = torch.randn(20, 16, 50, 100)
+        with self._setup_provenance_capture() as payload_buffer:
+            reset_inductor_kernel_provenance_debug_handle()
+            ep = torch.export.export(model, (x,))
+            torch._inductor.aoti_compile_and_package(ep)
+            payload_content = payload_buffer.getvalue().strip()
+            data = json.loads(payload_content)
+            self.assertEqual(set(data.keys()), set(expected.keys()))
+
+            for key, expected_lines in expected.items():
+                actual_lines = [self.extract_code_line(s, 1) for s in data[key]]
+                self.assertEqual(
+                    sorted(actual_lines),
+                    sorted(expected_lines),
+                    f"Mismatch for key: {key}",
+                )
 
 
 if __name__ == "__main__":
