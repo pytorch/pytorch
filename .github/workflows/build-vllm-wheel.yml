@@ -19,14 +19,12 @@ concurrency:
 
 jobs:
   build-wheel:
-    name: "Build ${{ matrix.device }} vLLM wheel"
-    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
         device: [ 'cuda' ]
-        runner: linux.12xlarge
+        runner: [ 'linux.12xlarge' ]
         include:
           - device: cuda
             cuda-version: cu128
@@ -34,6 +32,8 @@ jobs:
           - device: cuda
             cuda-version: cu129
             docker-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+    name: "Build ${{ matrix.device }} vLLM wheel"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     env:
       PY_VERS: ${{ matrix.python-version }}
