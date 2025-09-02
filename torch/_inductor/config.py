@@ -1237,7 +1237,10 @@ class triton:
     # contains cudagraph-unsafe ops. If True, we require that all cuda ops
     # be captured into cudagraph. If this is not possible, this will raise
     # an error.
-    cudagraph_or_error = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_OR_ERROR", 0) == "1"
+    cudagraph_or_error: bool = Config(
+        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
+        default=False,
+    )
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
