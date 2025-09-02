@@ -24,7 +24,7 @@ class TestPythonAgnostic(TestCase):
             shutil.rmtree(cls.dist_dir)
 
         # Build the wheel
-        wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+        wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
         return_code = shell(wheel_cmd, cwd=cls.extension_root, env=os.environ)
         if return_code != 0:
             raise RuntimeError("python_agnostic bdist_wheel failed to build")
@@ -32,7 +32,7 @@ class TestPythonAgnostic(TestCase):
     @onlyCUDA
     @unittest.skipIf(not IS_LINUX, "test requires linux tools ldd and nm")
     def test_extension_is_python_agnostic(self, device):
-        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
+        # For this test, run_test.py will call `python -m build --wheel --no-isolation` in the
         # cpp_extensions/python_agnostic_extension folder, where the extension and
         # setup calls specify py_limited_api to `True`. To approximate that the
         # extension is indeed python agnostic, we test

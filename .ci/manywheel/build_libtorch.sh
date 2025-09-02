@@ -104,7 +104,7 @@ if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr
 fi
 
-echo "Calling 'python -m pip install .' at $(date)"
+echo "Calling -m pip install . -v --no-build-isolation at $(date)"
 
 if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
     STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
