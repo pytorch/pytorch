@@ -203,7 +203,7 @@ class Inp3:
 
 
 NON_STRICT_SUFFIX = "_nonstrict"
-STRICT_SUFFIX = "_strictt"
+STRICT_SUFFIX = "_strict"
 INLINE_AND_INSTALL_STRICT_SUFFIX = "_inline_and_install_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability_strict"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_nonstrict"
