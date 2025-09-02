@@ -256,8 +256,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
     )
 
-    breakpoint()
-
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
 

@@ -1521,7 +1521,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return MutableMappingVariable(value, source=self.source)
+            result = MutableMappingVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
@@ -2816,10 +2817,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._functorch.vmap
     import torch._subclasses.fake_tensor
     import torch._utils
-
-    if proxy.node.target == torch.ops.higher_order.cond:
-        breakpoint()
-
 
     if isinstance(example_value, torch.Tensor):
         var = construct_tensor_variable(

@@ -1,8 +1,11 @@
 import builtins
 import inspect
-import sympy
+import logging
+import traceback
 from collections import namedtuple
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+
+import sympy
 
 import torch
 import torch.fx
@@ -10,42 +13,27 @@ import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import FrameInfo, fullgraph_capture, get_compile_id
 from torch._dynamo.eval_frame import argument_names
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
-from torch._guards import compile_context, CompileContext, TracingContext, tracing
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch._guards import compile_context, CompileContext
+from torch.export.dynamic_shapes import _RelaxedConstraint
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
-    ShapeEnv,
     StatelessSymbolicContext,
 )
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from torch.export.dynamic_shapes import (
-    _combine_args,
-    _DimHint,
-    _DimHintType,
-    _IntWrapper,
-    _RelaxedConstraint,
-    Constraint,
-)
-
-from .exc import (
-    CondOpArgsMismatchError,
-    ShortenTraceback,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
-import logging
 
 log = logging.getLogger(__name__)
+
 
 def clean_nn_module_stack(graph_module: torch.fx.GraphModule):
     for node in graph_module.graph.nodes:
         if "nn_module_stack" in node.meta:
             nn_module_stack = node.meta["nn_module_stack"].copy()
-            if "export_root" in list(nn_module_stack.keys())[0]:
-                del nn_module_stack[list(nn_module_stack.keys())[0]]
+            fist_key = next(iter(nn_module_stack.keys()))
+            if "export_root" in first_key:
+                del nn_module_stack[first_key]
             nn_module_stack_corrected = {}
             for k, v in nn_module_stack.items():
                 k_new = "".join(k.split("__export_root"))
@@ -61,11 +49,11 @@ def clean_export_root(graph_module: torch.fx.GraphModule):
 
     # Clean parameter names: L__self____export_root_param -> L__self___param
     def clean_name(name):
-        return name.replace('__export_root_', '_') if '__export_root_' in name else name
+        return name.replace("__export_root_", "_") if "__export_root_" in name else name
 
     # Update get_attr nodes in-place
     for node in graph_module.graph.nodes:
-        if node.op == 'get_attr':
+        if node.op == "get_attr":
             old_target = node.target
             new_target = clean_name(old_target)
             if new_target != old_target:
@@ -150,7 +138,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                             placeholder.node.meta[key] = value
 
             # Always ensure we have proper "val" metadata from fake tensor
-            if self.fake_mode is not None and isinstance(self.flat_inputs[i], torch.Tensor):
+            if self.fake_mode is not None and isinstance(
+                self.flat_inputs[i], torch.Tensor
+            ):
                 placeholder.node.meta["val"] = self.fake_mode.from_tensor(
                     self.flat_inputs[i],
                     symbolic_context=StatelessSymbolicContext(
@@ -165,7 +155,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                         constraint_sizes=[None] * len(self.flat_inputs[i].shape),
                     ),
                 )
-            elif hasattr(self.flat_inputs[i], 'val'):  # _IntWrapper case
+            elif hasattr(self.flat_inputs[i], "val"):  # _IntWrapper case
                 placeholder.node.meta["val"] = self.flat_inputs[i].val
             else:
                 placeholder.node.meta["val"] = self.flat_inputs[i]
@@ -227,7 +217,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         result = super().run_node(node)
 
         # Copy important metadata
-        if hasattr(result, 'node') and result.node is not node:
+        if hasattr(result, "node") and result.node is not node:
             for key in ["val", "example_value", "unbacked_bindings"]:
                 if key in node.meta:
                     result.node.meta[key] = node.meta[key]
@@ -243,16 +233,22 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         result_gm = super().transform()
 
         # Copy module metadata like the original implementation
-        if hasattr(self.module, 'meta'):
+        if hasattr(self.module, "meta"):
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta["dynamo_flat_name_to_original_fqn"]
+                result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                    "dynamo_flat_name_to_original_fqn"
+                ]
             if "dynamo_compile_id" in self.module.meta:
-                result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
+                result_gm.meta["dynamo_compile_id"] = self.module.meta[
+                    "dynamo_compile_id"
+                ]
 
         return result_gm
 
 
-def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, dynamic_shapes=None):
+def _dynamo_graph_capture_for_export(
+    mod: Callable[..., Any], *, constraints=None, dynamic_shapes=None
+):
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
 
@@ -286,6 +282,7 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
         bound_arguments.apply_defaults()
 
         from . import reset  # type: ignore[attr-defined]
+
         reset()
 
         f_locals = {"self": module_to_trace, **bound_arguments.arguments}
@@ -296,8 +293,6 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
             builtins,
             closure=(),
         )
-
-        #dynamo_config_ctx = torch._dynamo.config.patch("log_graph_in_out_metadata", True)
 
         dynamo_config_ctx = torch._dynamo.config.patch(
             specialize_int=True,
@@ -317,19 +312,25 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
             dynamo_timed("fullgraph_capture"),
             dynamo_config_ctx,
         ):
-            out = fullgraph_capture(frame, _is_export_deprecated_do_not_use=True, _export_constraints=_constraints)
+            out = fullgraph_capture(
+                frame,
+                _is_export_deprecated_do_not_use=True,
+                _export_constraints=_constraints,
+            )
 
             # Extract export metadata from the new location
-            export_metadata = out.dynamo_output.tracer_output.output_graph.export_metadata
+            export_metadata = (
+                out.dynamo_output.tracer_output.output_graph.export_metadata
+            )
             graph_inputs = export_metadata.graph_input_idx_to_local_source
             graph_output_map = export_metadata.output_return_type
             out_spec = export_metadata.out_spec
             module_call_spec = export_metadata.module_call_spec
 
-
         if out.backend_input is not None:
             graph = out.backend_input.graph_module
             fake_mode = out.backend_input.fake_mode
+            example_inputs = out.backend_input.example_inputs
         else:
             graph = torch.fx.GraphModule(mod, torch.fx.Graph())
             graph.graph.output(None)
@@ -343,7 +344,7 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
                 for c in (constraints or ())
                 if (
                     c.t_id == id(x)
-                    and not isinstance(c, _RelaxedConstraint)  # type: ignore
+                    and not isinstance(c, _RelaxedConstraint)
                     and c.constraint_range.vr.lower != c.constraint_range.vr.upper
                 )
             }
@@ -356,6 +357,9 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
             source = graph_inputs[inp]
             assert isinstance(source, torch._dynamo.source.GetItemSource)
             graph_input_order[source.index] = len(graph_input_order)
+
+        for real_idx, graph_idx in graph_input_order.items():
+            flat_inputs[real_idx] = out.backend_input.example_inputs[graph_idx]
 
         # Use FX transformer to rebuild the graph cleanly
         transformed_graph = DynamoGraphTransformer(
@@ -370,29 +374,12 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
         # Set up PyTree codegen for proper input/output handling
         transformed_graph.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
-                argument_names(inspect.signature(mod.forward), args, kwargs),
+                argument_names(inspect.signature(mod.forward), args, kwargs),  # type: ignore[arg-type]
                 in_spec,
                 out_spec,
             )
         )
-        
-        for module in transformed_graph.modules():
-            if hasattr(module, 'graph'):
-                for node in module.graph.nodes:
-                    if node.op == "placeholder":
-                        node.name = node.target
-                # Also fix the graph signature
-                if hasattr(module.graph, '_codegen'):
-                    # Update parameter names in the signature
-                    old_params = list(inspect.signature(module.forward).parameters.keys())
-                    new_params = [node.target for node in module.graph.nodes if node.op == "placeholder"]
-                    if old_params != new_params:
-                        # Force signature update
-                        module.graph._codegen = None  # Clear cached codegen
-                module.recompile()
-
-        breakpoint()
-
+        transformed_graph.recompile()
 
         clean_nn_module_stack(transformed_graph)
         clean_export_root(transformed_graph)
@@ -401,19 +388,22 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
 
         constraint_violation_error = None
         try:
-            check_fn = out.dynamo_output.build_guards(module_to_trace.forward.__code__).guard_manager
+            check_fn = out.dynamo_output.build_guards(
+                module_to_trace.forward.__code__
+            ).guard_manager
             check_fn.check(f_locals)
-        except (ConstraintViolationError, torch.utils._sympy.value_ranges.ValueRangeError) as e:
+        except (
+            ConstraintViolationError,
+            torch.utils._sympy.value_ranges.ValueRangeError,
+        ) as e:
             constraint_violation_error = e
-
-        from torch._dynamo import trace_rules
-        import traceback
 
         if (
             (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
             and not isinstance(
-                module_to_trace.forward, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+                module_to_trace.forward,
+                (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
             )
         ):
             dim_constraints.solve()
@@ -448,36 +438,7 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module, *, constraints=None, 
                     )
         if constraint_violation_error:
             raise constraint_violation_error
-        
-
-        # from torch._export.non_strict_utils import produce_guards_and_solve_constraints, make_fake_inputs
-
-        # with tracing(TracingContext(fake_mode)):
-        #     (
-        #         fake_mode,
-        #         fake_args,
-        #         fake_kwargs,
-        #         equalities_inputs,
-        #         original_signature,
-        #         dynamic_shapes,
-        #     ) = make_fake_inputs(
-        #         mod,
-        #         args,
-        #         kwargs,
-        #         _dynamic_shapes,
-        #         allow_complex_guards_as_runtime_asserts=True,  # for shape env initialization
-        #     )
-
-        # try:
-        #     produce_guards_and_solve_constraints(
-        #         fake_mode, 
-        #         transformed_graph, 
-        #         _dynamic_shapes, 
-        #         equalities_inputs,
-        #         inspect.signature(module_to_trace.forward),
-        #     )
-        # except (ConstraintViolationError, torch.utils._sympy.value_ranges.ValueRangeError) as e:
-        #     raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
         return transformed_graph
+
     return inner

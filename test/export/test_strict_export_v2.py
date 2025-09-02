@@ -7,7 +7,6 @@ except ImportError:
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 from torch.export import export
-import torch
 
 
 test_classes = {}
@@ -21,6 +20,7 @@ def mocked_strict_export_v2(*args, **kwargs):
         else:
             return export(*args, **kwargs)
     return export(*args, **kwargs, strict=True, _use_new_tracer_experimental=True)
+
 
 def make_dynamic_cls(cls):
     cls_prefix = "StrictExportV2"

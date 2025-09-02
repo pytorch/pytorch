@@ -805,11 +805,14 @@ def _export_to_torch_ir(
                 )
             with ctx, _ignore_backend_decomps():
                 if _use_new_tracer_experimental:
-                    from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-                    try:
-                        gm_torch_level = _dynamo_graph_capture_for_export(f, constraints=constraints, dynamic_shapes=dynamic_shapes)(*args, **kwargs)
-                    except Exception as e:
-                        raise e
+                    from torch._dynamo.functional_export import (
+                        _dynamo_graph_capture_for_export,
+                    )
+
+                    gm_torch_level = _dynamo_graph_capture_for_export(
+                        f, constraints=constraints, dynamic_shapes=dynamic_shapes
+                    )(*args, **kwargs)
+
                 else:
                     gm_torch_level, _ = torch._dynamo.export(
                         f,
@@ -820,7 +823,7 @@ def _export_to_torch_ir(
                         disable_constraint_solver=disable_constraint_solver,
                         # currently the following 2 flags are tied together for export purposes,
                         # but untangle for sake of dynamo export api
-                        prefer_deferred_runtime_asserts_over_guards=True,
+                        prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                         _log_export_usage=_log_export_usage,
                         same_signature=same_signature,
@@ -837,7 +840,6 @@ def _export_to_torch_ir(
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
-
 
     if isinstance(f, torch.nn.Module) and restore_fqn:
         _restore_state_dict(f, gm_torch_level)
@@ -2047,7 +2049,8 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
-    _use_new_tracer_experimental = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
+    _use_new_tracer_experimental=False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2063,7 +2066,13 @@ def _export_for_training(
     original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
-    export_func = functools.partial(_strict_export, _use_new_tracer_experimental=_use_new_tracer_experimental) if strict else _non_strict_export
+    export_func = (
+        functools.partial(
+            _strict_export, _use_new_tracer_experimental=_use_new_tracer_experimental
+        )
+        if strict
+        else _non_strict_export
+    )
 
     export_artifact = export_func(
         mod=mod,
@@ -2072,7 +2081,7 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
@@ -2135,7 +2144,7 @@ def _export(
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
-    _use_new_tracer_experimental = False,
+    _use_new_tracer_experimental=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -2210,6 +2219,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             _use_new_tracer_experimental=_use_new_tracer_experimental,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))

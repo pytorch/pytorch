@@ -331,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -1100,7 +1100,6 @@ def placeholder_naming_pass(
             node.name = name_map[node.name]
 
     # propagate names to higher order op subgraphs
-    print(gm)
     _name_hoo_subgraph_placeholders(gm)
 
     # re-generate graph module code
