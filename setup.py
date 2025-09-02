@@ -420,6 +420,33 @@ for i, arg in enumerate(sys.argv):
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
+    if arg == "develop":
+        print(
+            "Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation'",
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".",
+                "-v",
+                "--no-build-isolation",
+            ]
+        )
+        sys.exit(result.returncode)
+    if arg == "install":
+        print(
+            "Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation'",
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"]
+        )
+        sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
