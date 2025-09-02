@@ -9,10 +9,9 @@ import shutil
 from typing import Any, TYPE_CHECKING
 
 import torch
-import torch.jit._trace
 import torch.serialization
 from torch.onnx import errors
-from torch.onnx._internal import jit_utils, registration
+from torch.onnx._internal.torchscript_exporter import jit_utils, registration
 
 
 if TYPE_CHECKING:

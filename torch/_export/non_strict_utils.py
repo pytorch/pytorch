@@ -330,7 +330,7 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    prefer_deferred_runtime_asserts_over_guards=False,
+    allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -382,7 +382,8 @@ def make_fake_inputs(
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
-                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,

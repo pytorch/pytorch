@@ -20,7 +20,7 @@ torch._logging.set_logs(graph_breaks=True)
 
 **Summary:**
 
-- When `fullgraph=False`, `torch.compile`'s `error_on_graph_break` setting can be toggled during tracing to provide more flexibility in
+- When `fullgraph=False`, we can use `torch._dynamo.error_on_graph_break()` for more flexibility in
   dealing with graph breaks.
 
 So far, we have introduced two ways in dealing with graph breaks in `torch.compile`:
@@ -28,18 +28,19 @@ So far, we have introduced two ways in dealing with graph breaks in `torch.compi
 2. `fullgraph=False` continues tracing even when encountering graph breaks.
 
 What if we want to disallow graph breaks for most of the code, but there are a few problematic functions where the graph breaks are hard to remove,
-and we are okay with having those graph breaks? We can use `torch.compile`'s `error_on_graph_break` setting to achieve this.
+and we are okay with having those graph breaks? We can use `torch._dynamo.error_on_graph_break()` to achieve this.
 
+`torch.compile` has an `error_on_graph_break` setting (initially set to `False`).
 If a graph break or compiler error occurs in code while `error_on_graph_break` is set to `False`, then `torch.compile` will attempt to continue compilation after the graph break/error.
 If `error_on_graph_break` is set to `True`, then `torch.compile` will abort compilation and propagate the error to user code.
 
 A significant difference between `error_on_graph_break=True` and `fullgraph=True` is that the former **does not guarantee that a single graph will be captured**.
-Additionally, `error_on_graph_break` **can be arbitrarily toggled during compile time** by using the `torch._dynamo.error_on_graph_break()` context manager/decorator.
+`error_on_graph_break` **can be arbitrarily toggled during compile time** by using the `torch._dynamo.error_on_graph_break()` context manager/decorator.
 In comparison, once `fullgraph` is set to `True`, it cannot be set back to `False`.
 Finally, `error_on_graph_break` has lower precedence than `fullgraph` - `error_on_graph_break` only takes effect when `fullgraph=False`.
 
 
-## `error_on_graph_break(False)`
+## `error_on_graph_break(False)` example
 
 ```{code-cell}
 @torch._dynamo.error_on_graph_break(False)
@@ -52,7 +53,8 @@ def inner(x):
     return code_with_a_difficult_graph_break(x)
 
 # NOTE: fullgraph=False
-@torch.compile(error_on_graph_break=True)
+@torch._dynamo.error_on_graph_break(True)
+@torch.compile
 def fn(x):
     return inner(x)
 
@@ -60,10 +62,47 @@ def fn(x):
 fn(torch.randn(3))
 ```
 
-Using `error_on_graph_break(False)` under `torch.compile(error_on_graph_break=True)` is helpful for when we want to minimize graph breaks (i.e. follow the `fullgraph=True` programming model),
+Using `error_on_graph_break(False)` under `error_on_graph_break(True)` is helpful for when we want to minimize graph breaks (i.e. follow the `fullgraph=True` programming model),
 but there are some sections of code with non-performance-critical graph breaks that are difficult to work around.
 
-## `error_on_graph_break(True)`
+`error_on_graph_break()` can be used as a context manager as well:
+
+```{code-cell}
+# NOTE: fullgraph=False
+@torch._dynamo.error_on_graph_break(True)
+@torch.compile
+def fn(x):
+    x = x + 1
+    with torch._dynamo.error_on_graph_break(False):
+        torch._dynamo.graph_break()  # no error
+    return x + 2
+
+# No error, but there is a graph break
+fn(torch.randn(3))
+```
+
+You can use monkey patching to toggle `error_on_graph_break` for code where you cannot edit the source (e.g. framework code):
+
+```{code-cell}
+class ThirdPartyModule(torch.nn.Module):
+    def forward(self, x):
+        x = x + 1
+        torch._dynamo.graph_break()
+        return x + 2
+
+tp_mod = ThirdPartyModule()
+tp_mod.forward = torch._dynamo.error_on_graph_break(False)(tp_mod.forward)
+
+@torch._dynamo.error_on_graph_break(True)
+@torch.compile
+def fn(x):
+    return tp_mod.forward(x)
+
+# No error, but there is a graph break
+fn(torch.randn(3))
+```
+
+## `error_on_graph_break(True)` example
 
 ```{code-cell}
 @torch._dynamo.error_on_graph_break(True)
@@ -88,7 +127,7 @@ except Exception as e:
     print(e)
 ```
 
-Using `error_on_graph_break(True)` under `torch.compile(error_on_graph_break=False)` is helpful for when we want to use `torch.compile` flexibly (i.e. follow the `fullgraph=False` programming model),
+Using `error_on_graph_break(True)` under `error_on_graph_break(False)` is helpful for when we want to use `torch.compile` flexibly (i.e. follow the `fullgraph=False` programming model),
 but there are some sections of the code that are performance-critical and we want to ensure that those sections do not contain graph breaks.
 
 ## `error_on_graph_break` nesting behavior
@@ -105,7 +144,8 @@ def inner2(x):
     with torch._dynamo.error_on_graph_break(False):
         return inner(x)
 
-@torch.compile(error_on_graph_break=True)
+@torch._dynamo.error_on_graph_break(True)
+@torch.compile
 def fn(x):
     return inner2(x)
 
@@ -136,7 +176,7 @@ fn(torch.randn(3))
 
 ## Interaction with `fullgraph`
 
-`fullgraph=True` takes higher precendence than `error_on_graph_break`:
+`fullgraph=True` takes higher precedence than `error_on_graph_break`:
 
 
 ```{code-cell}

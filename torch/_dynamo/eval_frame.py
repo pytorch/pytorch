@@ -599,7 +599,7 @@ class _TorchDynamoContext:
         first_ctx: bool = False,
         *,
         fullgraph: bool = False,
-        error_on_graph_break: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -859,11 +859,14 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-            external_utils.wrap_inline_with_error_on_graph_break(
-                fn, self.error_on_graph_break
+        if self.error_on_graph_break is not None:
+            compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+                external_utils.wrap_inline_with_error_on_graph_break(
+                    fn, self.error_on_graph_break
+                )
             )
-        )
+        else:
+            compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -926,7 +929,7 @@ class OptimizeContext(_TorchDynamoContext):
         first_ctx: bool = False,
         *,
         fullgraph: bool = False,
-        error_on_graph_break: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -1072,7 +1075,7 @@ def _optimize_catch_errors(
         [], contextlib.AbstractContextManager[Any]
     ] = null_context,
     fullgraph: bool = False,
-    error_on_graph_break: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     export: bool = False,
     dynamic: Optional[bool] = None,
     compiler_config: Optional[Any] = None,
@@ -1182,7 +1185,7 @@ def _optimize(
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
     nopython: bool = False,
-    error_on_graph_break: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
@@ -1205,9 +1208,11 @@ def _optimize(
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
-        error_on_graph_break: If True and nopython is False, graph breaks will be errors.
-            This setting can be toggled during compile time, so there is no guarantee of
-            a single whole-program graph. If nopython if True, this setting does nothing.
+        error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
+            See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
+
+            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
+            If `nopython` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
@@ -1756,6 +1761,7 @@ def export(
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
@@ -1982,6 +1988,7 @@ def export(
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             _compiling_state_context(),
         ):

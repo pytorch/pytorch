@@ -123,7 +123,7 @@ class CPythonTestCase(TestCase):
     """
 
     _stack: contextlib.ExitStack
-    dynamo_error_on_graph_break = True
+    dynamo_strict_nopython = False
 
     # Restore original unittest methods to simplify tracing CPython test cases.
     assertEqual = unittest.TestCase.assertEqual  # type: ignore[assignment]

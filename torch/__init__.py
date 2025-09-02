@@ -35,10 +35,6 @@ from typing import (
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
-if TYPE_CHECKING:
-    from .types import Device, IntLikeType
-
-
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -59,6 +55,10 @@ from torch._utils_internal import (
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
 from torch.torch_version import __version__ as __version__
+
+
+if TYPE_CHECKING:
+    from torch.types import Device, IntLikeType
 
 
 __all__ = [
@@ -2218,6 +2218,7 @@ from torch import (
     testing as testing,
     types as types,
     utils as utils,
+    version as version,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2437,7 +2438,6 @@ def compile(
     model: _Callable[_InputT, _RetT],
     *,
     fullgraph: builtins.bool = False,
-    error_on_graph_break: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2453,7 +2453,6 @@ def compile(
     model: None = None,
     *,
     fullgraph: builtins.bool = False,
-    error_on_graph_break: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2468,7 +2467,6 @@ def compile(
     model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
-    error_on_graph_break: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2502,15 +2500,6 @@ def compile(
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
         then this will raise an error.
-       error_on_graph_break (bool): If `fullgraph` is set, then this arg does nothing
-        (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
-        `error_on_graph_break` determines whether `torch.compile` throws an error upon
-        encountering a graph break, or attempts to continue tracing. This setting can be toggled
-        during compile time with `torch._dynamo.error_on_graph_break()` to allow graph breaks in some
-        compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
-        does NOT guarantee that a single graph is captured from the compiled function.
-        See https://docs.pytorch.org/docs/main/compile/programming_model.error_on_graph_break.html for more details
-        and examples.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
@@ -2606,7 +2595,6 @@ def compile(
             return compile(
                 model,
                 fullgraph=fullgraph,
-                error_on_graph_break=error_on_graph_break,
                 dynamic=dynamic,
                 backend=backend,
                 mode=mode,
@@ -2640,7 +2628,6 @@ def compile(
     return torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
-        error_on_graph_break=error_on_graph_break,
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
