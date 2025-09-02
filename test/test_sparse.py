@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
 from packaging import version
@@ -21,7 +22,7 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -40,7 +41,6 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_csc
             or op.supports_sparse_bsr
             or op.supports_sparse_bsc)
-
 
 
 reduction_ops_with_sparse_support = [
@@ -366,6 +366,20 @@ class TestSparse(TestSparseBase):
 
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype, device, coalesced)
             _test_coalesce(t)  # this tests correctness
+
+    @onlyCUDA
+    @largeTensorTest("30GB", "cuda")
+    @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
+    @dtypes(torch.float)
+    def test_coalesce_accepts_large_tensor(self, device, dtype):
+        N = 22500000
+        NNZ = 272500000
+        rows = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        cols = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        indices = torch.stack([rows, cols], dim=0)
+        values = torch.randn(NNZ, dtype=dtype, device=device)
+        sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
+        sparse_matrix = sparse_matrix.coalesce()
 
     @dtypes(torch.double)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
@@ -4112,7 +4126,7 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-_sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs, sparse=True), dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
@@ -4164,8 +4178,8 @@ class TestSparseUnaryUfuncs(TestCase):
     @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
         # test 0x0 sparse_coo_tensor
-        indices = torch.empty(2, 0, dtype=torch.int64)
-        values = torch.empty(0, dtype=dtype)
+        indices = torch.empty(2, 0, dtype=torch.int64, device=device)
+        values = torch.empty(0, dtype=dtype, device=device)
         sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
         expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
         actual = op(sparse_0x0)
@@ -5512,7 +5526,7 @@ class TestSparseAny(TestCase):
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 
