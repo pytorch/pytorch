@@ -378,9 +378,9 @@ reorder_for_compute_comm_overlap_passes: list[
         ],
     ]
 ] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
+    "reorder_communication_preserving_peak_memory",
+    "sink_waits_iterative",
+    "reorder_communication_preserving_peak_memory",
 ]
 
 # Maximum number of positions to advance a given collective, unlimited by default
@@ -418,6 +418,8 @@ sink_iterative_peak_memory_budget: float = 0.2
 # which can result in collective hangs.
 reorder_iterative_unsafe_collectives_reorder: bool = False
 sink_waits_iterative_unsafe_collectives_reorder: bool = False
+
+bucket_fx_collectives_trie = ["ag", "rs"]
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
