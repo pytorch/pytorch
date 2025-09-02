@@ -144,6 +144,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 
@@ -1231,6 +1232,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             "inductor_output_code",
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
         return graph, cache_info
 
@@ -2397,9 +2414,44 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
-                    import resource
 
-                    page_size_ = resource.getpagesize()
+                    def get_page_size() -> int:
+                        # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
+                        # as seen in https://docs.python.org/2/library/resource.html
+                        if _IS_WINDOWS:
+                            from ctypes import (  # type: ignore[attr-defined]
+                                byref,
+                                Structure,
+                                windll,
+                            )
+                            from ctypes.wintypes import DWORD, LPVOID, WORD
+
+                            class SYSTEM_INFO(Structure):
+                                _fields_ = [
+                                    ("wProcessorArchitecture", WORD),
+                                    ("wReserved", WORD),
+                                    ("dwPageSize", DWORD),
+                                    ("lpMinimumApplicationAddress", LPVOID),
+                                    ("lpMaximumApplicationAddress", LPVOID),
+                                    ("dwActiveProcessorMask", DWORD),
+                                    ("dwNumberOfProcessors", DWORD),
+                                    ("dwProcessorType", DWORD),
+                                    ("dwAllocationGranularity", DWORD),
+                                    ("wProcessorLevel", WORD),
+                                    ("wProcessorRevision", WORD),
+                                ]
+
+                            si = SYSTEM_INFO()
+                            windll.kernel32.GetSystemInfo(byref(si))
+                            sys_page_size = si.dwPageSize
+                        else:
+                            import resource
+
+                            sys_page_size = resource.getpagesize()
+
+                        return sys_page_size
+
+                    page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
                     with open(output_so, "a+b") as f_so:
@@ -2413,6 +2465,15 @@ end
                     generated_files.append(output_so)
 
         if config.aot_inductor.package:
+            if config.trace.provenance_tracking_level != 0:
+                kernel_info = torch._inductor.debug.create_kernel_information_json()
+                kernel_info_json = os.path.join(
+                    wrapper_path_operator.parent, "kernel_information.json"
+                )
+                with open(kernel_info_json, "w") as f:
+                    f.write(json.dumps(kernel_info, indent=4))
+                generated_files.append(kernel_info_json)
+
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -3535,8 +3596,8 @@ def _load_triton_kernel_from_source(
 
 
 def _cuda_compiler() -> Optional[str]:
-    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
-        return config.cuda.cuda_cxx
+    if cuda_env.nvcc_exist(config.cutlass.cuda_cxx):
+        return config.cutlass.cuda_cxx
     if config.is_fbcode():
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
@@ -3622,9 +3683,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -3656,7 +3720,7 @@ def _nvcc_arch_as_compile_option() -> str:
 def _nvcc_compiler_options() -> list[str]:
     arch = _nvcc_arch_as_compile_option()
     code = [f"sm_{arch}", f"compute_{arch}"]
-    if config.cuda.enable_cuda_lto:
+    if config.cutlass.enable_cuda_lto:
         code += [f"lto_{arch}"]
     options = [
         "-t=0",
@@ -3665,16 +3729,16 @@ def _nvcc_compiler_options() -> list[str]:
         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cuda.compile_opt_level,
+        config.cutlass.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cuda.enable_debug_info:
+    if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
-    if config.cuda.enable_ptxas_info:
+    if config.cutlass.enable_ptxas_info:
         options.extend(
             [
                 "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
@@ -3684,7 +3748,7 @@ def _nvcc_compiler_options() -> list[str]:
                 "--source-in-ptx",
             ]
         )  # Annotate the ptx file with source information
-    if config.cuda.use_fast_math:
+    if config.cutlass.use_fast_math:
         options.extend(
             [
                 "--use_fast_math",
@@ -3733,7 +3797,10 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
 
 
