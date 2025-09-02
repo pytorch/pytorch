@@ -22,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -1295,8 +1296,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
+
+        debug_handle = None
+        if config.trace.provenance_tracking_level != 0:
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                extern_kernel, extern_kernel.get_kernel_name(), is_extern=True
+            )
+
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            extern_kernel.get_kernel_name(), args, device, debug_handle=debug_handle
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1353,10 +1361,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
+
+        debug_handle = None
+        if config.trace.provenance_tracking_level != 0:
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                fallback_kernel,
+                fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
+                is_extern=True,
+            )
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
+            debug_handle=debug_handle,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
