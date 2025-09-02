@@ -1,3 +1,5 @@
+# mypy: disable-error-code=possibly-undefined
+
 import math
 from collections.abc import Sequence
 from itertools import chain
@@ -472,6 +474,7 @@ def foreach_reduce(
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
     """
+
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
         # Check this at runtime since it could be a real runtime error if e.g.
@@ -492,32 +495,57 @@ def foreach_reduce(
         )
     )
     world_size = reduce_scatter_group.size()
-    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
-        if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
-            continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
-        chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
-        unsharded_grads[i] = torch.cat(chunks, dim=0)
-    padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-    )
-    reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
-    reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_input_numel,),
-        dtype=reduce_dtype,
-        device=device,
-    )
     device_handle = _get_device_handle(device.type)
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
     current_stream = device_handle.current_stream()
+
+    if world_size > 1:
+        for i, (fsdp_param, unsharded_grad) in enumerate(
+            zip(fsdp_params, unsharded_grads)
+        ):
+            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+                continue
+            assert unsharded_grad.size(shard_dim) % world_size == 0, (
+                f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+            )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
+        padded_unsharded_sizes = tuple(
+            _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+        )
+        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+        reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
+        reduce_scatter_input = reduce_scatter_comm.allocate(
+            (reduce_scatter_input_numel,),
+            dtype=reduce_dtype,
+            device=device,
+        )
+
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
+
+    else:
+        padded_unsharded_sizes = tuple(
+            _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+        )
+        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+        reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
+        reduce_scatter_input = reduce_scatter_comm.allocate(
+            (reduce_scatter_input_numel,),
+            dtype=reduce_dtype,
+            device=device,
+        )
+
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
+
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
+
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_comm.allocate(
             (reduce_scatter_output_numel,),
@@ -525,12 +553,16 @@ def foreach_reduce(
             device=device,
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        reduce_scatter_comm(
-            output_tensor=reduce_output,
-            input_tensor=reduce_scatter_input,
-            group=reduce_scatter_group,
-            op=reduce_scatter_op,
-        )
+        if world_size > 1:
+            reduce_scatter_comm(
+                output_tensor=reduce_output,
+                input_tensor=reduce_scatter_input,
+                group=reduce_scatter_group,
+                op=reduce_scatter_op,
+            )
+        else:
+            # For single GPU, just copy the input to output (no actual reduce-scatter needed)
+            reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP
@@ -551,7 +583,10 @@ def foreach_reduce(
             if partial_reduce_output is not None:
                 reduce_output += partial_reduce_output
             post_reduce_stream = all_reduce_stream
-            all_reduce_stream.wait_stream(reduce_scatter_stream)
+            if world_size >= 1:
+                all_reduce_stream.wait_stream(reduce_scatter_stream)
+            else:
+                all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
                 dist.all_reduce(
                     reduce_output,
