@@ -21,30 +21,31 @@ ARG PYTHON_VERSION=3.12
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-# Install Python and other dependencies if it does not existed
-RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "Installing Python ${PYTHON_VERSION}..." && \
-      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
-      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
-      apt-get update -y && \
-      apt-get install -y ccache software-properties-common git curl sudo && \
-      for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-      done && \
-      apt-get update -y && \
-      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
-      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
-      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
-      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
-      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
-   else \
-      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
-   fi \
-   && python3 --version && python3 -m pip --version
+# Install Python and other dependencies
+RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+    && apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl sudo \
+    && if [ ! -z ${DEADSNAKES_MIRROR_URL} ] ; then \
+        if [ ! -z "${DEADSNAKES_GPGKEY_URL}" ] ; then \
+            mkdir -p -m 0755 /etc/apt/keyrings ; \
+            curl -L ${DEADSNAKES_GPGKEY_URL} | gpg --dearmor > /etc/apt/keyrings/deadsnakes.gpg ; \
+            sudo chmod 644 /etc/apt/keyrings/deadsnakes.gpg ; \
+            echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] ${DEADSNAKES_MIRROR_URL} $(lsb_release -cs) main" > /etc/apt/sources.list.d/deadsnakes.list ; \
+        fi ; \
+    else \
+        for i in 1 2 3; do \
+            add-apt-repository -y ppa:deadsnakes/ppa && break || \
+            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+        done ; \
+    fi \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+    && python3 --version && python3 -m pip --version
 
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
@@ -118,17 +119,17 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch wheels to build vllm"; \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
-        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
+        vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
+        uv pip install --system "${torch_whl}[opt-einsum]" --extra-index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
-        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     else \
         echo "[INFO] Installing torch nightly with latest one to build vllm"; \
-        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install numba 0.61.2 for cuda environment
@@ -266,31 +267,31 @@ USER root
 # prepare for environment starts
 WORKDIR /workspace
 
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-# Install Python and other dependencies if it does not existed
-RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "Installing Python ${PYTHON_VERSION}..." && \
-      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
-      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
-      apt-get update -y && \
-      apt-get install -y ccache software-properties-common git curl sudo && \
-      for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-      done && \
-      apt-get update -y && \
-      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
-      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
-      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
-      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
-      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
-   else \
-      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
-   fi \
-   && python3 --version && python3 -m pip --version
-
+# Install Python and other dependencies
+RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+    && apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl sudo \
+    && if [ ! -z ${DEADSNAKES_MIRROR_URL} ] ; then \
+        if [ ! -z "${DEADSNAKES_GPGKEY_URL}" ] ; then \
+            mkdir -p -m 0755 /etc/apt/keyrings ; \
+            curl -L ${DEADSNAKES_GPGKEY_URL} | gpg --dearmor > /etc/apt/keyrings/deadsnakes.gpg ; \
+            sudo chmod 644 /etc/apt/keyrings/deadsnakes.gpg ; \
+            echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] ${DEADSNAKES_MIRROR_URL} $(lsb_release -cs) main" > /etc/apt/sources.list.d/deadsnakes.list ; \
+        fi ; \
+    else \
+        for i in 1 2 3; do \
+            add-apt-repository -y ppa:deadsnakes/ppa && break || \
+            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+        done ; \
+    fi \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+    && python3 --version && python3 -m pip --version
 
 # Get the torch versions, and whls used in previous stagtes for consistency
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
@@ -327,15 +328,15 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
-        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
+        uv pip install --system "${torch_whl}[opt-einsum]" --extra-index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install the vllm wheel from previous stage
@@ -415,11 +416,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/nightly_torch_test.txt
-
-# Workaround for #17068
-# pinned commit for v2.2.4
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@95d8aba8a8c75aedcaa6143713b11e745e7cd0d9#egg=mamba-ssm"
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'

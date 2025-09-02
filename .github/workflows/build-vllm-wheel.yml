@@ -105,7 +105,7 @@ jobs:
           esac
 
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip download \
-            --pre torch \
+            --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
       - name: Build vLLM wheel
