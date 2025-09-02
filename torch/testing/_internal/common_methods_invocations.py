@@ -14728,7 +14728,7 @@ op_db: list[OpInfo] = [
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=True,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True, 
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_aminmax,
            error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',

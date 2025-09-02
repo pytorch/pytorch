@@ -11416,8 +11416,12 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
         # 2) Explicit amin/amax plus the two components of aminmax
-        amin2 = lambda x: torch.aminmax(x)[0]  # min part
-        amax2 = lambda x: torch.aminmax(x)[1]
+        def amin2(x):
+            return torch.aminmax(x)[0]  # min part
+
+        def amax2(x):
+            return torch.aminmax(x)[1]
+
         for f in [torch.amin, torch.amax, amax2, amin2]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
