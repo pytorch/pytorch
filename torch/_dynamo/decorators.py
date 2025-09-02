@@ -585,6 +585,7 @@ def mark_dynamic(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
     *,
+    hint_override: Optional[int] = None,
     min: Optional[int] = None,
     max: Optional[int] = None,
     specialize_on: Optional[list[Any]] = None,
@@ -637,10 +638,13 @@ def mark_dynamic(
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+            t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
             t._specialize_on = {}
 
+        if hint_override:
+            t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
@@ -755,15 +759,6 @@ def mark_static_address(t: Any, guard: bool = True) -> None:
     is not needed for this input. The data_ptr will be guarded if guard=True. Note:
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
-    if torch._dynamo.config.caching_precompile:
-        # [Note] Static Addresses and Precompile
-        # When using precompile, `mark_static_address` is dangerous to use, because
-        # dynamo saves the addresses directly on the parameters of the graph. These addresses
-        # are process dependent, so are not serializable, and serializing
-        # their tensors would be extremely expensive. Instead, by treating mark_static_address
-        # as a no-op, dynamo will automatically inline them as inputs to the graph instead.
-        # See https://github.com/pytorch/pytorch/issues/159228
-        return
     if not isinstance(t, torch.Tensor):
         raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 

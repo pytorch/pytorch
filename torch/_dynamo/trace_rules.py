@@ -21,7 +21,6 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
-import collections
 import copy
 import dataclasses
 import functools
@@ -172,6 +171,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
+    "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer": UserFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
@@ -244,6 +244,8 @@ manual_torch_name_rule_map: dict[
     "torch._C.set_autocast_xla_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_xla_enabled": SkipFunctionVariable,
     "torch.resize_as_": SkipFunctionVariable,
+    "torch._functorch.predispatch._add_batch_dim": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
@@ -324,8 +326,6 @@ manual_torch_name_rule_map: dict[
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # functorch/C++ bindings
-    "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
-    "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_batched": TorchInGraphFunctionVariable,
@@ -334,6 +334,8 @@ manual_torch_name_rule_map: dict[
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._vmap_increment_nesting": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
     # everything else
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
@@ -447,7 +449,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
-        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",
@@ -504,6 +505,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
+        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
@@ -2365,7 +2367,11 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.utils.enable_single_level_autograd_function",
         "torch._functorch.utils.exposed_in",
         "torch._functorch.utils.unwrap_dead_wrappers",
-        "torch._functorch.vmap.lazy_load_decompositions",
+        "torch._functorch.predispatch.lazy_load_decompositions",
+        "torch._functorch.predispatch._vmap_increment_nesting",
+        "torch._functorch.predispatch._vmap_decrement_nesting",
+        "torch._functorch.predispatch._add_batch_dim",
+        "torch._functorch.predispatch._remove_batch_dim",
         "torch._guards.compile_context",
         "torch._guards.detect_fake_mode",
         "torch._guards.tracing",
@@ -2684,7 +2690,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.set_stream",
         "torch.cuda.set_sync_debug_mode",
         "torch.cuda.stream",
-        "torch.cuda.synchronize",
         "torch.cuda.temperature",
         "torch.cuda.utilization",
         "torch.einsum",
@@ -3292,7 +3297,6 @@ def is_numpy_type_info(obj: Any) -> bool:
 
 BUILTIN_SKIPLIST = (
     abc,
-    collections,
     copy,
     random,
     traceback,
@@ -3399,6 +3403,7 @@ MOD_INLINELIST = [
     "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._dynamo.test_case",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3414,7 +3419,6 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
-    "torch.ao.quantization.fake_quantize",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",

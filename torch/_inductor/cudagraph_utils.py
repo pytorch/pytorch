@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
@@ -14,7 +15,7 @@ from .utils import is_using_cudagraph_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Set as AbstractSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -110,7 +111,8 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
+    placeholders: Sequence[PlaceholderInfo],
+    mutation_indices: Union[AbstractSet[int], Sequence[int]],
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -203,6 +205,10 @@ def check_lowering_disable_cudagraph(
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     perf_hint_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
+
+    if torch._inductor.config.triton.cudagraph_or_error:
+        raise Unsupported(msg)
+
     metrics_context = get_metrics_context()
     if metrics_context.in_progress():
         metrics_context.set("cudagraph_skip_reason", msg, overwrite=True)

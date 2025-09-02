@@ -142,6 +142,16 @@ class _Action(NamedTuple):
                 repr_str += str(self.microbatch_index)
             return repr_str
 
+    @property
+    def is_compute_op(self) -> bool:
+        return self.computation_type in (
+            FORWARD,
+            FULL_BACKWARD,
+            BACKWARD_INPUT,
+            BACKWARD_WEIGHT,
+            OVERLAP_F_B,
+        )
+
     @staticmethod
     def from_str(action_string: str):
         """
@@ -1741,7 +1751,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
 
-    def _load_actions(
+    def _prepare_schedule_with_comms(
         self,
         actions: dict[int, list[Optional[_Action]]],
         format: str = "compute_only",
@@ -1762,6 +1772,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
         elif format == "compute_only":
+            # Validate that the schedule does not have comms already added to it
+            for rank, action_list in actions.items():
+                for i, action in enumerate(action_list):
+                    if action is not None and not action.is_compute_op:
+                        raise ValueError(
+                            f"Expected compute-only schedule but found communication action "
+                            f"'{action}' at rank {rank}, position {i}. "
+                            f"Communication actions (e.g. SEND_F, RECV_F, etc.) "
+                            f"should not be present when format='compute_only'."
+                        )
+
             # Perform schedule lowering
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
@@ -1786,14 +1807,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # this will populate self.pipeline_order
             super()._load_csv(filename)
             # this will populate self.pipeline_order_with_comms
-            self._load_actions(self.pipeline_order)
+            self._prepare_schedule_with_comms(self.pipeline_order)
         elif format == "compute_comms":
             actions = {}
             with open(filename, newline="") as csvfile:
                 reader = csv.reader(csvfile)
                 for rank, row in enumerate(reader):
                     actions[rank] = [_Action.from_str(s) for s in row]
-                self._load_actions(actions, format=format)
+                self._prepare_schedule_with_comms(actions, format=format)
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
@@ -1847,7 +1868,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         }
 
         assert self.pipeline_order_with_comms is not None, (
-            "Must call _load_actions() before calling _step_microbatches()"
+            "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
         )
 
         # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
@@ -2816,7 +2837,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             self.pipeline_order[rank] = rank_ops
 
         # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
-        self._load_actions(self.pipeline_order)
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         actions: list[Optional[_Action]] = []
