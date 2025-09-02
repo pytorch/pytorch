@@ -3994,6 +3994,48 @@ class CUDACodeCache(CUTLASSCodeCache):
         return extra
 
 
+from torch._inductor.codegen.xpu import compile_utils as xpu_compile_utils
+
+
+@clear_on_fresh_cache
+class XPUCodeCache(CUTLASSCodeCache):
+    _SOURCE_CODE_SUFFIX = "cpp"
+    _BACKEND = "XPU"
+
+    @classmethod
+    def _use_re_build(cls) -> bool:
+        return False
+
+    @classmethod
+    def _compile_command(
+        cls,
+        src_files: list[str],
+        dst_file: str,
+        dst_file_ext: str,
+        extra_args: Optional[list[str]] = None,
+    ) -> str:
+        return xpu_compile_utils.xpu_compile_command(
+            src_files, dst_file, dst_file_ext, extra_args=extra_args
+        )
+
+    @classmethod
+    def _source_code_extra(cls) -> str:
+        extra = repr(
+            [
+                # nvcc and cuda hash
+                xpu_compile_utils._sycl_compiler(),
+                # cutlass flags and gcc hash
+                xpu_compile_utils._sycl_compiler_options(),
+                # flags
+                xpu_compile_utils._sycl_host_compiler_options(),
+                # cutlass key
+                cutlass_key(),
+                # hack to deal with AOTI .o compilation
+            ]
+        )
+        return extra
+
+
 @clear_on_fresh_cache
 class ROCmCodeCache:
     @dataclasses.dataclass
