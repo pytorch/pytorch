@@ -177,6 +177,7 @@ class TestPatternMatcherBase(TestCase):
         is_dynamic=False,
         quantizer=None,
         compile_options={},  # noqa: B006
+        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -206,9 +207,15 @@ class TestPatternMatcherBase(TestCase):
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
-            convert_model = _generate_qdq_quantized_model(
-                mod, inputs, is_qat, is_dynamic, quantizer
-            )
+            if quantization_with_autocast:
+                with maybe_autocast:
+                    convert_model = _generate_qdq_quantized_model(
+                        mod, inputs, is_qat, is_dynamic, quantizer
+                    )
+            else:
+                convert_model = _generate_qdq_quantized_model(
+                    mod, inputs, is_qat, is_dynamic, quantizer
+                )
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
                 matcher_check_fn()
@@ -2330,6 +2337,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         bias=True,
         is_dynamic=False,
         is_qat=False,
+        quantization_with_autocast=False,
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
@@ -2368,6 +2376,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_quantization=True,
             is_qat=is_qat,
             is_dynamic=is_dynamic,
+            quantization_with_autocast=quantization_with_autocast,
         )
 
     @skipIfNoDynamoSupport
@@ -2438,6 +2447,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_use_autocast(self):
+        r"""
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_test_helper(
+                (torch.randn((2, 4)),),
+                int8_mixed_bf16=True,
+                bias=bias,
+                quantization_with_autocast=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_xpu(self):
         r"""
@@ -2482,6 +2506,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for bias in [True, False]:
             self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), int8_mixed_bf16=True, bias=bias
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_use_autocast(self):
+        r"""
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_test_helper(
+                (torch.randn((2, 3, 4)),),
+                int8_mixed_bf16=True,
+                bias=bias,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
@@ -2552,6 +2591,37 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 do_permute=True,
                 matcher_check_fn=matcher_check_fn,
                 bias=bias,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous_use_autocast(
+        self,
+    ):
+        r"""
+        This testcase will quantize a single Linear Module for int8_bf16.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        for bias in [True, False]:
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    16 if bias else 15,
+                )
+
+            self._qlinear_test_helper(
+                (torch.randn((2, 4, 3, 4)),),
+                int8_mixed_bf16=True,
+                do_permute=True,
+                matcher_check_fn=matcher_check_fn,
+                bias=bias,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
