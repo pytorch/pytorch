@@ -479,16 +479,6 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
-def clone_if_aliasing(storages, to_clone):
-    outputs = []
-    for t in to_clone:
-        if StorageWeakRef(t._typed_storage()) in storages:
-            outputs.append(t.clone())
-        else:
-            outputs.append(t)
-    return outputs
-
-
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
@@ -789,24 +779,24 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         ]
 
         # Elimitate input-output, output-output aliasing
-        seen_primals_storages = {
+        seen_input_storages = {
             StorageWeakRef(t._typed_storage())
-            for t in primals
+            for t in args_and_grad_outs
             if isinstance(t, torch.Tensor)
         }
-        seen_grads_storages = set()
+        seen_output_storages = set()
         final_grads = []
         for grad, arg in zip(grads, primals):
             if isinstance(arg, torch.Tensor):
                 assert isinstance(grad, torch.Tensor)
-                seen_primals_storages.add(StorageWeakRef(arg._typed_storage()))
+                seen_input_storages.add(StorageWeakRef(arg._typed_storage()))
                 grad_storage = StorageWeakRef(grad._typed_storage())
                 if (
-                    grad_storage in seen_primals_storages
-                    or grad_storage in seen_grads_storages
+                    grad_storage in seen_input_storages
+                    or grad_storage in seen_output_storages
                 ):
                     grad = grad.clone()
-                seen_grads_storages.add(StorageWeakRef(grad._typed_storage()))
+                seen_output_storages.add(StorageWeakRef(grad._typed_storage()))
             final_grads.append(grad)
 
         return final_grads
