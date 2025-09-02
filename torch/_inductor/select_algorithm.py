@@ -3035,46 +3035,66 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
             exceptions: list[tuple[ChoiceCaller, BaseException]] = []
-            for future in as_completed(
-                futures,
-                timeout=precompilation_timeout_seconds,
-            ):
-                if e := future.exception():
-                    counters["inductor"][
-                        "select_algorithm_num_precompilation_exceptions"
-                    ] += 1
-                    exceptions.append((futures[future], e))
-                    from torch._inductor.codegen.cuda.cuda_kernel import (
-                        CUDATemplateCaller,
-                    )
 
-                    if isinstance(e, CUDACompileError) and isinstance(
-                        futures[future], CUDATemplateCaller
-                    ):
-                        log.debug(
-                            "Exception %s for benchmark choice %s",
-                            e,
-                            futures[future],
-                            exc_info=e,
+            # Track problematic choices
+            timeout_choices = []
+            completed_futures: OrderedSet[concurrent.futures.Future[Any]] = OrderedSet()
+
+            try:  # the timeout itself is not captured in future.exceptions so we need this try block to catch it
+                for future in as_completed(
+                    futures,
+                    # timeout=precompilation_timeout_seconds,
+                    timeout=30,
+                ):
+                    completed_futures.add(future)
+                    choice = futures[
+                        future
+                    ]  # Get the choice associated with this future
+
+                    if e := future.exception():
+                        exceptions.append((futures[future], e))
+                        from torch._inductor.codegen.cuda.cuda_kernel import (
+                            CUDATemplateCaller,
                         )
-                        futures[future].mark_failed()
+
+                        if isinstance(e, CUDACompileError) and isinstance(
+                            futures[future], CUDATemplateCaller
+                        ):
+                            log.debug(
+                                "Exception %s for benchmark choice %s",
+                                e,
+                                futures[future],
+                                exc_info=e,
+                            )
+                            futures[future].mark_failed()
+                        else:
+                            log.exception(  # noqa: G202
+                                "Exception %s for benchmark choice %s",
+                                e,
+                                futures[future],
+                                exc_info=e,
+                            )
+                            futures[future].mark_failed()
                     else:
-                        log.exception(  # noqa: G202
-                            "Exception %s for benchmark choice %s",
-                            e,
-                            futures[future],
-                            exc_info=e,
+                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
+                        log.info(
+                            "Precompiling benchmark choice %s took %.02fs",
+                            futures.get(future),
+                            elapsed_times.get(future),
                         )
-                        futures[future].mark_failed()
-                else:
-                    counters["inductor"]["select_algorithm_num_precompiles"] += 1
-                    log.info(
-                        "Precompiling benchmark choice %s took %.02fs",
-                        futures.get(future),
-                        elapsed_times.get(future),
-                    )
-            if exceptions:
-                _log_autotune_exceptions(exceptions)
+                if exceptions:
+                    _log_autotune_exceptions(exceptions)
+
+            except Exception as e:
+                # for some reason, "except (TimeoutError, torch._inductor.exc.InductorError) as e" won't catch the exception
+                timeout_choices = [
+                    futures[future]
+                    for future in futures
+                    if future not in completed_futures
+                ]
+                for choice in timeout_choices:
+                    log.error("Timeout benchmark choice: %s ", choice)
+                raise
 
             executor.shutdown(wait=True)
 
