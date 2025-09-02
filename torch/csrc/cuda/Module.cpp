@@ -5,7 +5,6 @@
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
-#include <fmt/core.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
@@ -1015,34 +1014,6 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
       return THPUtils_packInt32(-1); // can't happen
   }
   END_HANDLE_TH_ERRORS
-}
-
-std::string uuid_to_string(const char* uuid_bytes) {
-  // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
-  // For string representation, the code here expands this to
-  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-  return fmt::format(
-      "{:02x}{:02x}{:02x}{:02x}-"
-      "{:02x}{:02x}-"
-      "{:02x}{:02x}-"
-      "{:02x}{:02x}-"
-      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-      (uint8_t)uuid_bytes[0],
-      (uint8_t)uuid_bytes[1],
-      (uint8_t)uuid_bytes[2],
-      (uint8_t)uuid_bytes[3],
-      (uint8_t)uuid_bytes[4],
-      (uint8_t)uuid_bytes[5],
-      (uint8_t)uuid_bytes[6],
-      (uint8_t)uuid_bytes[7],
-      (uint8_t)uuid_bytes[8],
-      (uint8_t)uuid_bytes[9],
-      (uint8_t)uuid_bytes[10],
-      (uint8_t)uuid_bytes[11],
-      (uint8_t)uuid_bytes[12],
-      (uint8_t)uuid_bytes[13],
-      (uint8_t)uuid_bytes[14],
-      (uint8_t)uuid_bytes[15]);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
