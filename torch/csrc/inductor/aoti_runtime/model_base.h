@@ -1,11 +1,12 @@
 #pragma once
 #ifdef _WIN32
 #include <Windows.h>
+#include <functional> // std::function
+#ifdef USE_MMAP_SELF
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
-#include <functional> // std::function
 
 #define PROT_READ 0x1
 #define PROT_WRITE 0x2
@@ -258,11 +259,12 @@ int munmap(void* addr, size_t length) {
   }
   return 0;
 }
-#else
+#endif // USE_MMAP_SELF
+#else // !_WIN32
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#endif
+#endif // _WIN32
 
 #include <fcntl.h>
 #include <optional>
