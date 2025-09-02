@@ -746,12 +746,14 @@ These compilers and language have syntax and semantics that resemble the loop-le
 
 Dimension objects are just an extension of the existing PyTorch tensors and eager semantics, so there is no friction switching between normal Python code and code that uses them. However, since loops over the dimensions are defined implicitly, they can still execute in Python with good performance compared to explicit loops. Furthermore, with dimension objects, a tensors containing dimensions can compute through code that is oblivious to the dimension such as batching examples. There is no need to separate code into 'compiled' vs 'eager'.
 
-In this way, first-class dims are a way of adapting the nicer syntax of these array compilers and languages to eager numpy-style libraries.
+In this way, first-class dims are a way of adapting the nicer syntax of these array compilers and languages to eager numpy-style libraries.  Note, however, that first class dimensions are not natively compiled, so if you write code that performs many outer products with the expectation of it being fused, you will generally not get good performance or memory use (except for matrix-multiply-like patterns specifically.)
 
 
 Performance Expectations
 ========================
-First-class dimensions are not a compiler. They provide syntax for existing PyTorch operations such as advanced indexing that is easier to read and write. For large sized tensors, the performance of any statements including them will be the same as using the already existing operations. An important exception is the pattern matching of products and summation, where performance will be improved by issuing to a matrix-multiply kernel. The C++ implementation of dimensions adds a small overhead of around 2us on top of PyTorch's normal overhead of 8us to each function that uses them. In the future, the implementation can incorporate more fusion optimization to further improve performance of this style of code.
+First-class dimensions are not a compiler. They provide syntax for existing PyTorch operations such as advanced indexing that is easier to read and write. For large sized tensors, the performance of any statements including them will be the same as using the already existing operations. An important exception is the pattern matching of products and summation, where performance will be improved by issuing to a matrix-multiply kernel.
+
+Originally, there was a C++ implementation of dimensions adds a small overhead of around 2us on top of PyTorch's normal overhead of 8us to each function that uses them.  However, this implementation had some manual memory managemetn bugs and was not kept up to date with CPython updates.  The latest Python implementation is two orders of magnitude slower due to CPU overhead; for overhead sensitive applications you should compile the code to eliminate this overhead.
 
 
 ## License
