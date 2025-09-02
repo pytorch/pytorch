@@ -23,14 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
-        device: [ 'cuda' ]
+        device: [ 'cu128', 'cu129' ]
         runner: [ 'linux.12xlarge' ]
         include:
-          - device: cuda
-            cuda-version: cu128
+          - device: cu128
             docker-image: 'pytorch/manylinux2_28-builder:cuda12.8'
-          - device: cuda
-            cuda-version: cu129
+          - device: cu129
             docker-image: 'pytorch/manylinux2_28-builder:cuda12.9'
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
@@ -40,7 +38,6 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.docker-image }}
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
-      BUILD_VERSION: ${{ matrix.device == 'cuda' && matrix.cuda-version || '' }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -109,7 +106,7 @@ jobs:
 
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip download \
             --pre torch \
-            --index-url https://download.pytorch.org/whl/nightly/"${BUILD_VERSION}"
+            --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
       - name: Build vLLM wheel
         uses: ./.github/actions/build-external-packages
@@ -122,7 +119,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: vllm-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.BUILD_VERSION }}-${{ env.PLATFORM }}
+          name: vllm-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/externals/vllm/*
 
