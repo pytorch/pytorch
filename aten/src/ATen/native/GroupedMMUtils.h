@@ -16,7 +16,7 @@
 
 namespace at::native {
 
-bool check_valid_strides_and_return_transposed(const Tensor& mat) {
+inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   IntArrayRef tensor_strides = mat.strides();
   IntArrayRef tensor_sizes = mat.sizes();
   int end_dim = mat.dim() - 1;
@@ -33,7 +33,7 @@ bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   }
 }
 
-at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
+inline at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
 const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 std::optional<c10::ScalarType> out_dtype
@@ -80,7 +80,7 @@ std::optional<c10::ScalarType> out_dtype
   #endif
 }
 
-void _grouped_mm_validate_inputs(const Tensor& mat_a, const Tensor& mat_b,
+inline void _grouped_mm_validate_inputs(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
@@ -107,7 +107,7 @@ std::optional<c10::ScalarType> out_dtype) {
 }
 
 
-void _grouped_mm_fallback(const Tensor& mat_a, const Tensor& mat_b,
+inline void _grouped_mm_fallback(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype,
