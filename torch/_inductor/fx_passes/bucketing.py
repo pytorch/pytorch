@@ -1,6 +1,7 @@
 import collections
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import torch
@@ -740,3 +741,302 @@ def merge_all_gather(
                 g.erase_node(ag_n)
                 for n in reversed(ag_node_to_pre_nodes[ag_n]):
                     g.erase_node(n)  # type: ignore[arg-type]
+
+
+from enum import Enum
+
+
+class CType(str, Enum):
+    AG = "AG"  # "all_gather"
+    AGC = "AGC"  # "all_gather_coalesced"
+    AR = "AR"  # "all_reduce"
+    ARC = "ARC"  # "all_reduce_coalesced"
+    RS = "RS"  # "reduce_scatter"
+    RSC = "RSC"  # "reduce_scatter_coalesced"
+    A2A = "A2A"  # "all_2_all"
+    CMP = "C"  # "compute"
+
+
+@dataclass
+class CKey:
+    ctype: CType
+    group_name: Optional[str] = None
+
+    def __hash__(self):
+        return hash((self.ctype, self.group_name))
+
+    def __str__(self):
+        return f"{self.ctype}({self.group_name})"
+
+
+def get_collective_key(n: torch.fx.Node) -> CKey:
+    if n.op != "call_function":
+        return CKey(CType.CMP, None)
+    if n.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+        _, group_size, group_name = n.args
+        assert isinstance(group_name, str)
+        return CKey(CType.AG, group_name)
+    elif (
+        n.target == torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default
+    ):
+        assert False
+        return CKey(CType.AGC, None)
+    if n.target == torch.ops._c10d_functional.all_reduce.default:
+        # TODO: Verify args
+        _, _, group_name = n.args
+        assert isinstance(group_name, str)
+        return CKey(CType.AR, group_name)
+    elif n.target == torch.ops._c10d_functional.all_reduce_coalesced.default:
+        assert False
+        return CKey(CType.ARC, None)
+    elif n.target == torch.ops._c10d_functional.reduce_scatter_tensor.default:
+        _, reduce_op, group_size, group_name = n.args
+        assert isinstance(group_name, str)
+        return CKey(CType.RS, group_name)
+    elif n.target == torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default:
+        assert False
+        return CKey(CType.RSC, None)
+    elif n.target == torch.ops._c10d_functional.all_to_all_single.default:
+        assert False
+        return CKey(CType.A2A, None)
+    return CKey(CType.CMP, None)
+
+
+class CTreeNode:
+    def __init__(self, ctype, group_name, parent_ct=None):
+        self.ctype = ctype
+        self.group_name = group_name
+        self.parent_ct = parent_ct
+        self.depth = 0 if self.parent_ct is None else parent_ct.depth + 1
+        self.n_to_parent_n = {}
+        self.n_to_bucket: dict[torch.fx.Node, Optional[str]] = {}
+        self.children_cts = {}  # dict[CKey, CTreeNode]
+
+
+def get_collectives_trie(
+    gm: torch.fx.GraphModule,
+):
+    g = gm.graph
+    n_to_ct = {}
+    collectives_set = OrderedSet()
+    root_cts = {}
+    for n in g.nodes:
+        ckey = get_collective_key(n)
+        ctype, group_name = ckey.ctype, ckey.group_name
+
+        args_classes = []
+        ct_parent_n = None
+        args_min_depth = len(g.nodes)
+        args_min_depth_ct = None
+        for arg in n.args:
+            if not isinstance(arg, torch.fx.Node):
+                continue
+
+            arg_ct = n_to_ct.get(arg, None)
+            if arg_ct is None:
+                continue
+            if arg_ct.depth < args_min_depth:
+                args_min_depth = arg_ct.depth
+                args_min_depth_ct = arg_ct
+                ct_parent_n = arg
+
+        args_ct = args_min_depth_ct
+
+        if ckey.ctype == CType.CMP:
+            if args_ct is not None:
+                n_to_ct[n] = args_ct
+            continue
+
+        lookup_cts = args_ct.children_cts if args_ct is not None else root_cts
+        ct = lookup_cts.get(ckey, None)
+        if ct is not None:
+            ct.n_to_parent_n[n] = ct_parent_n
+            n_to_ct[n] = args_ct
+            continue
+
+        ct = CTreeNode(
+            ctype,
+            group_name,
+            parent_ct=args_ct,
+        )
+        ct.n_to_parent_n[n] = ct_parent_n
+        if args_ct is None:
+            root_cts[ckey] = ct
+        else:
+            args_ct.children_cts[ckey] = ct
+
+        n_to_ct[n] = ct
+
+    def _dfs(ct, curr_path):
+        path = curr_path
+        if path:
+            path += "-"
+        path += f"{ct.ctype}({ct.group_name})"
+        print(f"XXX CTreeNode[{path}]\n    ns:{list(ct.n_to_parent_n.keys())}")
+        for _ct in ct.children_cts.values():
+            _dfs(_ct, path)
+
+    for ct in root_cts.values():
+        _dfs(ct, "")
+
+    return root_cts
+
+
+def bucket_collectives_trie(gm, config):
+    root_cts = get_collectives_trie(gm)
+
+    def should_bucket(ctype):
+        if ctype == CType.AG:
+            return "ag" in config
+        elif ctype == CType.RS:
+            return "rs" in config
+        elif ctype == CType.AR:
+            return "ar" in config
+        return False
+
+    # TODO: put in config
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] = lambda id: 2000
+
+    buckets = defaultdict(list)
+
+    def _n_in_ct_str(n, ct):
+        bucket = ct.n_to_bucket.get(n, "")
+        return f"{ct.ctype}({ct.group_name})[{bucket}]"
+
+    def _n_in_ct_path(n, ct):
+        cur_ct = ct
+        cur_n = n
+        ret = ""
+        while cur_ct is not None:
+            path = _n_in_ct_str(n, ct)
+            if ret:
+                ret = "-" + ret
+            ret = path + ret
+            cur_n = cur_ct.n_to_parent_n.get(cur_n, None)
+            cur_ct = cur_ct.parent_ct
+            if cur_ct is None:
+                break
+        return ret
+
+    def bucket_ct(ct):
+        # group first nodes in ct by full path, including parent cts buckets
+        ns_groups = defaultdict(list)
+        for n, parent_n in ct.n_to_parent_n.items():
+            path = _n_in_ct_path(n, ct)
+            dtype = n.meta["val"].dtype
+            group_key = (path, dtype)
+            ns_groups[group_key].append(n)
+
+        def _greedy_bucket(
+            ns,
+            bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+            node_descendents,
+            try_left=3,
+        ):
+            buckets: list[list[torch.fx.Node]] = []
+            cur_bucket: list[torch.fx.Node] = []
+            cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
+            cur_bucket_size_bytes: int = 0
+            cur_bucket_id: int = 0
+            bucket_size_bytes = int(
+                bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
+            )
+            left_ns = []
+
+            def _add_bucket(bucket_ns, bucket_descendents):
+                if len(cur_bucket) <= 1:
+                    return False
+                buckets.append(bucket_ns)
+                for bn in bucket_ns:
+                    node_descendents[bn] |= bucket_descendents
+                return True
+
+            for node in ns:
+                if node in cur_bucket_descendents:
+                    print(
+                        f"XXX cur_bucket:{cur_bucket} node:{node} in cur_bucket_descendents"
+                    )
+                    # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
+                    left_ns.append(node)
+                    continue
+                assert "val" in node.meta
+                n_val = node.meta["val"]
+                out_size_bytes = n_val.numel() * n_val.element_size()
+                n_input_val = node.all_input_nodes[0].meta["val"]
+                in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+                size_bytes = max(out_size_bytes, in_size_bytes)
+                if (
+                    cur_bucket_size_bytes + size_bytes > bucket_size_bytes
+                    and cur_bucket
+                ):
+                    # Current bucket is full, create new bucket
+                    if not _add_bucket(cur_bucket, cur_bucket_descendents):
+                        left_ns.extend(cur_bucket)
+                    cur_bucket = []
+                    cur_bucket_size_bytes = 0
+                    cur_bucket_id += 1
+                    cur_bucket_descendents = OrderedSet()
+                cur_bucket_size_bytes += size_bytes
+                cur_bucket.append(node)
+                cur_bucket_descendents |= node_descendents[node]
+            if not _add_bucket(cur_bucket, cur_bucket_descendents):
+                left_ns.extend(cur_bucket)
+            # if try_left > 0:
+            #     if len(left_ns) > 1 and len(left_ns) < len(ns):
+            #         left_buckets = _greedy_bucket(
+            #             left_ns, bucket_cap_mb_by_bucket_idx, node_descendents, try_left = try_left - 1
+            #         )
+            #         buckets.extend(left_buckets)
+            return buckets
+
+        ret_buckets = []
+        for group_key, ns_group in ns_groups.items():
+            print(f"XXX {group_key} -> GROUP:{ns_group}")
+            node_descendents = collect_node_descendants(gm.graph)
+            g_buckets = _greedy_bucket(
+                ns_group, bucket_cap_mb_by_bucket_idx, node_descendents, try_left=0
+            )
+            print(f"XXX {group_key} -> BUCKETS:{g_buckets}")
+            for bucket_idx, g_bucket in enumerate(g_buckets):
+                for g_n in g_bucket:
+                    ct.n_to_bucket[g_n] = bucket_idx
+            ret_buckets.extend(g_buckets)
+        return ret_buckets
+
+    def _dfs(ct, curr_path):
+        path = curr_path
+        if path:
+            path += "-"
+        path += f"{ct.ctype}({ct.group_name})"
+        print(
+            f"\nXXX CTreeNode[{path}] ctype:{ct.ctype}   ns:{list(ct.n_to_parent_n.keys())}"
+        )
+        if should_bucket(ct.ctype):
+            bs = bucket_ct(ct)
+            buckets[ct.ctype].extend(bs)
+            print(f"XXX TRIE_BUCKET {path} {ct.ctype}: BUCKETS:{bs}")
+
+        for _ct in ct.children_cts.values():
+            _dfs(_ct, path)
+
+    for ct in root_cts.values():
+        _dfs(ct, "")
+
+    ag_buckets = []
+    rs_buckets = []
+    for ctype, bucket_ns in buckets.items():
+        if ctype == CType.AG:
+            ag_buckets.append(bucket_ns)
+        elif ctype == CType.RS:
+            rs_buckets.append(bucket_ns)
+        else:
+            assert False
+
+    print(f"XXX NUM_AG_BUCKETS:{len(ag_buckets)}")
+    print(f"XXX NUM_RS_BUCKETS:{len(rs_buckets)}")
+    for i, ag_bucket in enumerate(ag_buckets):
+        print(f"XXX AG_BUCKET[{i}]:{len(ag_bucket)}")
+        merge_all_gather(gm, ag_bucket, "custom_ops")
+    for i, rs_bucket in enumerate(rs_buckets):
+        print(f"XXX RS_BUCKET[{i}]:{len(rs_bucket)}")
+        merge_reduce_scatter(gm, rs_bucket, "custom_ops")
