@@ -14,7 +14,6 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
-from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
@@ -23,7 +22,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistTensorOpsTest(DTensorTestBase):
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_aten_contiguous(self):
         # this op not covered by dtensor_ops
@@ -55,7 +53,6 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -149,7 +146,6 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(res is dt_to_inplace_add)
         self.assertTrue(res.placements == tuple(shard_spec))
 
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_op_out_variant(self):
         mesh = self.build_device_mesh()
@@ -284,9 +280,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
+    @with_comms
     def test_stack(self):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
@@ -479,7 +474,6 @@ class DistTensorOpsTest(DTensorTestBase):
                 self.assertEqual(output_dt.placements, [Replicate()])
                 self.assertEqual(output_dt.to_local(), global_output)
 
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_gather(self):
         device_mesh = self.build_device_mesh()
@@ -530,7 +524,6 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.full_tensor(), global_output)
 
     @skipIfRocm
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_index(self):
         meshes = [
@@ -682,7 +675,6 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
             self.assertEqual(output_dt.full_tensor(), ref)
 
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
@@ -729,7 +721,6 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
 
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_slice(self):
         mesh = self.build_device_mesh()  # 1D mesh
