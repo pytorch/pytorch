@@ -402,7 +402,7 @@ class _PipelineSchedule(ABC):
         kwarg_mbs: Optional[list] = None,
         target_mbs: Optional[list] = None,
         losses: Optional[list] = None,
-    ):
+    ) -> tuple[list, list]:
         """
         Pre-process/check inputs
         """
@@ -1151,6 +1151,9 @@ def _add_send_recv(
 ) -> dict[int, list[_Action]]:
     """
     Transforms a compute-only schedule into a complete schedule with communication actions.
+
+    For actions with sub-actions (OVERLAP_F_B) we ensure that all the subactions have been
+    computed and the communication is ready
     """
     comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
     prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
@@ -1220,19 +1223,6 @@ def _add_send_recv(
         else:
             return True
 
-    # TODO: For now we are splitting OVERLAP_F_B into replacing it to
-    # its forward and backward components
-    # We need to figure out how to do the communication
-    for rank in compute_actions:
-        new_actions: list[_Action] = []
-        for action in compute_actions[rank]:
-            if action is not None and action.sub_actions is not None:
-                # Replace OVERLAP_F_B action with its sub_actions
-                new_actions.extend(action.sub_actions)
-            else:
-                new_actions.append(action)
-        compute_actions[rank] = new_actions
-
     while compute_actions:
         progress = False
         # go in order of ranks even if dict keys aren't ordered
@@ -1241,21 +1231,28 @@ def _add_send_recv(
                 f"{rank=}, {len(compute_actions[rank])=}"
             )
             action = compute_actions[rank][0]
+            # handle new case where parent action (OVERLAP_F_B) can be comprised of subactions
+            if action is not None and action.sub_actions is not None:
+                all_actions = action.sub_actions
+            else:
+                all_actions = (action,)
 
-            if not _ready_to_schedule(action, prev_actions[rank]):
+            if not all(_ready_to_schedule(a, prev_actions[rank]) for a in all_actions):
                 continue
 
+            # The action's dependencies are satisfied, so add to schedule
             if action is not None:
                 comm_actions[rank].append(action)
-                prev_actions[rank].add(action)
-                if _has_comms(action):
-                    send, recv = _get_comms(action)
-                    # TODO we can avoid send/recv if the 2 stages are on the same rank.
-                    # should we avoid that in the runtime or here?
-                    comm_actions[rank].append(send)
-                    prev_actions[rank].add(send)
-                    comm_actions[stage_to_rank(recv.stage_index)].append(recv)
-                    prev_actions[stage_to_rank(recv.stage_index)].add(recv)
+                for a in all_actions:
+                    prev_actions[rank].add(a)
+                    if _has_comms(a):
+                        send, recv = _get_comms(a)
+                        # TODO we can avoid send/recv if the 2 stages are on the same rank.
+                        # should we avoid that in the runtime or here?
+                        comm_actions[rank].append(send)
+                        prev_actions[rank].add(send)
+                        comm_actions[stage_to_rank(recv.stage_index)].append(recv)
+                        prev_actions[stage_to_rank(recv.stage_index)].add(recv)
 
             compute_actions[rank].pop(0)
             if len(compute_actions[rank]) == 0:
@@ -1892,9 +1889,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 f"Attempted to compute on sharded {stage_idx=}"
             )
 
-        # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
-        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+        def _perform_action(action: _Action):
             try:
                 comp_type = action.computation_type
                 mb_index: int = (
@@ -1965,100 +1960,118 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                         stage.submod.reshard()  # type: ignore[operator]
                 elif comp_type == FORWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
+                    with record_function(f"PP::Stage{stage_idx}-Forward{mb_index}"):
+                        if stage_uses_fsdp:
+                            _assert_unsharded(stage_idx)
 
-                    if (
-                        not stage.is_first
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_prev_stage_on_this_rank
-                    ):
-                        assert (
-                            stage_idx,
+                        if (
+                            not stage.is_first
+                            # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                            and not is_prev_stage_on_this_rank
+                        ):
+                            assert (
+                                stage_idx,
+                                mb_index,
+                            ) in fwd_recv_ops, (
+                                f"Computing {action=} before receiving input"
+                            )
+                            _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
+
+                        output = stage.forward_one_chunk(
                             mb_index,
-                        ) in fwd_recv_ops, f"Computing {action=} before receiving input"
-                        _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
-
-                    output = stage.forward_one_chunk(
-                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
-                    )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_next_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
-                            output, mb_index
+                            arg_mbs[mb_index],  # type: ignore[index]
+                            kwarg_mbs[mb_index],  # type: ignore[index]
                         )
+                        self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+
+                        # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                        # see [Note: V-schedule special case]
+                        if is_next_stage_on_this_rank:
+                            stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
+                                output, mb_index
+                            )
 
                 elif comp_type == FULL_BACKWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-
-                    if (
-                        not stage.is_last
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_next_stage_on_this_rank
+                    with record_function(
+                        f"PP::Stage{stage_idx}-FullBackward{mb_index}"
                     ):
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in bwd_recv_ops, (
-                            f"Attempted to run compute {action=} before receiving input"
-                        )
-                        _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    backward_counter[stage_idx] += 1
-                    last_backward = backward_counter[stage_idx] == self._n_microbatches
-                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=True,
-                        last_backward=last_backward,
-                    )
-                    if last_backward:
-                        stage.scale_grads(grad_scale_factor)
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
-                        )
-                elif comp_type == BACKWARD_INPUT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
+                        if stage_uses_fsdp:
+                            _assert_unsharded(stage_idx)
 
-                    if not stage.is_last and not is_next_stage_on_this_rank:
-                        assert (
-                            stage_idx,
+                        if (
+                            not stage.is_last
+                            # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                            and not is_next_stage_on_this_rank
+                        ):
+                            assert (
+                                stage_idx,
+                                mb_index,
+                            ) in bwd_recv_ops, (
+                                f"Attempted to run compute {action=} before receiving input"
+                            )
+                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                        loss = self._maybe_get_loss(stage, mb_index)
+                        backward_counter[stage_idx] += 1
+                        last_backward = (
+                            backward_counter[stage_idx] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
+                        stage.backward_one_chunk(
                             mb_index,
-                        ) in bwd_recv_ops, (
-                            f"Attempted to run compute {action=} before receiving input"
+                            loss=loss,
+                            full_backward=True,
+                            last_backward=last_backward,
                         )
-                        _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=False,
-                        last_backward=False,
-                    )
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
+                        # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                        # see [Note: V-schedule special case]
+                        if is_prev_stage_on_this_rank:
+                            stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                                stage.get_local_bwd_output(mb_index), mb_index
+                            )
+                elif comp_type == BACKWARD_INPUT:
+                    with record_function(
+                        f"PP::Stage{stage_idx}-BackwardInput{mb_index}"
+                    ):
+                        if stage_uses_fsdp:
+                            _assert_unsharded(stage_idx)
+
+                        if not stage.is_last and not is_next_stage_on_this_rank:
+                            assert (
+                                stage_idx,
+                                mb_index,
+                            ) in bwd_recv_ops, (
+                                f"Attempted to run compute {action=} before receiving input"
+                            )
+                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                        loss = self._maybe_get_loss(stage, mb_index)
+                        stage.backward_one_chunk(
+                            mb_index,
+                            loss=loss,
+                            full_backward=False,
+                            last_backward=False,
                         )
+                        # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                        # see [Note: V-schedule special case]
+                        if is_prev_stage_on_this_rank:
+                            stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                                stage.get_local_bwd_output(mb_index), mb_index
+                            )
                 elif comp_type == BACKWARD_WEIGHT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-                    backward_counter[stage_idx] += 1
-                    stage.backward_weight_one_chunk(
-                        mb_index,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
-                    )
+                    with record_function(
+                        f"PP::Stage{stage_idx}-BackwardWeight{mb_index}"
+                    ):
+                        if stage_uses_fsdp:
+                            _assert_unsharded(stage_idx)
+                        backward_counter[stage_idx] += 1
+                        stage.backward_weight_one_chunk(
+                            mb_index,
+                            last_backward=backward_counter[stage_idx]
+                            == self._n_microbatches,
+                        )
                 else:
                     raise ValueError(f"{action=} is unknown or unsupported")
             except Exception as e:
@@ -2076,6 +2089,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                 )
                 raise e
+
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        backward_counter: Counter[int] = Counter()
+        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            if action.computation_type == OVERLAP_F_B:
+                assert action.sub_actions is not None, "sub_actions must be set"
+                with record_function("PP::OverlapFwdBwd"):
+                    for sub_a in action.sub_actions:
+                        _perform_action(sub_a)
+            else:
+                _perform_action(action)
 
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
         while len(send_ops):
