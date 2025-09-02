@@ -12,12 +12,12 @@ class TestRNG(TestCase):
         self.assertEqual(generator.device.index, 1)
 
     def test_rng_state(self):
-        state = torch.openreg.get_rng_state(0)  # type: ignore[misc]
-        torch.openreg.set_rng_state(state, 0)  # type: ignore[misc]
+        state = torch.openreg.get_rng_state(0)
+        torch.openreg.set_rng_state(state, 0)
 
     def test_manual_seed(self):
-        torch.openreg.manual_seed_all(2024)  # type: ignore[misc]
-        self.assertEqual(torch.openreg.initial_seed(), 2024)  # type: ignore[misc]
+        torch.openreg.manual_seed_all(2024)
+        self.assertEqual(torch.openreg.initial_seed(), 2024)
 
 
 if __name__ == "__main__":
