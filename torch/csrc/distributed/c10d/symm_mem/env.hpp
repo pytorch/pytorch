@@ -3,7 +3,7 @@
 
 namespace c10d::symmetric_memory {
 
-static inline int getenv_nblocks() {
+static int getenv_nblocks() {
   static int num_blocks = -1; // Uninitialized
   if (num_blocks == -1) {
     const char* str = getenv("TORCH_SYMMMEM_NBLOCKS");
