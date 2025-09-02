@@ -1463,14 +1463,9 @@ def module_inputs_torch_nn_BCELoss(module_info, device, dtype, requires_grad, tr
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
         ('weights', {'weight': make_weight((10,))}),
-        ('label_smoothing', {'label_smoothing': 0.15}),
     ]
 
-    def bce_loss_reference_fn(m, p, i, t, reduction='mean', weight=None, label_smoothing=0.0):
-        assert 0 <= label_smoothing <= 1
-        if label_smoothing > 0:
-            t = t * (1 - label_smoothing) + (1 - t) * label_smoothing
-
+    def bce_loss_reference_fn(m, p, i, t, reduction='mean', weight=None):
         result = -(t * i.log() + (1 - t) * (1 - i).log())
 
         if weight is not None:
@@ -1516,15 +1511,10 @@ def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, require
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
         ('weights', {'weight': make_weight((10,))}),
-        ('scalar_weights', {'weight': make_weight(())}),
-        ('label_smoothing', {'label_smoothing': 0.15}),
+        ('scalar_weights', {'weight': make_weight(())})
     ]
 
-    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None, label_smoothing=0.0):
-        assert 0 <= label_smoothing <= 1
-        if label_smoothing > 0:
-            t = t * (1 - label_smoothing) + (1 - t) * label_smoothing
-
+    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None):
         # TODO: add pos_weight to the definition here and corresponding SampleInputs
         max_val = (-i).clamp(min=0)
         result = (1 - t).mul_(i).add_(max_val).add_((-max_val).exp_().add_((-i - max_val).exp_()).log_())

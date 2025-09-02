@@ -158,19 +158,6 @@ def _embedding_dense_backward(
     )
 
 
-# TODO: for now, inductor doesn't handle asserts
-# because the condition is symbol -> tensor in the graph.
-@register_decomposition([aten._assert_async.msg])
-def assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
-
-
-# Following `assert_async_msg_decomp` and implement as non-op.
-@register_decomposition([aten._functional_assert_async.msg])
-def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
-
-
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(
     symbol: torch.SymInt,
@@ -472,6 +459,16 @@ def add(
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
+
+    output_size_zero = False
+    if x.ndim == 0 and y.ndim == 0:
+        output_size_zero = True
+
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+
     z = y
     if alpha is not None:
         z = alpha * y
@@ -503,6 +500,9 @@ def add(
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
+
+    if output_size_zero:
+        return result[0]
     return result
 
 
@@ -1150,3 +1150,25 @@ def rrelu_with_noise_functional(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope), torch.Tensor()
+
+
+@register_decomposition(aten.repeat_interleave.Tensor)
+def repeat_interleave_Tensor(
+    repeat: torch.Tensor,
+    output_size: Optional[int] = None,
+) -> torch.Tensor:
+    if config.triton.autotune_at_compile_time:
+        # We can't compile-time auto-tune this because
+        # it expects specific data in `repeat`
+        return NotImplemented
+    if output_size is None or type(output_size) is not int:
+        return NotImplemented
+    if repeat.device.type == "mps":
+        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
+    cumsum = repeat.cumsum(0)
+    pos = torch.arange(output_size, device=repeat.device)
+    return torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )

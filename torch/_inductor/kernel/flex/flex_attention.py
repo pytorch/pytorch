@@ -53,7 +53,11 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 
 def get_float32_precision():
     if (
-        torch.backends.cuda.matmul.fp32_precision == "ieee"
+        (
+            torch.backends.cuda.matmul.fp32_precision == "ieee"
+            if torch.backends.cuda.matmul.fp32_precision != "none"
+            else torch.get_float32_matmul_precision() == "highest"
+        )
         or torch.version.hip
         or torch.mtia.is_available()
     ):
@@ -164,7 +168,7 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-    if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
+    if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
             query,
             key,
@@ -270,7 +274,9 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_fwd_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -708,7 +714,9 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_bwd_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
