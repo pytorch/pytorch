@@ -1467,6 +1467,49 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
+    def test_add_complex7(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar (0-dimensional) complex tensor addition: 0D + 0D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand((), dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex8(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex addition: 1D + 0D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand(1, dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex9(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex addition: 0D + 1D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand((), dtype=torch.complex64, device=self.device)
+        y = torch.rand(1, dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex10(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex broadcasting
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.randn(2, 3, dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
+        self.common(fn, (x, y, 2))
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -5716,6 +5759,19 @@ class CommonTemplate:
 
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
+
+    def test_complex_from_real_imag(self):
+        def fn(x, y):
+            return aten.complex.default(x, y)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        self.common(
+            fn,
+            (a, a),
+            exact_stride=True,
+            reference_in_float=False,
+        )
 
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
@@ -10573,6 +10629,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(dynamic, dynamic_specialized)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @config.patch({"force_disable_caches": True})
+    def test_mark_dynamic_with_hint_override(self):
+        @torch.compile
+        def no_override(x):
+            return x.sum(dim=0)
+
+        @torch.compile
+        def override(x):
+            return x.sum(dim=0)
+
+        x_small = torch.randn(4096, 512, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_dynamic(x_small, 0)
+        code1 = run_and_get_triton_code(no_override, x_small)
+
+        torch._dynamo.reset_code_caches()
+
+        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 10)
+        code2 = run_and_get_triton_code(override, x_small)
+        self.assertNotEqual(code1, code2)
+
+        self.assertEqual(no_override(x_small), override(x_small))
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -11561,6 +11644,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps_unimplemented
     @expectedFailureXPU
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
+    )
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
