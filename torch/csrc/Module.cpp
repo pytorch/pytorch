@@ -312,6 +312,12 @@ static PyObject* THPModule_crashIfC10ASAN(PyObject* module, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_crashIfC10UBSAN(PyObject* module, PyObject* noarg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(c10::crash_if_ubsan());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_abort(PyObject* module, PyObject* noargs) {
   std::terminate();
   Py_RETURN_NONE;
@@ -1589,6 +1595,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
     {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
     {"_crash_if_c10_asan", THPModule_crashIfC10ASAN, METH_O, nullptr},
+    {"_crash_if_c10_ubsan", THPModule_crashIfC10UBSAN, METH_NOARGS, nullptr},
     {"_crash_if_debug_asserts_fail",
      THPModule_crashIfDebugAssertsFail,
      METH_O,
