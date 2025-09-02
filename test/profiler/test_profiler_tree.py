@@ -764,6 +764,7 @@ class TestProfilerTree(TestCase):
               aten::add
                 torch/_library/simple_registry.py(...): find_torch_dispatch_rule
                   torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                   torch/_library/simple_registry.py(...): find
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__
