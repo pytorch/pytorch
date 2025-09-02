@@ -1100,6 +1100,7 @@ def placeholder_naming_pass(
             node.name = name_map[node.name]
 
     # propagate names to higher order op subgraphs
+    print(gm)
     _name_hoo_subgraph_placeholders(gm)
 
     # re-generate graph module code

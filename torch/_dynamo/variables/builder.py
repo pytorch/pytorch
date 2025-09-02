@@ -2817,6 +2817,10 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._subclasses.fake_tensor
     import torch._utils
 
+    if proxy.node.target == torch.ops.higher_order.cond:
+        breakpoint()
+
+
     if isinstance(example_value, torch.Tensor):
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options

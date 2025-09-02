@@ -754,6 +754,7 @@ def _export_to_torch_ir(
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
+    _use_new_tracer_experimental: bool = False,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -803,23 +804,31 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                    constraints=constraints,  # type: ignore[arg-type]
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                    disable_constraint_solver=disable_constraint_solver,
-                    # currently the following 2 flags are tied together for export purposes,
-                    # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    _log_export_usage=_log_export_usage,
-                    same_signature=same_signature,
-                )(
-                    *args,
-                    **kwargs,
-                )
+                if _use_new_tracer_experimental:
+                    from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+                    try:
+                        gm_torch_level = _dynamo_graph_capture_for_export(f, constraints=constraints, dynamic_shapes=dynamic_shapes)(*args, **kwargs)
+                    except Exception as e:
+                        raise e
+                else:
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                        constraints=constraints,  # type: ignore[arg-type]
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                        disable_constraint_solver=disable_constraint_solver,
+                        # currently the following 2 flags are tied together for export purposes,
+                        # but untangle for sake of dynamo export api
+                        prefer_deferred_runtime_asserts_over_guards=True,
+                        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                        _log_export_usage=_log_export_usage,
+                        same_signature=same_signature,
+                    )(
+                        *args,
+                        **kwargs,
+                    )
+                    gm_torch_level.meta["module_call_specs"] = module_call_specs
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
@@ -829,7 +838,6 @@ def _export_to_torch_ir(
                 case_name="constrain_as_size_example",
             )
 
-    gm_torch_level.meta["module_call_specs"] = module_call_specs
 
     if isinstance(f, torch.nn.Module) and restore_fqn:
         _restore_state_dict(f, gm_torch_level)
@@ -1404,6 +1412,7 @@ def _strict_export(
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _to_aten_func: Callable,
+    _use_new_tracer_experimental: bool = False,
 ) -> ExportArtifact:
     """
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
@@ -1418,6 +1427,7 @@ def _strict_export(
         restore_fqn=False,  # don't need to restore because we will do it later
         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _log_export_usage=False,
+        _use_new_tracer_experimental=_use_new_tracer_experimental,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
@@ -2037,6 +2047,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    _use_new_tracer_experimental = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2052,7 +2063,7 @@ def _export_for_training(
     original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
-    export_func = _strict_export if strict else _non_strict_export
+    export_func = functools.partial(_strict_export, _use_new_tracer_experimental=_use_new_tracer_experimental) if strict else _non_strict_export
 
     export_artifact = export_func(
         mod=mod,
@@ -2124,6 +2135,7 @@ def _export(
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
+    _use_new_tracer_experimental = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -2198,6 +2210,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            _use_new_tracer_experimental=_use_new_tracer_experimental,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep
