@@ -123,10 +123,6 @@ SparseTensor& add_out_sparse_mps(const SparseTensor& self,
   TORCH_CHECK(self.sizes().equals(other.sizes()),
               "add: expected 'self' and 'other' to have same size, but ", self.sizes(), " != ", other.sizes());
 
-  TORCH_CHECK(is_same_density(self, other),
-              "add: expected 'self' and 'other' to have same density, but 'self' has ",
-              self.sparse_dim(), " sparse dimensions while 'other' has ", other.sparse_dim(), " sparse dimensions");
-
   if (other._nnz() == 0) {
     out.resize_as_(self);
     Tensor vals = self._values();
@@ -137,6 +133,24 @@ SparseTensor& add_out_sparse_mps(const SparseTensor& self,
     out._coalesced_(self.is_coalesced());
     return out;
   }
+
+  if (self._nnz() == 0) {
+    out.resize_as_(other);
+    Tensor vals = other._values();
+    if (!alpha.isIntegral(false) || alpha.to<double>() != 1.0) {
+      vals = at::mul(vals, alpha);
+    }
+    if (vals.scalar_type() != out.scalar_type()) {
+      vals = vals.to(out.scalar_type());
+    }
+    alias_into_sparse(out, other._indices(), vals);
+    out._coalesced_(other.is_coalesced());
+    return out;
+  }
+
+  TORCH_CHECK(is_same_density(self, other),
+              "add: expected 'self' and 'other' to have same density, but 'self' has ",
+              self.sparse_dim(), " sparse dimensions while 'other' has ", other.sparse_dim(), " sparse dimensions");
 
   Tensor t_indices_ = self._indices();
   Tensor s_indices_ = other._indices();
