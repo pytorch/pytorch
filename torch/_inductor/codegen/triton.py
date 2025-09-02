@@ -609,6 +609,13 @@ def triton_reshape(
     return f"{value}[{', '.join(expand)}]"
 
 
+def enable_pdl_codegen():
+    if not torch._inductor.config.triton.enable_pdl:
+        return False
+    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
+    return major >= 9
+
+
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
 # number of operators which Triton "implements", but in a way that is
 # inconsistent with Python semantics (and consistent with C semantics).  We
@@ -1879,6 +1886,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.tma_min_block_sizes = dict[str, int]()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        self._load_index = 0
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -2458,7 +2466,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # One exception is when this is an indirect_load.
             return self.body
         else:
-            return self.loads
+            eturn self.loads
+
+    def _handle_pdl_before_load(self, wait_buffer):
+        GDC_WAIT = "tl.extra.cuda.gdc_wait()"
+        self._load_index += 1
+        if self.inside_reduction:
+            wait_buffer = self.body
+        if enable_pdl_codegen():
+            if self._load_index == 1:
+                wait_buffer.writeline(GDC_WAIT)
+
+    def _handle_pdl_after_load(self, launch_buffer, result_var):
+        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
+        if self.inside_reduction:
+            launch_buffer = self.post_loop_combine
+        if enable_pdl_codegen():
+            current_load_index = self._load_index
+            launch_if_last_load = DelayReplaceLine(
+                "<LAUNCH>",
+                lambda: GDC_LAUNCH if current_load_index == self._load_index else "",
+                "0; <LAUNCH> # maybe gdc launch for " + str(result_var),
+            )
+            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
     def load(self, name: str, index: sympy.Expr):
         """
@@ -2582,9 +2612,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        if config.triton.enable_pdl:
-            load_buffer.writeline("tl.extra.cuda.gdc_wait()")
+        self._handle_pdl_before_load(load_buffer)
         result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
+        self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
@@ -2722,6 +2752,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "Bucketize only supports indexing with int32 and int64"
             )
 
+        self._handle_pdl_before_load(self.compute)
         result = self.cse.generate(
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, "
@@ -2734,6 +2765,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
+        self._handle_pdl_after_load(self.compute, result)
 
         masks = self._combine_masks(values, boundary_indices, sorter_indices)
         result.mask_vars = masks  # type: ignore[attr-defined]
@@ -4020,7 +4052,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if config.triton.enable_pdl:
+        if enable_pdl_codegen():
             triton_meta["launch_pdl"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
