@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/TensorAccessor.h>
 #include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
@@ -188,6 +187,12 @@ class Tensor {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  Tensor clone() const {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_clone(get(), &ret));
+    return Tensor(ret);
   }
 
   // defined in tensor-inl.h to avoid circular dependencies
