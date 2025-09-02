@@ -236,13 +236,15 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    # Only keep attributes that are safe for dictionary serialization.
-    serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
+    # pybind service attributes are no longer needed and their presence breaks
+    # the further logic related to the serialization of the created dictionary.
+    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
+    # to fix Triton tests.
+    # This field appears after updating pybind to 2.13.6.
     return {
-        key: value
-        for key in dir(props)
-        if not key.startswith("__")
-        and isinstance((value := getattr(props, key)), serializable_types)
+        prop: getattr(props, prop)
+        for prop in dir(props)
+        if not prop.startswith(("__", "_pybind11_"))
     }
 
 

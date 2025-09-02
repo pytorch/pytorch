@@ -9,7 +9,7 @@ namespace c10d {
 class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllreduceCUDADeviceWork(
-      std::shared_ptr<gloo::Context> context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,

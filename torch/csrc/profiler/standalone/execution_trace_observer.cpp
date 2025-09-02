@@ -30,12 +30,15 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_DISTRIBUTED
 
 using namespace at;
 
 // Collective property attributes
 // https://github.com/pytorch/pytorch/issues/124674
+#ifdef USE_DISTRIBUTED
 constexpr auto kETCommsName = "collective_name";
 constexpr auto kETInMsgNelems = "in_msg_nelems";
 constexpr auto kETOutMsgNelems = "out_msg_nelems";
@@ -46,6 +49,7 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
+#endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
 
@@ -265,6 +269,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+#ifdef USE_DISTRIBUTED
 static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
@@ -277,6 +282,7 @@ static std::string getAttrJson(
       type,
       value);
 }
+#endif
 
 static void writeJsonNode(
     std::ofstream& out,
@@ -654,6 +660,7 @@ static void handleKernelBackendInfo(
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
+#ifdef USE_DISTRIBUTED
   // We rely on paramcommsdebug object that is available in thread local info
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
@@ -696,6 +703,8 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
+
+#endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
   return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));

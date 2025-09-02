@@ -1,6 +1,5 @@
 #include <include/openreg.h>
 
-#include "OpenRegException.h"
 #include "OpenRegFunctions.h"
 
 namespace c10::openreg {

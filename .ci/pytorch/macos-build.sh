@@ -35,10 +35,11 @@ fi
 
 print_cmake_info
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
-  USE_OPENMP=1 WERROR=1 python setup.py bdist_wheel
+  # Needed for inductor benchmarks, as lots of HF networks make `torch.distribtued` calls
+  USE_DISTRIBUTED=1 USE_OPENMP=1 WERROR=1 python setup.py bdist_wheel
 else
-  # NB: we always build with distributed; USE_DISTRIBUTED turns off all
-  # backends (specifically the gloo backend), so test that this case works too
+  # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
+  # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
   USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel --plat-name macosx_11_0_arm64
 fi
 if which sccache > /dev/null; then

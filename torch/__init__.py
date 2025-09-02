@@ -35,6 +35,10 @@ from typing import (
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
+if TYPE_CHECKING:
+    from .types import Device, IntLikeType
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -55,10 +59,6 @@ from torch._utils_internal import (
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
 from torch.torch_version import __version__ as __version__
-
-
-if TYPE_CHECKING:
-    from torch.types import Device, IntLikeType
 
 
 __all__ = [
@@ -2218,7 +2218,6 @@ from torch import (
     testing as testing,
     types as types,
     utils as utils,
-    version as version,
     xpu as xpu,
 )
 from torch.signal import windows as windows

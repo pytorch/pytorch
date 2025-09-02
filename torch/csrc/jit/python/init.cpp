@@ -1958,15 +1958,17 @@ void initJITBindings(PyObject* module) {
            std::vector<Argument>,
            bool,
            bool>())
-      .def_property_readonly("name", &FunctionSchema::name)
-      .def_property_readonly("overload_name", &FunctionSchema::overload_name)
-      .def_property_readonly("arguments", &FunctionSchema::arguments)
-      .def_property_readonly("returns", &FunctionSchema::returns)
+      .def_property_readonly(
+          "name", [](FunctionSchema& self) { return self.name(); })
+      .def_property_readonly(
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
+      .def_property_readonly(
+          "arguments", [](FunctionSchema& self) { return self.arguments(); })
+      .def_property_readonly(
+          "returns", [](FunctionSchema& self) { return self.returns(); })
       .def(
           "is_backward_compatible_with",
-          // FunctionSchema::isBackwardCompatibleWith has an extra
-          // defaulted argument, so we can't just use a
-          // pointer-to-member here.
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
           })
@@ -1989,14 +1991,14 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "__str__",
-          [](const FunctionSchema& self) {
+          [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
             return ss.str();
           })
       .def(
           "__repr__",
-          [](const FunctionSchema& self) {
+          [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
             return ss.str();
@@ -2010,9 +2012,8 @@ void initJITBindings(PyObject* module) {
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);
           }))
-      .def_property_readonly("is_mutable", [](const FunctionSchema& self) {
-        return self.is_mutable();
-      });
+      .def_property_readonly(
+          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
       .def(py::init<
            std::string,
@@ -2021,17 +2022,18 @@ void initJITBindings(PyObject* module) {
            std::optional<IValue>,
            bool,
            std::optional<AliasInfo>>())
-      .def_property_readonly("name", &Argument::name)
-      .def_property_readonly("type", &Argument::type)
-      .def_property_readonly("real_type", &Argument::real_type)
+      .def_property_readonly("name", [](Argument& self) { return self.name(); })
+      .def_property_readonly("type", [](Argument& self) { return self.type(); })
+      .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
       .def_property_readonly(
           "N",
-          [](const Argument& self) -> py::object {
+          [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
       .def_property_readonly(
           "default_value",
-          [](const Argument& self) -> py::object {
+          [](Argument& self) -> py::object {
             if (!self.default_value()) {
               return py::none();
             }
@@ -2040,38 +2042,38 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "has_default_value",
-          [](const Argument& self) -> py::bool_ {
+          [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();
           })
       .def_property_readonly(
-          "alias_info", [](const Argument& self) { return self.alias_info(); })
+          "alias_info", [](Argument& self) { return self.alias_info(); })
       .def_property_readonly(
           "is_write",
-          [](const Argument& self) {
+          [](Argument& self) {
             if (self.alias_info() == nullptr) {
               return false;
             }
             return self.alias_info()->isWrite();
           })
       .def_property_readonly(
-          "is_out", [](const Argument& self) { return self.is_out(); })
-      .def_property_readonly("kwarg_only", [](const Argument& self) -> bool {
+          "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
   py::class_<AliasInfo>(m, "_AliasInfo")
       .def(py::init<bool, std::set<std::string>, std::set<std::string>>())
       .def_property_readonly(
-          "is_write", [](const AliasInfo& self) { return self.isWrite(); })
+          "is_write", [](AliasInfo& self) { return self.isWrite(); })
       .def_property_readonly(
           "before_set",
-          [](const AliasInfo& self) {
+          [](AliasInfo& self) {
             std::set<py::str> before_set_python;
             for (const auto& set : self.beforeSets()) {
               before_set_python.insert(py::str(set.toUnqualString()));
             }
             return before_set_python;
           })
-      .def_property_readonly("after_set", [](const AliasInfo& self) {
+      .def_property_readonly("after_set", [](AliasInfo& self) {
         std::set<py::str> after_set_python;
         for (const auto& set : self.afterSets()) {
           after_set_python.insert(py::str(set.toUnqualString()));

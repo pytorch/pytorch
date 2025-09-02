@@ -53,7 +53,7 @@ def build_deps():
         ".",
         "--target",
         "install",
-        "--config",  # For multi-config generators
+        "--config",
         "Release",
         "--",
     ]

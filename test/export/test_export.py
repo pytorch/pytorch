@@ -63,7 +63,10 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    xfailIfDistributedNotSupported,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -416,6 +419,28 @@ graph():
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \>\= 4"
         ):
             ep.module()(torch.tensor([3]))
+
+    def test_container_leak(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._cache = {}
+
+            def forward(self, x):
+                self._cache["leaky"] = x.sum()
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self, bar):
+                super().__init__()
+                self.bar = bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        foo = Foo(Bar())
+        with self.assertRaisesRegex(ValueError, "self.bar._cache"):
+            export(foo, (torch.randn(4, 4),), strict=False)
 
     def test_export_assume_static_by_default(self):
         class Module(torch.nn.Module):
@@ -4338,6 +4363,79 @@ def forward(self, x):
         x = torch.tensor([1, 2])
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
 
+    def test_nested_module_fake_tensor_leak(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._tensor_cache = None
+
+            def forward(self, x):
+                if self._tensor_cache is None:
+                    self._tensor_cache = x + 2
+                return self._tensor_cache.sum() + x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self, bar):
+                super().__init__()
+                self.bar = bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        foo = Foo(Bar())
+        _ = export(foo, (torch.ones(4, 4),), strict=False)
+        self.assertTrue(foo.bar._tensor_cache is None)
+
+    def test_export_leak_compile(self):
+        class BaseModule(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                raise NotImplementedError
+
+        class CacheModule(BaseModule):
+            def __init__(self, cache: torch.Tensor):
+                super().__init__()
+                assert cache.ndim == 3
+                self.cache = torch.nn.Parameter(cache, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                n_tokens = x.size(1)
+                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
+                rolled_cache[:, -n_tokens:, :] = x
+                self.cache.data = rolled_cache
+                return self.cache
+
+        class LinearBlock(torch.nn.Module):
+            def __init__(self, in_features, out_features, activation=None):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features)
+                self.activation = activation
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.activation(x) if self.activation else x
+
+        class MyModel(BaseModule):
+            def __init__(self):
+                super().__init__()
+                default_cache = torch.zeros(1, 10, 5)
+                self.cache_layer = CacheModule(default_cache)
+                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
+                self.fc2 = LinearBlock(10, 5)
+
+            def forward(self, x):
+                cached = self.cache_layer(x)
+                out = self.fc1(cached)
+                out = self.fc2(out)
+                return out
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "cached = self.cache_layer\(x\)",
+        ):
+            # Intentionally using training IR here because it will crash in inference IR
+            # anyways.
+            _ = torch.export.export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
+
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -5511,11 +5609,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dim0_x = torch.export.Dim("dim0_x", min=3)
         dim1_x = torch.export.Dim("dim1_x", max=8000)
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
-        em = torch.export._trace._export(
+        em = torch.export.export(
             m,
             (a,),
             dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
@@ -13399,7 +13497,7 @@ def forward(self, x, y):
 
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
-        # with allow_complex_guards_as_runtime_asserts=True to successfully export
+        # with prefer_deferred_runtime_asserts_over_guards=True to successfully export
         # case 1: modulo guards
         from torch.export import dims
 
@@ -13409,11 +13507,11 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         out1 = ep.module()(torch.randn(8, 7))
         self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
@@ -13443,11 +13541,11 @@ def forward(self, x, y):
 
         for private_api in (True, False):
             if private_api:
-                ep = torch.export._trace._export(
+                ep = torch.export.export(
                     FreeReshape(),
                     inputs,
                     dynamic_shapes=dynamic_shapes,
-                    allow_complex_guards_as_runtime_asserts=True,
+                    prefer_deferred_runtime_asserts_over_guards=True,
                 )
             else:
                 ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
@@ -13484,11 +13582,11 @@ def forward(self, x, y):
             "x": (Dim("dx0", min=2), Dim("dx1", min=2), Dim("dx2", min=2)),
             "y": (Dim("dy", min=8),),
         }
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             Reshape3d(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         out1 = ep.module()(torch.randn(9, 7, 2), torch.randn(126))
         self.assertEqual(out1.shape, torch.ones(126).shape)
@@ -13610,11 +13708,11 @@ def forward(self, x, y):
         model = Model()
         x = torch.rand(1024, 20, 16)
         dynamic_shapes = {"x": {0: Dim("batch")}}
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             model,
             (x,),
             dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -13687,11 +13785,11 @@ def forward(self, x, y):
 
         inputs = (torch.randn(6), torch.randn(12))
         dynamic_shapes = {"x": [Dim("dx", min=4)], "y": [Dim("dy", min=4)]}
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             Foo(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         # check forward pass
         out0, out1 = ep.module()(torch.randn(9), torch.randn(27))
@@ -13726,7 +13824,7 @@ def forward(self, x, y):
                 Foo(),
                 inputs,
                 dynamic_shapes=dynamic_shapes,
-                allow_complex_guards_as_runtime_asserts=True,
+                prefer_deferred_runtime_asserts_over_guards=True,
             ).run_decompositions()
 
         self.assertEqual(
@@ -14138,11 +14236,11 @@ graph():
 
         inputs = (torch.randn(5), torch.randn(3))
         shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=True,
         )
         # count 2 pow nodes, 2 sym_size.int nodes
         self.assertEqual(
@@ -14941,11 +15039,11 @@ def forward(self, x):
 
         for private_api in (True, False):
             if private_api:
-                ep = torch.export._trace._export(
+                ep = torch.export.export(
                     ModConstraint(),
                     (torch.randn(3, 4),),
                     dynamic_shapes={"x": (dynamic, dynamic)},
-                    allow_complex_guards_as_runtime_asserts=True,
+                    prefer_deferred_runtime_asserts_over_guards=True,
                 )
             else:
                 ep = export(
@@ -14959,7 +15057,7 @@ def forward(self, x):
                 for node in ep.graph.nodes
             ].count(True)
             if private_api:
-                self.assertEqual(num_asserts, 7)
+                self.assertEqual(num_asserts, 6)
                 with self.assertRaisesRegex(
                     RuntimeError,
                     r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
@@ -15357,6 +15455,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15374,6 +15473,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15389,6 +15489,7 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15402,6 +15503,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15419,6 +15521,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
