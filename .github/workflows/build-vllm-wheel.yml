@@ -41,8 +41,6 @@ jobs:
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
       BUILD_VERSION: ${{ matrix.device == 'cuda' && matrix.cuda-version || '' }}
-      # CUDA specific env variables
-      TORCH_CUDA_ARCH_LIST: ${{ matrix.device == 'cuda' && '8.0;8.9;9.0' || '' }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -63,7 +61,6 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Get latest PyTorch nightly
-        env:
         shell: bash
         run: |
           set -eux
@@ -119,7 +116,7 @@ jobs:
         with:
           build-targets: vllm
           docker-image: ${{ matrix.docker-image }}
-          cuda-arch-list: ${{ env.TORCH_CUDA_ARCH_LIST }}
+          cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
           output-dir: ${{ runner.temp }}/vllm
 
