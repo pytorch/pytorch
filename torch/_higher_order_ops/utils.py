@@ -880,7 +880,6 @@ def check_input_alias_and_mutation(
 def _tensor_storage(t) -> StorageWeakRef:
     return StorageWeakRef(t._typed_storage())
 
-
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
@@ -1169,7 +1168,12 @@ def materialize_as_graph(
                 # be None but the associated inputs have fake mode or there
                 # is a global tracing context with fake mode. We nneed to
                 # make sure the fake mode when tracing subgraph is consistent.
-                if fake_mode := detect_fake_mode(unfunc_t):
+                fake_mode = None
+                for t in unfunc_t:
+                    if isinstance(t, FakeTensor):
+                        fake_mode = t.fake_mode
+                        break
+                if fake_mode is not None:
                     stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(fn)(*unfunc_t)
 
