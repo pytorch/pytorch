@@ -1528,10 +1528,10 @@ class OutputGraph(OutputGraphGuardsState):
 
             if (
                 torch._dynamo.config.log_graph_in_out_metadata
-                and root_stack_values
-                and len(root_stack_values) == 1
+                and stack_values_flat
+                and len(stack_values_flat) == 1
             ):
-                vt = root_stack_values[0]
+                vt = stack_values_flat[0]
                 if (
                     isinstance(vt, torch._dynamo.variables.NamedTupleVariable)
                     and vt.tuple_cls is torch._dynamo.export.ExportTracerOutput
