@@ -1712,15 +1712,21 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormBackwardKernelImpl",
-      [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-      });
+  if (use_cudnn_layernorm(gamma.numel(), dbeta->numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_layernorm_backward_out(dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormBackwardKernelImpl",
+        [&]() {
+          LayerNormBackwardKernelImplInternal<scalar_t>(
+              dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        });
+  }
 }
 
 void RMSNormBackwardKernelImpl(
@@ -1732,15 +1738,21 @@ void RMSNormBackwardKernelImpl(
     int64_t N,
     Tensor* dX,
     Tensor* dgamma) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormBackwardKernelImpl",
-      [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t, true>(
-            dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
-      });
+  if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_rmsnorm_backward_out(dY, X, rstd, gamma, M, N, dX, dgamma);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormBackwardKernelImpl",
+        [&]() {
+          LayerNormBackwardKernelImplInternal<scalar_t, true>(
+              dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
+        });
+  }
 }
 
 } // namespace
