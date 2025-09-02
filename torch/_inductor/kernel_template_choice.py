@@ -48,7 +48,7 @@ class KernelTemplateChoice:
         """
         if not hasattr(self, "_choice"):
             # First time accessing choice - try to generate it
-            self._choice = self.template.choice_or_None(
+            self._choice = self.template.choice_or_none(
                 **self.kwargs,
                 layout=self.layout,
                 input_nodes=self.inputs.nodes(),
