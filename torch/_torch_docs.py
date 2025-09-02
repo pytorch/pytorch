@@ -10052,7 +10052,7 @@ Example::
 add_docstr(
     torch.argsort,
     r"""
-argsort(input, dim=-1, descending=False, stable=False) -> Tensor
+argsort(input, dim=-1, descending=False, *, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -10068,6 +10068,8 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+
+Keyword args:
     stable (bool, optional): controls the relative order of equivalent elements
 
 Example::
