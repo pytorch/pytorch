@@ -594,7 +594,6 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         return 8
 
     @skip_if_lt_x_gpu(8)
-    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     @with_comms
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh
