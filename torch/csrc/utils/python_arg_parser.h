@@ -322,6 +322,12 @@ struct FunctionParameter {
       int argnum,
       int64_t* failed_idx = nullptr);
 
+  bool _check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
   void set_default_str(const std::string& str);
   TORCH_PYTHON_API std::string type_name() const;
 
@@ -1053,13 +1059,20 @@ inline double PythonArgs::toDouble(int i) {
 }
 
 inline bool PythonArgs::toBool(int i) {
-  if (!args[i])
+  if (!args[i]) {
     return signature.params[i].default_bool;
+  }
+  if (args[i] == Py_True) {
+    return true;
+  }
+  if (args[i] == Py_False) {
+    return false;
+  }
   if (torch::is_symbool(py::handle(args[i]))) {
     return py::cast<c10::SymBool>(py::handle(args[i]))
         .guard_bool(__FILE__, __LINE__);
   }
-  return args[i] == Py_True;
+  return false;
 }
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
