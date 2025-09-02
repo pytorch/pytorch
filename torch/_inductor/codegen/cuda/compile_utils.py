@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.cpp_builder import _set_gpu_runtime_env, _transform_cuda_paths
@@ -16,6 +17,7 @@ if config.is_fbcode():
 
 
 log = logging.getLogger(__name__)
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 
 
 def use_re_build() -> bool:
@@ -67,8 +69,8 @@ def _cutlass_include_paths() -> list[str]:
 
 
 def _cuda_compiler() -> Optional[str]:
-    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
-        return config.cuda.cuda_cxx
+    if cuda_env.nvcc_exist(config.cutlass.cuda_cxx):
+        return config.cutlass.cuda_cxx
     if config.is_fbcode():
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
@@ -135,7 +137,7 @@ def _nvcc_arch_as_compile_option() -> str:
 def _nvcc_compiler_options() -> list[str]:
     arch = _nvcc_arch_as_compile_option()
     code = [f"sm_{arch}", f"compute_{arch}"]
-    if config.cuda.enable_cuda_lto:
+    if config.cutlass.enable_cuda_lto:
         code += [f"lto_{arch}"]
     options = [
         "-t=0",
@@ -144,16 +146,16 @@ def _nvcc_compiler_options() -> list[str]:
         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cuda.compile_opt_level,
+        config.cutlass.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cuda.enable_debug_info:
+    if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
-    if config.cuda.enable_ptxas_info:
+    if config.cutlass.enable_ptxas_info:
         options.extend(
             [
                 "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
@@ -163,7 +165,7 @@ def _nvcc_compiler_options() -> list[str]:
                 "--source-in-ptx",
             ]
         )  # Annotate the ptx file with source information
-    if config.cuda.use_fast_math:
+    if config.cutlass.use_fast_math:
         options.extend(
             [
                 "--use_fast_math",
@@ -217,7 +219,6 @@ def cuda_compile_command(
     else:
         autotuning_log.debug("CUDA command: %s", res)
     return res
-
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
