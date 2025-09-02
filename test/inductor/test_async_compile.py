@@ -4,6 +4,7 @@ from unittest.mock import patch
 import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
@@ -40,6 +41,29 @@ class TestAsyncCompile(TestCase):
             with fresh_cache():
                 compiled_fn = torch.compile(fn)
                 self.assertEqual(fn(x, y), compiled_fn(x, y))
+
+    @requires_gpu()
+    @requires_triton()
+    def test_bad_kernel(self):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            async_compile = AsyncCompile()
+            AsyncCompile.wait_pool_ready()
+            with self.assertRaises(SubprocException):
+                async_compile.triton(
+                    "fake_kernel_name", source_code="This definitely doesn't exist"
+                ).result()
+
+    @requires_gpu()
+    @requires_triton()
+    def test_wait_pool_ready(self):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile._ready_future.done())
+            self.assertTrue(AsyncCompile.use_process_pool())
 
     @requires_gpu()
     @requires_triton()
