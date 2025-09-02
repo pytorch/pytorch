@@ -225,10 +225,8 @@ Tensor aminmax_backward(
     const Tensor& grad_max,
     const Tensor& min_val,
     const Tensor& max_val) {
-  at::DimVector dims_vec;
-  if (dim.has_value())
-    dims_vec.push_back(*dim);
-  IntArrayRef dims = dims_vec;
+  IntArrayRef dims = dim ? IntArrayRef(*dim) : IntArrayRef{};
+
   Tensor result;
 
   if (grad_min.defined()) {
@@ -7314,3 +7312,4 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
 }
 
 } // namespace torch::autograd::generated::details
+        
