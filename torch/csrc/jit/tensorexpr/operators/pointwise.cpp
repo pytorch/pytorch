@@ -14,7 +14,7 @@ Tensor computeSign(
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices)};
-        auto inp = inputs[0];
+        const auto& inp = inputs[0];
         auto zero = ExprHandle(immLike(inp, 0.0f));
         auto res = (zero < inp) - (inp < zero);
         return promoteToDtype(res, inp.dtype().scalar_type());

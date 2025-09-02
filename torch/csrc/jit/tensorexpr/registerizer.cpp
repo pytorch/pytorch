@@ -165,7 +165,7 @@ void Scope::filterClosed() {
       std::remove_if(
           closedAccesses_.begin(),
           closedAccesses_.end(),
-          [](auto info) {
+          [](const auto& info) {
             return info->store_cost()->isConstant() &&
                 immediateAs<int>(info->store_cost()) <= 1 &&
                 info->load_cost()->isConstant() &&
@@ -645,7 +645,9 @@ std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
   std::sort(
       currentScope_->closedAccesses().begin(),
       currentScope_->closedAccesses().end(),
-      [](auto i1, auto i2) { return i1->accessOrder() < i2->accessOrder(); });
+      [](const auto& i1, const auto& i2) {
+        return i1->accessOrder() < i2->accessOrder();
+      });
   return currentScope_->closedAccesses();
 }
 
