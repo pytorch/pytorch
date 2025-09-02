@@ -274,9 +274,7 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(
-        head_dim, dtype, query.get_device().type
-    )
+    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -714,9 +712,7 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(
-        head_dim, dtype, query.get_device().type
-    )
+    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0

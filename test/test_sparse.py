@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
 from packaging import version
@@ -41,6 +40,7 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_csc
             or op.supports_sparse_bsr
             or op.supports_sparse_bsc)
+
 
 
 reduction_ops_with_sparse_support = [
@@ -4126,7 +4126,7 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs, sparse=True), dtypes=OpDTypes.supported,
+_sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
@@ -4178,8 +4178,8 @@ class TestSparseUnaryUfuncs(TestCase):
     @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
         # test 0x0 sparse_coo_tensor
-        indices = torch.empty(2, 0, dtype=torch.int64, device=device)
-        values = torch.empty(0, dtype=dtype, device=device)
+        indices = torch.empty(2, 0, dtype=torch.int64)
+        values = torch.empty(0, dtype=dtype)
         sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
         expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
         actual = op(sparse_0x0)
@@ -5526,7 +5526,7 @@ class TestSparseAny(TestCase):
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 

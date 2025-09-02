@@ -28,10 +28,9 @@ _P = ParamSpec("_P")
 Args: TypeAlias = tuple[Any, ...]
 Kwargs: TypeAlias = dict[str, Any]
 StateDict: TypeAlias = dict[str, Any]
-DeviceDict: TypeAlias = dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict: TypeAlias = dict[
-    Optional[tuple[torch.device, torch.dtype]], torch.Tensor
-]
+DeviceDict = dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict = dict[Optional[tuple[torch.device, torch.dtype]], torch.Tensor]
+
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]

@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <include/openreg.h>
+
 #if defined(_WIN32)
 #include <windows.h>
 #else

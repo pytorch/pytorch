@@ -12,9 +12,8 @@ if torch.backends.mps.is_available():
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: str = "mps",
+        device_type: Optional[str] = None,
         xfail_exclusion: Optional[list[str]] = None,
-        sparse: bool = False,
     ) -> Sequence[OpInfo]:
         if xfail_exclusion is None:
             xfail_exclusion = []
@@ -38,7 +37,6 @@ if torch.backends.mps.is_available():
             "as_strided_copy",
             "as_strided_scatter",
             "asin",
-            "asinh",
             "acos",
             "atan",
             "broadcast_tensors",
@@ -296,7 +294,7 @@ if torch.backends.mps.is_available():
         }
 
         # Those ops are not expected to work
-        UNIMPLEMENTED_XFAILLIST: dict[str, Optional[list]] = {
+        UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
             "logspace": None,
             "logspacetensor_overload": None,
@@ -319,7 +317,7 @@ if torch.backends.mps.is_available():
             "index_reducemean": None,
             "index_reduceamax": None,
             "index_reduceamin": None,
-            # "kthvalue": None,
+            "kthvalue": None,
             "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
@@ -442,13 +440,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
         }
-        UNIMPLEMENTED_XFAILLIST_SPARSE: dict[str, Optional[list]] = {
-            "logspace": None,
-            "logspacetensor_overload": None,
-            "linalg.eig": None,
-            "linalg.eigvals": None,
-            "put": None,
-        }
 
         if MACOS_VERSION < 15.0:
             UNIMPLEMENTED_XFAILLIST.update(
@@ -457,10 +448,8 @@ if torch.backends.mps.is_available():
                     "nanquantile": None,
                 }
             )
-        if sparse:
-            UNIMPLEMENTED_XFAILLIST.update(UNIMPLEMENTED_XFAILLIST_SPARSE)
 
-        UNDEFINED_XFAILLIST: dict[str, Optional[list]] = {
+        UNDEFINED_XFAILLIST = {
             # Top 60 operators
             # topk fails with duplicate indices
             "topk": [
@@ -537,7 +526,7 @@ if torch.backends.mps.is_available():
             ],
         }
 
-        ON_MPS_XFAILLIST: dict[str, Optional[list]] = {
+        ON_MPS_XFAILLIST = {
             # Failures due to lack of implementation of downstream functions on MPS backend
             # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
             "linalg.matrix_rank": None,
@@ -610,30 +599,6 @@ if torch.backends.mps.is_available():
 
         for op in ops:
             key = op.name + op.variant_test_name
-            addDecorator(
-                op,
-                DecorateInfo(
-                    unittest.expectedFailure,
-                    dtypes=[
-                        torch.double,
-                        torch.cdouble,
-                    ],
-                ),
-            )
-            if sparse:
-                # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
-                # which leads to unexpected success with it
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.skip(
-                            "Skipped due to MPS not supporting complex128 tensors"
-                        ),
-                        dtypes=[
-                            torch.complex128,
-                        ],
-                    ),
-                )
             if key in EMPTY_OPS_SKIPLIST:
                 addDecorator(
                     op,
@@ -839,13 +804,4 @@ if torch.backends.mps.is_available():
             if key in XFAILLIST:
                 addDecorator(op, DecorateInfo(unittest.expectedFailure))
 
-        return ops
-else:
-
-    def mps_ops_modifier(
-        ops: Sequence[OpInfo],
-        device_type: str = "mps",
-        xfail_exclusion: Optional[list[str]] = None,
-        sparse: bool = False,
-    ) -> Sequence[OpInfo]:
         return ops

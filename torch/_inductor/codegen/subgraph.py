@@ -168,6 +168,7 @@ class SubgraphTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
+        make_fx_graph: Callable[..., Any],
     ):
         """
         Initialize a subgraph template.
@@ -176,15 +177,13 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        super().__init__(name=name)
+        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
+        self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]
         self,
-        name: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        make_fx_graph: Callable[..., Any],
-        description: str = "",
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -201,9 +200,9 @@ class SubgraphTemplate(KernelTemplate):
         """
 
         return SubgraphChoiceCaller(
-            name=f"{name}_{next(SubgraphTemplate.index_counter)}",
+            name=self.name,
             input_nodes=input_nodes,
             layout=layout,
-            description=description,
-            make_fx_graph=make_fx_graph,
+            description="",
+            make_fx_graph=self.make_fx_graph,
         )

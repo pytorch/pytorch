@@ -198,7 +198,6 @@ class PagedAttention:
         self,
         block_mask: BlockMask,
         batch_idx: Optional[torch.Tensor] = None,
-        kv_len: Optional[torch.Tensor] = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -211,8 +210,6 @@ class PagedAttention:
                 batch dimension. This provides flexibility to convert a
                 block mask with smaller batch size than the page table;
                 shape :math:`(B)`.
-            kv_len (Optional[Tensor]): actual KV sequence length for upper bound check;
-                shape :math:`(B,)` to handle multiple batches.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 
@@ -264,7 +261,7 @@ class PagedAttention:
                 .to(torch.int32)
             )
 
-        new_mask_mod = self.get_mask_mod(block_mask.mask_mod, kv_len)
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
 
         seq_lengths = (block_mask.seq_lengths[0], self.n_pages * self.page_size)
         return BlockMask.from_kv_blocks(
@@ -278,9 +275,7 @@ class PagedAttention:
         )
 
     def get_mask_mod(
-        self,
-        mask_mod: Optional[_mask_mod_signature],
-        kv_len: Optional[torch.Tensor] = None,
+        self, mask_mod: Optional[_mask_mod_signature]
     ) -> _mask_mod_signature:
         """
         Converts a mask_mod based on mapping from the physical block index to the logical
@@ -288,7 +283,6 @@ class PagedAttention:
 
         Args:
             mask_mod (_mask_mod_signature): mask_mod based on the logical block index.
-            kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
         """
         if mask_mod is None:
             mask_mod = noop_mask
@@ -303,21 +297,14 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
-            live_block = logical_block_idx >= 0
-            within_upper_bound = (
-                logical_kv_idx < kv_len[b] if kv_len is not None else True
+            return torch.where(
+                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
             )
-            within_lower_bound = logical_kv_idx >= 0
-            is_valid = live_block & within_upper_bound & within_lower_bound
-
-            return torch.where(is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False)
 
         return new_mask_mod
 
     def get_score_mod(
-        self,
-        score_mod: Optional[_score_mod_signature],
-        kv_len: Optional[torch.Tensor] = None,
+        self, score_mod: Optional[_score_mod_signature]
     ) -> _score_mod_signature:
         """
         Converts a score_mod based on mapping from the physical block index to the logical
@@ -325,8 +312,6 @@ class PagedAttention:
 
         Args:
             score_mod (_score_mod_signature): score_mod based on the logical block index.
-            `kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
-
         """
         if score_mod is None:
             score_mod = _identity
@@ -342,15 +327,8 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
-            live_block = logical_block_idx >= 0
-            within_upper_bound = (
-                logical_kv_idx < kv_len[b] if kv_len is not None else True
-            )
-            within_lower_bound = logical_kv_idx >= 0
-            is_valid = live_block & within_upper_bound & within_lower_bound
-
             return torch.where(
-                is_valid,
+                logical_block_idx >= 0,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
                 float("-inf"),
             )
