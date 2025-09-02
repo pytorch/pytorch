@@ -397,7 +397,7 @@ def forward(self, x):
         export_inputs = ((torch.randn(4, 4),), {})
         eager_inputs = copy.deepcopy(export_inputs)
 
-        from torch._dynamo.export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
         graph_module = _dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]
