@@ -3043,8 +3043,7 @@ class AlgorithmSelectorCache(PersistentCache):
             try:  # the timeout itself is not captured in future.exceptions so we need this try block to catch it
                 for future in as_completed(
                     futures,
-                    # timeout=precompilation_timeout_seconds,
-                    timeout=30,
+                    timeout=precompilation_timeout_seconds
                 ):
                     completed_futures.add(future)
                     choice = futures[
