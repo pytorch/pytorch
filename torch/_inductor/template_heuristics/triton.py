@@ -16,7 +16,12 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
 from ..kernel_inputs import KernelInputs, MMKernelInputs
-from ..utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
+from ..utils import (
+    get_backend_num_stages,
+    get_num_sms,
+    get_tma_workspace_arg,
+    TMA_DESCRIPTOR_SIZE,
+)
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
@@ -26,6 +31,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from triton import Config as TritonConfig
+
+    from ..ir import Layout
 
 
 # Gemm Configs
@@ -1497,12 +1504,24 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         self.should_scale_configs = False
 
 
-# TMA-specific mixin for TMA templates
-class TMAConfigMixin(MMTemplateConfigMixin):
+class TMAWorkspaceMixin(MMTemplateConfigMixin):
     """
-    TMA-specific mixin that uses persistent configs and adds TMA options.
-    This inherits from MMTemplateConfigMixin and overrides config generation.
+    Small mixin to ensure that the workspace arg is correct for TMA
+    and TMA specific filtering can happen.
     """
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs["workspace_arg"] = get_tma_workspace_arg(
+            num_tma_descriptors=2,
+            device=kernel_inputs.device(),
+        )
+        return kwargs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1510,6 +1529,14 @@ class TMAConfigMixin(MMTemplateConfigMixin):
         """
         configs = [c for c in configs if c.num_warps != 2]
         return super()._filter_configs(configs)
+
+
+# TMA-specific mixin for TMA templates
+class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
+    """
+    TMA-specific mixin that uses persistent configs and adds TMA options.
+    This inherits from MMTemplateConfigMixin and overrides config generation.
+    """
 
     def get_template_configs(
         self,
@@ -1520,26 +1547,10 @@ class TMAConfigMixin(MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
-            kernel_inputs, layout, op_name
-        ):
-            # Add TMA-specific options (moved from mm_common.persistent_mm_options)
-            input_nodes = kernel_inputs.nodes()
-            self._add_tma_options(template_kwargs, input_nodes)
-            yield template_kwargs
-
-    def _add_tma_options(
-        self, template_kwargs: dict[str, Any], input_nodes: list[Any]
-    ) -> None:
-        """
-        Add TMA-specific options to template kwargs.
-        Moved from mm_common.persistent_mm_options and mm_common.tma_options.
-        """
-        # For TMA templates, we need the actual matrix tensors
-        mat1 = input_nodes[-2]
-        mat2 = input_nodes[-1]
-
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "TMATemplateConfigMixin requires MMKernelInputs"
+        )
+        mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
             "B_ROW_MAJOR": not mat2.layout.is_transposed(),
@@ -1547,15 +1558,19 @@ class TMAConfigMixin(MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
-        template_kwargs.update(tma_opts)
+        # Get base template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            yield {**template_kwargs, **tma_opts}
 
 
-# Scaled MM-specific mixin for scaled MM templates (non-TMA)
+# Scaled MM-specific mixin for scaled MM templates
 class ScaledMMConfigMixin(MMTemplateConfigMixin):
     """
-    Scaled MM-specific mixin that uses scaled configs and adds scaled MM options.
-    This is for non-TMA scaled MM templates only.
-    This inherits from MMTemplateConfigMixin and overrides config generation.
+    This is a base that handles the common case for ScaledMM
+
+    The TMA and non-TMA should build on top of this
     """
 
     def get_template_configs(
@@ -1617,19 +1632,12 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
 
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
-class ScaledTMAConfigMixin(ScaledMMConfigMixin):
+class ScaledTMAConfigMixin(TMAWorkspaceMixin, ScaledMMConfigMixin):
     """
     Scaled TMA-specific mixin that extends ScaledMMConfigMixin with TMA functionality.
     This is for scaled MM templates that use device TMA.
     This inherits from ScaledMMConfigMixin and adds TMA-specific options.
     """
-
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        TMA specific filtering, as num_warps=2 not safe for TMA
-        """
-        configs = [c for c in configs if c.num_warps != 2]
-        return super()._filter_configs(configs)
 
     def get_template_configs(
         self,
@@ -1680,7 +1688,9 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
 @register_template_heuristic(
     "mm_persistent_tma", "cuda", register=torch.version.hip is None
 )
-class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
+class CUDAPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, CUDAConfigHeuristic
+):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
@@ -1693,7 +1703,9 @@ class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeurist
     "mm_persistent_tma",
     "xpu",
 )
-class XPUPersistentTMATemplateConfigHeuristic(TMAConfigMixin, XPUConfigHeuristic):
+class XPUPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, XPUConfigHeuristic
+):
     """Persistent TMA template heuristic for CUDA"""
 
     def __init__(self) -> None:
