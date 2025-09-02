@@ -4727,6 +4727,10 @@ class ComputedBuffer(OperationBuffer):
             reindex0: Callable[[Sequence[int]], Sequence[int]]
             reindex1: Callable[[Sequence[int]], Sequence[int]]
             if self.get_reduction_type() == "dot":
+                # TODO : what really matters is the location of "z" (batch) axis in bmm.
+                # while it is okay to swap the y and x like (x,y,r) or (z,x,y,r), but
+                # when we reorder the z axis (e.g., (y,x,z,r) ), codegen break.
+                # so relax the condition accordingly
                 order = list(range(len(sizes)))  # Dont reorder
                 newsizes = [sizes[i] for i in order]
                 reindex0 = same_reorder(order)
