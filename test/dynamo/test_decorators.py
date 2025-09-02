@@ -1723,11 +1723,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_error_on_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f1(x):
             x = x + 1
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1738,18 +1738,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts)
         def f2(x):
             x = x + 1
-            with torch._dynamo.error_on_graph_break(True):
+            with torch.compiler.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 2
 
         with self.assertRaises(Unsupported):
             f2(inp)
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f3(x):
             x = x + 1
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.graph_break()
                 x = x + 2
                 torch._dynamo.graph_break()
@@ -1764,11 +1764,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.graph_break()
             return x + 4
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f4(x):
             x = x + 1
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.skip_frame()
                 return inner_f4(x)
 
@@ -1780,13 +1780,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # error_on_graph_break in a nested frame
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         def inner_f5(x):
             x = x + 2
             torch._dynamo.graph_break()
             return x + 4
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f5(x):
             x = x + 1
@@ -1798,11 +1798,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner_f6(x):
             x = x + 2
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.graph_break()
             return x + 4
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f6(x):
             x = x + 1
@@ -1814,11 +1814,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner_f7(x):
             x = x + 2
-            with torch._dynamo.error_on_graph_break(True):
+            with torch.compiler.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 4
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         @torch.compile(backend=cnts)
         def f7(x):
             x = x + 1
@@ -1831,18 +1831,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # error_on_graph_break in a nested frame with a skipped frame in between
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         def inner2_f8(x):
             x = x + 2
             torch._dynamo.graph_break()
             return x + 4
 
         def inner1_f8(x):
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.skip_frame()
             return inner2_f8(x)
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f8(x):
             x = x + 1
@@ -1854,7 +1854,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def inner2_f9(x):
             x = x + 2
-            with torch._dynamo.error_on_graph_break(True):
+            with torch.compiler.error_on_graph_break(True):
                 torch._dynamo.graph_break()
             return x + 4
 
@@ -1862,7 +1862,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def inner1_f9(x):
             return inner2_f9(x)
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         @torch.compile(backend=cnts)
         def f9(x):
             x = x + 1
@@ -1874,7 +1874,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # test export with error_on_graph_break(False) still errors
 
     def test_error_on_graph_break_export(self):
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         def inner(x):
             x = x + 2
             torch._dynamo.graph_break()
@@ -1899,13 +1899,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return inner1_f1(x)
 
         def inner3_f1(x):
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 return inner2_f1(x)
 
         def inner4_f1(x):
             return inner3_f1(x)
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend=cnts)
         def f1(x):
             x = x + 4
@@ -1924,13 +1924,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return inner1_f2(x)
 
         def inner3_f2(x):
-            with torch._dynamo.error_on_graph_break(True):
+            with torch.compiler.error_on_graph_break(True):
                 return inner2_f2(x)
 
         def inner4_f2(x):
             return inner3_f2(x)
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         @torch.compile(backend=cnts)
         def f2(x):
             x = x + 4
@@ -1942,17 +1942,17 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_error_on_graph_break_error(self):
         @torch.compile(backend="eager")
         def f1():
-            with torch._dynamo.error_on_graph_break(foo="bar"):
+            with torch.compiler.error_on_graph_break(foo="bar"):
                 pass
 
         @torch.compile(backend="eager")
         def f2():
-            with torch._dynamo.error_on_graph_break():
+            with torch.compiler.error_on_graph_break():
                 pass
 
         @torch.compile(backend="eager")
         def f3():
-            with torch._dynamo.error_on_graph_break("foo"):
+            with torch.compiler.error_on_graph_break("foo"):
                 pass
 
         with self.assertRaises(Exception):
@@ -1965,14 +1965,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_nested_compile_error_on_graph_break(self):
         inp = torch.ones(3)
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend="eager")
         def inner_f1(x):
             x = x + 1
             torch._dynamo.graph_break()
             return x + 2
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         @torch.compile(backend="eager")
         def f1(x):
             return inner_f1(x)
@@ -1980,14 +1980,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             f1(inp)
 
-        @torch._dynamo.error_on_graph_break(False)
+        @torch.compiler.error_on_graph_break(False)
         @torch.compile(backend="eager")
         def inner_f2(x):
             x = x + 1
             torch._dynamo.graph_break()
             return x + 2
 
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend="eager")
         def f2(x):
             return inner_f2(x)
@@ -2001,7 +2001,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
             x = x + 1
-            with torch._dynamo.error_on_graph_break(False):
+            with torch.compiler.error_on_graph_break(False):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -2009,7 +2009,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             f(inp)
 
     def test_error_on_graph_break_empty_graph(self):
-        @torch._dynamo.error_on_graph_break(True)
+        @torch.compiler.error_on_graph_break(True)
         @torch.compile(backend="eager")
         def f():
             return 1
