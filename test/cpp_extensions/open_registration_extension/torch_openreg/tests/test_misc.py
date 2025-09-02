@@ -11,6 +11,7 @@ import torch_openreg  # noqa: F401
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfMPS,
+    skipIfTorchDynamo,
     skipIfWindows,
     TestCase,
 )
@@ -167,8 +168,10 @@ class TestTensorType(TestCase):
 
 
 class TestAutograd(TestCase):
+    # Support MPS and Windows platform later and fix torchdynamo issue
     @skipIfMPS
     @skipIfWindows()
+    @skipIfTorchDynamo()
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
