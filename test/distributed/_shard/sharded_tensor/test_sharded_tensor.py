@@ -48,6 +48,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    TEST_XPU,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
@@ -61,6 +62,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
     _chunk_sharding_specs_list_for_test,
     MyShardedModel1,
 )
+
+from torch.testing._internal.common_device_type import skipXPUIf
+import unittest
 
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
@@ -173,6 +177,7 @@ class TestShardParameter(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://jira.devtools.intel.com/browse/MLSL-3625")
     def test_shard_parameter(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -516,6 +521,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_complete_world_size(self):
         for dim in [0, -2]:
             spec = ChunkShardingSpec(
@@ -562,16 +569,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(1, len(shards))
                 for remote_shard in shards:
                     self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    if DEVICE_TYPE != "xpu":
-                        shard = remote_shard.to_here()
-                        self.assertEqual(
-                            f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
-                            str(shard.metadata.placement),
-                        )
-                        if rpc_rank == 3:
-                            self.assertEqual((1, 20), shard.tensor.size())
-                        else:
-                            self.assertEqual((3, 20), shard.tensor.size())
+                    # if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual(
+                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
+                        str(shard.metadata.placement),
+                    )
+                    if rpc_rank == 3:
+                        self.assertEqual((1, 20), shard.tensor.size())
+                    else:
+                        self.assertEqual((3, 20), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
@@ -838,6 +845,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_partial_world_size(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -882,17 +891,19 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual(
-                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                    )
-                    self.assertEqual((5, 20), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual(
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                )
+                self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_new_group(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -937,20 +948,22 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(1, len(shards))
-            if DEVICE_TYPE != "xpu":
-                for remote_shard in shards:
-                    shard = remote_shard.to_here()
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    self.assertEqual(
-                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                    )
-                    self.assertEqual((5, 20), shard.tensor.size())
+            # if DEVICE_TYPE != "xpu":
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                self.assertEqual(
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                )
+                self.assertEqual((5, 20), shard.tensor.size())
 
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_multiple_local_shards(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -994,11 +1007,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(3, len(remote_shards))
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(2, len(shards))
-            if DEVICE_TYPE != "xpu":
-                for remote_shard in shards:
-                    shard = remote_shard.to_here()
-                    self.assertEqual((2, 20), shard.tensor.size())
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+            # if DEVICE_TYPE != "xpu":
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual((2, 20), shard.tensor.size())
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
 
 
     @skip_if_lt_x_gpu(4)
@@ -1493,6 +1506,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_grid_sharding(self):
         spec = EnumerableShardingSpec(
             [
@@ -1557,9 +1572,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
 
     @with_comms(backend=BACKEND)
@@ -2014,6 +2029,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_partial_world_size(self):
         spec = EnumerableShardingSpec(
             [
@@ -2074,14 +2091,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_new_group(self):
         spec = EnumerableShardingSpec(
             [
@@ -2144,14 +2163,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_multiple_local_shards(self):
         spec = EnumerableShardingSpec(
             [
@@ -2229,14 +2250,16 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(2, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_with_rpc_names(self):
         spec = EnumerableShardingSpec(
             [
@@ -2301,12 +2324,14 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
 
 class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def _generate_st_from_chunk_local_tensor(self, st_size, sharding_spec):
         tensor_meta = sharding_spec.build_metadata(st_size, TensorProperties())
         pg = dist.distributed_c10d._get_default_group()
@@ -2362,12 +2387,12 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 # If remote shard does not exist, to_here() will throw exception.
-                if DEVICE_TYPE != "xpu":
-                    if tensor_meta.shards_metadata[rpc_rank]:
-                        shard = remote_shard.to_here()
-                        self.assertEqual(
-                            rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
-                        )
+                # if DEVICE_TYPE != "xpu":
+                    # if tensor_meta.shards_metadata[rpc_rank]:
+                shard = remote_shard.to_here()
+                self.assertEqual(
+                    rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
+                )
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2449,6 +2474,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_init_from_local_shards(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -2501,9 +2528,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
@@ -2865,6 +2892,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
+    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_init_from_local_shards_and_global_metadata(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -2946,9 +2975,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
