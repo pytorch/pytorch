@@ -313,8 +313,6 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
-            "igamma": None,
-            "igammac": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -696,6 +694,8 @@ if torch.backends.mps.is_available():
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
+            "igamma": None,  # currently not supported for any device
+            "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
                 torch.float16,
