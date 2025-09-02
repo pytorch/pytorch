@@ -213,12 +213,14 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(
-        kernel_inputs,
-        layout,
-        templates_to_use,
-        name,
-        kwarg_overrides=kwarg_overrides,
+    choices.extend(
+        V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            templates_to_use,
+            name,
+            kwarg_overrides=kwarg_overrides,
+        )
     )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
@@ -286,6 +288,8 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

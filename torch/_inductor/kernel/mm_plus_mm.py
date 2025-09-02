@@ -166,8 +166,8 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(
-        kernel_inputs, layout1, templates_to_use, "mm_plus_mm"
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, layout1, templates_to_use, "mm_plus_mm")
     )
 
     return autotune_select_algorithm(
