@@ -8640,7 +8640,7 @@ class WhileLoop(ExternKernel):
                     # Subgraph lowering always return StorageBox as graph_outputs because
                     # it realizes the outputs.
                     #
-                    # However, require_exact_strides is mostly expecting TensorBox
+                    # However, require_exact_strides is expecting TensorBox
                     # e.g. in require_exact_strides when an expand happens,
                     # the fake tensor's stride is (0, 0, 0) but the storage
                     # box might have a different stride so lowering.slice_

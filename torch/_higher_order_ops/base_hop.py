@@ -173,20 +173,14 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
     def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import HopSchemaGenerator
 
-        if not isinstance(subgraph, torch.fx.GraphModule):
-            subgraph = materialize_as_graph(subgraph, operands)
-
-        fake_args = [
-            ph.meta["example_value"] if "example_value" in ph.meta else ph.meta["val"]
-            for ph in subgraph.graph.find_nodes(op="placeholder")
-        ]
+        subgraph = materialize_as_graph(subgraph, operands)
         (
             inp_inp_alias,
             inp_out_alias,
             out_out_alias,
             mutated_inp_idx,
             output,
-        ) = check_input_alias_and_mutation_return_outputs(subgraph, fake_args)
+        ) = check_input_alias_and_mutation_return_outputs(subgraph)
 
         if not (
             len(inp_inp_alias) == 0

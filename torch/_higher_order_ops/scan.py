@@ -276,16 +276,7 @@ class ScanOp(HigherOrderOperator):
             list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
         )
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
 
         (
             _,
@@ -293,7 +284,7 @@ class ScanOp(HigherOrderOperator):
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For scan, combine_fn cannot have in-place mutations but found "
@@ -634,14 +625,14 @@ class ScanAutogradOp(torch.autograd.Function):
                 *y,
             ]
 
-        # Materialize the ``combine_fn_with_carry_checkpoint`` under enable_grad
-        # we need the context manager to support torch.func.grad_and_value
+        # Materialize the ``combine_fn_with_carry_checkpoint`` with enable_grad
+        # we need enable_grad to support torch.func.grad_and_value
         # in subgraph.
-        with torch.enable_grad():
-            gm = materialize_as_graph(
-                combine_fn_with_carry_checkpoint,
-                (*init, *[x[0] for x in xs], *additional_inputs),
-            )
+        gm = materialize_as_graph(
+            combine_fn_with_carry_checkpoint,
+            (*init, *[x[0] for x in xs], *additional_inputs),
+            force_enable_grad=True,
+        )
 
         with torch._C._AutoDispatchBelowAutograd():
             # 2.) Compute the all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``
