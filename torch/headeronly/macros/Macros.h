@@ -259,7 +259,8 @@ using namespace c10::xpu;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || \
+    __CUDA_ARCH__ == 1200
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
