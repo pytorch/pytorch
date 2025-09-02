@@ -198,7 +198,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices += list(
+        choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
@@ -212,7 +212,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
-        choices += list(
+        choices.extend(
             V.choices.get_mm_configs(kernel_inputs, layout, [bmm_template], name)
         )
     _, is_nonzero = _is_static_problem(layout)
@@ -272,12 +272,12 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # options to tune from
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices += list(
+        choices.extend(
             V.choices.get_mm_configs(kernel_inputs, layout, [aten_baddbmm], name)
         )
 
     if use_triton_template(layout):
-        choices += list(
+        choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
