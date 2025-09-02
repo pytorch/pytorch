@@ -177,7 +177,7 @@ class TestPatternMatcherBase(TestCase):
         is_dynamic=False,
         quantizer=None,
         compile_options={},  # noqa: B006
-        use_autocast_in_generate_qmodel_process=False,
+        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -207,7 +207,7 @@ class TestPatternMatcherBase(TestCase):
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
-            if use_autocast_in_generate_qmodel_process:
+            if quantization_with_autocast:
                 with maybe_autocast:
                     convert_model = _generate_qdq_quantized_model(
                         mod, inputs, is_qat, is_dynamic, quantizer
@@ -1117,7 +1117,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self,
         device="cpu",
         int8_mixed_bf16=False,
-        use_autocast_in_generate_qmodel_process=False,
+        quantization_with_autocast=False,
     ):
         class M(torch.nn.Module):
             def __init__(
@@ -1151,9 +1151,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(
                 counters["inductor"]["qconv_weight_prepack_matcher_nodes"],
-                (16 if use_autocast_in_generate_qmodel_process else 18)
-                if int8_mixed_bf16
-                else 12,
+                (16 if quantization_with_autocast else 18) if int8_mixed_bf16 else 12,
             )
             self.assertEqual(
                 counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
@@ -1165,7 +1163,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn,
             check_quantization=True,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
-            use_autocast_in_generate_qmodel_process=use_autocast_in_generate_qmodel_process,
+            quantization_with_autocast=quantization_with_autocast,
         )
 
     @skipIfNoDynamoSupport
@@ -1204,9 +1202,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
         """
-        self._qconv2d_test_helper(
-            int8_mixed_bf16=True, use_autocast_in_generate_qmodel_process=True
-        )
+        self._qconv2d_test_helper(int8_mixed_bf16=True, quantization_with_autocast=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2357,7 +2353,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         bias=True,
         is_dynamic=False,
         is_qat=False,
-        use_autocast_in_generate_qmodel_process=False,
+        quantization_with_autocast=False,
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
@@ -2396,7 +2392,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_quantization=True,
             is_qat=is_qat,
             is_dynamic=is_dynamic,
-            use_autocast_in_generate_qmodel_process=use_autocast_in_generate_qmodel_process,
+            quantization_with_autocast=quantization_with_autocast,
         )
 
     @skipIfNoDynamoSupport
@@ -2477,7 +2473,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (torch.randn((2, 4)),),
                 int8_mixed_bf16=True,
                 bias=bias,
-                use_autocast_in_generate_qmodel_process=True,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
@@ -2540,7 +2536,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (torch.randn((2, 3, 4)),),
                 int8_mixed_bf16=True,
                 bias=bias,
-                use_autocast_in_generate_qmodel_process=True,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
@@ -2641,7 +2637,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 do_permute=True,
                 matcher_check_fn=matcher_check_fn,
                 bias=bias,
-                use_autocast_in_generate_qmodel_process=True,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
