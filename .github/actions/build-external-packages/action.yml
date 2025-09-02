@@ -69,8 +69,9 @@ runs:
           export OUTPUT_DIR
           echo "Building external package: $target in directory $OUTPUT_DIR"
           python3 -m cli.run build external "$target"
-
         done
+
+        sleep 7200
 
         END_TIME=$(date +%s)
         {
