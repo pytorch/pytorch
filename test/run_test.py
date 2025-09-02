@@ -916,6 +916,11 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
+# test_openreg is designed to run all tests under torch_openreg, which
+# is an torch backend similar to CUDA or MPS and implemented by using
+# third-party accelerator integration mechanism. Therefore, if all the
+# tests under torch_openreg are passing, it can means that the mechanism
+# mentioned above is working as expected.
 def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
