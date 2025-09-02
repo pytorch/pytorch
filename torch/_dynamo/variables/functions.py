@@ -1466,11 +1466,27 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        # Use closure match guard (i.e. guard on __code__ object instead of
+        # function id) to avoid guarding on nested functions.
+        if inspect.getattr_static(value, "_torchdynamo_disable", False):
+            # For torch._dynamo.disable function, ensure that the original
+            # function is guarded. Otherwise, the else branch will guard on the
+            # _dynamo.disable.__code__
+            guard_on_source = source
+            guard_on_value = value
+
+            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+                guard_on_value = guard_on_value._torchdynamo_orig_callable
+                guard_on_source = AttrSource(
+                    guard_on_source, "_torchdynamo_orig_callable"
+                )
+
+            guard_on_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
-            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
     def call_function(
