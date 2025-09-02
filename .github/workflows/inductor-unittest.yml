@@ -28,8 +28,8 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  linux-jammy-cuda12_8-py3_10-gcc9-inductor-build:
-    name: cuda12.8-py3.10-gcc9-sm86
+  inductor-build:
+    name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -47,44 +47,18 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
-    name: cuda12.8-py3.10-gcc9-sm86
+  inductor-test:
+    name: inductor-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cuda12_8-py3_10-gcc9-inductor-build
+    needs: inductor-build
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_12-gcc9-inductor-build:
-    name: cuda12.8-py3.12-gcc9-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc9-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      test-matrix: |
-        { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cuda12_8-py3_12-gcc9-inductor-test:
-    name: cuda12.8-py3.12-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cuda12_8-py3_12-gcc9-inductor-build
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc9-sm86
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_12-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_12-gcc9-inductor-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-cpu-py3_12-inductor-halide-build:
-    name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
+  inductor-halide-build:
+    name: inductor-halide-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -97,18 +71,18 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cpu-py3_12-inductor-halide-test:
-    name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
+  inductor-halide-test:
+    name: inductor-halide-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_12-inductor-halide-build
+    needs: inductor-halide-build
     with:
       build-environment: linux-jammy-py3.12-gcc11
-      docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-halide-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_12-inductor-triton-cpu-build:
-    name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
+  inductor-triton-cpu-build:
+    name: inductor-triton-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -121,23 +95,23 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cpu-py3_12-inductor-triton-cpu-test:
+  inductor-triton-cpu-test:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_12-inductor-triton-cpu-build
+    needs: inductor-triton-cpu-build
     with:
       build-environment: linux-jammy-py3.12-gcc11
-      docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-triton-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  inductor-cpu-build:
+    name: inductor-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
@@ -148,37 +122,12 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-test:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  inductor-cpu-test:
+    name: inductor-cpu-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    needs: inductor-cpu-build
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-cuda12_8-py3_13-gcc9-inductor-build:
-    name: cuda12.8-py3.13-gcc9-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.13-gcc9-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.6'
-      test-matrix: |
-        { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cuda12_8-py3_13-gcc9-inductor-test:
-    name: cuda12.8-py3.13-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cuda12_8-py3_13-gcc9-inductor-build
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.13-gcc9-sm86
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
     secrets: inherit
