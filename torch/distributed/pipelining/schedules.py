@@ -1978,7 +1978,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
 
                         output = stage.forward_one_chunk(
-                            mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                            mb_index,
+                            arg_mbs[mb_index],  # type: ignore[index]
+                            kwarg_mbs[mb_index],  # type: ignore[index]
                         )
                         self._maybe_compute_loss(stage, output, target_mbs, mb_index)
 
