@@ -32,43 +32,6 @@ XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
 )
 
 
-def _cutlass_path() -> str:
-    if config.is_fbcode():
-        from libfb.py import parutil
-
-        return parutil.get_dir_path("cutlass-4-headers")
-    else:
-        return config.cutlass.cutlass_dir
-
-
-def _cutlass_paths() -> list[str]:
-    return [
-        "include",
-        "tools/library/include",
-        "tools/library/src",
-        "tools/util/include",
-    ]
-
-
-def _clone_cutlass_paths(build_root: str) -> list[str]:
-    paths = _cutlass_paths()
-    cutlass_root = _cutlass_path()
-    for path in _cutlass_paths():
-        old_path = os.path.join(cutlass_root, path)
-        new_path = os.path.join(build_root, path)
-        shutil.copytree(old_path, new_path, dirs_exist_ok=True)
-    return paths
-
-
-def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
-    return [
-        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
-        for path in _cutlass_paths()
-    ]
-
-
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
