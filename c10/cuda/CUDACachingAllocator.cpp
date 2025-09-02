@@ -470,6 +470,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
     CUdeviceptr devPtr{};
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &devPtr, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     *ptr = reinterpret_cast<void*>(devPtr);
   }
 
@@ -693,7 +694,10 @@ PrivatePoolState::PrivatePoolState(
   }
 }
 
-cudaError_t allocPrimitive(void** ptr, size_t size, AllocParamsT& p) {
+cudaError_t allocPrimitive(
+    void** ptr,
+    size_t size,
+    AllocParams<cuda::CUDAStream, Block>& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
@@ -1075,7 +1079,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
       }
 
       auto& block_state = segment.blocks.at(i);
-      AllocParams params(
+      AllocParamsT params(
           block_state.device,
           block_state.size,
           block_state.stream,
@@ -1083,7 +1087,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
           block_state.size);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
-      params.stat_types = get_stat_types_for_pool(pool);
+      params.stat_types = pool->get_stat_types();
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between when checkpoint was taken and now, so we make sure to recreate

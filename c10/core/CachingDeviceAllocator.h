@@ -2722,7 +2722,7 @@ template <
     c10::DeleterFnPtr deleteFunc,
     typename ImplT,
     typename BaseDeviceAllocator = c10::DeviceAllocator>
-struct CachingDeviceAllocatorInterface : BaseDeviceAllocator {
+struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   using BlockT = typename ImplT::BlockT;
   using StreamT = typename ImplT::StreamT;
   using ExpandableSegmentT = typename ImplT::ExpandableSegmentT;
@@ -2769,7 +2769,7 @@ struct CachingDeviceAllocatorInterface : BaseDeviceAllocator {
     c10::Device device = impl.getDevice();
     void* devPtr = nullptr;
     c10::Stream stream = impl.getStream(device);
-    malloc(&devPtr, device, nbytes, StreamT(stream));
+    malloc(&devPtr, device.index(), nbytes, StreamT(stream));
 
     return devPtr;
   }
@@ -2804,7 +2804,7 @@ struct CachingDeviceAllocatorInterface : BaseDeviceAllocator {
     impls_[block->device]->recordStream(block, stream);
   }
 
-  void empty_cache(MempoolId_t mempool_id = {0, 0}) override {
+  void emptyCache(MempoolId_t mempool_id = {0, 0}) override {
     for (auto& impl : impls_) {
       impl->emptyCache(mempool_id);
     }
