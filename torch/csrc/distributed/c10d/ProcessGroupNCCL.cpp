@@ -5075,7 +5075,7 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
   // offset wrt the device id if intra-node GPUs are sharded into multiple
   // dimensions.
   int devIdx = globalRank() % localDeviceCount_;
-  if (rank_ == 0) {
+  if (devIdx == 0) { // only log on first rank of each node
     LOG(WARNING) << c10::str(
         "Guessing device ID based on global rank. ",
         "This can cause a hang if rank to GPU mapping is heterogeneous. ",
