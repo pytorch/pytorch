@@ -200,11 +200,50 @@ class VecAVX512(VecISA):
         else "/arch:AVX512"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
+    _is_avx512_bf16_supported = False
 
     def __str__(self) -> str:
         return "avx512"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
+
+    _avx512_bf16_code = """
+#include <cstdint>
+#include <immintrin.h>
+
+extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
+    return _mm512_cvtne2ps_pbh(a, b);
+}
+"""
+
+    @functools.cache  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            # check avx512_bf16
+            if torch.cpu._is_avx512_bf16_supported() and not _IS_WINDOWS:
+                # save _arch_flags
+                base_flags = self._arch_flags
+                # temporarily change _arch_flags for avx512_bf16 check_build
+                self._arch_flags += " -mavx512bf16"
+                if self.check_build(VecAMX._avx512_bf16_code):
+                    self._is_avx512_bf16_supported = True
+                # restore _arch_flags
+                self._arch_flags = base_flags
+
+            return True
+        return False
+
+    @functools.lru_cache(None)  # noqa: B019
+    def is_avx512_bf16_supported(self) -> bool:
+        return self._is_avx512_bf16_supported
+
+    def build_arch_flags(self) -> str:
+        if self._is_avx512_bf16_supported:
+            return self._arch_flags + " -mavx512bf16"
+        else:
+            return self._arch_flags
 
 
 @dataclasses.dataclass
@@ -267,10 +306,14 @@ extern "C" void __amx_chk_kernel() {
         return self._is_amx_fp16_supported
 
     def build_arch_flags(self) -> str:
+        extra_flags = ""
+        if self._is_avx512_bf16_supported:
+            # avx512_bf16 is not among the base flags, so we need to check and add it here
+            # And we need this flag in the WOQ case for dequantization
+            extra_flags += " -mavx512bf16"
         if self._is_amx_fp16_supported:
-            return self._arch_flags + " -mamx-fp16"
-        else:
-            return self._arch_flags
+            extra_flags += " -mamx-fp16"
+        return self._arch_flags + extra_flags
 
 
 @dataclasses.dataclass

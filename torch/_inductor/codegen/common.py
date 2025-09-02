@@ -518,11 +518,9 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            (
-                CppWrapperCpuArrayRef
-                if config.aot_inductor.allow_stack_allocation
-                else CppWrapperCpu
-            ),
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -2404,7 +2402,7 @@ class KernelTemplate:
         # TODO(coconutruben): add some central registration to assert on global uniqueness
         return self.name
 
-    def choice_or_None(self, **kwargs: Any) -> Optional[ChoiceCaller]:
+    def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
         """
         Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
 

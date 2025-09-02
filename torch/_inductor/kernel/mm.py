@@ -714,7 +714,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             templates_to_use.append(decompose_k_subgraph_template)
 
     # Single unified call for all non-autoheuristic templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, "mm")
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, "mm")
+    )
 
     if (
         is_nonzero
@@ -749,14 +751,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        choices += V.choices.get_mm_configs(
-            # TODO(coconutruben): remove once we deprecate ah
-            # mm-extra is a hack to keep the ah functionality alive
-            # while we transition to the unified kwargs retrieval
-            kernel_inputs,
-            layout,
-            [mm_template],
-            "mm-ah",
+        choices.extend(
+            V.choices.get_mm_configs(
+                # TODO(coconutruben): remove once we deprecate ah
+                # mm-extra is a hack to keep the ah functionality alive
+                # while we transition to the unified kwargs retrieval
+                kernel_inputs,
+                layout,
+                [mm_template],
+                "mm-ah",
+            )
         )
 
         # using AutoHeuristic for ranking
@@ -840,7 +844,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         templates_to_use.append(mm_template)
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    )
 
     if use_cutlass and _use_cutlass_for_op(name):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -888,7 +894,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             templates_to_use.append(persistent_tma_mm_template)
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+    )
 
     if (
         is_nonzero
@@ -1072,12 +1080,14 @@ def tuned_scaled_mm(
         kwarg_overrides[mm_template.uid] = overriders
 
     # Single unified call for all templates
-    choices += V.choices.get_mm_configs(
-        kernel_inputs,
-        layout,
-        templates_to_use,
-        name,
-        kwarg_overrides=kwarg_overrides,
+    choices.extend(
+        V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            templates_to_use,
+            name,
+            kwarg_overrides=kwarg_overrides,
+        )
     )
 
     # Early return for MX variants
