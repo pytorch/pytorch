@@ -134,6 +134,10 @@ class TestXpu(TestCase):
                 device_properties.architecture,
                 device_capability["architecture"],
             )
+        self.assertEqual(
+            len(str(device_properties.uuid)), 36
+        )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(device_properties.uuid.bytes), 16)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
