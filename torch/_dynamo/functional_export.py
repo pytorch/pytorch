@@ -1,7 +1,7 @@
 import builtins
 import inspect
 from collections import namedtuple
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,12 +13,12 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 
 class ModuleToTrace(torch.nn.Module):
-    def __init__(self, foo, in_spec):
+    def __init__(self, foo: Any, in_spec: Any) -> None:
         super().__init__()
         self._export_root = foo
         self.in_spec = in_spec
 
-    def forward(self, *flat_args):
+    def forward(self, *flat_args: Any) -> "ExportTracerOutput":
         args, kwargs = pytree.tree_unflatten(flat_args, self.in_spec)
         res = self._export_root(*args, **kwargs)
         out_flat, out_spec = pytree.tree_flatten(res)
@@ -28,17 +28,19 @@ class ModuleToTrace(torch.nn.Module):
 ExportTracerOutput = namedtuple("ExportTracerOutput", ["flat_args", "out_spec"])
 
 
-def _dynamo_graph_capture_for_export(mod: torch.nn.Module):
+def _dynamo_graph_capture_for_export(
+    mod: torch.nn.Module,
+) -> Callable[..., torch.fx.GraphModule]:
     """
     This is lower level API that is used for export to capture dynamo level
     torch IR.
 
     Notable TODOs:
-    1. Are we actualyl gonna run the bytecode?
+    1. Are we actually gonna run the bytecode?
     2. Need to attach guards
     """
 
-    def inner(*args: Any, **kwargs: Any):
+    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
         module_to_trace = ModuleToTrace(mod, in_spec)
 
@@ -50,11 +52,11 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module):
         f_locals = {"self": module_to_trace, **bound_arguments.arguments}
 
         frame = FrameInfo(
-            module_to_trace.forward.__func__.__code__,
-            module_to_trace.forward.__func__.__globals__,
+            module_to_trace.forward.__func__.__code__,  # type: ignore[attr-defined]
+            module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
             f_locals,
-            builtins,
-            closure=(),
+            builtins,  # type: ignore[arg-type]
+            closure=(),  # type: ignore[arg-type]
         )
 
         dynamo_config_ctx = torch._dynamo.config.patch(
@@ -69,6 +71,8 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module):
         ):
             out = fullgraph_capture(frame, _is_export_deprecated_do_not_use=True)
 
+            assert out.dynamo_output.tracer_output.output_graph is not None
+
             export_metadata = (
                 out.dynamo_output.tracer_output.output_graph.export_metadata
             )
@@ -81,14 +85,14 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module):
 
             # It is not guaranteed that dynamo puts inputs in right order, so we need to
             # map the actual user order to the dynamo order.
-            graph_input_order = {}
+            graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
                 assert isinstance(source, torch._dynamo.source.GetItemSource)
                 graph_input_order[source.index] = len(graph_input_order)
 
             placeholders = [n for n in list(graph.graph.nodes) if n.op == "placeholder"]
-            output = [n for n in list(graph.graph.nodes) if n.op == "output"][0]
+            output = next(n for n in list(graph.graph.nodes) if n.op == "output")
             # Sometimes there can be empty inputs
             anchor = placeholders[0] if len(placeholders) > 0 else output
             inp_to_node = {}
@@ -126,7 +130,7 @@ def _dynamo_graph_capture_for_export(mod: torch.nn.Module):
 
         graph.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
-                argument_names(signature, args, kwargs),
+                argument_names(signature, args, kwargs),  # type: ignore[arg-type]
                 in_spec,
                 out_spec,
             )
