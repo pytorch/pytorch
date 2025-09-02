@@ -145,7 +145,7 @@ def aot_compile_fullgraph(
                 fn.__globals__,
                 f_locals,
                 builtins.__dict__,
-                closure=fn.__closure__,
+                closure=fn.__closure__ or (),  # type: ignore[arg-type]
             )
         )
         dynamo_output = capture_output.dynamo_output
