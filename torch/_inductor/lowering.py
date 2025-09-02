@@ -12,9 +12,9 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, Collection
 from unittest.mock import patch
 
 import sympy
@@ -145,7 +145,7 @@ def cur_node_has_non_foreach_users() -> bool:
 # note arg_pairs may or may not be a pair
 # foreach_map for example just passes output buffers here
 def group_foreach_args(
-    arg_pairs: Iterable[Union[tuple[Any, Any], Any]],
+    arg_pairs: Iterable[Any],
 ) -> defaultdict[tuple[Any, bool], list[tuple[int, Any]]]:
     out = defaultdict(list)
     unpack_args = False
@@ -204,9 +204,7 @@ def assert_nyi(cond: bool, msg: str) -> None:
 
 def add_needs_realized_inputs(
     fn: Union[
-        list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
-        OrderedSet[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
-        tuple[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
+        Collection[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
         torch._ops.OpOverload,
         torch._ops.OpOverloadPacket,
     ],
@@ -215,12 +213,11 @@ def add_needs_realized_inputs(
         return [add_needs_realized_inputs(x) for x in fn]
     if isinstance(fn, torch._ops.OpOverload):
         needs_realized_inputs.add(fn)
-        return None
-    if isinstance(fn, torch._ops.OpOverloadPacket):
+    elif isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
             getattr(fn, overload) for overload in fn.overloads()
         )
-        return None
+    return None
 
 
 def add_layout_constraint(
