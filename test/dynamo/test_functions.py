@@ -4083,10 +4083,10 @@ class GraphModule(torch.nn.Module):
             return torch.get_device_module()
 
         f5()
-        new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
-        )
-
+        if torch._C._get_accelerator() == torch.device("cuda"):
+            new_device = "cuda"
+        else:
+            new_device = "cpu"
         old_get_device_module = torch.get_device_module
 
         def new_get_device_module(device=None):
@@ -4733,12 +4733,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, ys, zs[:1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_gpu_current_device(self):
+    def test_cuda_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3),
-                dtype=torch.float32,
-                device=torch.accelerator.current_device_index(),
+                (2, 3), 
+                dtype=torch.float32, 
+                device=torch.cuda.current_device(),
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
