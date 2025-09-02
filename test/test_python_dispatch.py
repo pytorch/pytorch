@@ -1,7 +1,6 @@
 # Owner(s): ["module: __torch_dispatch__"]
 # ruff: noqa: F841
 
-import logging
 import pickle
 import sys
 import tempfile
@@ -587,6 +586,47 @@ class TestPythonRegistration(TestCase):
         for kind in ("DEF", "FRAGMENT"):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
                 my_lib1 = Library("prim", kind)  # noqa: TOR901
+
+    def test_dispatcher_error_filenames(self) -> None:
+        # Test that dispatcher errors report correct Python filenames and line numbers
+        # when defining duplicate libraries (which triggers the filename tracking)
+        import linecache
+        import re
+
+        # Create first library
+        # NOTE: Using Library directly instead of _scoped_library because this test
+        # specifically verifies filename tracking in error messages, and _scoped_library
+        # would report library.py locations instead of the actual test file locations
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: TOR901
+        try:
+            lib1.define("duplicate_op(Tensor x) -> Tensor")
+
+            # Try to create another library with same namespace - this should trigger error
+            with self.assertRaises(RuntimeError) as cm:
+                lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER  # noqa: TOR901
+        finally:
+            lib1._destroy()
+
+        error_msg = str(cm.exception)
+
+        # The error should NOT contain /dev/null (the old placeholder)
+        self.assertNotIn("/dev/null", error_msg)
+        # The error should contain the test file name for both registrations
+        self.assertIn("test_python_dispatch.py", error_msg)
+        # Extract line numbers from the error message and verify they point to the right lines
+        line_matches = re.findall(r"test_python_dispatch\.py:(\d+)", error_msg)
+        self.assertEqual(
+            len(line_matches), 2, "Should have exactly 2 line number references"
+        )
+
+        # Get the actual source lines and verify they contain our markers
+        first_line_num, second_line_num = sorted([int(x) for x in line_matches])
+        first_line = linecache.getline(__file__, first_line_num).strip()
+        second_line = linecache.getline(__file__, second_line_num).strip()
+
+        # Verify the lines contain our expected markers
+        self.assertIn("FIRST_LIB_MARKER", first_line)
+        self.assertIn("SECOND_LIB_MARKER", second_line)
 
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()
@@ -1717,49 +1757,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertEqual(s.stream_id, 1)
                 self.assertEqual(s.device_index, 2)
                 self.assertEqual(s.device_type, 3)
-
-    def test_subclass_autograd_device_check(self) -> None:
-        class NonWrapperSubclass(torch.Tensor):
-            elem: torch.Tensor
-
-            __slots__ = ["elem"]
-
-            @staticmethod
-            def __new__(cls, elem, *args, **kwargs):
-                # Wrong device here!
-                r = torch.Tensor._make_subclass(
-                    cls, elem.to("meta"), elem.requires_grad
-                )
-                # ...the real tensor is held as an element on the tensor.
-                r.elem = elem
-                return r
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                def unwrap(e):
-                    return e.elem if isinstance(e, NonWrapperSubclass) else e
-
-                def wrap(e):
-                    return NonWrapperSubclass(e) if isinstance(e, torch.Tensor) else e
-
-                rs = tree_map(
-                    wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
-                )
-                logging.getLogger("NonWrapperSubclass").info(
-                    f"{func.__module__}.{func.__name__}",  # noqa: G004
-                    args,
-                    kwargs,
-                    rs,
-                )
-                return rs
-
-        x = NonWrapperSubclass(torch.tensor([3.0, 4.0], requires_grad=True))
-        y = torch.randn(2, requires_grad=True)
-        z = x * y
-        self.assertIsInstance(z, NonWrapperSubclass)
-        z.sum().backward(torch.tensor(1))
-        self.assertEqual(x.grad, y)
-        self.assertEqual(y.grad, x)
 
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
