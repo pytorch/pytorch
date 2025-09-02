@@ -23,19 +23,12 @@ from torchgen.model import (
 
 
 # This file describes the translation of JIT schema to API's used
-# when creating view lambdas that are used by the functionalization pass.
-# There are two types of lambdas: forward lambdas and reverse lambdas.
-# These API's mostly follow the dispatcher API, with a few quirks:
-# - The lambda capture has to convert reference types to value types
-# - While the forward lambda just directly calls into the at::_ops API
-#   (following the dispatcher convention), the logic here for the reverse lambda
+# when creating `ViewMeta` specializations that are used by the functionalization pass.
+# These API's mostly follow the dispatcher API, with one difference:
+# - While the forward function just directly calls into the at::_ops API
+#   (following the dispatcher convention), the logic here for the reverse function
 #   is responsible for generating both the call-site, and the declarations
 #   (which are implemented manually in the at::functionalization::impl namespace).
-
-# The lambdas generated for each view op in the functionalization pass are of the form
-# [capture_arguments](outer_arguments) -> returns_type {
-#     return name(inner_arguments);
-# }
 
 # Define some specific lambda input arguments.
 base_binding = Binding(
@@ -43,6 +36,18 @@ base_binding = Binding(
     nctype=NamedCType(name="base", type=ConstRefCType(BaseCType(tensorT))),
     argument=Argument(
         name="base", type=BaseType(BaseTy.Tensor), default=None, annotation=None
+    ),
+    default=None,
+)
+
+has_symbolic_inputs_binding = Binding(
+    name="has_symbolic_inputs",
+    nctype=NamedCType(name="has_symbolic_inputs", type=BaseCType(boolT)),
+    argument=Argument(
+        name="has_symbolic_inputs",
+        type=BaseType(BaseTy.bool),
+        default=None,
+        annotation=None,
     ),
     default=None,
 )
@@ -54,11 +59,11 @@ mutated_view_binding = Binding(
     ),
     default=None,
 )
-mutated_view_idx_binding = Binding(
-    name="mutated_view_idx",
-    nctype=NamedCType(name="mutated_view_idx", type=BaseCType(longT)),
+out_index_binding = Binding(
+    name="out_index",
+    nctype=NamedCType(name="out_index", type=BaseCType(longT)),
     argument=Argument(
-        name="base", type=BaseType(BaseTy.Tensor), default=None, annotation=None
+        name="out_index", type=BaseType(BaseTy.int), default=None, annotation=None
     ),
     default=None,
 )
@@ -86,8 +91,13 @@ inverse_return_mode_binding = Binding(
 )
 
 
-# The lambda capture itself doesn't have a name.
-# The name returned here corresponds to the name of the inner function called by the lambda.
+# Name of the `ViewMeta` specialization class created.
+def classname(func: FunctionSchema, with_namespace: bool = False) -> str:
+    namespace = "at::functionalization::" if with_namespace else ""
+    return f"{namespace}{func.name.unambiguous_name()}_ViewMeta"
+
+
+# Name of the operation called inside the `forward`/`reverse` implementations.
 def name(
     g: NativeFunctionsViewGroup,
     *,
@@ -124,24 +134,6 @@ def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
         return f"{api_name}_inverse"
 
 
-def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> list[Binding]:
-    # capture arguments include all arguments except `self`.
-    # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
-    # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
-    args = func.arguments.flat_all
-    assert args[0].type == BaseType(BaseTy.Tensor)
-    non_self_args = args[1:]
-    non_self_value_bindings = [
-        dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
-    ]
-
-    all_bindings = [
-        inverse_return_mode_binding if is_reverse else reapply_views_binding
-    ]
-    all_bindings.extend(non_self_value_bindings)
-    return all_bindings
-
-
 def returns_type(func: FunctionSchema) -> CType:
     # Assertion: all view ops return tensor-like outputs
     assert len(func.returns) >= 1
@@ -152,24 +144,49 @@ def returns_type(func: FunctionSchema) -> CType:
     return BaseCType(tensorT)
 
 
-def outer_arguments(*, is_reverse: bool) -> list[Binding]:
-    if is_reverse:
-        return [base_binding, mutated_view_binding, mutated_view_idx_binding]
-    else:
-        return [base_binding, mutated_view_idx_binding]
+# Checks whether `func` might return more than one value.
+def is_multi_output(func: FunctionSchema) -> bool:
+    return len(func.returns) > 1 or (
+        len(func.returns) == 1 and func.returns[0].type.is_list_like() is not None
+    )
 
 
-def inner_call_index(func: FunctionSchema) -> Binding | None:
-    # For view ops that return multiple tensors (like `split`), we generate a separate lambda for each output.
-    # When we replay a view op that returns multiple tensors, we need to index into the output appropriately
-    if len(func.returns) > 1 or (
-        len(func.returns) == 1 and func.returns[0].type.is_list_like()
-    ):
-        return mutated_view_idx_binding
-    return None
+# `ViewMeta` specialization constructor parameters.
+def base_ctor_arguments(func: FunctionSchema) -> list[Binding]:
+    # All specializations are paremeterized by `has_symbolic_inputs` flag.
+    arguments = [has_symbolic_inputs_binding]
+
+    # If `func` might return more than 1 value, we also parameterize this specialization
+    # with the output index.
+    if is_multi_output(func):
+        arguments.append(out_index_binding)
+
+    return arguments
 
 
-def inner_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
+# `ViewMeta` specialized class' constructor arguments.
+#
+# Values needed specifically by this specialization, that the base class does not need.
+# Same as the class' attributes, but non-owning.
+def extra_ctor_arguments(func: FunctionSchema) -> list[Binding]:
+    return attributes(func, owning=False)
+
+
+# `ViewMeta` specialized class' non-static member data.
+#
+# Essential data for calling the instance's `forward` and `reverse functions. You can
+# think of them as values that should be captured from the functionalization kernel.
+def attributes(func: FunctionSchema, owning: bool = True) -> list[Binding]:
+    args = func.arguments.flat_all
+    assert args[0].type == BaseType(BaseTy.Tensor)
+    return [
+        reapply_views_binding,
+        inverse_return_mode_binding,
+        *[dispatcher.argument(a, remove_non_owning_ref_types=owning) for a in args[1:]],
+    ]
+
+
+def op_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
     args = func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]
@@ -183,13 +200,12 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
         # the reverse lambda does the same, but with an additional "mutated_view" arg
         # additionally, we have a calling convention: for view ops that return multiple tensor outputs
         # their corresponding view_inverse function takes in an additional index argument.
-        index_binding = inner_call_index(func)
-        if index_binding is not None:
+        if is_multi_output(func):
             return [
                 base_binding,
                 mutated_view_binding,
                 inverse_return_mode_binding,
-                index_binding,
+                out_index_binding,
             ] + non_self_bindings
         else:
             return [
