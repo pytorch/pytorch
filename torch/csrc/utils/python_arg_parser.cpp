@@ -10,6 +10,10 @@
 #include <torch/csrc/utils/python_torch_function_mode.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 
+#ifdef USE_NUMPY
+#include <torch/csrc/utils/numpy_stub.h>
+#endif
+
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/TracerMode.h>
@@ -1562,6 +1566,36 @@ std::string FunctionSignature::toString() const {
   return ss.str();
 }
 
+bool FunctionSignature::isNumericLike(PyObject* obj) {
+  // check if obj is a Python numeric type
+  if (PyLong_Check(obj) || PyFloat_Check(obj) || PyComplex_Check(obj)) {
+      return true;
+  }
+
+  // check if obj is a torch.tensor
+  if (THPVariable_CheckExact(obj)) {
+    at::Tensor tensor = THPVariable_Unpack(obj);
+    // Make sure the tensor only has one element and is numeric type.
+    at::ScalarType dtype = tensor.scalar_type();
+    bool is_numeric = c10::isIntegralType(dtype, /*includeBool*/false) || c10::isFloatingType(dtype) || c10::isComplexType(dtype);
+    return tensor.numel() == 1 && is_numeric;
+  } 
+
+  #ifdef USE_NUMPY
+  // check if obj is a numpy array
+  if (PyArray_Check(obj)) {
+    PyArrayObject* array = (PyArrayObject*)obj;
+    return PyArray_SIZE(array) == 1 && PyArray_ISNUMBER(array);
+  } 
+  
+  if (torch::utils::is_numpy_scalar(obj)) {
+    return true;
+  } 
+  #endif
+  
+  return false;
+}
+
 [[noreturn]] static void extra_args(
     const FunctionSignature& signature,
     Py_ssize_t nargs) {
@@ -1689,16 +1723,17 @@ bool FunctionSignature::parse(
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     PyObject* arg_i = nullptr;
     if (nargs == 1) {
-      arg_i = PyTuple_GetItem(args, 0);
-      // If there is only one argument, make sure it's a sequence or an int.
-      allow_varargs_intlist = PySequence_Check(arg_i) || PyLong_Check(arg_i);
+      arg_i = PyTuple_GET_ITEM(args, 0);
+      // If there is only one argument, make sure it's a sequence or a scalar.
+      allow_varargs_intlist = PySequence_Check(arg_i) || isNumericLike(arg_i);
     } else {
       allow_varargs_intlist = true;
       for (Py_ssize_t i = 0; i < nargs; i++) {
-        arg_i = PyTuple_GetItem(args, i);
-        // Make sure every argument in args is an int.
-        if (!PyLong_Check(arg_i))
+        arg_i = PyTuple_GET_ITEM(args, i);
+        // Make sure every argument in args is an scalar like object.
+        if (!isNumericLike(arg_i)) {
           allow_varargs_intlist = false;
+        }
       }
     }
   }
