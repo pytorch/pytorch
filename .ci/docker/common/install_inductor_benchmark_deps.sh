@@ -5,9 +5,7 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 function install_huggingface() {
-  local version
-  commit=$(get_pinned_commit huggingface)
-  pip_install "git+https://github.com/huggingface/transformers@${commit}"
+  pip_install -r huggingface-requirements.txt
 }
 
 function install_timm() {
@@ -25,9 +23,6 @@ function install_torchbench() {
   git checkout "$commit"
 
   python install.py --continue_on_fail
-
-  # soxr comes from https://github.com/huggingface/transformers/pull/39429
-  pip install transformers==4.54.0 soxr==0.5.0
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze

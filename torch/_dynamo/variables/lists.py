@@ -27,7 +27,7 @@ import torch.fx
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented_v2
-from ..source import AttrSource
+from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
     cmp_name_to_op_mapping,
     cmp_name_to_op_str_mapping,
@@ -1149,6 +1149,10 @@ class NamedTupleVariable(TupleVariable):
                 return UserMethodVariable(method, self)
             else:
                 return None
+
+        if name == "_fields":
+            source = NamedTupleFieldsSource(self.source) if self.source else None
+            return VariableTracker.build(tx, self.fields(), source=source)
 
         if name in self.dynamic_attributes:
             return self.dynamic_attributes[name]

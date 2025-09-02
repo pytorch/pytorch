@@ -31,7 +31,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
+def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
        Since the number of splits is calculated based of the the number of batch and head dims
@@ -60,6 +60,15 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
                 sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
             )
         )
+
+    Hq = query.get_size()[1]
+    Hkv = value.get_size()[1]
+    ratio = Hq // Hkv
+
+    pw_of_two = V.graph.sizevars.guard_or_false(
+        sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
+    )
+
     return (
         not force_flex
         and short_query_length
@@ -67,6 +76,7 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
         and static_num_heads
         and non_zero_length
         and valid_block_mask_num_heads
+        and pw_of_two
     )
 
 
@@ -92,7 +102,10 @@ flex_decoding_template = TritonTemplate(
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
-    num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+    if torch.xpu.is_available():
+        num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
+    else:
+        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
     split_k = num_SM // bh * 2  # Each SM should at least get one block.
@@ -197,7 +210,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     choices: list[Any] = []
     dtype = key.get_dtype()
     head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
-    configs = V.choices.get_flex_decode_configs(head_dim, dtype)
+    configs = V.choices.get_flex_decode_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # TODO: fix autotuning.
 
@@ -244,7 +259,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
                     )
                     * gqa_shared_heads
                 ),
-                16,
+                1 if torch.xpu.is_available() else 16,
             )
         ),
     )
@@ -339,6 +354,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
             **cur_kernel_options,
         )
 
+    filtered_score_mod_buffers = [
+        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+    ]
+    filtered_mask_mod_buffers = [
+        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+    ]
+
     inputs_for_flex_decoding = (
         [
             query,
@@ -351,8 +373,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_num_blocks,
             full_kv_indices,
         ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
+        + filtered_score_mod_buffers
+        + filtered_mask_mod_buffers
     )
 
     input_gen_fns = {
