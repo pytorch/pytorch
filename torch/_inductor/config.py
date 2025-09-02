@@ -415,6 +415,7 @@ estimate_op_runtime = "default"
 
 runtime_estimations_use_nccl_lib_estimations: bool = False
 runtime_estimations_mms_benchmark: bool = False
+runtime_estimations_triton_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink

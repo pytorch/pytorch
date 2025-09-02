@@ -2207,7 +2207,8 @@ def override_lowering(
 
 
 def add_scheduler_init_hook(
-    pre_fn: Callable[..., Any], post_fn: Optional[Callable[..., Any]] = None
+    pre_fn: Optional[Callable[..., Any]] = None,
+    post_fn: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """
     Add hook functions to be called at the beginning and end of Scheduler.__init__.
@@ -2218,7 +2219,8 @@ def add_scheduler_init_hook(
     orig_fn = Scheduler.__init__
 
     def wrapper(scheduler: Any, nodes: Any) -> Any:
-        pre_fn(scheduler, nodes)
+        if pre_fn:
+            pre_fn(scheduler, nodes)
         out = orig_fn(scheduler, nodes)
         if post_fn:
             post_fn(scheduler, nodes)
