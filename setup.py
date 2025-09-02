@@ -438,7 +438,8 @@ for i, arg in enumerate(sys.argv):
                 ".",
                 "-v",
                 "--no-build-isolation",
-            ]
+            ],
+            env={**os.environ}
         )
         sys.exit(result.returncode)
     if arg == "install":
@@ -450,7 +451,8 @@ for i, arg in enumerate(sys.argv):
             file=sys.stderr,
         )
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"]
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
+            env={**os.environ}
         )
         sys.exit(result.returncode)
     if arg == "--":
