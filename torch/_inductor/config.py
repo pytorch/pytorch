@@ -914,6 +914,9 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Control if we will do padding on dynamic shapes
+pad_dynamic_shapes = False
+
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
 
