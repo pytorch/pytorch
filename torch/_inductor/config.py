@@ -1037,6 +1037,27 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 
+class performance_model:
+    """
+    Settings for performance model interface in inductor.
+
+    The performance model interface allows using machine learning models or
+    heuristics to predict kernel performance and guide kernel selection.
+
+    see README.md in performance_model for more details.
+    """
+
+    # 0 means the model is off
+    # -1 means the model filters down to default set of configs (from exhaustive)
+    # > 0 means the model filters down to topk
+    # anything else results in the model being off
+    topk: int = 0
+
+    # whether to discard choices that no model was able to make a prediction on
+    # or to keep them in the set of autotuning configs
+    discard_unranked: bool = False
+
+
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
     if is_fbcode():
