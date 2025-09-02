@@ -2461,6 +2461,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return self.loads
 
     def load(self, name: str, index: sympy.Expr):
+        """
+        generate triton code for a load
+        """
         var = self.args.input(name)
         load_counts = self._load_counts
         load_counts[name] += 1
@@ -2582,8 +2585,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if config.triton.enable_pdl:
             load_buffer.writeline("tl.extra.cuda.gdc_wait()")
         result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
-        # if config.triton.enable_pdl:
-        #     load_buffer.writeline("tl.extra.cuda.gdc_launch_dependents()")
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
@@ -4019,7 +4020,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        # print(f"{config.triton.enable_pdl=}")
         if config.triton.enable_pdl:
             triton_meta["launch_pdl"] = True
 
