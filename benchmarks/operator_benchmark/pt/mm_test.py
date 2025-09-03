@@ -26,7 +26,7 @@ mm_long_configs = op_bench.cross_product_configs(
     M=[8, 128],
     N=[32, 64],
     K=[256, 512],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     dtype=[torch.float, torch.bfloat16],
     tags=["long"],
 )
