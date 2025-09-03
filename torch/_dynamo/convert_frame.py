@@ -850,6 +850,7 @@ class DynamoOutput:
         hooks: Optional[Hooks] = None,
         save: bool = False,
         cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
     ) -> CheckFunctionManager:
         assert self.tracer_output.output_graph is not None
         return CheckFunctionManager(
@@ -859,6 +860,7 @@ class DynamoOutput:
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
+            strict_error=strict_error,
         )
 
 
