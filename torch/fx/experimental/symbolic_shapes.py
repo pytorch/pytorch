@@ -6538,7 +6538,6 @@ class ShapeEnv:
         expr: sympy.Basic,
         unhinted_expr: sympy.Basic,
         *,
-        size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
@@ -6552,11 +6551,6 @@ class ShapeEnv:
             if s in self.size_like:
                 size_like_symbols.append(s)
         size_oblivious_result_msg = ""
-        if size_oblivious_result is not None:
-            size_oblivious_result_msg = (
-                f"ATTENTION: guard_size_oblivious would fix the error, evaluating expression to {size_oblivious_result}.\n"
-                "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
-            )
         sloc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:  # type: ignore[attr-defined]
             desc = (
@@ -6564,6 +6558,11 @@ class ShapeEnv:
             )
         else:
             desc = "Could not guard on data-dependent expression"
+            size_oblivious_result_msg = (
+                "consider using data-dependent friendly APIs such as "
+                "guard_or_false, guard_or_true and statically_known_true"
+            )
+
         msg = (
             f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
@@ -7588,16 +7587,9 @@ class ShapeEnv:
                         ok = True
 
                     if not ok:
-                        size_oblivious_result = None
-                        # compute size_oblivious_result to suggest it as a fix for the user if it works.
-                        if not size_oblivious:
-                            size_oblivious_result = self._maybe_evaluate_static(
-                                expr, size_oblivious=True
-                            )
                         raise self._make_data_dependent_error(
                             expr.xreplace(self.var_to_val),
                             expr,
-                            size_oblivious_result=size_oblivious_result,
                             expr_sym_node_id=self._expr_sym_node_id,
                         )
                 else:
