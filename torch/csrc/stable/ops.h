@@ -167,7 +167,7 @@ inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
 // typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
 // header-only (2) SymInt is not yet header-only
 inline Tensor amax(
-    Tensor& self,
+    const Tensor& self,
     std::vector<int64_t> dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
