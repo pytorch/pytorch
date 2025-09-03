@@ -5075,14 +5075,12 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
   // offset wrt the device id if intra-node GPUs are sharded into multiple
   // dimensions.
   int devIdx = globalRank() % localDeviceCount_;
-  LOG(WARNING)
-      << logPrefix()
-      << c10::str(
-             " using GPU ",
-             devIdx,
-             " as device used by this process is currently unknown. ",
-             "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-             "You can specify device_id in init_process_group() to force use of a particular device.");
+  if (devIdx == 0) { // only log on first rank of each node
+    LOG(WARNING) << c10::str(
+        "Guessing device ID based on global rank. ",
+        "This can cause a hang if rank to GPU mapping is heterogeneous. ",
+        "You can specify device_id in init_process_group()");
+  }
   return static_cast<c10::DeviceIndex>(devIdx);
 }
 

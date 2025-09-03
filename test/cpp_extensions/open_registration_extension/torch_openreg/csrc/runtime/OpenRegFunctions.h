@@ -1,13 +1,9 @@
 #pragma once
 
-#ifdef _WIN32
-  #define OPENREG_EXPORT __declspec(dllexport)
-#else
-  #define OPENREG_EXPORT __attribute__((visibility("default")))
-#endif
-
 #include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
+
+#include <include/Macros.h>
 
 #include <limits>
 
