@@ -12,7 +12,7 @@ from subprocess import Popen
 from typing import Any, Optional
 
 from torch.numa.binding import (
-    maybe_temporarily_apply_numa_binding_to_current_process,
+    maybe_temporarily_apply_numa_binding_to_current_thread,
     NumaOptions,
 )
 
@@ -57,7 +57,7 @@ class SubprocessHandler:
         self.local_rank_id = local_rank_id
 
         # See HACK [NUMA inheritance] in spawn.py for context.
-        with maybe_temporarily_apply_numa_binding_to_current_process(
+        with maybe_temporarily_apply_numa_binding_to_current_thread(
             gpu_index=local_rank_id, numa_options=numa_options
         ):
             self.proc: Popen = self._popen(args_str, env_vars)
