@@ -265,13 +265,9 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         self.bias = bias
 
         if self.elementwise_affine:
-            self.weight = Parameter(
-                torch.empty(self.normalized_shape, **factory_kwargs)
-            )
+            self.weight = UninitializedParameter(**factory_kwargs)
             if bias:
-                self.bias = Parameter(
-                    torch.empty(self.normalized_shape, **factory_kwargs)
-                )
+                self.bias = UninitializedParameter(**factory_kwargs)
             else:
                 self.register_parameter("bias", None)
         else:
