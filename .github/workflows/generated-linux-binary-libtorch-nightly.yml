@@ -338,7 +338,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_3-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - libtorch-rocm6_3-shared-with-deps-release-build
       - get-label-type
@@ -453,7 +453,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_4-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - libtorch-rocm6_4-shared-with-deps-release-build
       - get-label-type

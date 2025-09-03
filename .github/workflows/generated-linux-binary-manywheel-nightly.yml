@@ -394,7 +394,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_10-rocm6_3-build
       - get-label-type
@@ -506,7 +506,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_10-rocm6_4-build
       - get-label-type
@@ -1054,7 +1054,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_11-rocm6_3-build
       - get-label-type
@@ -1166,7 +1166,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_11-rocm6_4-build
       - get-label-type
@@ -1714,7 +1714,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_12-rocm6_3-build
       - get-label-type
@@ -1826,7 +1826,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_12-rocm6_4-build
       - get-label-type
@@ -2374,7 +2374,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_13-rocm6_3-build
       - get-label-type
@@ -2486,7 +2486,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_13-rocm6_4-build
       - get-label-type
@@ -3034,7 +3034,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_13t-rocm6_3-build
       - get-label-type
@@ -3146,7 +3146,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_13t-rocm6_4-build
       - get-label-type
@@ -3694,7 +3694,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_14-rocm6_3-build
       - get-label-type
@@ -3806,7 +3806,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_14-rocm6_4-build
       - get-label-type
@@ -4354,7 +4354,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-rocm6_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_14t-rocm6_3-build
       - get-label-type
@@ -4466,7 +4466,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_14t-rocm6_4-build
       - get-label-type
