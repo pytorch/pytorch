@@ -832,6 +832,23 @@ def forward(self, x):
         epm.const2[-1] = 321
         self.assertEqual(epm.const1[-1][-1], 321)
 
+    def test_complex_constant(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = torch.sin(x)
+                y = (1 + 1j) * s
+                z = 1j * s
+                return y, z
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
