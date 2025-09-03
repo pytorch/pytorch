@@ -61,6 +61,33 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
+// We only go one deep, because that's all torchdim needs (it supports
+// a tuple/list of FCDs which triggers a split behavior, but you can
+// only do it at the top level) and it's all the dispatcher will do
+// as well.
+static bool sequence_has_torch_function(PyObject* seq) {
+  auto length = PySequence_Length(seq);
+  if (length < 0) {
+    PyErr_Clear();
+    return false;
+  }
+
+  for (Py_ssize_t i = 0; i < length; i++) {
+    THPObjectPtr item(PySequence_GetItem(seq, i));
+    if (!item.get()) {
+      PyErr_Clear();
+      continue;
+    }
+
+    // Only check direct torch function on item (no recursion)
+    if (check_has_torch_function(item.get(), /*ignore_mode*/ true)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
@@ -68,8 +95,10 @@ static int64_t count_specified_dimensions(PyObject* index) {
   auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
-    if (check_has_torch_function(obj))
+    if (check_has_torch_function(obj)) {
       return -1;
+    }
+
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
@@ -78,10 +107,17 @@ static int64_t count_specified_dimensions(PyObject* index) {
       } else {
         count++;
       }
-    } else if (
-        obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
-        obj != Py_False) {
-      count++;
+    } else {
+      // Check sequences for __torch_function__ (top-level only)
+      if (PySequence_Check(obj)) {
+        if (sequence_has_torch_function(obj)) {
+          return -1; // Signal torch function handling needed
+        }
+      }
+      if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
+          obj != Py_False) {
+        count++;
+      }
     }
   }
   return count;
@@ -262,9 +298,76 @@ static Variable applySlicing(
   return result;
 }
 
+static bool treatSequenceAsTuple(PyObject* index) {
+  if (PyTuple_Check(index)) {
+    return true;
+  }
+  if (THPVariable_Check(index)) {
+    return false;
+  }
+  //  Allow indexing with ndarray if numpy compilation is enabled. An ndarray
+  //  index should not be treated as a tuple since the indexing has a different
+  //  syntax.
+#ifdef USE_NUMPY
+  if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
+    return false;
+  }
+#endif
+  if (!PySequence_Check(index)) {
+    return false;
+  }
+  // This uses a heuristics from NumPy for determining whether to treat
+  // non-tuple sequences as if they were a tuple. From the NumPy code comments:
+  //
+  // "At this point, we're left with a non-tuple, non-array, sequence:
+  //  typically, a list. We use some somewhat-arbitrary heuristics from here
+  //  onwards to decided whether to treat that list as a single index, or a
+  //  list of indices. Backwards compatibility only takes effect for short
+  //  sequences - otherwise we treat it like any other scalar."
+  auto n = PySequence_Size(index);
+  if (n < 0) {
+    // Negative size indicates a Python error in the PySequence_Size call.
+    PyErr_Clear();
+    return false;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  if (n >= 32) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < n; i++) {
+    auto obj = THPObjectPtr{PySequence_GetItem(index, i)};
+    if (!obj.get()) {
+      PyErr_Clear();
+      return false;
+    }
+    if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
+        PySlice_Check(obj.get())) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
+      return true;
+    }
+    if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
+      return true;
+    }
+  }
+  return false;
+}
+
 static THPObjectPtr wrapTuple(PyObject* index) {
   THPObjectPtr res;
-  if (PyTuple_Check(index)) {
+  if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
   } else {
     res = PyTuple_Pack(1, index);
@@ -331,7 +434,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, holder.get());
+    return handle_torch_function_indexing(self, index);
   }
   Variable sliced = applySlicing(
       self_,

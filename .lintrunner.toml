@@ -132,7 +132,7 @@ include_patterns = [
     'test/test_complex.py',
     'test/test_datapipe.py',
     'test/test_futures.py',
-    # 'test/test_numpy_interop.py',
+    'test/test_numpy_interop.py',
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
@@ -583,7 +583,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
+    '--pattern=#include <pybind11\/(^|[^(gil_simple\.h)])',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',

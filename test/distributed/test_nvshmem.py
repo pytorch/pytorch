@@ -37,8 +37,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # NOTE: required for nvshmem allocation
-        torch.empty(1, device=self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
@@ -66,46 +64,121 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
-    def test_rendezvous_slice(self) -> None:
-        # Rendezvous a slice of a tensor
-        self._init_device()
+    def test_alloc_without_device_context(self) -> None:
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
-        x = symm_mem.empty((2, 1024), device=self.device)
-        # Directly rendezvousing a slice should not fail
-        hdls = [symm_mem.rendezvous(y, group=group_name) for y in torch.chunk(x, 2)]
-        # Assert that handles are not the same
-        self.assertIsNot(hdls[0], hdls[1])
+        dtype = torch.float
+        numel = 1024
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
+        symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
-    def test_rendezvous_view(self) -> None:
-        # Rendezvous a view of a tensor
+    def test_mempool_tensor_factory(self) -> None:
+        """
+        Test the effectiveness of MemPool on tensor factory ops.
+        """
         self._init_device()
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
-        x = symm_mem.empty(1024, device=self.device)
-        y = x.view(32, 32)
-        # Directly rendezvousing a view should not fail
+        dtype = torch.float
+        numel = 1024
+        src_rank = 0
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            if self.rank == src_rank:
+                tensor = torch.arange(numel, dtype=dtype, device=self.device)
+            else:
+                tensor = torch.zeros(numel, dtype=dtype, device=self.device)
+
+        symm_mem.rendezvous(tensor, group=group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
+
+    @skipIfRocm
+    def test_mempool_compute_ops(self) -> None:
+        """
+        Apply MemPool context to a compute op that creates input to collective.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x0 = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x = x0 + self.rank
+            y = torch.mm(x, w)
+
+        # y should be a symm tensor
+        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        expected = torch.mm(x0, w)
+        self.assertEqual(y, expected)
+
+    @skipIfRocm
+    def test_handle_offset(self) -> None:
+        """
+        Test if handle offset is correctly set.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x0 = torch.empty(numel, dtype=dtype, device=self.device)
+            x1 = torch.empty_like(x0)
+
+        hdl0 = symm_mem.rendezvous(x0, group=group_name)
+        hdl1 = symm_mem.rendezvous(x1, group=group_name)
+        self.assertEqual(hdl0.offset, 0)
+        self.assertEqual(hdl1.offset, x0.untyped_storage().nbytes())
+
+    def test_get_remote_tensor(self) -> None:
+        """
+        Get a remote tensor and use regular aten ops to write to it.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            # src data stores my rank
+            x = torch.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+            y = torch.empty_like(x)
+
         hdl_y = symm_mem.rendezvous(y, group=group_name)
-
-        # Assert that view's handle is not the same as the original tensor's handle
-        hdl_x = symm_mem.rendezvous(x, group=group_name)
-        self.assertIsNot(hdl_x, hdl_y)
-
-    @skipIfRocm
-    def test_rendezvous_same(self) -> None:
-        # Rendezvous same tensor multiple times
-        self._init_device()
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        x = symm_mem.empty(1024, device=self.device)
-        hdl_0 = symm_mem.rendezvous(x, group=group_name)
-        hdl_1 = symm_mem.rendezvous(x, group=group_name)
-        # The handle should point to the same object
-        self.assertIs(hdl_0, hdl_1)
+        peer = (self.rank + 1) % self.world_size  # Shifting pattern
+        y_remote = hdl_y.get_remote_tensor(peer, y.size(), y.dtype)
+        y_remote.copy_(x)
+        dist.barrier()
+        # Expecting data from -1 rank
+        expected = torch.empty(numel, dtype=dtype, device=self.device).fill_(
+            (self.rank - 1) % self.world_size
+        )
+        self.assertEqual(y, expected)
 
     @skipIfRocm
     def test_nvshmem_put(self) -> None:

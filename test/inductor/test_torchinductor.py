@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     MACOS_VERSION,
     parametrize,
     serialTest,
+    skipIfMPS,
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
@@ -1465,6 +1466,49 @@ class CommonTemplate:
         x = torch.tensor([[1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j]])
         y = torch.tensor([[1 + 1j]])
 
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex7(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar (0-dimensional) complex tensor addition: 0D + 0D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand((), dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex8(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex addition: 1D + 0D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand(1, dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex9(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex addition: 0D + 1D
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.rand((), dtype=torch.complex64, device=self.device)
+        y = torch.rand(1, dtype=torch.complex64, device=self.device)
+
+        self.common(fn, (x, y, 2))
+
+    def test_add_complex10(self):
+        # Fix https://github.com/pytorch/pytorch/issues/160495
+        # Test scalar complex broadcasting
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.randn(2, 3, dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
         self.common(fn, (x, y, 2))
 
     def test_concat_add_inplace(self):
@@ -8437,6 +8481,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfMPS
+    def test_slice_scatter_dtype_consistency(self):
+        # Test dtype consistency of slice_scatter
+        def fn(x, y):
+            return torch.slice_scatter(y, x, 0)
+
+        for dtype in [
+            torch.int64,
+            torch.float64,
+        ]:
+            self.common(
+                fn,
+                [
+                    torch.tensor([0], dtype=dtype),
+                    torch.tensor([0], dtype=torch.float32),
+                ],
+            )
+
     @skip_if_gpu_halide  # compile error on gpu
     def test_scatter1(self):
         def fn(a, dim, index, b):
@@ -10668,6 +10730,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_pattern_matcher_unbacked(self):
+        @torch.compile(fullgraph=True)
+        def get_mask(W: torch.Tensor, percentage_nonzeros: torch.Tensor):
+            total_elements = W.numel()
+            k = total_elements * percentage_nonzeros
+            top_k_indices = torch.topk(torch.abs(W).flatten(), k.int())[1]
+            mask = torch.zeros(total_elements, dtype=torch.bool, device=W.device)
+            mask.scatter_(0, top_k_indices, True)
+            mask = mask.view(W.shape)
+            return mask
+
+        x = torch.randn((128, 64), device=self.device)
+        p = torch.tensor(0.50, device=self.device)
+        get_mask(x, p)
+
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
@@ -11601,6 +11679,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps_unimplemented
     @expectedFailureXPU
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
+    )
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -12828,8 +12909,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             not in [
                 "airy_ai",
                 "erfcx",
-                "gammainc",
-                "gammaincc",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",

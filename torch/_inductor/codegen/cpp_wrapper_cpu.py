@@ -584,7 +584,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are promoted in the JIT mode
                     num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                     # release GIL to support multiple instances inference (in different threads of the same process)
-                    self.prefix.splice("py::gil_scoped_release release;")
+                    self.prefix.splice("py::gil_scoped_release_simple release;")
 
                 self.prefix.splice(
                     f"""
@@ -720,6 +720,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"    extern const unsigned char __{name}_end[];"
                     )
             self.prefix.writeline("}")
+
+    # MSVC string was longer than the limit of 16380 single-byte characters.
+    # https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026
+    MSVC_C2026_MAX_STRING_LENGTH = 16000
+
+    def codegen_write_arg_with_large_length_string(
+        self,
+        arg_name: str,
+        arg_str_val: str,
+        max_truncate_length: int = MSVC_C2026_MAX_STRING_LENGTH,
+    ):
+        def truncate_string(s: str, length: int) -> list[str]:
+            return [s[i : i + length] for i in range(0, len(s), length)]
+
+        if len(arg_str_val) > max_truncate_length:
+            truncated_strs = truncate_string(arg_str_val, max_truncate_length)
+            self.prefix.writeline(f"{arg_name} =")
+            for truncate_str in truncated_strs:
+                self.prefix.writeline(f'R"({truncate_str})"')
+            self.prefix.writeline(";")
+        else:
+            self.prefix.writeline(f'{arg_name} = R"({arg_str_val})";')
 
     def codegen_model_constructor(self):
         """
@@ -868,11 +890,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     .replace("\t", "\\t")
                 )
 
-            self.prefix.writeline(
-                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
+            # Origin code: self.prefix.writeline(f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="in_spec_", arg_str_val=config.aot_inductor.serialized_in_spec
             )
-            self.prefix.writeline(
-                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
+            # Origin code: self.prefix.writeline(f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="out_spec_",
+                arg_str_val=config.aot_inductor.serialized_out_spec,
             )
 
             for idx, output in enumerate(V.graph.graph_outputs):
@@ -1219,6 +1246,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
+        debug_handle: Optional[int] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1235,14 +1263,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
+            self.write_provenance_debug_handle(shim_fn, debug_handle)
             shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
             if enable_kernel_profile:
+                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1338,6 +1368,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        debug_handle: Optional[int] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1346,7 +1377,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(
+            kernel, args, device, debug_handle=debug_handle
+        )
 
     def generate_scatter_fallback(
         self,
@@ -1456,51 +1489,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def codegen_dynamic_select_index(self, node, clamp):
+    def codegen_dynamic_select_index(self, node):
         index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
-        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
 
-        # codegen index
-        sym = node.unbacked_offset_symbol
-        index_str = (
+        index_compute_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
         )
-        self.writeline(f"auto {sym}_index = {index_str};")
-        index_str_clamped = (
-            f"{sym}_index < 0 ? 0 : ({sym}_index > {size_cpp_str} ? {size_cpp_str} : {sym}_index)"
-            if clamp
-            else f"{sym}_index"
-        )
-        self.writeline(f"auto {sym}_index_clamped = {index_str_clamped};")
         self.writeline(
-            f"auto {sym} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
-            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * {sym}_index_clamped;"
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(sym))
-
-    def codegen_dynamic_slice_size(self, node):
-        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
-        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
-        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
-        sym = node.unbacked_size_symbol
-
-        def codegen_clamp(index_str, start=True):
-            suf = "start" if start else "end"
-            index_ = f"{sym}_{suf}_index"
-            self.writeline(
-                f"auto {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
-            )
-            self.writeline(
-                f"auto {sym}_{suf}_clamped = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
-            )
-
-        codegen_clamp(start_cpp_str, start=True)
-        codegen_clamp(end_cpp_str, start=False)
-        self.writeline(f"auto {sym}_raw = {sym}_end_clamped - {sym}_start_clamped;")
-        self.writeline(f"auto {sym} = {sym}_raw < 0 ? 0 : {sym}_raw;")
-        self.unbacked_symbol_decls.add(str(sym))
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def make_buffer_free(self, buffer):
         return (
@@ -2287,7 +2288,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
-            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writeline("py::gil_scoped_acquire_simple acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
         return scoped_lines._lines

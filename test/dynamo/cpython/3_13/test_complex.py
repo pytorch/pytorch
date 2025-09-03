@@ -14,6 +14,7 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
+    slowTest,
     xfailIfTorchDynamo,
 )
 
@@ -279,6 +280,7 @@ class ComplexTest(__TestCase):
             q = z.__truediv__(y)
             self.assertClose(q, x)
 
+    @slowTest
     def test_truediv(self):
         simple_real = [float(i) for i in range(-5, 6)]
         simple_complex = [complex(x, y) for x in simple_real for y in simple_real]
@@ -524,7 +526,10 @@ class ComplexTest(__TestCase):
 
     def test_boolcontext(self):
         for i in range(100):
-            self.assertTrue(complex(random() + 1e-6, random() + 1e-6))
+            with torch._dynamo.set_fullgraph(False):
+                r1 = random()
+                r2 = random()
+            self.assertTrue(complex(r1 + 1e-6, r2 + 1e-6))
         self.assertTrue(not complex(0.0, 0.0))
         self.assertTrue(1j)
 

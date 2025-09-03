@@ -589,6 +589,14 @@ def propagate_shape_and_sharding(
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",
                         )
 
+                shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
+                if strict_view and shard_mesh_dim is not None:
+                    if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
+                        raise RuntimeError(
+                            f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
+                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                        )
+
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):

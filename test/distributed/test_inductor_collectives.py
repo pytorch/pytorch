@@ -1642,7 +1642,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_reduce_scatter_bucket(self):
-        def func(x, w, rs_0, rs_1, *, tag, ranks, group_size):
+        def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
 
@@ -1667,35 +1667,44 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, rs_0_out, rs_1_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
-        inputs = [x, w, rs_0, rs_1]
-        func(*inputs, **self.get_world_trs())
+        # test "fsdp" mode to allow convert_element_type after wait
+        def func2(x, w, rs_0, rs_1, tag, ranks, group_size):
+            y, rs_0_out, rs_1_out = func(x, w, rs_0, rs_1, tag, ranks, group_size)
+            return y, rs_0_out.to(torch.float32), rs_1_out.to(torch.float32)
 
-        with torch._inductor.config.patch(
-            {
-                "bucket_reduce_scatters_fx": "all",
-                "reorder_for_compute_comm_overlap": False,
-            }
-        ):
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-        # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=1,
-                exactly=True,
+        for f in [func, func2]:
+            x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+            w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+            rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+            rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+            inputs = [x, w, rs_0, rs_1]
+            f(*inputs, **self.get_world_trs())
+
+            with torch._inductor.config.patch(
+                {
+                    "bucket_reduce_scatters_fx": "fsdp",
+                    "reorder_for_compute_comm_overlap": False,
+                }
+            ):
+                compiled = torch.compile(f)
+                compiled(*inputs, **self.get_world_trs())
+                code = run_and_get_triton_code(
+                    compiled, *inputs, **self.get_world_trs()
+                )
+            # NOTE: The first return value should be the output of the first wait_tensor.
+            # We want to make sure no unnecessary copy is made.
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=1,
+                    exactly=True,
+                )
+                .run(code)
             )
-            .run(code)
-        )
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+            out = compiled(*inputs, **self.get_world_trs())
+            correct = f(*inputs, **self.get_world_trs())
+            assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")

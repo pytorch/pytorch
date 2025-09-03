@@ -384,7 +384,9 @@ def _get_param_buffer_mapping(
     param_lookup: dict[int, str] = {}
     buffer_lookup: dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup[id(param)] = name
+        if param_lookup.get(id(param)) is None:
+            # we only want to keep the first occurrence of a parameter to guarantee parity of original and traced module.
+            param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup[id(buffer)] = name
 
@@ -810,7 +812,7 @@ def _export_to_torch_ir(
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
                     # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
@@ -1850,14 +1852,6 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
 
-def _is_bogus_const_name(name: str):
-    splitted_names = name.split(".")
-    if len(splitted_names) < 1:
-        return True
-
-    return splitted_names[-1].startswith("lifted_tensor")
-
-
 def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -2043,6 +2037,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    allow_complex_guards_as_runtime_asserts: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2057,11 +2052,6 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
-    has_ambient_mode = False
-    if not strict:
-        flat_args, _ = pytree.tree_flatten((args, kwargs))
-        has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
-
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
@@ -2072,24 +2062,9 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
-
-    # If we are tracing with fake inputs, it is expected to
-    # see fake tensor constants.
-    if not strict and not has_ambient_mode:
-        for const, val in export_artifact.aten.constants.items():
-            if isinstance(
-                val, torch._subclasses.fake_tensor.FakeTensor
-            ) and _is_bogus_const_name(const):
-                raise RuntimeError(
-                    f"We found a fake tensor in the exported program constant's list. "
-                    f"This typically means our tracing system encountered an op that "
-                    f"we can't trace through. For the potential source, you can refer to "
-                    f"following model attribute: {const}. "
-                    f"Please file an issue on github. "
-                )
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2224,6 +2199,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep
