@@ -298,165 +298,6 @@ class TestMatmulCuda(TestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
-
-    @onlyCUDA
-    @skipIfRocm
-    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("M", [1, 32, 64])
-    @parametrize("N", [1, 32, 64])
-    @parametrize("K", [1, 32, 64])
-    @parametrize("batch_size", [None, 1, 16])
-    @parametrize("backend", ["cublas", "cublaslt"])
-    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        device = "cuda"
-        dtype = input_dtype
-        with blas_library_context(backend):
-            def create_inputs(B=None):
-                if B is None:
-                    a = torch.randn(M, K, device=device, dtype=dtype)
-                    b = torch.randn(K, N, device=device, dtype=dtype)
-                else:
-                    a = torch.randn(B, M, K, device=device, dtype=dtype)
-                    b = torch.randn(B, K, N, device=device, dtype=dtype)
-                return a, b
-
-            a, b = create_inputs(batch_size)
-
-            a_fp32, b_fp32 = a.to(torch.float32), b.to(torch.float32)
-
-            output_dtypes = [torch.float32]
-
-            if input_dtype != torch.float32:
-                output_dtypes.append(input_dtype)
-
-            for output_dtype in output_dtypes:
-                # Catch edge case of incompat with bfloat16 and major version < 8
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    if output_dtype == torch.bfloat16:
-                        continue
-
-                    if batch_size:
-                        with self.assertRaises(RuntimeError):
-                            torch.bmm(a, b, out_dtype=output_dtype)
-                    else:
-                        with self.assertRaises(RuntimeError):
-                            torch.mm(a, b, out_dtype=output_dtype)
-                else:
-                    if batch_size:
-                        out = torch.bmm(a, b, out_dtype=output_dtype)
-                        baseline = torch.bmm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.bmm(a, b)
-                    else:
-                        out = torch.mm(a, b, out_dtype=output_dtype)
-                        baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
-
-                    self.assertEqual(out.dtype, output_dtype)
-
-                    torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
-
-
-    @onlyCUDA
-    @skipIfRocm
-    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("M", [1, 32, 64])
-    @parametrize("N", [1, 32, 64])
-    @parametrize("K", [1, 32, 64])
-    @parametrize("batch_size", [None, 1, 32])
-    @parametrize("backend", ["cublas", "cublaslt"])
-    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        device = "cuda"
-        dtype = input_dtype
-        with blas_library_context(backend):
-            def create_inputs(B=None):
-                if B is None:
-                    a = torch.randn(M, K, device=device, dtype=dtype)
-                    b = torch.randn(K, N, device=device, dtype=dtype)
-                    c = torch.randn(M, N, device=device, dtype=dtype)
-                else:
-                    a = torch.randn(B, M, K, device=device, dtype=dtype)
-                    b = torch.randn(B, K, N, device=device, dtype=dtype)
-                    c = torch.randn(B, M, N, device=device, dtype=dtype)
-
-                return a, b, c
-
-            a, b, c = create_inputs(batch_size)
-
-            a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
-
-            output_dtypes = [torch.float32]
-
-            if input_dtype != torch.float32:
-                output_dtypes.append(input_dtype)
-
-            for output_dtype in output_dtypes:
-                # Catch edge case of incompat with bfloat16 and major version < 8
-                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
-                    if output_dtype == torch.bfloat16:
-                        continue
-
-                    if batch_size:
-                        with self.assertRaises(RuntimeError):
-                            torch.baddbmm(c, a, b, out_dtype=output_dtype)
-                    else:
-                        with self.assertRaises(RuntimeError):
-                            torch.addmm(c, a, b, out_dtype=output_dtype)
-                else:
-                    if batch_size:
-                        out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
-                        if output_dtype == torch.float32:
-                            baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32)
-                        else:
-                            baseline = torch.baddbmm(c, a, b)
-                    else:
-                        out = torch.addmm(c, a, b, out_dtype=output_dtype)
-                        if output_dtype == torch.float32:
-                            baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
-                        else:
-                            baseline = torch.addmm(c, a, b)
-
-                    self.assertEqual(out.dtype, output_dtype)
-                    torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
-
-
-    @onlyCUDA
-    @skipIfRocm
-    @parametrize("batch_size", [1, 32])
-    @parametrize("backend", ["cublas", "cublaslt"])
-    def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
-        M, N, K = 32, 32, 32
-        device = "cuda"
-        dtype = torch.float16
-        with blas_library_context(backend):
-            torch.backends.cuda.preferred_blas_library(backend)
-
-            orig_fp16_accum = torch.backends.cuda.matmul.allow_fp16_accumulation
-            torch.backends.cuda.matmul.allow_fp16_accumulation = True
-
-            def create_inputs():
-                a = torch.randn(M, K, device=device, dtype=dtype)
-                b = torch.randn(K, N, device=device, dtype=dtype)
-                c = torch.randn(M, N, device=device, dtype=dtype)
-                return a, b, c
-
-            def expand(tensor):
-                return tensor.unsqueeze(0).expand(batch_size, *tensor.shape)
-
-            a, b, c = create_inputs()
-
-            with self.assertRaises(Exception):
-                torch.baddbmm(expand(c), expand(a), expand(b), out_dtype=torch.float32)
-
-            with self.assertRaises(Exception):
-                torch.addmm(c, a, b, out_dtype=torch.float32)
-
-            with self.assertRaises(Exception):
-                torch.bmm(expand(a,), expand(b), out_dtype=torch.float32)
-
-            with self.assertRaises(Exception):
-                torch.mm(a, b, out_dtype=torch.float32)
-
-            torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
-
-class TestGroupedMM(TestCase):
     def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
         for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
             a = a.clone().detach().requires_grad_()
@@ -468,14 +309,14 @@ class TestGroupedMM(TestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
-
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major):
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
         dtype = torch.bfloat16
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -513,7 +354,8 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major):
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -569,7 +411,8 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major):
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -603,7 +446,8 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major):
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
+        device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -768,6 +612,163 @@ class TestGroupedMM(TestCase):
         C = f(A, B.transpose(-2, -1), offs=offs)
         torch.testing.assert_close(C, C_ref)
 
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 16])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        device = "cuda"
+        dtype = input_dtype
+        with blas_library_context(backend):
+            def create_inputs(B=None):
+                if B is None:
+                    a = torch.randn(M, K, device=device, dtype=dtype)
+                    b = torch.randn(K, N, device=device, dtype=dtype)
+                else:
+                    a = torch.randn(B, M, K, device=device, dtype=dtype)
+                    b = torch.randn(B, K, N, device=device, dtype=dtype)
+                return a, b
+
+            a, b = create_inputs(batch_size)
+
+            a_fp32, b_fp32 = a.to(torch.float32), b.to(torch.float32)
+
+            output_dtypes = [torch.float32]
+
+            if input_dtype != torch.float32:
+                output_dtypes.append(input_dtype)
+
+            for output_dtype in output_dtypes:
+                # Catch edge case of incompat with bfloat16 and major version < 8
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    if output_dtype == torch.bfloat16:
+                        continue
+
+                    if batch_size:
+                        with self.assertRaises(RuntimeError):
+                            torch.bmm(a, b, out_dtype=output_dtype)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            torch.mm(a, b, out_dtype=output_dtype)
+                else:
+                    if batch_size:
+                        out = torch.bmm(a, b, out_dtype=output_dtype)
+                        baseline = torch.bmm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.bmm(a, b)
+                    else:
+                        out = torch.mm(a, b, out_dtype=output_dtype)
+                        baseline = torch.mm(a_fp32, b_fp32) if output_dtype == torch.float32 else torch.mm(a, b)
+
+                    self.assertEqual(out.dtype, output_dtype)
+
+                    torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 32])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        device = "cuda"
+        dtype = input_dtype
+        with blas_library_context(backend):
+            def create_inputs(B=None):
+                if B is None:
+                    a = torch.randn(M, K, device=device, dtype=dtype)
+                    b = torch.randn(K, N, device=device, dtype=dtype)
+                    c = torch.randn(M, N, device=device, dtype=dtype)
+                else:
+                    a = torch.randn(B, M, K, device=device, dtype=dtype)
+                    b = torch.randn(B, K, N, device=device, dtype=dtype)
+                    c = torch.randn(B, M, N, device=device, dtype=dtype)
+
+                return a, b, c
+
+            a, b, c = create_inputs(batch_size)
+
+            a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
+
+            output_dtypes = [torch.float32]
+
+            if input_dtype != torch.float32:
+                output_dtypes.append(input_dtype)
+
+            for output_dtype in output_dtypes:
+                # Catch edge case of incompat with bfloat16 and major version < 8
+                if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+                    if output_dtype == torch.bfloat16:
+                        continue
+
+                    if batch_size:
+                        with self.assertRaises(RuntimeError):
+                            torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            torch.addmm(c, a, b, out_dtype=output_dtype)
+                else:
+                    if batch_size:
+                        out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                        if output_dtype == torch.float32:
+                            baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32)
+                        else:
+                            baseline = torch.baddbmm(c, a, b)
+                    else:
+                        out = torch.addmm(c, a, b, out_dtype=output_dtype)
+                        if output_dtype == torch.float32:
+                            baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
+                        else:
+                            baseline = torch.addmm(c, a, b)
+
+                    self.assertEqual(out.dtype, output_dtype)
+                    torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("batch_size", [1, 32])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
+        M, N, K = 32, 32, 32
+        device = "cuda"
+        dtype = torch.float16
+        with blas_library_context(backend):
+            torch.backends.cuda.preferred_blas_library(backend)
+
+            orig_fp16_accum = torch.backends.cuda.matmul.allow_fp16_accumulation
+            torch.backends.cuda.matmul.allow_fp16_accumulation = True
+
+            def create_inputs():
+                a = torch.randn(M, K, device=device, dtype=dtype)
+                b = torch.randn(K, N, device=device, dtype=dtype)
+                c = torch.randn(M, N, device=device, dtype=dtype)
+                return a, b, c
+
+            def expand(tensor):
+                return tensor.unsqueeze(0).expand(batch_size, *tensor.shape)
+
+            a, b, c = create_inputs()
+
+            with self.assertRaises(Exception):
+                torch.baddbmm(expand(c), expand(a), expand(b), out_dtype=torch.float32)
+
+            with self.assertRaises(Exception):
+                torch.addmm(c, a, b, out_dtype=torch.float32)
+
+            with self.assertRaises(Exception):
+                torch.bmm(expand(a,), expand(b), out_dtype=torch.float32)
+
+            with self.assertRaises(Exception):
+                torch.mm(a, b, out_dtype=torch.float32)
+
+            torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
@@ -2164,7 +2165,6 @@ class TestMixedDtypesLinearCuda(TestCase):
             )
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestGroupedMM, globals())
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8Matmul, globals(), except_for="cpu")
 
