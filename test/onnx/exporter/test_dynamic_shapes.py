@@ -199,7 +199,6 @@ class TestDynamicShapes(common_utils.TestCase):
                 filename,
                 dynamic_axes=dynamic_axes,
                 input_names=input_names,
-                dynamo=False,
             )
             onnx_model = onnx.load(filename)
 

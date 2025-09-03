@@ -44,7 +44,6 @@ class CompileArtifacts:
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
-    closure: Optional[tuple[Any, ...]]
 
     def compiled_function(self) -> Any:
         import_sources = {
@@ -52,7 +51,7 @@ class CompileArtifacts:
             for alias, module_name in self.import_sources.items()
         }
         f_globals = {**import_sources, self.backend_id: self.compiled_fn}
-        core = types.FunctionType(self.bytecode, f_globals, closure=self.closure)
+        core = types.FunctionType(self.bytecode, f_globals)
 
         def optimized_call(*args: Any, **kwargs: Any) -> Any:
             f_locals = bind_locals(self.signature, *args, **kwargs)
@@ -125,15 +124,6 @@ def aot_compile_fullgraph(
 
     signature = inspect.signature(fn)
     f_locals = bind_locals(signature, *args, **kwargs)
-    if fn.__code__.co_freevars or fn.__closure__:
-        assert len(fn.__closure__) == len(fn.__code__.co_freevars)
-        f_locals.update(
-            {
-                name: cell.cell_contents
-                for name, cell in zip(fn.__code__.co_freevars, fn.__closure__)
-            }
-        )
-
     with (
         compile_context(CompileContext(convert_frame.get_compile_id({}))),
         get_metrics_context(),
@@ -145,13 +135,11 @@ def aot_compile_fullgraph(
                 fn.__globals__,
                 f_locals,
                 builtins.__dict__,
-                closure=fn.__closure__ or (),  # type: ignore[arg-type]
+                closure=(),  # type: ignore[arg-type]
             )
         )
         dynamo_output = capture_output.dynamo_output
-        check_fn = dynamo_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
-        )
+        check_fn = dynamo_output.build_guards(fn.__code__, hooks=hooks, save=True)
         assert check_fn.guards_state is not None
 
     backend_input = capture_output.backend_input
@@ -179,6 +167,5 @@ def aot_compile_fullgraph(
         backend_id=backend_input.backend_id,
         compiled_fn=compiled_fn,
         original_code=fn.__code__,
-        closure=fn.__closure__,
     )
     return compile_artifacts.compiled_function()

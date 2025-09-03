@@ -1412,7 +1412,7 @@
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
   dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: cat_sparse
+    SparseCPU, SparseCUDA: cat_sparse
     QuantizedCPU: cat_quantized_cpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: cat_nested
   tags: core
@@ -6917,7 +6917,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clone
-    SparseCPU, SparseCUDA, SparseMPS: clone_sparse
+    SparseCPU, SparseCUDA: clone_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
@@ -6952,7 +6952,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
-    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zero_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: zero_nested_
@@ -9943,7 +9943,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: igamma_out
+    CPU, CUDA: igamma_out
   tags: pointwise
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
@@ -9960,7 +9960,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: igammac_out
+    CPU, CUDA: igammac_out
   tags: pointwise
 
 - func: igammac(Tensor self, Tensor other) -> Tensor

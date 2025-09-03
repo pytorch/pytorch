@@ -996,6 +996,9 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  #ifdef USE_ROCM
+  TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported for ROCm");
+  #endif
   // TODO: Support tuning for Half inputs and FP32 output
   bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
 }
@@ -1003,7 +1006,9 @@ void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)
 
 template <>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  #ifndef USE_ROCM
+  #ifdef USE_ROCM
+  TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #else
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
@@ -1508,6 +1513,9 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
+  #ifdef USE_ROCM
+  TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+  #endif
   // TODO: Support Tuning for fp16-fp32 gemm
   gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
 }
@@ -1515,7 +1523,9 @@ void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) 
 
 template <>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  #ifndef USE_ROCM
+  #ifdef USE_ROCM
+  TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+  #else
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
