@@ -37,8 +37,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # NOTE: required for nvshmem allocation
-        torch.empty(1, device=self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
@@ -66,6 +64,19 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_alloc_without_device_context(self) -> None:
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
     def test_mempool_tensor_factory(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -88,7 +99,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
-        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     @skipIfRocm
@@ -113,7 +124,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
-        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 

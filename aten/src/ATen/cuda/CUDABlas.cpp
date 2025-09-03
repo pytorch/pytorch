@@ -2573,8 +2573,6 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// HIP on Windows does not support
-#if !(defined(USE_ROCM) && defined(_MSC_VER))
 template <>
 void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgetrsBatched(
@@ -2773,6 +2771,5 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       devInfoArray,
       batchSize));
 }
-#endif // !(defined(USE_ROCM) && defined(_MSC_VER))
 
 } // namespace at::cuda::blas
