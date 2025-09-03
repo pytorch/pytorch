@@ -1314,7 +1314,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         )
                     )
                 # Insert a guard that the name is not present in the object __dict__
-                if self.source:
+                if (
+                    self.source
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
                     install_guard(
                         self.source.make_guard(
                             functools.partial(
