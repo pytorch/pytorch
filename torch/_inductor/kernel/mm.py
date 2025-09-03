@@ -671,6 +671,56 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 decompose_k_subgraph_template = DecomposeKSugraphTemplate()
 
 
+class ContiguousTemplate(SubgraphTemplate):
+    def __init__(self, name: str, description: str, fn: Any):
+        self.name = name
+        self.description = description
+        self.fn = fn
+        super().__init__(
+            name=name,
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                self.fn,
+                decompositions,
+            )
+
+            return super().generate(
+                name=self.name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=self.description,
+            )
+
+
+def contiguous_mm(a, b):
+    return torch.mm(a, b.contiguous())
+
+
+def contiguous_addmm(inp, a, b):
+    return torch.addmm(inp, a, b.contiguous())
+
+
+mm_contiguous_subgraph_template = ContiguousTemplate(
+    "contiguous_mm", "contiguous mm", contiguous_mm
+)
+addmm_contiguous_subgraph_template = ContiguousTemplate(
+    "contiguous_addmm", "contiguous addmm", contiguous_addmm
+)
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     """
@@ -712,6 +762,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
+
+        templates_to_use.append(mm_contiguous_subgraph_template)
 
     # Single unified call for all non-autoheuristic templates
     choices.extend(
@@ -858,6 +910,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    """
+    Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
@@ -892,6 +947,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             templates_to_use.append(persistent_tma_mm_template)
+
+        templates_to_use.append(addmm_contiguous_subgraph_template)
 
     # Single unified call for all templates
     choices.extend(
