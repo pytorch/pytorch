@@ -856,7 +856,9 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")

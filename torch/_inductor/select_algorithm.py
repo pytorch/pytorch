@@ -263,7 +263,7 @@ class SubgraphInfo:
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
-    numels = None  # type: ignore[var-annotated]
+    numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("range_trees", "numels")
@@ -1453,7 +1453,9 @@ class TritonTemplate(KernelTemplate):
         """
 
         try:
-            choices.append(self.generate(generate_with_caching=True, **kwargs))
+            choice = self.generate(generate_with_caching=True, **kwargs)
+            if choice is not None:
+                choices.append(choice)
             return None
         except NotImplementedError as e:
             log.info(
@@ -3358,6 +3360,9 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
+    def clear_feedback_savers(self):
+        self.feedback_saver_fns = []
+
     def add_preprocessing_fn(self, fn: PreprocessingFunction):
         self.preprocessing_fns.append(fn)
 
@@ -3403,6 +3408,12 @@ def add_feedback_saver(
 ):
     cache = get_algorithm_selector_cache()
     cache.add_feedback_saver(fn)
+
+
+def clear_feedback_savers():
+    """Clear all feedback saver functions."""
+    cache = get_algorithm_selector_cache()
+    cache.clear_feedback_savers()
 
 
 def add_preprocessing_fn(
