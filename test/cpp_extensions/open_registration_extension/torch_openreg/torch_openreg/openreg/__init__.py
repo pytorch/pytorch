@@ -60,6 +60,10 @@ def _lazy_init():
     _initialized = True
 
 
+def get_amp_supported_dtype():
+    return [torch.float16]
+
+
 from .random import *  # noqa: F403
 
 
