@@ -3007,9 +3007,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def flex_attention_lse_only(q, k, v):
             return flex_attention(q, k, v, return_lse=True)[1]
 
-        func = torch.compile(
-            flex_attention_lse_only, backend="aot_eager", fullgraph=True
-        )
+        func = torch.compile(flex_attention_lse_only, backend="aot_eager")
 
         self.assertTrue(
             torch.autograd.gradcheck(func, (query, key, value), raise_exception=True)
@@ -3035,9 +3033,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k.grad = None
         v.grad = None
 
-        out2, lse2 = torch.compile(flex_attention, fullgraph=True)(
-            q, k, v, return_lse=True
-        )
+        out2, lse2 = torch.compile(flex_attention)(q, k, v, return_lse=True)
         (out2.mean() + (lse2 * lse_mask).sum()).backward()
         q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
         tolerance = Tolerances(atol=1e-1, rtol=1e-1)
@@ -3556,7 +3552,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         out_eager, lse_eager = flex_attention(query, key, value, return_lse=True)
 
-        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        flex_compile = torch.compile(flex_attention)
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
         out_paged, lse_paged = self.run_paged_attention(
@@ -4262,7 +4258,7 @@ class GraphModule(torch.nn.Module):
             mask_mod_other_buffers=(),
         ):
             inner_q, inner_k, inner_v = query.elem, key.elem, value.elem
-            out, lse = flex_attention_hop(
+            out, lse, max_scores = flex_attention_hop(
                 inner_q,
                 inner_k,
                 inner_v,
@@ -4273,7 +4269,11 @@ class GraphModule(torch.nn.Module):
                 score_mod_other_buffers,
                 mask_mod_other_buffers,
             )
-            return AsStridedErrorTensor(out), AsStridedErrorTensor(lse)
+            return (
+                AsStridedErrorTensor(out),
+                AsStridedErrorTensor(lse),
+                AsStridedErrorTensor(max_scores),
+            )
 
         # Test setup
         B, H, S, D = 2, 1, 128, 16
@@ -4294,7 +4294,7 @@ class GraphModule(torch.nn.Module):
             )
 
         # Test 2: Run flex_attention with normal tensors first
-        compiled_fn = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
+        compiled_fn = torch.compile(flex_attention, backend="aot_eager")
         normal_out, normal_lse = compiled_fn(
             query_elem, key_elem, value_elem, return_lse=True
         )
