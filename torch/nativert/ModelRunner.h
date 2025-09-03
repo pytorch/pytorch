@@ -38,7 +38,6 @@ class TORCH_API ModelRunner {
       Graph& graph,
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>& reader);
 
-
  private:
   std::unordered_map<std::string, std::string> getPayloadConfig(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
