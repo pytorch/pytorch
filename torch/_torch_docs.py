@@ -7126,7 +7126,7 @@ Args:
     {opt_keepdim}
 
 Keyword arguments:
-    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7570,17 +7570,17 @@ The behavior depends on the dimensionality of the tensors as follows:
   N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
   argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
   batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
-  1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
-  The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
-  must be broadcastable).  For example, if :attr:`input` is a
-  :math:`(j \times 1 \times n \times n)` tensor and :attr:`other` is a :math:`(k \times n \times n)`
-  tensor, :attr:`out` will be a :math:`(j \times k \times n \times n)` tensor.
+  1 is appended to its dimension for the purpose of the batched matrix multiply and removed after.
 
-  Note that the broadcasting logic only looks at the batch dimensions when determining if the inputs
-  are broadcastable, and not the matrix dimensions. For example, if :attr:`input` is a
+  The first N-2 dimensions of each argument, the batch dimensions, are
+  :ref:`broadcast <broadcasting-semantics>` (and thus must be broadcastable).
+  The last 2, the matrix dimensions, are handled as in the matrix-matrix product.
+
+  For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
-  tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
-  matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
+  tensor, the batch dimensions are :math:`(j \times 1)` and :math:`(k)`,
+  and the matrix dimensions are :math:`(n \times m)` and :math:`(m \times p)`.
+  :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
 matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
@@ -9987,7 +9987,7 @@ Example::
 add_docstr(
     torch.sort,
     r"""
-sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, *, stable=False, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -10008,10 +10008,10 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
-    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
-       of equivalent elements is preserved.
 
 Keyword args:
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+        of equivalent elements is preserved.
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
         be optionally given to be used as output buffers
 
@@ -10052,7 +10052,7 @@ Example::
 add_docstr(
     torch.argsort,
     r"""
-argsort(input, dim=-1, descending=False, stable=False) -> Tensor
+argsort(input, dim=-1, descending=False, *, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -10068,6 +10068,8 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+
+Keyword args:
     stable (bool, optional): controls the relative order of equivalent elements
 
 Example::

@@ -197,6 +197,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
         torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
         torch._dynamo.external_utils.is_compiling: True,
         torch._utils.is_compiling: True,
@@ -1814,7 +1815,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)
         example_value = torch.nn.Parameter(
-            tx.output.example_value_from_input_node(data.as_proxy().node)
+            tx.output.example_value_from_input_node(data.as_proxy().node),
+            requires_grad=requires_grad,
         )
         result = VariableTracker.build(tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
