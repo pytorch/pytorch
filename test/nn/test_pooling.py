@@ -860,6 +860,14 @@ torch.cuda.synchronize()
             mod(inp)
 
     @onlyNativeDeviceTypes
+    def test_LPPool1d_kernel_size_overflow_large(self, device):
+        avgpool = torch.nn.LPPool1d(-1.38119e+150, 7879455037536781369, ceil_mode=True).to(device)
+        inp = torch.randn(3, 15, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+            avgpool(inp)
+
+    @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
