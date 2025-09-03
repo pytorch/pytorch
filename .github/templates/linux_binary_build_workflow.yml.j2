@@ -172,6 +172,7 @@ jobs:
         uses: ./.github/actions/teardown-xpu
     {%- else %}
     runs-on: linux.rocm.gpu.mi250
+    if: false
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:

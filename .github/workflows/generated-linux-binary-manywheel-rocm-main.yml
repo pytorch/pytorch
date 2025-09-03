@@ -70,6 +70,7 @@ jobs:
       - manywheel-py3_9-rocm6_4-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
+    if: false
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch

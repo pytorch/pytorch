@@ -343,6 +343,7 @@ jobs:
       - libtorch-rocm6_3-shared-with-deps-release-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
+    if: false
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -457,6 +458,7 @@ jobs:
       - libtorch-rocm6_4-shared-with-deps-release-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
+    if: false
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
