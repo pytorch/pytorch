@@ -28,10 +28,8 @@ ARG GET_PIP_URL
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python and other dependencies
-RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
-    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
-    && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim libgl1-mesa-dev \
+RUN apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update -y \
     && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
@@ -130,7 +128,7 @@ RUN pip freeze | grep -E 'ninja'
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
 # sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
-ARG XFORMERS_COMMIT=eb0946a363464da96ea40afd1a7f72a907c25497
+ARG XFORMERS_COMMIT=5d4b92a5e5a9c6c6d4878283f47d82e17995b468
 ENV CCACHE_DIR=/root/.cache/ccache
 
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -243,15 +241,14 @@ USER root
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
+ENV DEBIAN_FRONTEND=noninteractive
 
 # prepare for environment starts
 WORKDIR /workspace
 
 # Install Python and other dependencies
-RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
-    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
-    && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim libgl1-mesa-dev \
+RUN apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update -y \
     && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
