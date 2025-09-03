@@ -537,7 +537,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(self.rank), local_shard.device)
+            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
             if self.rank == 3:
                 self.assertEqual((1, 20), local_shard.size())
             else:
@@ -566,7 +566,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(1, len(shards))
                 for remote_shard in shards:
                     self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    # if DEVICE_TYPE != "xpu":
                     shard = remote_shard.to_here()
                     self.assertEqual(
                         f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
@@ -887,7 +886,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual(
                     f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
@@ -943,7 +941,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(1, len(shards))
-            # if DEVICE_TYPE != "xpu":
             for remote_shard in shards:
                 shard = remote_shard.to_here()
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
@@ -1001,7 +998,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(3, len(remote_shards))
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(2, len(shards))
-            # if DEVICE_TYPE != "xpu":
             for remote_shard in shards:
                 shard = remote_shard.to_here()
                 self.assertEqual((2, 20), shard.tensor.size())
@@ -1565,7 +1561,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2083,7 +2078,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2154,7 +2148,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2240,7 +2233,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(2, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2313,7 +2305,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2375,7 +2366,6 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 # If remote shard does not exist, to_here() will throw exception.
-                # if DEVICE_TYPE != "xpu":
                     # if tensor_meta.shards_metadata[rpc_rank]:
                 shard = remote_shard.to_here()
                 self.assertEqual(
@@ -2515,7 +2505,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
@@ -2961,7 +2950,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                # if DEVICE_TYPE != "xpu":
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
