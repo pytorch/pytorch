@@ -1,37 +1,4 @@
-# Extending PyTorch with New Accelerators
-
-## Background
-
-Since PyTorch 2.1, the community has made significant progress in simplifying the integration of new accelerators into the PyTorch ecosystem. These improvements include, but are not limited to: refinement of the `PrivateUse1` Dispatch Key, introduction and improvement of core subsystem extension mechanisms, and device-agnostic refactoring of key modules (e.g., `torch.accelerator`, `memory management`). Taken together, these improvements lay the foundation for a **robust**, **flexible** and developer-friendly accelerator integration path.
-
-### Why Does This Matter?
-
-This integration path has several key advantages:
-
-* **Speed**: Extensibility is built-in for all core PyTorch modules. Developers can integrate new accelerators into their downstream codebase independently without modifying upstream code and without being constrained by community review bandwidth.
-* **Future-proofing**: This integration path is the default for all future PyTorch features, which means that new modules and features will automatically support scaling to new accelerators as long as this path is followed.
-* **Autonomy**: Vendors have full control over their accelerator integration timelines, enabling agile iteration cycles and reducing reliance on upstream coordination.
-
-### About This Document
-
-This guide aims to provide a **comprehensive overview of the modern integration pathway** for new accelerator in PyTorch. It walks through the full integration surface, from low-level device primitives to higher-level domain modules like compilation and quantization. The structure follows a **modular and scenario-driven approach**, where each topic is paired with corresponding code examples from [torch_openreg][OpenReg URL], an official reference implementation.
-
-The goal is to help developers:
-
-* Understand the full scope of accelerator integration;
-* Follow best practices to quickly launch new accelerators;
-* Avoid common pitfalls through clear, targeted examples.
-
-### Target Audience
-
-This document is intended for:
-
-* **Accelerator Developers** who are integrating accelerator into PyTorch;
-* **Advanced PyTorch Users** interested in the inner workings of key modules;
-
-Next, we will officially embark on the integration journey of the new PyTorch accelerator.
-
-## Operators
+# Operator Registration
 
 For new accelerators, one of the most important and fundamental aspects of integration is supporting high-performance operators. To facilitate operator adaptation for users and accelerator developers, PyTorch provides multiple methods for developing and registering operators in both `Python` and `C++`. The following sections detail some of PyTorch's fundamental capabilities for operator registration.
 
@@ -41,7 +8,7 @@ For new accelerators, one of the most important and fundamental aspects of integ
 
 (operator-set)=
 
-### Operator Set
+## Operator Set
 
 PyTorch currently has over 3500 built-in operators (including related operator variants). This represents a significant workload from any perspective, and supporting this massive number of operators in a short period of time is no easy task. Therefore, as the first step in developing new backend operators, our goal should be to focus on the essential operators. For other operators, we can first use the community's fallback mechanism to support the feature as the first priority. After that, we can gradually complete other operators to improve the performance of the new backend.
 
@@ -63,13 +30,13 @@ The required operator set is listed below, primarily consisting of low-level ope
 | set_.source_Storage_storage_offset | PrivateUse1  | Set the current Tensor using the specified Storage with the storage offset                                         |
 | fallback                           | PrivateUse1  | Fallback to CPU                                                                                                    |
 
-### Basics
+## Basics
 
 Now that we have defined the initial scope of operator support, we can begin developing operator adaptations. This section will explain these implementations in `Python` and `C++` based on actual scenarios.
 
 (step-one)=
 
-#### Step 1
+### Step 1
 
 {ref}`The operators mentioned above <operator-set>` share a common characteristic: They are built-in PyTorch operators with defined `namespaces` and `Schemas`, and these operators' built-in accelerators (`CPU`, `CUDA`, etc.) have been implemented. What we have to do next is to implement these operators for the new accelerators.
 
@@ -120,7 +87,7 @@ dispatch:
 
 After completing the `wrapper_empty_memory_format`, we can register `aten::empty.memory_format` for `PrivateUse1` through `TORCH_LIBRARY_IMPL`.
 
-#### Step 2
+### Step 2
 
 By following {ref}`Step 1<step-one>`, we can complete the development and registration of all operators except `fallback`. Next, to support operators related to operations (such as mathematical operations and convolution operations), we need to implement the registration of fallback semantics. This is a built-in capability provided by the PyTorch framework that can fallback some operations that are not supported by new accelerators to the CPU for execution. For new backends in development, this is an extremely effective way to ensure functionality at the expense of performance.
 
@@ -155,9 +122,9 @@ By following {ref}`Step 1<step-one>`, we can complete the development and regist
 
 `wrapper_cpu_fallback` wraps the `at::native::cpu_fallback` method provided by PyTorch and is registered with `PrivateUse1` in PyTorch via `TORCH_LIBRARY_IMPL`. Subsequent operations not supported by the new backend will automatically fall back to the CPU for execution, and the results will be passed back to the new backend after execution.
 
-### Advanced
+## Advanced
 
-#### Selective Fallback
+### Selective Fallback
 
 Enabling the fallback mechanism only for certain operators, while following PyTorch's default behavior for other operators (an error will be reported if the accelerator does not have a corresponding operator implementation), this is a very reasonable scenario as well.
 
@@ -200,7 +167,7 @@ Per-operator fallbacks are very similar to global fallbacks, the only difference
 
 Of course, global fallbacks can also be combined with a blacklist of fallbacks, which is a common approach, especially when only a few operators do not support fallbacks.
 
-#### PyTorch STUB
+### PyTorch STUB
 
 PyTorch also provides another approach for built-in operators: `STUB`. This method is essentially based on the `Step 1<step-one>` approach, but adds secondary scheduling capabilities (for example, scheduling based on CPU characteristics).
 
@@ -263,7 +230,7 @@ The above listing contains the file that declares the `STUB` operator, where you
 
 From the signature, we can see that the input of `abs_stub` is `TensorIteratorBase`, a powerful helper class provided by PyTorch that contains all input and output operators, as well as some other auxiliary methods. Based on it, we can develop the `abs_kernel` operator and then call `REGISTER_PRIVATEUSE1_DISPATCH` to specify `abs_stub` to complete the registration.
 
-#### Custom Operators
+### Custom Operators
 
 In addition to PyTorch's built-in operators, custom accelerator operators are also very common to improve performance in specific scenarios. These can be categorized into three main approaches:
 
@@ -274,6 +241,8 @@ In addition to PyTorch's built-in operators, custom accelerator operators are al
 ```{note}
 There are more details in PyTorch tutorials, so refer to [PyTorch Custom Operators](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html) if you are interested.
 ```
+
+#### Forward Only
 
 Here, we'll briefly introduce the implementation process of custom operators, focusing on the forward-only approach. The implementation can be summarized into the following three points:
 
@@ -346,11 +315,11 @@ Here, we'll briefly introduce the implementation process of custom operators, fo
 
     PyTorch supports registering `Meta` in both C++ and Python. Since Python registration is simpler, Python is used as an example here. Similar to the `TORCH_LIBRARY_IMPL` function in C++, Python provides the more user-friendly `torch.library.impl` decorator.
 
-### Tools
+## Tools
 
 Operator registration in PyTorch is complex, with diverse registration methods and numerous scenarios. Therefore, the PyTorch community has provided a number of tools to help developers quickly understand the underlying principles and assist in troubleshooting. Here we briefly introduce several commonly used tools:
 
-#### Commands
+### Commands
 
 PyTorch provides a set of commands prefixed with `torch._C._dispatch_` around its Dispatch feature. You can query all related interfaces using the following command:
 
@@ -412,7 +381,7 @@ Here are explanations for several commonly used commands:
 
     You can easily query the corresponding implementation of the `aten::add.Tensor` operator on other platforms, so that you can track the entire operator calling process from the source code level.
 
-#### Environment Variables
+### Environment Variables
 
 PyTorch also provides some dispatcher-related environment variables that can help with learning and quickly locating issues.
 
@@ -435,5 +404,3 @@ PyTorch also provides some dispatcher-related environment variables that can hel
     ```
 
     You can clearly see all the underlying operators called by Python-level operators within PyTorch: including the operator name, calling hierarchy, and corresponding `Dispatch Key`.
-
-[OpenReg URL]: https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg "OpenReg URL"

@@ -613,6 +613,8 @@ class TritonTemplateKernel(TritonKernel):
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
 
+        inductor_meta["config_args"] = self.meta
+
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},
@@ -1907,6 +1909,19 @@ class ExternKernelChoice:
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
 
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
+        # convenience function to match the Template interface, so that
+        # templates and ExternKernelChoice can be treated the same when
+        # generating choice callers
+        assert "input_nodes" in kwargs, "input_nodes argument required"
+        assert "layout" in kwargs, "layout argument required"
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
+        return None
+
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def __init__(
@@ -2762,6 +2777,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    counters["inductor"][
+                        "select_algorithm_num_precompilation_exceptions"
+                    ] += 1
                     exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
