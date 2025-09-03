@@ -899,6 +899,7 @@ class CaptureOutput:
     """
 
     dynamo_output: DynamoOutput
+    # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
 
 
