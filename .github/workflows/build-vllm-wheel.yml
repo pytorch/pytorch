@@ -121,7 +121,7 @@ jobs:
         run: |
           set -eux
 
-          sleep 7200
+          # sleep 7200
 
           docker exec -t "${container_name}" bash -c "
             set -eux
@@ -131,7 +131,7 @@ jobs:
         with:
           name: vllm-wheel-${{ matrix.python-version }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/externals
+          path: ${{ runner.temp }}/artifacts/externals
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
