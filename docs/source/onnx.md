@@ -113,6 +113,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: unregister_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
+.. autoclass:: JitScalarType
 ```
 
 ```{eval-rst}
