@@ -552,6 +552,17 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
 
+  SegmentRange share(SegmentRange range, std::ostream& buf) {
+    return SegmentRange(nullptr, 0);
+  }
+
+  static std::unique_ptr<CUDAExpandableSegment> fromShared(
+      c10::DeviceIndex device,
+      std::vector<c10::DeviceIndex> peers,
+      std::istream& buf) {
+    return {};
+  }
+
  private:
   size_t getReservedVirtualMemorySize(c10::DeviceIndex device) override {
     return 0;
@@ -862,6 +873,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
     EventT event = create_event_internal(stream.device_index());
     C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
+    return event;
   }
 
   bool query_event(const EventT& event) override {
@@ -969,8 +981,9 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
       ss.write((char*)&handle, CUDA_IPC_HANDLE_SIZE);
     } else {
       ss.put(SHAREABLE_CUDA_EXPANDABLE_SEGMENT);
-      auto full_range = block->expandable_segment_->share(
-          SegmentRange(block->ptr, block->size), ss);
+      auto full_range =
+          reinterpret_cast<ExpandableSegmentT*>(block->expandable_segment_)
+              ->share(SegmentRange(block->ptr, block->size), ss);
       offset = (char*)block->ptr - (char*)full_range.ptr;
     }
     return ShareableHandle{offset, ss.str()};
@@ -1087,7 +1100,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
           block_state.size);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
-      params.stat_types = pool->get_stat_types();
+      params.stat_types = pool.get_stat_types();
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between when checkpoint was taken and now, so we make sure to recreate

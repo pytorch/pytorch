@@ -134,6 +134,9 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   // Deallocates memory previously allocated by raw_alloc.
   virtual void raw_delete(void* ptr) = 0;
 
+  // Initializes the allocator for a given device number.
+  virtual void init(c10::DeviceIndex device) = 0;
+
   // Returns true if the allocator has been properly initialized and is ready
   // for use
   virtual bool initialized() = 0;
