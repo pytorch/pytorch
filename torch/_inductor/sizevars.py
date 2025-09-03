@@ -93,7 +93,7 @@ class SizeVarAllocator:
         self._simplify_loops = self.make_simplify_loops_cache()
 
     def simplify(self, expr: Expr):
-        return sympy.expand(expr).xreplace(self.replacements)
+        return sympy.expand(expr, identity=True).xreplace(self.replacements)
 
     def make_simplify_with_ranges_cache(self) -> Callable[[Expr, VarRanges], Expr]:
         """
