@@ -2950,7 +2950,6 @@ graph():
 
         TS2EPConverter(foo_script, inp).convert()
 
-    @testing.expectedFailureStrictV2  # error message is messed up
     def test_dim_auto_and_dim(self):
         # test basic Dims
         class Foo(torch.nn.Module):
@@ -3003,7 +3002,6 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
-    @testing.expectedFailureStrictV2  # AssertionError: graph change
     def test_issue_157289(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4698,7 +4696,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailureStrictV2  # RuntimeError: Runtime assertion failed for expression Ne(s27, 2) on node 'sym_not'
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -4874,7 +4871,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_inferred_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -5214,7 +5210,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
 
-    @testing.expectedFailureStrictV2  # AssertionError: False is not true - bindings is None test
     def test_replaced_unbacked_bindings(self):
         import sympy
 
@@ -5553,7 +5548,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
         self.assertEqual(exported_program.module()(*inputs), model(*inputs))
 
-    @testing.expectedFailureStrictV2  # RuntimeError: Runtime assertion failed for Max expression
     def test_export_max_onnx_reported(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -6553,7 +6547,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(m.t, epm_foo.t))
         self.assertTrue(torch.allclose(m.t, epm_bar.t))
 
-    @testing.expectedFailureStrictV2  # Constraint violation error pattern mismatch
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
 
@@ -11543,7 +11536,6 @@ graph():
 
     @testing.expectedFailureCppRuntime
     @testing.expectedFailureRetraceabilityNonStrict  # no runtime asserts added for assert x == 3
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_symint_input_specialization(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -13594,7 +13586,6 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureStrictV2  # AssertionError - runtime assertion failure pattern mismatch
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -15077,7 +15068,6 @@ def forward(self, x):
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 

@@ -304,8 +304,8 @@ def _dynamo_graph_capture_for_export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=True,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=False,
+            allow_complex_guards_as_runtime_asserts=False,
             log_graph_in_out_metadata=True,
         )
 
