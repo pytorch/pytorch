@@ -25,34 +25,42 @@ USER root
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
-ENV DEBIAN_FRONTEND=noninteractive
+
+# TODO (huydhn): Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # Install Python and other dependencies
-RUN apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+        && add-apt-repository -y ppa:deadsnakes/ppa \
+        && apt-get update -y \
+        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+        && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
+    else \
+        dnf install -y git curl wget sudo vim; \
+    fi \
     && python3 --version && python3 -m pip --version
 
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 # Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
 RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
-    if [ "$current_gcc_version" -lt 10 ]; then \
-      echo "GCC version is $current_gcc_version, installing gcc-10..."; \
-      apt-get update && \
-      apt-get install -y gcc-10 g++-10 && \
-      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
-      update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
-    else \
-      echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
-    fi && \
-    gcc --version && g++ --version
+    if command -v apt-get >/dev/null; then \
+        if [ "$current_gcc_version" -lt 10 ]; then \
+            echo "GCC version is $current_gcc_version, installing gcc-10..."; \
+            apt-get update \
+            && apt-get install -y gcc-10 g++-10 \
+            && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
+            && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
+        else \
+            echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
+        fi \
+    fi \
+    && gcc --version && g++ --version
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -127,7 +135,7 @@ RUN pip freeze | grep -E 'ninja'
 
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-# sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
+# sha for https://github.com/facebookresearch/xformers/tree/v0.0.32.post2
 ARG XFORMERS_COMMIT=5d4b92a5e5a9c6c6d4878283f47d82e17995b468
 ENV CCACHE_DIR=/root/.cache/ccache
 
@@ -161,11 +169,6 @@ RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 # Image used to build vllm wheel
 FROM base AS build
 ARG TARGETPLATFORM
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
 
 COPY . .
 
@@ -241,21 +244,27 @@ USER root
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
-ENV DEBIAN_FRONTEND=noninteractive
+
+# TODO (huydhn): Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # prepare for environment starts
 WORKDIR /workspace
 
 # Install Python and other dependencies
-RUN apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+        && add-apt-repository -y ppa:deadsnakes/ppa \
+        && apt-get update -y \
+        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+        && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
+    else \
+        dnf install -y git curl wget sudo vim; \
+    fi \
     && python3 --version && python3 -m pip --version
 
 # Get the torch versions, and whls used in previous stagtes for consistency
@@ -347,11 +356,6 @@ RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm
 
 #################### UNITTEST IMAGE #############################
 FROM vllm-base as test
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
 
 COPY tests/ tests/
 COPY examples examples

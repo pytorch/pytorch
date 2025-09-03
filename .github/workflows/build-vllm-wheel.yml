@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build-wheel:
+    if: github.repository_owner == 'pytorch'
     strategy:
       fail-fast: false
       matrix:
@@ -27,10 +28,8 @@ jobs:
         runner: [ 'linux.12xlarge.memory' ]
         include:
           - device: cu128
-            cuda-version: '12.8.1'
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
           - device: cu129
-            cuda-version: '12.9.1'
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
@@ -38,7 +37,6 @@ jobs:
     env:
       PY_VERS: ${{ matrix.python-version }}
       MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
-      VLLM_BASE_IMAGE: "nvidia/cuda:${{ matrix.cuda-version }}-devel-ubuntu22.04"
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -109,19 +107,14 @@ jobs:
           # Save this for later
           echo "container_name=${container_name}" >> "$GITHUB_ENV"
 
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ env.VLLM_BASE_IMAGE }}
-
       - name: Build vLLM wheel
         uses: ./.github/actions/build-external-packages
         with:
           build-targets: vllm
-          docker-image: ${{ env.VLLM_BASE_IMAGE }}
+          docker-image: ${{ env.MANYLINUX_IMAGE }}
           cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
-          output-dir: ${{ runner.temp }}/externals
+          output-dir: ${{ runner.temp }}/artifacts/externals
 
       - name: Prepare vLLM wheel
         shell: bash
@@ -129,6 +122,10 @@ jobs:
           set -eux
 
           sleep 7200
+
+          docker exec -t "${container_name}" bash -c "
+            set -eux
+          "
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
