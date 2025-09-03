@@ -617,7 +617,7 @@ def compute_elementwise_output_logical_to_physical_perm(
 
             # imitates if stride_a > stride_b : return 1 but
             # when stride_b = 1, we want stride_a > stride_b to be TRUE
-            # when stride_a = 1, we want  stride_a > stride_b to be FALSE
+            # when stride_a = 1, we want stride_a > stride_b to be FALSE
             if guard_or_false(stride_b == 1):
                 return 1
 
