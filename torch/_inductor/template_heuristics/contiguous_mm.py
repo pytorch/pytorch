@@ -54,7 +54,7 @@ class ContiguousMMHeuristics(TemplateConfigHeuristics):
         if unbacked_symbols:
             return
         mat2 = kernel_inputs.mat1mat2()[1]
-        if mat2.is_contiguous():
+        if mat2.get_layout().is_contiguous():
             # no need for contiguous decomposition
             return
         m, n, k = kernel_inputs.mnk_symbolic()
