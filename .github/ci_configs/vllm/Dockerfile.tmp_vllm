@@ -6,16 +6,19 @@ ARG PYTHON_VERSION=3.12
 
 # BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
 # by default, it uses the torch-nightly-base stage from this docker image
-ARG BUILD_BASE_IMAGE=torch-nightly-base
+ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
 # FINAL_BASE_IMAGE: used to set up vllm-instaled environment and build flashinfer,
 # by default, it uses devel-ubuntu22.04 official image.
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
 
-#################### TORCH NIGHTLY  BASE IMAGE ####################
-# A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
-From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
+#################### BASE BUILD IMAGE ####################
+# A base image for building vLLM with torch nightly or torch wheels
+# prepare basic build environment
+FROM ${BUILD_BASE_IMAGE} AS base
+USER root
+
 ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
 ARG TARGETPLATFORM
@@ -61,24 +64,6 @@ RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
       echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
     fi && \
     gcc --version && g++ --version
-
-# install uv for faster pip installs
-RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv==0.8.4
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
-
-#################### TORCH NIGHTLY  BASE IMAGE ####################
-
-
-#################### BASE BUILD IMAGE ####################
-# A base image for building vLLM with torch nightly or torch wheels
-# prepare basic build environment
-FROM ${BUILD_BASE_IMAGE} AS base
-USER root
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
