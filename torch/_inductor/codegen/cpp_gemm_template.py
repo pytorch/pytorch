@@ -817,6 +817,15 @@ class CppGemmTemplate(CppTemplate):
                 if Kc_blocks * Kr >= self.q_group_size():
                     Kc_blocks = self.q_group_size() // Kr
 
+            if (
+                config.cpp.use_small_dequant_buffer
+                and dtype_A is torch.bfloat16
+                and dtype_B is torch.int8
+                and Mt_blocks == 1
+            ):
+                if Kc_blocks * Kr >= 256:
+                    Kc_blocks = 256 // Kr
+
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
             min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
