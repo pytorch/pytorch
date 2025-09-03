@@ -111,10 +111,9 @@ class LaunchConfig:
 
         if (
             self.numa_options is None
-            # NOTE: This filter isn't relevant for str entrypoints,
-            # but it's the default anyway.
-            and self.start_method == "spawn"
             and torch.cuda.is_available()
+            # We assume local_rank n uses cuda device n.
+            and torch.cuda.device_count() == self.nproc_per_node
         ):
             self.numa_options = get_default_numa_options()
             logger.info("Using default numa options = %r", self.numa_options)

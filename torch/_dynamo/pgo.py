@@ -642,11 +642,12 @@ def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
         if not _LOGGED_DYNAMIC_ALLOWLIST:
             torch._utils_internal.add_mlhub_insight(
                 category="dynamic_shapes_analysis",
-                insight="Dynamic shapes detected",
+                insight="Dynamic shape recompilation detected",
                 insight_description="PGO detected a recompilation due to dynamic shapes. \
-                Please follow the instruction from the action link to reduce shape recompilations.",
+                Please follow the instruction from the action link to reduce \
+                recompilation overhead.",
             )
-            # add mlhub insight only once per job
+            # add mlhub insight only once per rank
             _LOGGED_DYNAMIC_ALLOWLIST = True
 
 
@@ -967,6 +968,7 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
     _INIT_CODE_STATE = None
+    _LOGGED_DYNAMIC_ALLOWLIST = False
