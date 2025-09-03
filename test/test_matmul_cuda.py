@@ -315,9 +315,9 @@ class TestMatmulCuda(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
@@ -334,7 +334,7 @@ class TestMatmulCuda(TestCase):
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
         f = torch._grouped_mm
-        out = f(a, b.t(), offs=offs, out_dtype=torch.bfloat16)
+        out = f(a, b.t(), offs=offs, out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
         offs_cpu = offs.cpu()
@@ -354,9 +354,9 @@ class TestMatmulCuda(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -388,7 +388,7 @@ class TestMatmulCuda(TestCase):
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
                 out.backward(gO)
@@ -411,9 +411,9 @@ class TestMatmulCuda(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -435,7 +435,7 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
         f = torch._grouped_mm
-        out = f(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
+        out = f(a, b.transpose(-2, -1), out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
@@ -446,9 +446,9 @@ class TestMatmulCuda(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -477,7 +477,7 @@ class TestMatmulCuda(TestCase):
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
                 out.backward(gO)

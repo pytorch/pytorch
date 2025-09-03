@@ -1698,7 +1698,12 @@ const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
+  bool a_b_and_out_are_bf16 = (
+    mat_a.dtype() == at::kBFloat16 &&
+    mat_b.dtype() == at::kBFloat16 &&
+    out_dtype.value_or(at::kBFloat16) == at::kBFloat16
+  );
+  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
   if (use_fast_path) {
