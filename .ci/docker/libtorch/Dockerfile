@@ -77,9 +77,9 @@ RUN ln -sf /usr/local/cuda-13.0 /usr/local/cuda
 # Install libibverbs for libtorch and copy to CUDA directory
 RUN apt-get update -y && \
     apt-get install -y libibverbs-dev && \
-    cp /lib/x86_64-linux-gnu/libmlx5.so* /usr/local/cuda/lib64/ && \
-    cp /lib/x86_64-linux-gnu/librdmacm.so* /usr/local/cuda/lib64/ && \
-    cp /lib/x86_64-linux-gnu/libibverbs.so* /usr/local/cuda/lib64/
+    cp /usr/lib/x86_64-linux-gnu/libmlx5.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib/x86_64-linux-gnu/librdmacm.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib/x86_64-linux-gnu/libibverbs.so* /usr/local/cuda/lib64/
 
 FROM cpu as rocm
 ARG ROCM_VERSION
