@@ -6,6 +6,9 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+
+from __future__ import annotations
+
 import asyncio
 import ctypes
 import multiprocessing
@@ -15,6 +18,7 @@ import signal
 import sys
 import tempfile
 import time
+from contextlib import redirect_stderr, redirect_stdout
 from itertools import product
 from typing import Callable, Union
 from unittest import mock
@@ -23,6 +27,7 @@ import torch
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
+    _LogPrefixContext,
     _validate_full_rank,
     _wrap,
     DefaultLogsSpecs,
@@ -239,12 +244,14 @@ class _StartProcessesTest(TestCase):
     def log_dir(self):
         return tempfile.mkdtemp(dir=self.test_dir)
 
-    def assert_in_file(self, expected: list[str], filename: str) -> None:
+    def assert_in_file(
+        self, expected: list[str], filename: str, msg: str | None = None
+    ) -> None:
         expected = [f"{line.rstrip()}\n" for line in expected]
         with open(filename) as fp:
             actual = fp.readlines()
             for line in expected:
-                self.assertIn(line, actual)
+                self.assertIn(line, actual, msg)
 
     def assert_pids_noexist(self, pids: dict[int, int]):
         for local_rank, pid in pids.items():
@@ -677,7 +684,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             log_dir=self.log_dir(),
                             redirects=redirs,
                         ),
-                        log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
+                        log_prefix_template="[${role_name}${rank}|pid:${pid}] ",
+                        per_rank_log_prefix_context=[
+                            _LogPrefixContext(role_name="rank", rank=0, local_rank=0),
+                            _LogPrefixContext(role_name="rank", rank=1, local_rank=1),
+                        ],
                     )
 
                     results = pc.wait(period=0.1)
@@ -689,40 +700,61 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
                     nprocs = pc.nprocs
                     for i in range(nprocs):
+                        pid = pc.pids()[i]
                         if redirs & Std.OUT != Std.OUT:
                             self.assertFalse(results.stdouts[i])
                         if redirs & Std.ERR != Std.ERR:
                             self.assertFalse(results.stderrs[i])
                         if redirs & Std.OUT == Std.OUT:
                             self.assert_in_file(
-                                [f"hello stdout from {i}"], results.stdouts[i]
+                                [f"[rank{i}|pid:{pid}] hello stdout from {i}"],
+                                results.stdouts[i],
                             )
                         if redirs & Std.ERR == Std.ERR:
                             self.assert_in_file(
-                                [f"hello stderr from {i}"], results.stderrs[i]
+                                [f"[rank{i}|pid:{pid}] hello stderr from {i}"],
+                                results.stderrs[i],
                             )
 
         def test_binary_redirect_and_tee(self):
-            pc = start_processes(
-                name="trainer",
-                entrypoint=bin("echo1.py"),
-                args={0: ("hello",), 1: ("world",)},
-                envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                logs_specs=DefaultLogsSpecs(
-                    log_dir=self.log_dir(),
-                    redirects={0: Std.ERR, 1: Std.NONE},
-                    tee={0: Std.OUT, 1: Std.ERR},
-                ),
-                log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
-                start_method="spawn",
-            )
+            tee_stdout_file = os.path.join(self.log_dir(), "tee_stdout.log")
+            tee_stderr_file = os.path.join(self.log_dir(), "tee_stderr.log")
+            with (
+                open(tee_stdout_file, "w") as tee_stdout,
+                open(tee_stderr_file, "w") as tee_stderr,
+            ):
+                with redirect_stdout(tee_stdout), redirect_stderr(tee_stderr):
+                    pc = start_processes(
+                        name="trainer",
+                        entrypoint=bin("echo1.py"),
+                        args={0: ("hello",), 1: ("world",)},
+                        envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects={0: Std.ERR, 1: Std.NONE},
+                            tee={0: Std.OUT, 1: Std.ERR},
+                        ),
+                        log_prefix_template="[${role_name}${rank}|pid:${pid}] ",
+                        per_rank_log_prefix_context=[
+                            _LogPrefixContext(role_name="rank", rank=0, local_rank=0),
+                            _LogPrefixContext(role_name="rank", rank=1, local_rank=1),
+                        ],
+                        start_method="spawn",
+                    )
 
-            result = pc.wait()
+                    result = pc.wait()
 
+            pids = pc.pids()
             self.assertFalse(result.is_failed())
             self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
             self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
             self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
+            self.assert_in_file(
+                [f"[rank0|pid:{pids[0]}] hello stdout from 0"], tee_stdout_file
+            )
+            self.assert_in_file(
+                [f"[rank1|pid:{pids[1]}] world stderr from 1"], tee_stderr_file
+            )
             self.assertFalse(pc.stdouts[1])
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
