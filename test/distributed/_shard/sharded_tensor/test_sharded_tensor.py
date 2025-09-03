@@ -6,6 +6,7 @@ import itertools
 import math
 import pickle
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -63,8 +64,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
     MyShardedModel1,
 )
 
-from torch.testing._internal.common_device_type import skipXPUIf
-import unittest
 
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
@@ -177,7 +176,6 @@ class TestShardParameter(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://jira.devtools.intel.com/browse/MLSL-3625")
     def test_shard_parameter(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -521,7 +519,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_complete_world_size(self):
         for dim in [0, -2]:
@@ -845,7 +842,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_partial_world_size(self):
         spec = ChunkShardingSpec(
@@ -902,7 +898,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_new_group(self):
         spec = ChunkShardingSpec(
@@ -962,7 +957,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_multiple_local_shards(self):
         spec = ChunkShardingSpec(
@@ -1506,7 +1500,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_grid_sharding(self):
         spec = EnumerableShardingSpec(
@@ -2029,7 +2022,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_partial_world_size(self):
         spec = EnumerableShardingSpec(
@@ -2099,7 +2091,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_new_group(self):
         spec = EnumerableShardingSpec(
@@ -2171,7 +2162,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_multiple_local_shards(self):
         spec = EnumerableShardingSpec(
@@ -2258,7 +2248,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_with_rpc_names(self):
         spec = EnumerableShardingSpec(
@@ -2330,7 +2319,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
 
 class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def _generate_st_from_chunk_local_tensor(self, st_size, sharding_spec):
         tensor_meta = sharding_spec.build_metadata(st_size, TensorProperties())
@@ -2474,7 +2462,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_init_from_local_shards(self):
         local_shard_metadata = ShardMetadata(
@@ -2892,7 +2879,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2004")
     @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def test_init_from_local_shards_and_global_metadata(self):
         local_shard_metadata = ShardMetadata(
