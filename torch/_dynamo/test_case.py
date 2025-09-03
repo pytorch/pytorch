@@ -123,7 +123,7 @@ class CPythonTestCase(TestCase):
     """
 
     _stack: contextlib.ExitStack
-    dynamo_strict_nopython = False
+    dynamo_strict_nopython = True
 
     # Restore original unittest methods to simplify tracing CPython test cases.
     assertEqual = unittest.TestCase.assertEqual  # type: ignore[assignment]
