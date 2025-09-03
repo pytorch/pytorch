@@ -33,7 +33,8 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 }
 
 // Return a SymBool with underlying symbolic expression that represents
-// contiguity. Guaranteed not to add guards.
+// contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
+// or symbolic True.
 inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
@@ -76,6 +77,8 @@ inline static c10::SymBool _compute_contiguous_sym(
     return true;
   };
 
+  // We try to minimize creating large symbolic expressions when not needed to
+  // avoid symbolic evaluation perf issues.
   if (is_contiguous_or_false()) {
     return c10::SymBool(true);
   }
@@ -94,6 +97,9 @@ inline static c10::SymBool _compute_contiguous_sym(
   return is_contiguous_cond.sym_or(is_empty);
 }
 
+// When T is SymInt this function may throw a data dependent error.
+// _compute_channels_last_contiguous_2d_sym does not. Only use this function
+// when inputs are hinted.
 template <typename T>
 bool _compute_channels_last_contiguous_2d(
     ArrayRef<T> sizes,
@@ -123,11 +129,16 @@ bool _compute_channels_last_contiguous_2d(
   }
 }
 
+// Return a SymBool with underlying symbolic expression that represents
+// contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
+// or symbolic True.
 inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides) {
   switch (sizes.size()) {
     case 4: {
+      // When this function return True, result always true. When it return
+      // False, result could be False or data dependent.
       auto guard_or_false = [&]() {
         c10::SymInt expected = 1;
         for (auto& d : {1, 3, 2, 0}) {
@@ -147,6 +158,8 @@ inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
         return true;
       };
 
+      // We try to minimize creating large symbolic expressions when not needed
+      // to avoid symbolic evaluation perf issues.
       if (guard_or_false()) {
         return c10::SymBool(true);
       }
@@ -172,6 +185,9 @@ inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
   }
 }
 
+// When T is SymInt this function may throw a data dependent error.
+// _compute_channels_last_contiguous_3d_sym does not. Only use this function
+// when inputs are hinted.
 template <typename T>
 bool _compute_channels_last_contiguous_3d(
     ArrayRef<T> sizes,
@@ -206,6 +222,8 @@ inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
     ArrayRef<c10::SymInt> strides) {
   switch (sizes.size()) {
     case 5: {
+      // When this function return True, result always true. When it return
+      // False, result could be False or data dependent.
       auto guard_or_false = [&]() {
         c10::SymInt expected = 1;
         for (auto& d : {1, 4, 3, 2, 0}) {
@@ -225,6 +243,8 @@ inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
         return true;
       };
 
+      // We try to minimize creating large symbolic expressions when not needed
+      // to avoid symbolic evaluation perf issues.
       if (guard_or_false()) {
         return c10::SymBool(true);
       }
