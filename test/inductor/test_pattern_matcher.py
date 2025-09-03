@@ -3,7 +3,7 @@ import copy
 import itertools
 import os
 import unittest
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -181,7 +181,6 @@ class TestPatternMatcher(TestCase):
 
     def test_duplicate_search(self):
         from collections.abc import Iterable
-        from typing import Callable
 
         import torch
         from torch._inductor.pattern_matcher import (
@@ -1034,11 +1033,7 @@ class TestPatternMatcher(TestCase):
 
     def test_symint_pattern_matching(self):
         import torch._inductor.config as config
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
+        from torch._inductor.pattern_matcher import fwd_only, PatternMatcherPass
 
         saved_graph = None
 
@@ -1610,147 +1605,189 @@ class TestPatternMatcher(TestCase):
             expect=False,
         )
 
-    def test_multioutput_register_replacement(self):
+    def test_multioutput_replacement(self):
+        @torch.library.custom_op("mylib::fused_relu_add", mutates_args=[])
+        def fused_relu_add(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            out1 = torch.relu(x)
+            out2 = torch.add(y, out1)
+            return out1, out2
+
+        @torch.library.register_fake("mylib::fused_relu_add")
+        def fused_relu_add_meta(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            out1 = torch.relu(x)
+            out2 = torch.add(y, out1)
+            return out1, out2
+
+        def pattern(x, y):
+            out1 = torch.relu(x)
+            out2 = torch.add(y, out1)
+            return out1, out2
+
+        def replace(x, y):
+            return torch.ops.mylib.fused_relu_add.default(x, y)
+
+        my_patterns = PatternMatcherPass()
+        inputs = (torch.ones(3, 3), torch.ones(3, 3))
+        register_replacement(pattern, replace, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            _ = my_patterns.apply(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        @torch.compile(
+            options={
+                "post_grad_custom_post_pass": custom_pass,
+            }
+        )
+        def f(a):
+            x = torch.empty(3, 3)
+            out1 = torch.relu(x)
+            out_use_1 = torch.sqrt(out1)
+            y = torch.empty(3, 3)
+            y = y * 2
+            out2 = torch.add(y, out1)
+            final = torch.mm(out_use_1, out2)
+            return final
+
+        test, (code,) = run_and_get_code(f, ())
+
+        self.assertTrue("aten.add.default" not in code)
+        self.assertTrue("aten.relu.default" not in code)
+        self.assertTrue("fused_relu_add.default" in code)
+
+    def test_multioutput_replacement1(self):
         @torch.library.custom_op(
-            "vllm::fused_rms_norm_quant_static", mutates_args=["result", "scale"]
+            "vllm::fused_add_rms_norm_quant", mutates_args=["result", "residual"]
         )
         def fused_rms_norm_quant_static(
             result: torch.Tensor,
             input: torch.Tensor,
             weight: torch.Tensor,
+            residual: torch.Tensor,
             scale: torch.Tensor,
-            azp: torch.Tensor,
-            epsilon: float,
-        ) -> None:
-            print("vllm::fused_rms_norm_quant_static")
-            result_rms = torch.mul(input, weight) + epsilon
-            _result = torch.mul(result_rms, scale).to(torch.int8)
-            scale.fill_(0.5)
-
-        @torch.library.custom_op("vllm::rms_norm", mutates_args=["result"])
-        def rms_norm(
-            result: torch.Tensor,
-            input: torch.Tensor,
-            weight: torch.Tensor,
             epsilon: float,
         ) -> None:
             # bogus implementation doesn't matter
-            _result = torch.mul(input, weight) + epsilon
+            residual += input
+            result_rms = torch.mul(input, weight) + epsilon
+            result[:] = torch.mul(result_rms, scale).to(torch.float8_e4m3fn)
+            scale.fill_(0.5)
 
         @torch.library.custom_op(
-            "vllm::static_scaled_int8_quant", mutates_args=["result", "scale"]
+            "vllm::fused_add_rms_norm", mutates_args=["input", "residual"]
         )
-        def static_scaled_int8_quant(
+        def fused_add_rms_norm(
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            residual: torch.Tensor,
+            epsilon: float,
+        ) -> None:
+            # bogus implementation doesn't matter
+            residual += input
+            input[:] = torch.mul(input, weight) + epsilon
+
+        @torch.library.custom_op(
+            "vllm::static_scaled_fp8_quant", mutates_args=["result"]
+        )
+        def static_scaled_fp8_quant(
             result: torch.Tensor,
             input: torch.Tensor,
             scale: torch.Tensor,
-            azp: Optional[torch.Tensor] = None,
         ) -> None:
             # bogus implementation doesn't matter
-            _result = torch.mul(input, scale).to(torch.int8)
-            scale.fill_(0.5)
+            result[:] = torch.mul(input, scale).to(torch.float8_e4m3fn)
 
         def rms_pattern_static(
             result: torch.Tensor,
-            result_rms: torch.Tensor,
             input: torch.Tensor,
+            residual: torch.Tensor,
             weight: torch.Tensor,
             scale: torch.Tensor,
         ):
             at1 = auto_functionalized(
-                torch.ops.vllm.rms_norm.default,
-                result=result_rms,
+                torch.ops.vllm.fused_add_rms_norm.default,
                 input=input,
                 weight=weight,
+                residual=residual,
                 epsilon=1e-6,
             )
             at2 = auto_functionalized(
-                torch.ops.vllm.static_scaled_int8_quant.default,
+                torch.ops.vllm.static_scaled_fp8_quant.default,
                 result=result,
                 input=at1[1],
                 scale=scale,
-                azp=None,
             )
 
-            return at2[1], at2[2]
+            return at2[1], at1[2]
 
         def rms_replacement_static(
             result: torch.Tensor,
-            result_rms: torch.Tensor,
             input: torch.Tensor,
+            residual: torch.Tensor,
             weight: torch.Tensor,
             scale: torch.Tensor,
         ):
             at = auto_functionalized(
-                torch.ops.vllm.fused_rms_norm_quant_static.default,
+                torch.ops.vllm.fused_add_rms_norm_quant.default,
                 result=result,
                 input=input,
                 weight=weight,
+                residual=residual,
                 epsilon=1e-6,
                 scale=scale,
-                azp=None,
             )
+
             return at[1], at[2]
 
         def empty_bf16(*args, **kwargs):
             return torch.empty(*args, **kwargs, dtype=torch.bfloat16)
 
-        def empty_int8(*args, **kwargs):
-            return torch.empty(*args, **kwargs, dtype=torch.int8)
+        def empty_fp8(*args, **kwargs):
+            return torch.empty(*args, **kwargs, dtype=torch.float8_e4m3fn)
 
         my_patterns = PatternMatcherPass()
         inputs = [
-            empty_int8(5, 4),
-            empty_bf16(5, 4),
-            empty_bf16(5, 4),
-            empty_bf16(5, 1),
-            torch.empty(1, 1),
+            empty_fp8(5, 4),  # result
+            empty_bf16(5, 4),  # input
+            empty_bf16(5, 4),  # residual
+            empty_bf16(5, 1),  # weight
+            torch.empty(1, 1),  # scale
         ]
         register_replacement(
             rms_pattern_static, rms_replacement_static, inputs, fwd_only, my_patterns
         )
 
         def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
-            _count = my_patterns.apply(graph)
-            # print(f"Count: {_count}")
+            _ = my_patterns.apply(graph)
             graph.eliminate_dead_code()
-            # graph.print_tabular()
             return graph
 
-        def custom_backend(
-            graph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
-        ) -> Callable:
-            from torch._inductor import config
-
-            current_config = config.shallow_copy_dict()
-            from torch._inductor.compile_fx import compile_fx
-
-            current_config["post_grad_custom_post_pass"] = custom_pass
-            return compile_fx(graph, example_inputs, config_patches=current_config)
-
-        @torch.compile(backend=custom_backend)
+        @torch.compile(
+            options={
+                "post_grad_custom_post_pass": custom_pass,
+                "enable_auto_functionalized_v2": False,
+            }
+        )
         def my_func_static(x, w, epsilon):
-            quant_result = torch.empty_like(x, dtype=torch.int8)
-            result_rms = torch.empty_like(x, dtype=torch.bfloat16)
+            x = x.relu()
+            residual = x.sqrt()
+            torch.ops.vllm.fused_add_rms_norm(x, w, residual, epsilon)
             scale = torch.ones((1, 1))
+            quant_result = torch.empty_like(x, dtype=torch.float8_e4m3fn)
+            torch.ops.vllm.static_scaled_fp8_quant(quant_result, x, scale)
+            return quant_result, residual
 
-            x = x.to(torch.bfloat16)
-            w = w.to(torch.bfloat16)
-
-            quant_result, scale = rms_pattern_static(
-                result=quant_result,
-                result_rms=result_rms,
-                input=x,
-                weight=w,
-                scale=scale,
-            )
-
-            return quant_result, scale
-
-        inputs = [torch.empty((5, 4)), torch.empty((5, 1)), 1e-6]
-        # print(my_func_static(*inputs))
+        print("Run my_func_static")
+        inputs = [empty_bf16((5, 4)), empty_bf16((5, 1)), 1e-6]
         test, (code,) = run_and_get_code(my_func_static, *inputs)
-        self.assertTrue("static_scaled_int8_quant" not in code)
+        self.assertTrue("fused_add_rms_norm.default" not in code)
+        self.assertTrue("static_scaled_fp8_quant" not in code)
+        self.assertTrue("fused_add_rms_norm_quant" in code)
 
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):
