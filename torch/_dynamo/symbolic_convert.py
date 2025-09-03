@@ -1685,6 +1685,7 @@ class InstructionTranslatorBase(
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
+        self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -2840,7 +2841,7 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         # ensure everything is a dict
         items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
-        result = {}
+        result: dict[Any, Any] = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)

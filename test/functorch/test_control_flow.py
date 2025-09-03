@@ -7604,7 +7604,6 @@ def forward(self, l_inp_, l_tmp_):
         )
         self.assertEqual(out, f(inp, tmp))
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     @skipIfCrossRef  # Args get renamed to r in crossref mode
     @parametrize("requires_grad", [True, False])
     def test_cond_symint_operands(self, requires_grad):
@@ -8401,7 +8400,6 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_cond_merge_graph_preserves_ph_meta(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -8604,7 +8602,6 @@ class GraphModule(torch.nn.Module):
             with self.assertRaisesRegex(Exception, r"."):
                 _inner(case)
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
     def test_cond_mismatched_branch_output(self, dynamic, backend):

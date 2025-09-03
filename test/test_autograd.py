@@ -614,8 +614,6 @@ class TestAutograd(TestCase):
 
         with disable_gc():
             unpack_hook_ref = scope()
-            if torch._dynamo.is_compiling():
-                torch._dynamo.reset()
             self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):
@@ -3432,7 +3430,6 @@ class TestAutograd(TestCase):
         x.add_(2)
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_mark_non_differentiable(self):
         class MyFunction(Function):
             @staticmethod
@@ -3474,7 +3471,6 @@ class TestAutograd(TestCase):
         b.sum().backward()
         self.assertEqual(x.grad, torch.ones(5, 5))
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_mark_non_differentiable_none(self):
         # This used to segfault because MyFunction would send back null
         # gradients to MulBackward, which is implemented in C++. C++
@@ -3778,7 +3774,7 @@ class TestAutograd(TestCase):
             f.metadata
 
     @unittest.expectedFailure
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
+    @skipIfTorchDynamo("Passes due to dynamo skipping GC")
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod
@@ -3797,7 +3793,6 @@ class TestAutograd(TestCase):
         del y
         g.metadata  # this currently fails, but shouldn't
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_naughty_autograd_function_stashing_ctx(self):
         saved_ctx = []
 
@@ -3821,7 +3816,6 @@ class TestAutograd(TestCase):
         # problem).
         self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
@@ -3894,6 +3888,38 @@ class TestAutograd(TestCase):
         y = double2(x)
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
+
+    def test_custom_autograd_ac_early_stop(self):
+        refs = []
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.clone()
+                ctx.save_for_backward(y)
+                refs.append(weakref.ref(y))
+                return y
+
+            @staticmethod
+            def backward(ctx, *args):
+                _ = ctx.saved_tensors
+                return None
+
+        def fn(inp):
+            return Test.apply(inp)
+
+        inp = torch.randn(5, 5, requires_grad=True)
+
+        def scope():
+            # Early-stop is true by default in non-reentrant torch.utils.checkpoint
+            out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=False)
+            out.sum().backward()
+
+        with disable_gc():
+            scope()
+
+            for ref in refs:
+                self.assertIsNone(ref())
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -4077,7 +4103,6 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, torch.ones(5, 5))
         self.assertTrue(hook_called[0])
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_return_leaf_inplace(self):
         class Inplace(InplaceFunction):
             @staticmethod
@@ -5361,7 +5386,6 @@ Done""",
         # we should throw an exception if the output requires grad
         self.assertRaisesRegex(RuntimeError, "out=", lambda: torch.mul(a, b, out=x))
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_anomaly_detect_nan(self):
         size = 10
 
@@ -7145,7 +7169,6 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_checkpointing_without_reentrant_with_context_fn(self):
         class VerboseTorchDispatchMode(TorchDispatchMode):
             def __init__(self) -> None:
@@ -8106,7 +8129,6 @@ for shape in [(1,), ()]:
             should_raise_tuple=(None, None, None),
         )
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_inplace_not_requires_grad(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -8396,7 +8418,6 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_autograd_print_tensor(self):
         a = torch.ones(1, requires_grad=True)
         a_clone = a.clone()
@@ -13839,7 +13860,6 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_preserve_backtrace(self):
         class Foo(torch.autograd.Function):
             @staticmethod
@@ -14154,13 +14174,27 @@ class TestNestedCheckpoint(TestCase):
             # early stop is enabled.
             return clone(x.sin().cos())
 
+        # Test default
         # Early stopping is enabled by default
         a = torch.tensor(1.0, requires_grad=True)
         out = checkpoint(fn, a, use_reentrant=False)
         out.backward()
         self.assertEqual(counter[0], 1)
 
-        # Try using the context manager to set early stopping to False.
+        # Test local setting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager
         # Expect early stopping to be disabled for all checkpoints ran under
         # the context manager, even though context manager is no longer active
         # when backward/recomputation is performed.
@@ -14168,9 +14202,39 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(1.0, requires_grad=True)
         with torch.utils.checkpoint.set_checkpoint_early_stop(False):
             out = checkpoint(fn, a, use_reentrant=False)
-
         out.backward()
         self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager nesting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+                out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test precedence
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
 
     def test_nested_checkpoint_set_early_stop_no_recompution_needed(self):
         # Case 1: We have one tensor saved and its the input

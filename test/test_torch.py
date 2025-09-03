@@ -9347,7 +9347,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_as_subclass(self):
         class SubTensor(torch.Tensor):
             member_var = object()
@@ -10079,7 +10078,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # We used to loose the dict!
         self.assertTrue(hasattr(t2.grad_fn._saved_self, "foo"))
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_slot_dealloc(self):
 
         class SlotTensor1(torch.Tensor):
@@ -10101,7 +10099,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_storage_slot_dealloc(self):
 
         class SlotStorage1(torch._C.StorageBase):
@@ -10143,7 +10140,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del x
         self.assertTrue(m[0])
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_tensor_finalizer_dealloc(self):
         m = [False]
 
@@ -10156,7 +10152,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_storage_finalizer_dealloc(self):
         m = [False]
 
@@ -10282,7 +10277,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_tensor_cycle_via_slots(self):
         m1 = [False]
         m2 = [False]
@@ -10323,7 +10317,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertFalse(any(isinstance(o, SlotTensor1) for o in gc.get_objects()))
 
 
-    @skipIfTorchDynamo("Dynamo doesn't support class definitions in compiled regions")
     def test_storage_cycle_via_slots(self):
         m1 = [False]
         m2 = [False]

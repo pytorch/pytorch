@@ -596,6 +596,9 @@ class OutputGraph(OutputGraphGuardsState):
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
 
+        # mangled alias -> module fqn name
+        self.import_sources: dict[str, str] = {}
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -908,6 +911,9 @@ class OutputGraph(OutputGraphGuardsState):
 
     def is_empty_graph(self) -> bool:
         return len(list(self.graph.nodes)) == 0
+
+    def has_outputs(self) -> bool:
+        return len([x for x in self.graph.nodes if x.op == "output"]) > 0
 
     def get_submodule(self, keys: str) -> Union[torch.nn.Module, Any]:
         assert keys
@@ -1831,6 +1837,8 @@ class OutputGraph(OutputGraphGuardsState):
             assert self.should_exit
 
             self.run_compiler_collective()
+            if count_calls(self.graph) == 0 and len(rv) == 0:
+                return []
 
             name = unique_id("__compiled_fn", with_uuid=True)
 
@@ -1903,6 +1911,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
+            gm.meta["backend_id"] = name
 
             graph_code_log.debug(
                 "%s",
