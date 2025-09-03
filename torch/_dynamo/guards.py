@@ -1951,6 +1951,18 @@ class GuardBuilder(GuardBuilderBase):
 
     def NONE_MATCH(self, guard: Guard) -> None:
         # checks `val is None`
+
+        # Skip the guard on torch.nn.Module._compiled_call_impl flag. This flag
+        # is used when one uses mod.compile.
+        source = guard.originating_source
+        if (
+            isinstance(source, DictGetItemSource)
+            and source.index == "_compiled_call_impl"
+            and isinstance(source.base, TypeDictSource)
+            and self.get(source.base.base.name()) is torch.nn.Module
+        ):
+            return
+
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert val is None
