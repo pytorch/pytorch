@@ -256,7 +256,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = peer_offsets[peer] * stride + block_offset;
-    nvshmemx_getmem_block(
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       block_size,
@@ -266,6 +266,8 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
@@ -542,7 +544,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
     auto source_offset = source_offsets[eid] * stride;
     auto e_offset = tile_prefix_sums[row][col];
     auto write_offset = e_offset * stride;
-    nvshmemx_getmem_block(
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       peer_size,
@@ -552,6 +554,8 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
