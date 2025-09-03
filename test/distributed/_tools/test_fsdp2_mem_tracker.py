@@ -42,6 +42,7 @@ def _reset_mem_stats(dev: torch.device):
     mod.reset_accumulated_memory_stats(dev)
     mod.reset_peak_memory_stats(dev)
 
+
 class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
