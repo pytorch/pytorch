@@ -900,7 +900,7 @@ def prepare_aot_module_simplified(
     ignore_shape_env: bool,
     flatten: bool,
     *,
-    force_non_lazy_backward_lowering: bool = False,
+    force_non_lazy_backward_lowering: bool = True,
 ):
     if not flatten:
         assert kwargs is None

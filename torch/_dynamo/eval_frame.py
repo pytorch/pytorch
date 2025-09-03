@@ -48,6 +48,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from contextlib import ExitStack
 import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
@@ -427,6 +428,48 @@ class OptimizedModule(torch.nn.Module):
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__ = state
         self._initialize()
+
+
+    def aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> torch.nn.Module:
+        from torch._dynamo.aot_compile import aot_compile_fullgraph, CompileArtifacts
+
+        if not self.dynamo_ctx.error_on_graph_break:
+            raise RuntimeError(
+                "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+            )
+
+        if not callable(self.dynamo_ctx.callback):
+            raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+        def compile_single_graph(example_inputs) -> CompileArtifacts:
+            orig_forward = self._orig_mod.forward
+            return aot_compile_fullgraph(
+                orig_forward,
+                example_inputs,
+                hooks=self.dynamo_ctx._hooks,
+                backend=innermost_fn(
+                    self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
+
+        compiled_results = []
+        for model_input in inputs:
+            print(f"Compiling input {model_input}..")
+            example_inputs = (model_input.args, model_input.kwargs)
+            with ExitStack() as stack:
+                for ctx in model_input.contexts:
+                    stack.enter_context(ctx)
+                compiled_results.append(compile_single_graph(example_inputs))
+
+        assert(len(compiled_results) > 0)
+        def optimized_forward(*args, **kwargs):
+            for result in compiled_results:
+                if result.guard_check(self._orig_mod, *args, **kwargs):
+                    return result(self._orig_mod, *args, **kwargs)
+            return compiled_results[0](self._orig_mod, *args, **kwargs)
+
+        self.forward = optimized_forward
+        return self
 
     @property
     def training(self) -> bool:
