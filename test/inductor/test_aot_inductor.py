@@ -153,6 +153,7 @@ except (unittest.SkipTest, ImportError):
         sys.exit(0)
     raise
 
+
 def get_module_ext_type():
     if IS_WINDOWS:
         return "pyd"
@@ -313,7 +314,11 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        expected_path = normalize_path_separator(os.path.join(tempfile.mkdtemp(dir=cache_dir()), f"model.{get_module_ext_type()}"))
+        expected_path = normalize_path_separator(
+            os.path.join(
+                tempfile.mkdtemp(dir=cache_dir()), f"model.{get_module_ext_type()}"
+            )
+        )
         actual_path = AOTIRunnerUtil.legacy_compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
