@@ -36,7 +36,8 @@
 #if defined(_WIN32) && defined(USE_ROCM)
 static
 #endif
-int flock_(int fd, int op) {
+    int
+    flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
   OVERLAPPED offset = {0, 0, 0, 0, NULL};
