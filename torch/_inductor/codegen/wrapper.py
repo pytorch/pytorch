@@ -261,6 +261,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     compile_wrapper.splice(kernel.src, strip=True)
 
     # Also include any possible kernel being called indirectly
+    import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
 
@@ -286,6 +287,14 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(symbol.src, strip=True)
+                    symbols_included.add(symbol_name)
+                    traverse(symbol)
+                elif hasattr(triton, "constexpr_function") and isinstance(
+                    symbol, triton.runtime.jit.ConstexprFunction
+                ):
+                    compile_wrapper.newline()
+                    compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
