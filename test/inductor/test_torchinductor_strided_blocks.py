@@ -78,7 +78,6 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
         "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
-        "test_broadcast_prefer_nd_tiling_False_x_size3_y_size3",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
         "test_broadcast_with_singleton_dims",

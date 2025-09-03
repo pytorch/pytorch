@@ -1233,6 +1233,15 @@ class triton:
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
 
+    # If False (default), torch.compile skips cudagraph for a graph if it
+    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
+    # be captured into cudagraph. If this is not possible, this will raise
+    # an error.
+    cudagraph_or_error: bool = Config(
+        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
+        default=False,
+    )
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
