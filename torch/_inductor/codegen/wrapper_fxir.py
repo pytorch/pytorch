@@ -33,6 +33,7 @@ from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
 
 from .. import config, ir
+from ..runtime.triton_compat import Config
 from ..utils import LineContext
 from .common import (
     CodegenSymbol,
@@ -347,7 +348,7 @@ class FxConverter:
                 return node
             elif isinstance(node, ir.NoneAsConstantBuffer):
                 return None
-            elif isinstance(node, ir.StorageBox):
+            elif isinstance(node, ir.MutableBox):
                 return generate_to_buffer(node.data)
             elif isinstance(node, ir.ReinterpretView):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
@@ -467,10 +468,11 @@ class FxConverter:
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
 
-            def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+            def replace_floor_div(orig_expr: sympy.Expr) -> sympy.Expr:
                 """
                 Converts floor(x / c) to x // c.
                 """
+                expr = sympy.together(orig_expr, deep=False)
                 if isinstance(expr, sympy.core.mul.Mul) and isinstance(
                     expr.args[0], sympy.Rational
                 ):
@@ -487,7 +489,7 @@ class FxConverter:
                     # Undo the python division trick and replace with explicit CeilDiv
                     return -CeilDiv(-numerator, denominator)
                 else:
-                    return sympy.floor(expr)
+                    return sympy.floor(orig_expr)
 
             s = s.replace(sympy.floor, replace_floor_div)
             return self._sympy_interp(s).node
@@ -700,9 +702,40 @@ class FxConverter:
                 kernel_name,
             )
 
+        triton_meta = tuner.triton_meta
+        signature = triton_meta["signature"]
+
+        def add_constants_to_call_args(
+            call_args: Sequence[Any], cfg: Config
+        ) -> tuple[Any, ...]:
+            """
+            Add constant kwargs to the arg list.
+            """
+            # Add args from the proper Triton signature.
+            new_call_args = []
+            call_arg_idx = 0
+            constants = triton_meta["constants"]
+            for arg_name in signature:
+                # Config kwargs are tracked separately.
+                if arg_name in cfg.kwargs:
+                    continue
+
+                try:
+                    new_arg = constants[arg_name]
+                except KeyError:
+                    new_arg = call_args[call_arg_idx]
+                    call_arg_idx += 1
+                new_call_args.append(new_arg)
+
+            # Add Inductor's extra call args to the end.
+            new_call_args.extend(call_args[call_arg_idx:])
+
+            return tuple(new_call_args)
+
         kernel_config = tuner.compile_results[0].config
+        call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
-        call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
+        call_kwargs = dict(zip(signature, call_args))
         call_kwargs.update(kernel_config.kwargs)
 
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
@@ -766,14 +799,11 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unrecognized output layout: {kernel.layout}")
 
-        # Look up the kernel function from its name.
-        kernel_name = kernel.get_kernel_name()
-        module_name, kernel_name = kernel_name.split(".", 1)
-        op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
-        for subname in kernel_name.split("."):
-            op = getattr(op, subname)  # E.g. extern_kernels.addmm
-
-        fx_node = self.gm.graph.call_function(op, args=args, kwargs=kwargs)
+        fx_node = self.gm.graph.call_function(
+            kernel.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
 
         # Assign the result to the given name.
         if result_buffer:

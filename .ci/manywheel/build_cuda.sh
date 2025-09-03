@@ -117,7 +117,11 @@ DEPS_SONAME=(
 if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
-    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    # Compress the fatbin with -compress-mode=size for CUDA 13
+    if [[ $CUDA_VERSION == 13* ]]; then
+        export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS -compress-mode=size"
+    fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
