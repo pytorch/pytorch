@@ -1,5 +1,3 @@
-# mypy: disable-error-code=possibly-undefined
-
 import math
 from collections.abc import Sequence
 from itertools import chain
@@ -509,36 +507,19 @@ def foreach_reduce(
             )
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
-        padded_unsharded_sizes = tuple(
-            _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-        )
-        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
-        reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-        reduce_scatter_input = reduce_scatter_comm.allocate(
-            (reduce_scatter_input_numel,),
-            dtype=reduce_dtype,
-            device=device,
-        )
 
-        foreach_reduce_scatter_copy_in(
-            unsharded_grads, reduce_scatter_input, world_size
-        )
+    padded_unsharded_sizes = tuple(
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    )
+    reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+    reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
+    reduce_scatter_input = reduce_scatter_comm.allocate(
+        (reduce_scatter_input_numel,),
+        dtype=reduce_dtype,
+        device=device,
+    )
 
-    else:
-        padded_unsharded_sizes = tuple(
-            _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-        )
-        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
-        reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-        reduce_scatter_input = reduce_scatter_comm.allocate(
-            (reduce_scatter_input_numel,),
-            dtype=reduce_dtype,
-            device=device,
-        )
-
-        foreach_reduce_scatter_copy_in(
-            unsharded_grads, reduce_scatter_input, world_size
-        )
+    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
