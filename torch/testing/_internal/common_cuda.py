@@ -120,11 +120,19 @@ def evaluate_platform_supports_fp8_grouped_gemm():
             return SM90OrLater and not SM100OrLater
     return False
 
+def evaluate_platform_supports_mx_gemm():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+            if ROCM_VERSION >= (7, 0):
+                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return SM100OrLater
+    return False
+
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
-
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 
 if TEST_NUMBA:
     try:

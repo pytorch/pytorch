@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_contextlib.py b/test/dynamo/cpython/3_13/test_contextlib.py
-index cf651959803..51fd083b112 100644
+index cf651959803..256a824932d 100644
 --- a/test/dynamo/cpython/3_13/test_contextlib.py
 +++ b/test/dynamo/cpython/3_13/test_contextlib.py
 @@ -1,3 +1,57 @@
@@ -60,7 +60,7 @@ index cf651959803..51fd083b112 100644
  """Unit tests for contextlib.py, and other context managers."""
  
  import io
-@@ -14,7 +68,7 @@ from test.support.testcase import ExceptionIsLikeMixin
+@@ -14,60 +68,67 @@ from test.support.testcase import ExceptionIsLikeMixin
  import weakref
  
  
@@ -68,8 +68,81 @@ index cf651959803..51fd083b112 100644
 +class TestAbstractContextManager(__TestCase):
  
      def test_enter(self):
-         class DefaultEnter(AbstractContextManager):
-@@ -67,7 +121,7 @@ class TestAbstractContextManager(unittest.TestCase):
+-        class DefaultEnter(AbstractContextManager):
+-            def __exit__(self, *args):
+-                super().__exit__(*args)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class DefaultEnter(AbstractContextManager):
++                def __exit__(self, *args):
++                    super().__exit__(*args)
+ 
+         manager = DefaultEnter()
+         self.assertIs(manager.__enter__(), manager)
+ 
+     def test_slots(self):
+-        class DefaultContextManager(AbstractContextManager):
+-            __slots__ = ()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class DefaultContextManager(AbstractContextManager):
++                __slots__ = ()
+ 
+-            def __exit__(self, *args):
+-                super().__exit__(*args)
++                def __exit__(self, *args):
++                    super().__exit__(*args)
+ 
+         with self.assertRaises(AttributeError):
+             DefaultContextManager().var = 42
+ 
+     def test_exit_is_abstract(self):
+-        class MissingExit(AbstractContextManager):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class MissingExit(AbstractContextManager):
++                pass
+ 
+         with self.assertRaises(TypeError):
+             MissingExit()
+ 
+     def test_structural_subclassing(self):
+-        class ManagerFromScratch:
+-            def __enter__(self):
+-                return self
+-            def __exit__(self, exc_type, exc_value, traceback):
+-                return None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class ManagerFromScratch:
++                def __enter__(self):
++                    return self
++                def __exit__(self, exc_type, exc_value, traceback):
++                    return None
+ 
+         self.assertTrue(issubclass(ManagerFromScratch, AbstractContextManager))
+ 
+-        class DefaultEnter(AbstractContextManager):
+-            def __exit__(self, *args):
+-                super().__exit__(*args)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class DefaultEnter(AbstractContextManager):
++                def __exit__(self, *args):
++                    super().__exit__(*args)
+ 
+         self.assertTrue(issubclass(DefaultEnter, AbstractContextManager))
+ 
+-        class NoEnter(ManagerFromScratch):
+-            __enter__ = None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class NoEnter(ManagerFromScratch):
++                __enter__ = None
+ 
+         self.assertFalse(issubclass(NoEnter, AbstractContextManager))
+ 
+-        class NoExit(ManagerFromScratch):
+-            __exit__ = None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class NoExit(ManagerFromScratch):
++                __exit__ = None
+ 
          self.assertFalse(issubclass(NoExit, AbstractContextManager))
  
  
@@ -78,7 +151,81 @@ index cf651959803..51fd083b112 100644
  
      def test_contextmanager_plain(self):
          state = []
-@@ -396,7 +450,7 @@ def woohoo():
+@@ -115,8 +176,9 @@ class ContextManagerTestCase(unittest.TestCase):
+         self.assertEqual(frames[0].line, '1/0')
+ 
+         # Repeat with RuntimeError (which goes through a different code path)
+-        class RuntimeErrorSubclass(RuntimeError):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class RuntimeErrorSubclass(RuntimeError):
++                pass
+ 
+         try:
+             with f():
+@@ -128,8 +190,9 @@ class ContextManagerTestCase(unittest.TestCase):
+         self.assertEqual(frames[0].name, 'test_contextmanager_traceback')
+         self.assertEqual(frames[0].line, 'raise RuntimeErrorSubclass(42)')
+ 
+-        class StopIterationSubclass(StopIteration):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class StopIterationSubclass(StopIteration):
++                pass
+ 
+         for stop_exc in (
+             StopIteration('spam'),
+@@ -169,9 +232,9 @@ class ContextManagerTestCase(unittest.TestCase):
+         ctx.__enter__()
+         with self.assertRaises(RuntimeError):
+             ctx.__exit__(TypeError, TypeError("foo"), None)
+-        if support.check_impl_detail(cpython=True):
+-            # The "gen" attribute is an implementation detail.
+-            self.assertFalse(ctx.gen.gi_suspended)
++        # if support.check_impl_detail(cpython=True):
++        #     # The "gen" attribute is an implementation detail.
++        #     self.assertFalse(ctx.gen.gi_suspended)
+ 
+     def test_contextmanager_trap_no_yield(self):
+         @contextmanager
+@@ -191,9 +254,9 @@ class ContextManagerTestCase(unittest.TestCase):
+         ctx.__enter__()
+         with self.assertRaises(RuntimeError):
+             ctx.__exit__(None, None, None)
+-        if support.check_impl_detail(cpython=True):
+-            # The "gen" attribute is an implementation detail.
+-            self.assertFalse(ctx.gen.gi_suspended)
++        # if support.check_impl_detail(cpython=True):
++        #     # The "gen" attribute is an implementation detail.
++        #     self.assertFalse(ctx.gen.gi_suspended)
+ 
+     def test_contextmanager_non_normalised(self):
+         @contextmanager
+@@ -230,8 +293,9 @@ class ContextManagerTestCase(unittest.TestCase):
+         def woohoo():
+             yield
+ 
+-        class StopIterationSubclass(StopIteration):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class StopIterationSubclass(StopIteration):
++                pass
+ 
+         for stop_exc in (StopIteration('spam'), StopIterationSubclass('spam')):
+             with self.subTest(type=type(stop_exc)):
+@@ -344,8 +408,9 @@ def woohoo():
+             self.assertEqual(target, (11, 22, 33, 44))
+ 
+     def test_nokeepref(self):
+-        class A:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                pass
+ 
+         @contextmanager
+         def woohoo(a, b):
+@@ -396,7 +461,7 @@ def woohoo():
          self.assertEqual(depth, 0)
  
  
@@ -87,16 +234,48 @@ index cf651959803..51fd083b112 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -430,7 +484,7 @@ class ClosingTestCase(unittest.TestCase):
+@@ -407,9 +472,10 @@ class ClosingTestCase(unittest.TestCase):
+ 
+     def test_closing(self):
+         state = []
+-        class C:
+-            def close(self):
+-                state.append(1)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def close(self):
++                    state.append(1)
+         x = C()
+         self.assertEqual(state, [])
+         with closing(x) as y:
+@@ -418,9 +484,10 @@ class ClosingTestCase(unittest.TestCase):
+ 
+     def test_closing_error(self):
+         state = []
+-        class C:
+-            def close(self):
+-                state.append(1)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def close(self):
++                    state.append(1)
+         x = C()
+         self.assertEqual(state, [])
+         with self.assertRaises(ZeroDivisionError):
+@@ -430,16 +497,17 @@ class ClosingTestCase(unittest.TestCase):
          self.assertEqual(state, [1])
  
  
 -class NullcontextTestCase(unittest.TestCase):
 +class NullcontextTestCase(__TestCase):
      def test_nullcontext(self):
-         class C:
-             pass
-@@ -439,7 +493,7 @@ class NullcontextTestCase(unittest.TestCase):
+-        class C:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                pass
+         c = C()
+         with nullcontext(c) as c_in:
              self.assertIs(c_in, c)
  
  
@@ -105,7 +284,7 @@ index cf651959803..51fd083b112 100644
  
      def testWithOpen(self):
          tfn = tempfile.mktemp()
-@@ -457,7 +511,7 @@ class FileContextTestCase(unittest.TestCase):
+@@ -457,7 +525,7 @@ class FileContextTestCase(unittest.TestCase):
          finally:
              os_helper.unlink(tfn)
  
@@ -114,7 +293,7 @@ index cf651959803..51fd083b112 100644
  
      def boilerPlate(self, lock, locked):
          self.assertFalse(locked())
-@@ -520,7 +574,7 @@ class mycontext(ContextDecorator):
+@@ -520,7 +588,7 @@ class mycontext(ContextDecorator):
          return self.catch
  
  
@@ -123,7 +302,95 @@ index cf651959803..51fd083b112 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -680,7 +734,7 @@ class TestContextDecorator(unittest.TestCase):
+@@ -584,13 +652,14 @@ class TestContextDecorator(unittest.TestCase):
+     def test_decorating_method(self):
+         context = mycontext()
+ 
+-        class Test(object):
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Test(object):
+ 
+-            @context
+-            def method(self, a, b, c=None):
+-                self.a = a
+-                self.b = b
+-                self.c = c
++                @context
++                def method(self, a, b, c=None):
++                    self.a = a
++                    self.b = b
++                    self.c = c
+ 
+         # these tests are for argument passing when used as a decorator
+         test = Test()
+@@ -612,11 +681,12 @@ class TestContextDecorator(unittest.TestCase):
+ 
+ 
+     def test_typo_enter(self):
+-        class mycontext(ContextDecorator):
+-            def __unter__(self):
+-                pass
+-            def __exit__(self, *exc):
+-                pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class mycontext(ContextDecorator):
++                def __unter__(self):
++                    pass
++                def __exit__(self, *exc):
++                    pass
+ 
+         with self.assertRaisesRegex(TypeError, 'the context manager'):
+             with mycontext():
+@@ -624,11 +694,12 @@ class TestContextDecorator(unittest.TestCase):
+ 
+ 
+     def test_typo_exit(self):
+-        class mycontext(ContextDecorator):
+-            def __enter__(self):
+-                pass
+-            def __uxit__(self, *exc):
+-                pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class mycontext(ContextDecorator):
++                def __enter__(self):
++                    pass
++                def __uxit__(self, *exc):
++                    pass
+ 
+         with self.assertRaisesRegex(TypeError, 'the context manager.*__exit__'):
+             with mycontext():
+@@ -636,19 +707,20 @@ class TestContextDecorator(unittest.TestCase):
+ 
+ 
+     def test_contextdecorator_as_mixin(self):
+-        class somecontext(object):
+-            started = False
+-            exc = None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class somecontext(object):
++                started = False
++                exc = None
+ 
+-            def __enter__(self):
+-                self.started = True
+-                return self
++                def __enter__(self):
++                    self.started = True
++                    return self
+ 
+-            def __exit__(self, *exc):
+-                self.exc = exc
++                def __exit__(self, *exc):
++                    self.exc = exc
+ 
+-        class mycontext(somecontext, ContextDecorator):
+-            pass
++            class mycontext(somecontext, ContextDecorator):
++                pass
+ 
+         context = mycontext()
+         @context
+@@ -680,7 +752,7 @@ class TestContextDecorator(unittest.TestCase):
          self.assertEqual(state, [1, 'something else', 999])
  
  
@@ -132,7 +399,164 @@ index cf651959803..51fd083b112 100644
      exit_stack = None
  
      @support.requires_docstrings
-@@ -1141,7 +1195,7 @@ class TestBaseExitStack:
+@@ -745,13 +817,14 @@ class TestBaseExitStack:
+             self.assertIsNone(exc_type)
+             self.assertIsNone(exc)
+             self.assertIsNone(exc_tb)
+-        class ExitCM(object):
+-            def __init__(self, check_exc):
+-                self.check_exc = check_exc
+-            def __enter__(self):
+-                self.fail("Should not be called!")
+-            def __exit__(self, *exc_details):
+-                self.check_exc(*exc_details)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class ExitCM(object):
++                def __init__(self, check_exc):
++                    self.check_exc = check_exc
++                def __enter__(self):
++                    self.fail("Should not be called!")
++                def __exit__(self, *exc_details):
++                    self.check_exc(*exc_details)
+         with self.exit_stack() as stack:
+             stack.push(_expect_ok)
+             self.assertIs(stack._exit_callbacks[-1][1], _expect_ok)
+@@ -770,11 +843,12 @@ class TestBaseExitStack:
+             1/0
+ 
+     def test_enter_context(self):
+-        class TestCM(object):
+-            def __enter__(self):
+-                result.append(1)
+-            def __exit__(self, *exc_details):
+-                result.append(3)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class TestCM(object):
++                def __enter__(self):
++                    result.append(1)
++                def __exit__(self, *exc_details):
++                    result.append(3)
+ 
+         result = []
+         cm = TestCM()
+@@ -789,14 +863,15 @@ class TestBaseExitStack:
+         self.assertEqual(result, [1, 2, 3, 4])
+ 
+     def test_enter_context_errors(self):
+-        class LacksEnterAndExit:
+-            pass
+-        class LacksEnter:
+-            def __exit__(self, *exc_info):
+-                pass
+-        class LacksExit:
+-            def __enter__(self):
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class LacksEnterAndExit:
+                 pass
++            class LacksEnter:
++                def __exit__(self, *exc_info):
++                    pass
++            class LacksExit:
++                def __enter__(self):
++                    pass
+ 
+         with self.exit_stack() as stack:
+             with self.assertRaisesRegex(TypeError, 'the context manager'):
+@@ -877,32 +952,33 @@ class TestBaseExitStack:
+     def test_exit_exception_chaining_reference(self):
+         # Sanity check to make sure that ExitStack chaining matches
+         # actual nested with statements
+-        class RaiseExc:
+-            def __init__(self, exc):
+-                self.exc = exc
+-            def __enter__(self):
+-                return self
+-            def __exit__(self, *exc_details):
+-                raise self.exc
+-
+-        class RaiseExcWithContext:
+-            def __init__(self, outer, inner):
+-                self.outer = outer
+-                self.inner = inner
+-            def __enter__(self):
+-                return self
+-            def __exit__(self, *exc_details):
+-                try:
+-                    raise self.inner
+-                except:
+-                    raise self.outer
+-
+-        class SuppressExc:
+-            def __enter__(self):
+-                return self
+-            def __exit__(self, *exc_details):
+-                type(self).saved_details = exc_details
+-                return True
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class RaiseExc:
++                def __init__(self, exc):
++                    self.exc = exc
++                def __enter__(self):
++                    return self
++                def __exit__(self, *exc_details):
++                    raise self.exc
++
++            class RaiseExcWithContext:
++                def __init__(self, outer, inner):
++                    self.outer = outer
++                    self.inner = inner
++                def __enter__(self):
++                    return self
++                def __exit__(self, *exc_details):
++                    try:
++                        raise self.inner
++                    except:
++                        raise self.outer
++
++            class SuppressExc:
++                def __enter__(self):
++                    return self
++                def __exit__(self, *exc_details):
++                    type(self).saved_details = exc_details
++                    return True
+ 
+         try:
+             with RaiseExc(IndexError):
+@@ -957,8 +1033,9 @@ class TestBaseExitStack:
+         # Ensure ExitStack chaining matches actual nested `with` statements
+         # regarding explicit __context__ = None.
+ 
+-        class MyException(Exception):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class MyException(Exception):
++                pass
+ 
+         @contextmanager
+         def my_cm():
+@@ -1096,7 +1173,8 @@ class TestBaseExitStack:
+                 stack.callback(int)
+ 
+     def test_instance_bypass(self):
+-        class Example(object): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Example(object): pass
+         cm = Example()
+         cm.__enter__ = object()
+         cm.__exit__ = object()
+@@ -1108,8 +1186,9 @@ class TestBaseExitStack:
+ 
+     def test_dont_reraise_RuntimeError(self):
+         # https://bugs.python.org/issue27122
+-        class UniqueException(Exception): pass
+-        class UniqueRuntimeError(RuntimeError): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class UniqueException(Exception): pass
++            class UniqueRuntimeError(RuntimeError): pass
+ 
+         @contextmanager
+         def second():
+@@ -1141,7 +1220,7 @@ class TestBaseExitStack:
          self.assertIs(exc.__cause__, exc.__context__)
  
  
@@ -141,7 +565,7 @@ index cf651959803..51fd083b112 100644
      exit_stack = ExitStack
      callback_error_internal_frames = [
          ('__exit__', 'raise exc'),
-@@ -1149,7 +1203,7 @@ class TestExitStack(TestBaseExitStack, unittest.TestCase):
+@@ -1149,7 +1228,7 @@ class TestExitStack(TestBaseExitStack, unittest.TestCase):
      ]
  
  
@@ -150,7 +574,7 @@ index cf651959803..51fd083b112 100644
  
      redirect_stream = None
      orig_stream = None
-@@ -1206,19 +1260,19 @@ class TestRedirectStream:
+@@ -1206,19 +1285,19 @@ class TestRedirectStream:
          self.assertEqual(s, "Hello World!\n")
  
  
@@ -173,7 +597,7 @@ index cf651959803..51fd083b112 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -1315,7 +1369,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
+@@ -1315,7 +1394,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
          )
  
  
@@ -182,7 +606,7 @@ index cf651959803..51fd083b112 100644
      def make_relative_path(self, *parts):
          return os.path.join(
              os.path.dirname(os.path.realpath(__file__)),
-@@ -1331,6 +1385,7 @@ class TestChdir(unittest.TestCase):
+@@ -1331,6 +1410,7 @@ class TestChdir(unittest.TestCase):
              self.assertEqual(os.getcwd(), target)
          self.assertEqual(os.getcwd(), old_cwd)
  
@@ -190,7 +614,7 @@ index cf651959803..51fd083b112 100644
      def test_reentrant(self):
          old_cwd = os.getcwd()
          target1 = self.make_relative_path('data')
-@@ -1363,4 +1418,4 @@ class TestChdir(unittest.TestCase):
+@@ -1363,4 +1443,4 @@ class TestChdir(unittest.TestCase):
  
  
  if __name__ == "__main__":

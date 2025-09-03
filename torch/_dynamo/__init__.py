@@ -10,7 +10,7 @@ seamlessly optimize PyTorch programs, including those using modern Python featur
 
 import torch
 
-from . import config, convert_frame, eval_frame, resume_execution
+from . import aot_compile, config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context

@@ -187,6 +187,8 @@ cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
 
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -387,6 +389,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -538,6 +550,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -1164,6 +1181,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
     )
 
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
+    )
+
 
 class triton:
     """
@@ -1210,6 +1232,15 @@ class triton:
     # always run cudagraphs in the eager warmup stage
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
+
+    # If False (default), torch.compile skips cudagraph for a graph if it
+    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
+    # be captured into cudagraph. If this is not possible, this will raise
+    # an error.
+    cudagraph_or_error: bool = Config(
+        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
+        default=False,
+    )
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -1832,10 +1863,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
+    # Levels:
+    #   0 - disabled (default)
+    #   1 - normal
+    #   2 - basic
+    # Backward compatibility:
+    #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
+    #   If INDUCTOR_PROVENANCE is set, use its integer value.
+    provenance_tracking_level: int = int(
+        os.environ.get(
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+        )
     )
 
 
