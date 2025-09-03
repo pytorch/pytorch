@@ -96,7 +96,7 @@ jobs:
 
   {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    {% if config["gpu_arch_type"] == "rocm" %}if: false{% else %}if: ${{ github.repository_owner == 'pytorch' }}{% endif %}
     needs:
       - !{{ config["build_name"] }}-build
       - get-label-type

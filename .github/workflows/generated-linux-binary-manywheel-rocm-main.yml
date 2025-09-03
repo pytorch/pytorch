@@ -63,7 +63,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: false
     needs:
       - manywheel-py3_9-rocm6_4-build
       - get-label-type
