@@ -1907,6 +1907,19 @@ class ExternKernelChoice:
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
 
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
+        # convenience function to match the Template interface, so that
+        # templates and ExternKernelChoice can be treated the same when
+        # generating choice callers
+        assert "input_nodes" in kwargs, "input_nodes argument required"
+        assert "layout" in kwargs, "layout argument required"
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
+        return None
+
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def __init__(
