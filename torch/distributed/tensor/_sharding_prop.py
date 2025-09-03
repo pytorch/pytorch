@@ -348,7 +348,7 @@ class ShardingPropagator:
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
-                output_strategy = self._select_strategy(op_strategy)
+                output_strategy = self._select_strategy(op_strategy, op_schema)
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
@@ -556,21 +556,56 @@ class ShardingPropagator:
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
 
-    def _select_strategy(self, strategy: OpStrategy) -> OpSpec:
+    def _select_strategy(
+        self, strategy: OpStrategy, op_schema: Optional[OpSchema] = None
+    ) -> OpSpec:
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
             return strategy.strategies[0]
 
         op_spec_costs: list[float] = []
-        for op_spec in strategy.strategies:
+        no_redistribute_strategy_index: int = -1
+        for strategy_idx, op_spec in enumerate(strategy.strategies):
             assert op_spec.redistribute_cost is not None, (
                 "must set redistribute cost each OpSpec!"
             )
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
+            # If there's no redistribute cost, we record the index of the strategy
+            # which doesn't need redistribute.
+            # TODO: Currently this only applies to OpStrategy selection. Requires extra
+            # logic to make it work for TupleStrategy, if needed.
+            if op_schema is not None and redistribute_cost == 0:
+                needs_redistribute = False
+                for spec_idx, input_spec in enumerate(op_schema.args_spec):
+                    desired_spec = (
+                        op_spec.output_spec
+                        if op_spec.input_specs is None
+                        else op_spec.input_specs[spec_idx]
+                    )
+                    if input_spec.placements != desired_spec.placements:
+                        needs_redistribute = True
+                        break
+
+                if not needs_redistribute:
+                    no_redistribute_strategy_index = strategy_idx
+
         # for eager execution, we just select the one with the minimal redistribute cost
-        return strategy.strategies[op_spec_costs.index(min(op_spec_costs))]
+        min_cost = min(op_spec_costs)
+        if min_cost < 0:
+            # If there's negative cost, we select the one with the minimal cost,
+            # even if this means we need to redistribute, e.g. via local chunking.
+            # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
+            # when the inputs / outputs are sharded.
+            selected_strategy_index = op_spec_costs.index(min_cost)
+        elif min_cost == 0 and no_redistribute_strategy_index != -1:
+            # If there's no redistribute cost, we select the one with no redistribute.
+            selected_strategy_index = no_redistribute_strategy_index
+        else:
+            selected_strategy_index = op_spec_costs.index(min_cost)
+
+        return strategy.strategies[selected_strategy_index]
 
     def _adjust_shape_and_stride_args(
         self,
