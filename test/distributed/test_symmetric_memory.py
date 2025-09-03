@@ -2,6 +2,7 @@
 
 import itertools
 import os
+import random
 from contextlib import nullcontext
 from unittest import skip, skipIf
 
@@ -57,9 +58,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    def _init_process(self, set_device: bool = True):
-        if set_device:
-            torch.cuda.set_device(self.device)
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
     def test_has_multicast_support(self) -> None:
@@ -91,86 +91,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
-
-    def _get_test_alloc_args(self):
-        shape = (64, 64)
-        stride = (64, 1)
-        dtype = torch.float32
-        device = self.device
-        group_name = "0"
-        return (shape, stride, dtype, device, group_name)
-
-    def _verify_symmetric_memory(self, symm_mem_hdl):
-        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
-
-        buf = symm_mem_hdl.get_buffer(
-            0, (symm_mem_hdl.buffer_size // 4,), torch.float32
-        )
-        self.assertEqual(buf.storage_offset(), 0)
-        self.assertEqual(buf.untyped_storage().size(), symm_mem_hdl.buffer_size)
-
-        if symm_mem_hdl.rank == 0:
-            symm_mem_hdl.wait_signal(src_rank=1)
-            self.assertTrue(buf.eq(42).all())
-        else:
-            buf.fill_(42)
-            symm_mem_hdl.put_signal(dst_rank=0)
-
-        symm_mem_hdl.barrier()
-
-        if symm_mem_hdl.rank == 0:
-            symm_mem_hdl.barrier()
-            self.assertTrue(buf.eq(43).all())
-        else:
-            buf.fill_(43)
-            symm_mem_hdl.barrier()
-
-        symm_mem_hdl.barrier()
-
-    @runOnRocmArch(MI300_ARCH)
-    @skip_if_lt_x_gpu(2)
-    @parametrize("set_device", [True, False])
-    def test_empty_strided_p2p(self, set_device: bool) -> None:
-        self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
-
-        alloc_args = self._get_test_alloc_args()
-
-        t = torch.empty((64, 64), device=self.device)
-        self.assertIsNone(_SymmetricMemory.rendezvous(t))
-
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
-
-        del t
-        self._verify_symmetric_memory(symm_mem_hdl)
-
-    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
-    @skip_if_lt_x_gpu(2)
-    @parametrize("set_device", [True, False])
-    def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
-        self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
-
-        alloc_args = self._get_test_alloc_args()
-
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-        data_ptr = t.data_ptr()
-
-        # Verify that persistent allocation would fail if there's an active
-        # allocation with the same alloc_id.
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-
-        # Verify that persistent allocation would succeed in lieu of activate
-        # allocations with the same alloc_id, and the returned tensor would
-        # have the same data pointer.
-        del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
-        self.assertEqual(t.data_ptr(), data_ptr)
-
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
-        self._verify_symmetric_memory(symm_mem_hdl)
 
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
@@ -231,6 +151,121 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 self.assertEqual(buf.device, t.device)
 
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "0"
+
+    @runOnRocmArch(MI300_ARCH)
+    @skip_if_lt_x_gpu(2)
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            ).fill_(self.rank)
+        else:
+            t = torch.full((64, 64), self.rank, dtype=torch.float32, device=self.device)
+
+        res = torch.ops.symm_mem._low_contention_all_gather(t, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 * self.world_size, 64))
+
+        chunks = res.chunk(self.world_size)
+        for r in range(self.world_size):
+            self.assertTrue(chunks[r].eq(r).all())
+
+    @runOnRocmArch(MI300_ARCH)
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_op", ["sum", "avg"])
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_reduce_scatter(
+        self, reduce_op: str, symm_mem_input: bool
+    ) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            )
+        else:
+            t = torch.empty((64, 64), dtype=torch.float32, device=self.device)
+
+        chunks = t.chunk(self.world_size)
+        for r in range(self.world_size):
+            chunks[r].fill_(r)
+
+        res = torch.ops.symm_mem._low_contention_reduce_scatter(t, reduce_op, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 // self.world_size, 64))
+
+        if reduce_op == "sum":
+            expect = self.rank * self.world_size
+        elif reduce_op == "avg":
+            expect = self.rank
+        else:
+            raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
+        self.assertTrue(res.eq(expect).all())
+
+    @runOnRocmArch(MI300_ARCH)
+    @skip_if_lt_x_gpu(4)
+    def test_subgroup(self) -> None:
+        self._init_process()
+
+        ranks = list(range(self.world_size))
+        subgroup_0 = dist.new_group(ranks[: len(ranks) // 2])
+        subgroup_1 = dist.new_group(ranks[len(ranks) // 2 :])
+
+        world = dist.group.WORLD
+        subgroup = subgroup_0 if world.rank() < world.size() // 2 else subgroup_1
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_world = symm_mem.rendezvous(t, group=world)
+        symm_mem_subgroup = symm_mem.rendezvous(t, group=subgroup)
+
+        self.assertEqual(symm_mem_world.world_size, world.size())
+        self.assertEqual(symm_mem_world.rank, world.rank())
+        self.assertEqual(symm_mem_subgroup.world_size, world.size() // 2)
+        self.assertEqual(symm_mem_subgroup.rank, world.rank() % subgroup.size())
+
+        t.fill_(world.rank())
+        symm_mem_world.barrier()
+
+        # Observe a peer buffer via the world group
+        peer_rank = (world.rank() + 1) % world.size()
+        buf = symm_mem_world.get_buffer(peer_rank, (64,), torch.float32)
+        self.assertTrue(buf.eq(peer_rank).all())
+
+        # Observe a peer buffer via the subgroup
+        peer_rank = (subgroup.rank() + 1) % subgroup.size()
+        buf = symm_mem_subgroup.get_buffer(peer_rank, (64,), torch.float32)
+        if world.rank() < world.size() // 2:
+            self.assertTrue(buf.eq(peer_rank).all())
+        else:
+            self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
+
+
+# We move AsyncTP tests to a seperate test suite because 1) Async TP ops are not
+# the core symmetric memory APIs, they are more like applications, 2)
+# MultiProcContinuousTest will skip all the following tests if a test fails (
+# we should fix this too). We still want to get the test signals for the core
+# symmetric memory APIs when Async TP ops fail.
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class AsyncTPTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
 
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
@@ -535,103 +570,123 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
         self.assertTrue(torch.allclose(x, t))
 
+
+# [READ ME FIRST]
+# The `SymmMemEmptySetDeviceTest` suite parameterizes whether user sets the
+# device before calling symm_mem.emtpy.  Either way should work.
+# However, since `set_device` is persistent, we cannot use the
+# `MultiProcContinuousTest` template because the next function will be
+# "contaminated", leading to flaky tests (e.g. hang). Therefore, we use
+# `MultiProcessTestCase` which spawns new processes for each test function.
+# Please limit the number of tests you want to add under this test
+# suite as respawning processes and `init_process_group` is expensive.
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return device_module.device_count()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self, set_device: bool):
+        if set_device:
+            torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        torch.manual_seed(42 + self.rank)
+
+    def _get_test_alloc_args(self):
+        shape = (64, 64)
+        stride = (64, 1)
+        dtype = torch.float32
+        device = self.device
+        group_name = "0"
+        return (shape, stride, dtype, device, group_name)
+
+    def _verify_symmetric_memory(self, symm_mem_hdl):
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        buf = symm_mem_hdl.get_buffer(
+            0, (symm_mem_hdl.buffer_size // 4,), torch.float32
+        )
+        self.assertEqual(buf.storage_offset(), 0)
+        self.assertEqual(buf.untyped_storage().size(), symm_mem_hdl.buffer_size)
+
+        if symm_mem_hdl.rank == 0:
+            symm_mem_hdl.wait_signal(src_rank=1)
+            self.assertTrue(buf.eq(42).all())
+        else:
+            buf.fill_(42)
+            symm_mem_hdl.put_signal(dst_rank=0)
+
+        symm_mem_hdl.barrier()
+
+        if symm_mem_hdl.rank == 0:
+            symm_mem_hdl.barrier()
+            self.assertTrue(buf.eq(43).all())
+        else:
+            buf.fill_(43)
+            symm_mem_hdl.barrier()
+
+        symm_mem_hdl.barrier()
+
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
-    @parametrize("symm_mem_input", [True, False])
-    def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
-        self._init_process()
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p(self, set_device: bool) -> None:
+        self._init_process(set_device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
-        if symm_mem_input:
-            t = _SymmetricMemory.empty_strided_p2p(
-                size=(64, 64),
-                stride=(64, 1),
-                dtype=torch.float32,
-                device=self.device,
-                group_name="0",
-            ).fill_(self.rank)
-        else:
-            t = torch.full((64, 64), self.rank, dtype=torch.float32, device=self.device)
+        alloc_args = self._get_test_alloc_args()
 
-        res = torch.ops.symm_mem._low_contention_all_gather(t, "0")
-        res = torch.ops._c10d_functional.wait_tensor(res)
-        self.assertEqual(res.shape, (64 * self.world_size, 64))
+        t = torch.empty((64, 64), device=self.device)
+        self.assertIsNone(_SymmetricMemory.rendezvous(t))
 
-        chunks = res.chunk(self.world_size)
-        for r in range(self.world_size):
-            self.assertTrue(chunks[r].eq(r).all())
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
 
-    @runOnRocmArch(MI300_ARCH)
+        del t
+        self._verify_symmetric_memory(symm_mem_hdl)
+
+    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
     @skip_if_lt_x_gpu(2)
-    @parametrize("reduce_op", ["sum", "avg"])
-    @parametrize("symm_mem_input", [True, False])
-    def test_low_contention_reduce_scatter(
-        self, reduce_op: str, symm_mem_input: bool
-    ) -> None:
-        self._init_process()
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
+        self._init_process(set_device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
-        if symm_mem_input:
-            t = _SymmetricMemory.empty_strided_p2p(
-                size=(64, 64),
-                stride=(64, 1),
-                dtype=torch.float32,
-                device=self.device,
-                group_name="0",
-            )
-        else:
-            t = torch.empty((64, 64), dtype=torch.float32, device=self.device)
+        alloc_args = self._get_test_alloc_args()
 
-        chunks = t.chunk(self.world_size)
-        for r in range(self.world_size):
-            chunks[r].fill_(r)
+        alloc_id = 42 + random.randint(0, 2147483647)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+        data_ptr = t.data_ptr()
 
-        res = torch.ops.symm_mem._low_contention_reduce_scatter(t, reduce_op, "0")
-        res = torch.ops._c10d_functional.wait_tensor(res)
-        self.assertEqual(res.shape, (64 // self.world_size, 64))
+        # Verify that persistent allocation would fail if there's an active
+        # allocation with the same alloc_id.
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
 
-        if reduce_op == "sum":
-            expect = self.rank * self.world_size
-        elif reduce_op == "avg":
-            expect = self.rank
-        else:
-            raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
-        self.assertTrue(res.eq(expect).all())
+        # Verify that persistent allocation would succeed in lieu of activate
+        # allocations with the same alloc_id, and the returned tensor would
+        # have the same data pointer.
+        del t
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+        self.assertEqual(t.data_ptr(), data_ptr)
 
-    @runOnRocmArch(MI300_ARCH)
-    @skip_if_lt_x_gpu(4)
-    def test_subgroup(self) -> None:
-        self._init_process()
-
-        ranks = list(range(self.world_size))
-        subgroup_0 = dist.new_group(ranks[: len(ranks) // 2])
-        subgroup_1 = dist.new_group(ranks[len(ranks) // 2 :])
-
-        world = dist.group.WORLD
-        subgroup = subgroup_0 if world.rank() < world.size() // 2 else subgroup_1
-
-        t = symm_mem.empty(64, device="cuda")
-        symm_mem_world = symm_mem.rendezvous(t, group=world)
-        symm_mem_subgroup = symm_mem.rendezvous(t, group=subgroup)
-
-        self.assertEqual(symm_mem_world.world_size, world.size())
-        self.assertEqual(symm_mem_world.rank, world.rank())
-        self.assertEqual(symm_mem_subgroup.world_size, world.size() // 2)
-        self.assertEqual(symm_mem_subgroup.rank, world.rank() % subgroup.size())
-
-        t.fill_(world.rank())
-        symm_mem_world.barrier()
-
-        # Observe a peer buffer via the world group
-        peer_rank = (world.rank() + 1) % world.size()
-        buf = symm_mem_world.get_buffer(peer_rank, (64,), torch.float32)
-        self.assertTrue(buf.eq(peer_rank).all())
-
-        # Observe a peer buffer via the subgroup
-        peer_rank = (subgroup.rank() + 1) % subgroup.size()
-        buf = symm_mem_subgroup.get_buffer(peer_rank, (64,), torch.float32)
-        if world.rank() < world.size() // 2:
-            self.assertTrue(buf.eq(peer_rank).all())
-        else:
-            self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
+        symm_mem_hdl = _SymmetricMemory.rendezvous(t)
+        self._verify_symmetric_memory(symm_mem_hdl)
 
 
 # This Test class is used to test the error handling of SymmetricMemory APIs.
