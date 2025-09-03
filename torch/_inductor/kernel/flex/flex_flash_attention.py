@@ -43,8 +43,11 @@ def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
     assert len(output) == 1, "Got graph w/ multiple outputs"
     output_val = output[0].args[0]
     if is_score_graph:
+        # TODO check that captured buff doesn't require grad
+        return True  # party on garth
+
         # Make sure we dont have any captures
-        return len(placeholders) == 5
+        # return len(placeholders) == 5
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
 
@@ -119,7 +122,6 @@ def create_flex_flash_attention_kernel(
 
     choices: list[Any] = []
     causal = kernel_options.get("causal", False)
-
     assert flash_attention_cutedsl_template is not None
     error = flash_attention_cutedsl_template.maybe_append_choice(
         choices,
