@@ -6807,6 +6807,7 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
+    @skipIfTorchDynamo("Skip because we're testing export")
     def test_cond_autograd_backward_inp_out_aliasing(self):
         from torch._dynamo.testing import AotEagerAndRecordGraphs
 
@@ -6826,9 +6827,10 @@ def forward(self, arg0_1):
         res.sum().backward()
         res_compiled = torch.compile(f, backend=backend)(*example_inputs)
         res_compiled.sum().backward()
-        self.assertExpectedInline(
-            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]", gt: "b8[]", tangents_1: "f32[3, 4]"):
         true_graph_1 = self.true_graph_1
@@ -6850,9 +6852,10 @@ class GraphModule(torch.nn.Module):
             clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
             return [clone, clone_1]
 """,  # noqa: B950
-        )
+            )
         self.assertEqual(res, res_compiled)
 
+    @skipIfTorchDynamo("Skip because we're testing export")
     def test_cond_autograd_backward_out_out_aliasing(self):
         from torch._dynamo.testing import AotEagerAndRecordGraphs
 
@@ -6872,9 +6875,10 @@ class GraphModule(torch.nn.Module):
         res.sum().backward()
         res_compiled = torch.compile(f, backend=backend)(*example_inputs)
         res_compiled.sum().backward()
-        self.assertExpectedInline(
-            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]", gt: "b8[]", tangents_1: "f32[3, 4]"):
         true_graph_1 = self.true_graph_1
@@ -6900,7 +6904,7 @@ class GraphModule(torch.nn.Module):
             clone: "f32[3, 4]" = torch.ops.aten.clone.default(mul)
             return [mul, clone]
 """,  # noqa: B950
-        )
+            )
         self.assertEqual(res, res_compiled)
 
     def test_map_functionalized_elem_alias(self):
