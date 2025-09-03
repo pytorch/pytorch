@@ -1390,9 +1390,8 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @unittest.skipIf(
-        not hasattr(triton, "constexpr_function"), "newer triton version required"
+        not HAS_GPU or not hasattr(triton, "constexpr_function"), "newer triton version required"
     )
-    @requires_gpu
     def test_triton_kernel_with_constexpr_function(self):
         @triton.jit
         def kernel(x_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
