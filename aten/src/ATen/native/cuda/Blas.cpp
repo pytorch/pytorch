@@ -37,6 +37,7 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
+#include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
@@ -44,6 +45,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
+#include <ATen/ops/mm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
@@ -1079,6 +1081,16 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=fals
 #endif
 }
 
+static bool _grouped_mm_allowed_device() {
+#ifdef USE_ROCM
+    return false;
+#else
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    // CUDA capability 8.0 and greater
+    return dprops->major >= 8;
+#endif
+}
+
 #ifdef USE_ROCM
 static bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
@@ -1750,8 +1762,9 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0, 10.0");
+  bool allowed_device = _grouped_mm_allowed_device();
+  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
+  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability >= 8.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());
@@ -1776,7 +1789,55 @@ std::optional<c10::ScalarType> out_dtype) {
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
 
-  at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+  // TODO(before land): clean up the if statement, naming, etc
+  if (use_fast_path) {
+    // fast path, no d2h sync needed
+    at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+  } else {
+    // fallback path, using for loops or bmm
+    TORCH_WARN("fallback path for `torch._grouped_mm`, performance may not be optimal");
+    if (a_is_2d && !b_is_2d) {
+      // 2d x 3d with offsets
+      int group_start_idx = 0;
+      auto offs_cpu = offs.value().cpu();
+      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
+        int group_end_idx = offs_cpu[group_idx].item<int>();
+        auto mat_a_slice = mat_a.slice(0, group_start_idx, group_end_idx);
+        auto out_slice = out.slice(0, group_start_idx, group_end_idx);
+        at::mm_out(out_slice, mat_a_slice, mat_b[group_idx]);
+        group_start_idx = group_end_idx;
+      }
+
+    } else if (!a_is_2d && b_is_2d) {
+      // 3d x 2d with offsets
+      int group_start_idx = 0;
+      auto offs_cpu = offs.value().cpu();
+      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
+        int group_end_idx = offs_cpu[group_idx].item<int>();
+        auto mat_b_slice = mat_b.slice(1, group_start_idx, group_end_idx);
+        auto out_slice = out.slice(1, group_start_idx, group_end_idx);
+        at::mm_out(out_slice, mat_a[group_idx], mat_b_slice);
+        group_start_idx = group_end_idx;
+      }
+
+    } else if (a_is_2d && b_is_2d) {
+      // 2d x 2d with offsets
+      int group_start_idx = 0;
+      auto offs_cpu = offs.value().cpu();
+      for (int group_idx = 0; group_idx < offs_cpu.size(0); group_idx++) {
+        int group_end_idx = offs_cpu[group_idx].item<int>();
+        auto mat_a_slice = mat_a.slice(1, group_start_idx, group_end_idx);
+        auto mat_b_slice = mat_b.slice(0, group_start_idx, group_end_idx);
+        auto out_slice = out[group_idx];
+        at::mm_out(out_slice, mat_a_slice, mat_b_slice);
+        group_start_idx = group_end_idx;
+      }
+
+    } else {
+      // 3d x 3d without offsets - regular bmm
+      at::bmm_out(out, mat_a, mat_b);
+    }
+  }
   return out;
 #else
   TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
