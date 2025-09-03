@@ -547,6 +547,35 @@ class TestPySymInt(TestCase):
         fn(1, 1, 3, -0.5)  # guard failure: y == 2*x
         self.assertEqual(cnt.frame_count, 2)  # NB: for this recompile we just allocate 3 new symints; SymTokens aren't involved in this call
 
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 2
+            def forward(self, x):
+                return x + self.a
+
+        cnt.clear()
+        gn = torch.compile(Foo(), fullgraph=True, backend=cnt)
+        self.assertEqual(gn(2), 4)
+        gn.a = 4
+        self.assertEqual(gn(4), 8)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_sym_wrap_disabled(self):
+        from torch.fx.experimental.symbolic_shapes import sym_wrap
+
+        @torch._dynamo.disable
+        def g(x):
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + 2, g(x) + 2
+
+        s0 = sym_wrap(2, "s0")
+        out = f(s0)
+        breakpoint()
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
