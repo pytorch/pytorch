@@ -1684,11 +1684,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio
   install_torchvision
-  PYTHONPATH=/torchbench test_cachebench
+  PYTHONPATH=$(pwd)/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   install_torchaudio
   install_torchvision
-  PYTHONPATH=/torchbench test_verify_cachebench
+  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
@@ -1697,9 +1697,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    PYTHONPATH=/torchbench test_inductor_torchbench_smoketest_perf
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    PYTHONPATH=/torchbench test_inductor_torchbench_cpu_smoketest_perf
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     TORCHBENCHPATH=/torchbench test_torchbench_gcp_smoketest
   else
@@ -1708,11 +1708,11 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     if [[ "${TEST_CONFIG}" != *cpu* ]]; then
       install_torchrec_and_fbgemm
     fi
-    PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
+    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
-  PYTHONPATH=/torchbench:$PYTHONPATH test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  PYTHONPATH=$(pwd)/torchbench:$PYTHONPATH test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti
   fi
