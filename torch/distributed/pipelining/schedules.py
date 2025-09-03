@@ -208,6 +208,11 @@ class _Action(NamedTuple):
         )
 
 
+@lru_cache
+def _get_profiler_function_name(action: _Action) -> str:
+    return f"PP:{str(action)}"
+
+
 def _format_pipeline_order(
     pipeline_order: dict[int, list[Optional[_Action]]],
     error_step_number: Optional[int] = None,
@@ -1919,10 +1924,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     time_step,
                     action,
                 )
-
-                @lru_cache
-                def _get_profiler_function_name(action: _Action) -> str:
-                    return f"PP:{str(action)}"
 
                 with record_function(_get_profiler_function_name(action)):
                     # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
