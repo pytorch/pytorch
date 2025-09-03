@@ -674,14 +674,12 @@ def generic_jump(
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, all_stack_locals_metadata, False
+            self.next_instruction, all_stack_locals_metadata
         )
         if push:
             self.push(value)
         assert inst.target is not None
-        if_jump = self.create_call_resume_at(
-            inst.target, all_stack_locals_metadata, False
-        )
+        if_jump = self.create_call_resume_at(inst.target, all_stack_locals_metadata)
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
@@ -1014,7 +1012,7 @@ def break_graph_if_unsupported(
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
-                    self.next_instruction, all_stack_locals_metadata, False
+                    self.next_instruction, all_stack_locals_metadata
                 )
             )
 
@@ -1204,19 +1202,15 @@ class InstructionTranslatorBase(
         # graph during a for loop. In general, its better to have fewer false
         # negatives so that Dynamo does not skip the whole frame.
 
-        # If any parent tx has a backedge, then return True
-        cur_tx: Optional[InstructionTranslatorBase] = self
-        while cur_tx is not None:
-            cur_offset = cur_tx.current_instruction.offset
-            assert cur_tx.instruction_pointer is not None
-            for inst in cur_tx.instructions[cur_tx.instruction_pointer :]:
-                if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
-                    break
-                if inst.opname in JUMP_OPNAMES:
-                    jump_offset = inst.argval
-                    if jump_offset < cur_offset:
-                        return True
-            cur_tx = cur_tx.parent
+        cur_offset = self.current_instruction.offset
+        assert self.instruction_pointer is not None
+        for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
+            if inst.opname in JUMP_OPNAMES:
+                jump_offset = inst.argval
+                if jump_offset < cur_offset:
+                    return True
         return False
 
     def cellvars(self) -> list[str]:
@@ -1430,46 +1424,37 @@ class InstructionTranslatorBase(
             partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
-        if self.parent:
-            # nested graph break
-            assert config.nested_graph_breaks
-            self.output.add_output_instructions(
-                self.create_call_resume_at(
-                    continue_inst, all_stack_locals_metadata, True
-                )
-            )
-        else:
-            # load locals from frame values
-            # current frame state
-            # [
-            #   frame N locals,
-            #   frame N-1 stack + locals,
-            #   ...,
-            #   frame 1 stack + locals,
-            # ],
-            cg = PyCodegen(self)
+        # load locals from frame values
+        # current frame state
+        # [
+        #   frame N locals,
+        #   frame N-1 stack + locals,
+        #   ...,
+        #   frame 1 stack + locals,
+        # ],
+        cg = PyCodegen(self)
+        self.output.add_output_instructions(
+            [
+                cg.create_load_const(-1),
+                cg.create_binary_subscr(),
+            ]
+        )
+        for local, idx in all_stack_locals_metadata[-1].locals_names.items():
             self.output.add_output_instructions(
                 [
-                    cg.create_load_const(-1),
+                    create_dup_top(),
+                    cg.create_load_const(idx),
                     cg.create_binary_subscr(),
+                    cg.create_store(local),
                 ]
             )
-            for local, idx in all_stack_locals_metadata[-1].locals_names.items():
-                self.output.add_output_instructions(
-                    [
-                        create_dup_top(),
-                        cg.create_load_const(idx),
-                        cg.create_binary_subscr(),
-                        cg.create_store(local),
-                    ]
-                )
-            self.output.add_output_instructions(
-                [
-                    create_instruction("POP_TOP"),
-                    create_jump_absolute(continue_inst),
-                    *self.instructions,
-                ]
-            )
+        self.output.add_output_instructions(
+            [
+                create_instruction("POP_TOP"),
+                create_jump_absolute(continue_inst),
+                *self.instructions,
+            ]
+        )
 
     def run_ctx_mgr(self) -> Any:
         # NB: Don't push the top level frame summary; set_current_loc will
@@ -2482,9 +2467,7 @@ class InstructionTranslatorBase(
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
-            self.create_call_resume_at(
-                self.next_instruction, all_stack_locals_metadata, False
-            )
+            self.create_call_resume_at(self.next_instruction, all_stack_locals_metadata)
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
@@ -2496,31 +2479,8 @@ class InstructionTranslatorBase(
         )
 
     def create_call_resume_at(
-        self,
-        inst: Instruction,
-        all_stack_locals_metadata: Any,
-        disable_current_frame_resume: bool,
+        self, inst: Instruction, all_stack_locals_metadata: Any
     ) -> list[Instruction]:
-        """
-        Codegen resume function(s) and call it.
-        Assumes that the unsupported instruction has already been run.
-
-        Expects the stack to be in the state:
-            [
-                frame N locals,
-                frame N-1 stack + locals,
-                ...,
-                frame 1 stack + locals
-            ], frame N stack (post-instruction)
-
-        Args:
-            - inst: the instruction of the current (deepest) frame to resume at
-            - all_stack_locals_metadata: metadata returned from OutputGraph.compile_subgraph - contains
-                metadata such as local names, NULL positions, stack length, etc.
-            - disable_current_frame_resume: If True, disable tracing on the current frame's resume function.
-                Used for implementing nested step_graph_break.
-        """
-
         self.instruction_pointer = None
 
         if inst.opname == "RETURN_VALUE":
@@ -2529,6 +2489,14 @@ class InstructionTranslatorBase(
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
         cg = PyCodegen(self.output.root_tx)
+
+        # current frame state
+        # [
+        #   frame N locals,
+        #   frame N-1 stack + locals,
+        #   ...,
+        #   frame 1 stack + locals
+        # ], frame N stack (post-instruction)
 
         # move frame N stack to the frame values list
         current_num_stack = len(self.stack) - len(
@@ -2569,9 +2537,6 @@ class InstructionTranslatorBase(
         # NOTE: if the unsupported instruction modifies the inactive context variable, it may
         # result in silent incorrectness!
         for i, meta in enumerate(all_stack_locals_metadata):
-            if i == 0 and disable_current_frame_resume:
-                continue
-
             for (j, _), j_orig in zip(meta.stack_ctx_args, meta.stack_ctx_idxes_orig):
                 # Replace the stack var with the context class
                 ctx = cast(ContextWrappingVariable, txes[i].stack[j_orig])
@@ -2613,13 +2578,13 @@ class InstructionTranslatorBase(
                 resume_inst = inst
             else:
                 resume_inst = cur_tx.next_instruction
-            # If the resume instruction is a jump absolute, then resume
-            # at the target instead. This handles the case where we
-            # graph break again in a nested function before jump-resuming
-            # this frame.
-            if is_jump_absolute(resume_inst):
-                assert resume_inst.target
-                resume_inst = resume_inst.target
+                # If the resume instruction is a jump absolute, then resume
+                # at the target instead. This handles the case where we
+                # graph break again in a nested function before jump-resuming
+                # this frame.
+                if is_jump_absolute(resume_inst):
+                    assert resume_inst.target
+                    resume_inst = resume_inst.target
             resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
             resume_names.append(resume_name)
 
@@ -2726,11 +2691,6 @@ class InstructionTranslatorBase(
                 cur_tx.package.add_resume_function(
                     new_code, cur_tx.f_globals["__name__"], package_name
                 )
-
-        if disable_current_frame_resume:
-            from .eval_frame import skip_code
-
-            skip_code(resume_codes[0])
 
         # load first resume function (to be called this frame)
         if resume_codes[-1].co_freevars:
@@ -4439,15 +4399,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         return False  # inlining functions is all-or-nothing
 
     def create_call_resume_at(
-        self,
-        inst: Instruction,
-        all_stack_locals_metadata: Any,
-        disable_current_frame_resume: bool,
+        self, inst: Instruction, all_stack_locals_metadata: Any
     ) -> list[Instruction]:
         if config.nested_graph_breaks:
-            return super().create_call_resume_at(
-                inst, all_stack_locals_metadata, disable_current_frame_resume
-            )
+            return super().create_call_resume_at(inst, all_stack_locals_metadata)
         unimplemented_v2(
             gb_type="Graph break in inlined function",
             context="",

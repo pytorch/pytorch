@@ -3274,7 +3274,6 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
-        strict_error: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3448,7 +3447,7 @@ class CheckFunctionManager:
                     builder, sorted_guards, self.output_graph
                 )
             except exc.PackageError as e:
-                if torch._dynamo.config.strict_precompile or strict_error:
+                if torch._dynamo.config.strict_precompile:
                     raise e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
