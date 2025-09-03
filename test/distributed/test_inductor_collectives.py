@@ -1821,8 +1821,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 ],
                 "allow_buffer_reuse": False,
                 "test_configs.track_memory_lifecycle": "error",
-                "reorder_iterative_use_runtime_estimations": False,
-                "sink_iterative_use_runtime_estimations": False,
             }
         ):
             compiled = torch.compile(func, fullgraph=True)

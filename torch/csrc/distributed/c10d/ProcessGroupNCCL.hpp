@@ -1002,7 +1002,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
-  void registerMemPool(c10::cuda::MemPool* pool);
+  void registerMemPool(c10::cuda::MemPool* pool, bool symm = false);
 
   // Performs NCCL user buffer de-registration for all buffers in
   // the given MemPool
