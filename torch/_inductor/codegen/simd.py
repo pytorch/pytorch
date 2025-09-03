@@ -408,6 +408,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_cooperative_reduction()
         )
         self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
+        self.tiling: dict[str, sympy.Expr] = tiling
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
