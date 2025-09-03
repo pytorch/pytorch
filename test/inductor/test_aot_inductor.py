@@ -322,7 +322,6 @@ class AOTInductorTestsTemplate:
         actual_path = AOTIRunnerUtil.legacy_compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
-        print(f"{expected_path} - {actual_path}")
         self.assertTrue(actual_path == expected_path)
 
     def test_empty_constant_folding(self):
