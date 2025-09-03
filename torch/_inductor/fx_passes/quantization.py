@@ -2391,7 +2391,9 @@ def _register_qlinear_weight_prepack():
         with_bias,
         is_tensor_overload,
         with_dtype_convert,
-    ) in linear_weight_prepack_cases:
+    ) in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False], [True, False], [True, False]
+    ):
         if dtype == torch.float32 and with_dtype_convert:
             continue
         bmm_pattern = _generate_qlinear_weight_prepack_patterns(
