@@ -106,6 +106,7 @@ jobs:
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
           # Save this for later
+          echo "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" >> "$GITHUB_ENV"
           echo "container_name=${container_name}" >> "$GITHUB_ENV"
 
       - name: Build vLLM wheel
@@ -122,7 +123,6 @@ jobs:
         run: |
           set -eux
 
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip install auditwheel==6.4.2
           # Get these wheels ready, the vllm renaming logic is copied from its .buildkite/scripts/upload-wheels.sh
           docker exec -t "${container_name}" bash -c "
             set -eux
@@ -160,7 +160,7 @@ jobs:
         with:
           name: vllm-wheel-${{ matrix.python-version }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/externals/vllm/wheels
+          path: ${{ runner.temp }}/artifacts/externals/vllm/wheels/*.whl
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
@@ -205,7 +205,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/*.whl "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
