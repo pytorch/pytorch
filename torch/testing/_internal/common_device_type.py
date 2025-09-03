@@ -1277,24 +1277,23 @@ class skipPRIVATEUSE1If(skipIf):
 
 
 def _has_sufficient_memory(device, size):
-    if torch.device(device).type == "cuda":
-        if not torch.cuda.is_available():
-            return False
-        gc.collect()
-        torch.cuda.empty_cache()
-        # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
-        if device == "cuda":
-            device = "cuda:0"
-        return (
-            torch.cuda.memory.mem_get_info(device)[0]
-            * torch.cuda.memory.get_per_process_memory_fraction(device)
-        ) >= size
-
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device == "xpu":
-        raise unittest.SkipTest("TODO: Memory availability checks for Intel GPU?")
+    device_type = torch.device(device).type
+    if device_type != "cpu":
+        if not torch.accelerator.is_available():
+            return False
+        gc.collect()
+        torch.accelerator.empty_cache()
+
+        if device_type == "cuda":
+            return (
+                torch.cuda.memory.mem_get_info()[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device)
+            ) >= size
+        elif device_type == "xpu":
+            return torch.xpu.memory.mem_get_info()[0] >= size
 
     if device != "cpu":
         raise unittest.SkipTest("Unknown device type")
@@ -1342,8 +1341,7 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            # TODO: Memory availability checks for Intel GPU
-            if device != "xpu" and not _has_sufficient_memory(_device, size_bytes):
+            if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
