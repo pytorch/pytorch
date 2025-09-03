@@ -38,6 +38,7 @@ jobs:
     env:
       PY_VERS: ${{ matrix.python-version }}
       MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
+      VLLM_BASE_IMAGE: "nvidia/cuda:${{ matrix.cuda-version }}-devel-ubuntu22.04"
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -105,11 +106,16 @@ jobs:
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.VLLM_BASE_IMAGE }}
+
       - name: Build vLLM wheel
         uses: ./.github/actions/build-external-packages
         with:
           build-targets: vllm
-          docker-image: "nvidia/cuda:${{ matrix.cuda-version }}-devel-ubuntu22.04"
+          docker-image: ${{ env.VLLM_BASE_IMAGE }}
           cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
           output-dir: ${{ runner.temp }}/externals
