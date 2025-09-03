@@ -13,6 +13,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._export.serde import schema
 from torch._export.serde.serialize import (
+    _dataclass_to_dict,
     _dict_to_dataclass,
     deserialize_device,
     deserialize_scalar_type,
@@ -21,9 +22,11 @@ from torch._export.serde.serialize import (
     deserialize_stride,
     ExportedProgramDeserializer,
     serialize,
+    serialize_tensor_meta,
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
@@ -322,6 +325,161 @@ def _package_aoti_files(
             logger.debug(weights_config)
 
 
+def _is_fake_tensor(t: torch.Tensor) -> bool:
+    return isinstance(t, FakeTensor)
+
+
+def _is_tensor_subclass(t: torch.Tensor) -> bool:
+    return isinstance(t, torch.Tensor) and type(t.data) is not torch.Tensor
+
+
+def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
+    """
+    Get the raw bytes of a tensor. This is used to save the tensor in pt2 archive.
+    """
+    # NOTE: don't chain .cpu() with .data_ptr(). If an HtoD copy needs to be
+    # performed, the CPU copy needs to be kept alive when its underlying
+    # memory is accessed.
+    import ctypes
+
+    if _is_fake_tensor(value):
+        value_bytes = b""
+    elif value.data_ptr():
+        cpu_tensor = value.cpu().contiguous()
+        # we store the raw bytes of tensor. Tensor metadata is stored separately
+        value_bytes = bytes(
+            ctypes.cast(
+                cpu_tensor.data_ptr(),
+                ctypes.POINTER(ctypes.c_ubyte * value.element_size() * value.numel()),
+            ).contents
+        )
+    else:
+        # for empty tensor
+        value_bytes = b""
+    return value_bytes
+
+
+def _package_state_dict(
+    exported_program: ExportedProgram,
+    archive_writer: PT2ArchiveWriter,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+) -> schema.PayloadConfig:
+    weights_config: dict[str, schema.PayloadMeta] = {}
+    storage_map: dict[torch.UntypedStorage, str] = {}
+
+    idx = archive_writer.count_prefix(os.path.join(WEIGHTS_DIR, WEIGHT_FILENAME_PREFIX))
+    for weight_fqn, weight_tensor in exported_program.state_dict.items():
+        assert isinstance(weight_tensor, torch.Tensor), (
+            "only torch.Tensor is allowed in state_dict"
+        )
+        path_name = f"{WEIGHT_FILENAME_PREFIX}{idx}"
+        is_param = isinstance(weight_tensor, torch.nn.Parameter)
+        # use pickle for non-fake tensor subclasses
+        use_pickle = _is_tensor_subclass(weight_tensor) and not _is_fake_tensor(
+            weight_tensor
+        )
+        archive_path = os.path.join(WEIGHTS_DIR, path_name)
+        if use_pickle:
+            buffer = io.BytesIO()
+            torch.save(weight_tensor, buffer, pickle_protocol=pickle_protocol)
+            archive_writer.write_bytes(archive_path, buffer.getvalue())
+            idx += 1
+        else:
+            tensor_storage = weight_tensor.untyped_storage()
+            if tensor_storage not in storage_map:
+                storage_map[tensor_storage] = path_name
+                tensor_bytes = _get_raw_tensor_bytes(weight_tensor)
+                archive_writer.write_bytes(archive_path, tensor_bytes)
+                idx += 1
+            else:
+                path_name = storage_map[tensor_storage]
+
+        weights_config[weight_fqn] = schema.PayloadMeta(
+            path_name=path_name,
+            is_param=is_param,
+            use_pickle=use_pickle,
+            tensor_meta=serialize_tensor_meta(weight_tensor),
+        )
+
+    return schema.PayloadConfig(config=weights_config)
+
+
+def _package_constants(
+    exported_program: ExportedProgram,
+    archive_writer: PT2ArchiveWriter,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+) -> schema.PayloadConfig:
+    constants_config: dict[str, schema.PayloadMeta] = {}
+    storage_map: dict[torch.UntypedStorage, str] = {}
+
+    tensor_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, TENSOR_CONSTANT_FILENAME_PREFIX)
+    )
+    custom_obj_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, CUSTOM_OBJ_FILENAME_PREFIX)
+    )
+
+    for constant_fqn, constant in exported_program.constants.items():
+        if isinstance(constant, torch.Tensor):
+            use_pickle = _is_tensor_subclass(constant) and not _is_fake_tensor(constant)
+            path_name = f"{TENSOR_CONSTANT_FILENAME_PREFIX}{tensor_idx}"
+            archive_path = os.path.join(CONSTANTS_DIR, path_name)
+            if use_pickle:
+                buffer = io.BytesIO()
+                torch.save(constant, buffer, pickle_protocol=pickle_protocol)
+                archive_writer.write_bytes(archive_path, buffer.getvalue())
+                tensor_idx += 1
+            else:
+                # Only save once when tensors share the same storage
+                tensor_storage = constant.untyped_storage()
+                if tensor_storage not in storage_map:
+                    storage_map[tensor_storage] = path_name
+                    tensor_bytes = _get_raw_tensor_bytes(constant)
+                    archive_writer.write_bytes(archive_path, tensor_bytes)
+                    tensor_idx += 1
+                else:
+                    path_name = storage_map[tensor_storage]
+
+            constants_config[constant_fqn] = schema.PayloadMeta(
+                path_name=path_name,
+                is_param=False,
+                use_pickle=use_pickle,
+                tensor_meta=serialize_tensor_meta(constant),
+            )
+
+        elif isinstance(constant, torch._C.ScriptObject):
+            # use pickle for custom objects
+            path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+            custom_obj_idx += 1
+            constants_config[constant_fqn] = schema.PayloadMeta(
+                path_name=path_name,
+                is_param=False,
+                use_pickle=True,
+                tensor_meta=None,
+            )
+            archive_path = os.path.join(CONSTANTS_DIR, path_name)
+            custom_obj_bytes = torch._C._pickle_save(constant)
+            archive_writer.write_bytes(archive_path, custom_obj_bytes)
+
+        else:
+            raise RuntimeError(f"Unsupported constant type: {type(constant)}")
+
+    return schema.PayloadConfig(config=constants_config)
+
+
+def _package_payload_config(
+    archive_writer: PT2ArchiveWriter,
+    payload_config: schema.PayloadConfig,
+    config_file: str,
+) -> None:
+    """
+    Save the payload config as json file in the archive.
+    """
+    archive_writer.write_string(
+        config_file, json.dumps(_dataclass_to_dict(payload_config))
+    )
+
+
 def _package_exported_programs(
     archive_writer: PT2ArchiveWriter,
     exported_programs: Optional[Union[ExportedProgram, dict[str, ExportedProgram]]],
@@ -337,15 +495,22 @@ def _package_exported_programs(
     assert isinstance(exported_programs, dict)
 
     for model_name, ep in exported_programs.items():
-        artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
+        weights_config = _package_state_dict(ep, archive_writer, pickle_protocol)
+        weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        _package_payload_config(archive_writer, weights_config, weights_config_file)
+
+        constants_config = _package_constants(ep, archive_writer, pickle_protocol)
+        constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        _package_payload_config(archive_writer, constants_config, constants_config_file)
+
+        artifact: SerializedArtifact = serialize(
+            ep,
+            opset_version,
+            pickle_protocol,
+        )
 
         archive_writer.write_bytes(
             MODELS_FILENAME_FORMAT.format(model_name), artifact.exported_program
-        )
-        # TODO:Consider dedup this with the weights saved in package_aoti_files
-        archive_writer.write_bytes(f"{WEIGHTS_DIR}{model_name}.pt", artifact.state_dict)
-        archive_writer.write_bytes(
-            f"{CONSTANTS_DIR}{model_name}.pt", artifact.constants
         )
         archive_writer.write_bytes(
             SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name),
@@ -571,8 +736,13 @@ def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
 ) -> Union[dict[str, torch.Tensor], bytes]:
+    # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
     if legacy_weights_file in archive_reader.get_file_names():
+        logger.warning(
+            "You are loading weight from the legacy format. "
+            "Please generate a new pt2 file using torch.export.save()."
+        )
         return archive_reader.read_bytes(legacy_weights_file)
     else:
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
@@ -618,8 +788,13 @@ def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
 ) -> Union[dict[str, torch.Tensor], bytes]:
+    # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
     if legacy_constants_file in archive_reader.get_file_names():
+        logger.warning(
+            "You are loading constant from the legacy format. "
+            "Please generate a new pt2 file using torch.export.save()."
+        )
         return archive_reader.read_bytes(legacy_constants_file)
     else:
         constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
