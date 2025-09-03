@@ -4044,7 +4044,8 @@ class GraphModule(torch.nn.Module):
             print(torch.get_device_module())
             self.assertEqual(f5(), getattr(torch, new_device))
 
-        @torch.compile(backend="eager", fullgraph=True)
+        # synchronize causes a graph break, so no fullgraph=True
+        @torch.compile(backend="eager")
         def f6():
             mod = torch.get_device_module()
             mod.synchronize()
