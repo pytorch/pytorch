@@ -2708,6 +2708,17 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
+            if True:
+                @torch.compile
+                def f(x):
+                    out = model(**x)[0]
+                    out.sum().backward()
+                from triton.testing import do_bench
+                model = model
+                ms = do_bench(lambda: f(example_inputs))
+                print(f"{ms=}")
+                exit(0)
+
             if (
                 self.args.export_aot_inductor
                 or self.args.export_nativert
@@ -3565,6 +3576,8 @@ def process_entry(rank, runner, original_dir, args):
 
 
 def maybe_fresh_cache(args):
+    if True:
+        return fresh_cache()
     cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
     if not cache_dir_assigned and (
         args.cold_start_latency or args.warm_start_latency or args.ci
