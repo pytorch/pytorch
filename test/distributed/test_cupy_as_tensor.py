@@ -3,12 +3,11 @@
 # To run:
 # python test/distributed/test_cupy_as_tensor.py
 
-import os
 from dataclasses import dataclass
 
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
-from torch.testing._internal.common_distributed import MultiProcContinousTest
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
@@ -16,7 +15,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -48,12 +46,15 @@ def from_buffer(
 
 
 @requires_cuda_p2p_access()
-class CupyAsTensorTest(MultiProcContinousTest):
+class CupyAsTensorTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls):
         return "gloo"
 
     def _init_device(self) -> None:
+        # need to use vmm api to test it,
+        # see https://forums.developer.nvidia.com/t/inconsistent-behavior-of-cudapointergetattributes-between-cudamalloc-ipc-and-vmm-based-ipc/339025/5 # noqa: B950
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         # init and pin the process to the device
         device_module.set_device(self.device)
         torch.empty(1, device=self.device)
@@ -98,6 +99,11 @@ class CupyAsTensorTest(MultiProcContinousTest):
         torch.distributed.barrier()
         assert tensor.allclose(tensor, 1)
         torch.distributed.barrier()
+
+    @classmethod
+    def tearDownClass(cls):
+        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+        super().tearDownClass()
 
 
 if __name__ == "__main__":

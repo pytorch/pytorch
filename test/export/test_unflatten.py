@@ -178,6 +178,39 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    def test_assert_tensor_metadata_stack(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3)
+
+            def forward(self, x, y):
+                x = x.to(dtype=torch.int32)
+                y = y.to(dtype=torch.int32)
+                x = x + self.a
+                return x + y
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x, y):
+                x = x * x
+                y = y * y
+                return self.n(x, y)
+
+        m = M()
+        ep = torch.export.export(m, (torch.randn(3), torch.randn(3)))
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten._assert_tensor_metadata.default:
+                self.assertEqual(len(node.meta.get("nn_module_stack")), 2)
+
+        uep = torch.export.unflatten(ep)
+
+        inp = (torch.randn(3), torch.randn(3))
+        self.assertTrue(torch.allclose(uep(*inp), m(*inp)))
+
     @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
@@ -631,8 +664,6 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
-    # skip connection is not supported yet
-    @unittest.expectedFailure
     def test_unflatten_skipped_call_module(self):
         class C(torch.nn.Module):
             def __init__(self):
@@ -670,7 +701,30 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflatten(ep)
+        ufm = unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    b = self.b(x);  x = None
+    return (b,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    c = self.c(x)
+    add = torch.ops.aten.add.Tensor(c, x);  c = x = None
+    return add""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.c.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x);  x = None
+    sin = torch.ops.aten.sin.default(cos);  cos = None
+    return sin""",
+        )
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):

@@ -9,7 +9,7 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -36,6 +36,36 @@ from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
+# Private debug flag to disable internal compilation wrapping for debugging purposes.
+# WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
+# When enabled, this bypasses the required internal compilation that ensures correctness
+# and performance. Only use this temporarily when you need to set breakpoints
+# in your score_mod/mask_mod functions during development.
+#
+# This flag only affects the internal compilation when flex_attention is called directly.
+# If you have already wrapped flex_attention in torch.compile(), this flag has no effect
+# and the user's compilation will still occur.
+#
+# Usage:
+#   import torch.nn.attention.flex_attention as fa
+#   fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+#   # Now you can set breakpoints in your score_mod/mask_mod
+#   output = fa.flex_attention(q, k, v, score_mod=my_score_mod)
+#
+_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+
+_WARNINGS_SHOWN: set[str] = set()
+
+
+def _warn_once(
+    warning_id: str, message: str, category: type[Warning] = UserWarning
+) -> None:
+    """Helper to ensure each warning is shown only once per process."""
+    if warning_id not in _WARNINGS_SHOWN:
+        warnings.warn(message, category, stacklevel=2)
+        _WARNINGS_SHOWN.add(warning_id)
+
+
 __all__ = [
     "BlockMask",
     "flex_attention",
@@ -59,8 +89,8 @@ class FlexKernelOptions(TypedDict, total=False):
     and numerical behavior. Most users will not need to specify these options as the
     default autotuning provides good performance.
 
-    The options can be prefixed with 'fwd_' or 'bwd_' to apply only to forward or
-    backward pass respectively. For example: 'fwd_BLOCK_M' and 'bwd_BLOCK_M1'.
+    The options can be prefixed with ``fwd_`` or ``bwd_`` to apply only to forward or
+    backward pass respectively. For example: ``fwd_BLOCK_M`` and ``bwd_BLOCK_M1``.
 
     Note:
       We currently do not provide any backward compatibility guarantees for these options.
@@ -1548,6 +1578,18 @@ def flex_attention(
         else:
             return out
 
+    if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        _warn_once(
+            warning_id="flex_attention_performance",
+            message=(
+                "flex_attention called without torch.compile() - this will use an unfused implementation that materializes the full scores matrix instead of generating a fused kernel.\n\n"
+                "SOLUTION: Use torch.compile(flex_attention)(...)\n\n"
+                "If you want to debug your score_mod/mask_mod, you can set:\n"
+                "torch.nn.attention.flex_attention._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True\n\n"
+                "This will allow you to use print statements or breakpoints. Note: This doesn't work with the backwards pass and may produce incorrect results."
+            ),
+        )
+
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
@@ -1565,14 +1607,20 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                     if metadata_mode:
-                        backend = make_eager_backend_with_torch_function_mode(
-                            metadata_mode
+                        backend: Union[str, Callable[..., Any]] = (
+                            make_eager_backend_with_torch_function_mode(metadata_mode)
                         )
                     else:
                         backend = "eager"
-                    out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                    )(
+
+                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+                        flex_fn = _flex_attention_hop_wrapper
+                    else:
+                        flex_fn = torch.compile(
+                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                        )
+
+                    out, lse = flex_fn(
                         query,
                         key,
                         value,
@@ -1581,7 +1629,7 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-                    if return_lse:
-                        return out, lse * math.log(2)
-                    else:
-                        return out
+    if return_lse:
+        return out, lse * math.log(2)
+    else:
+        return out

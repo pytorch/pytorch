@@ -7,7 +7,7 @@ from typing import cast, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed import init_device_mesh
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -52,7 +52,7 @@ def scale_for_fp8(
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -69,7 +69,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_addmm_empty_operand(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -86,7 +86,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_addmm_auto_redistribute(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard0_spec = [Shard(0)]
         shard1_spec = [Shard(1)]
         replica_spec = [Replicate()]
@@ -117,7 +117,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_mm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard0_spec = Shard(0)
         shard1_spec = Shard(1)
         replica_spec = Replicate()
@@ -152,7 +152,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
         shrd1 = Shard(1)
         repl = Replicate()
@@ -222,7 +222,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_matmul(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         dim = 128
         x = torch.randn(8, dim)
         A = torch.randn(dim, dim)
@@ -241,7 +241,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_t(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         tensor_to_transpose = torch.randn(12, 8, requires_grad=True)
@@ -255,7 +255,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_t_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         a = torch.randn(12, 8)
         b = torch.randn(8, 4)
@@ -280,7 +280,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_baddbmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         tensor = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_1 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_2 = torch.rand(4, 8, 8, device=self.device_type, requires_grad=True)
@@ -344,7 +344,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_bmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         mat1 = torch.rand(4, 8, 4, device=self.device_type, requires_grad=True)
         mat2 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         local_result = torch.bmm(mat1, mat2)
@@ -389,7 +389,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
@@ -492,7 +492,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         """
         Create a simple test for Shampoo's use case.
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = self.build_device_mesh()
 
         local_a = torch.randn(4, 4)
         local_b = torch.randn(4, 15)
@@ -545,7 +545,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     def test_grouped_mm(self, kwargs):
         # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
         dtype = torch.bfloat16
         inp = torch.rand(

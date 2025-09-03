@@ -27,7 +27,7 @@ aten = torch.ops.aten
 class LocalShardsWrapper(torch.Tensor):
     """
     A wrapper class to hold local shards of a DTensor.
-    This class is used largely for checkpointing purposes and implicity subtypes
+    This class is used largely for checkpointing purposes and implicitly subtypes
     the _Checkpointable protocol.
     """
 
@@ -159,7 +159,7 @@ class LocalShardsWrapper(torch.Tensor):
                 ]
             elif args[0].local_shards()[0].ndim == 1:
                 assert args[0].storage_metadata().size[0] == view_shape[0]
-                # This case is for optimizer sharding as regardles of sharding type, optimizer state is row wise sharded
+                # This case is for optimizer sharding as regardless of sharding type, optimizer state is row wise sharded
                 res_shards_list = [
                     aten.view.default(shard, shard.shape, **kwargs)
                     for shard in args[0].local_shards()

@@ -351,7 +351,10 @@ def _apply_fn_on_data(func, *args, **kwargs):
 @register_dispatch_func([torch.ops.aten._to_copy])
 def _to_copy(func, *args, **kwargs):
     new_data = func(_get_data(args[0]), *args[1:], **kwargs)
-    return MaskedTensor(new_data, _maybe_get_mask(args[0]))
+    cloned_kwargs = kwargs.copy()
+    cloned_kwargs["dtype"] = torch.bool
+    new_mask = func(_maybe_get_mask(args[0]), *args[1:], **cloned_kwargs)
+    return MaskedTensor(new_data, new_mask)
 
 
 @register_dispatch_func([torch.ops.aten._softmax])

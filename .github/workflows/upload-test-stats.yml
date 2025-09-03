@@ -14,6 +14,7 @@ on:
       - inductor-periodic
       - rocm
       - rocm-mi300
+      - rocm-mi355
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124

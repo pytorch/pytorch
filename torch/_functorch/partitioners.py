@@ -48,6 +48,7 @@ from ._activation_checkpointing.knapsack import (
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
+from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
@@ -175,6 +176,7 @@ def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
     inputs: list[fx.Node],
     outputs: list[fx.Node],
+    outputs_descs: list[AOTOutput],
     subgraph: Optional[str] = None,
 ) -> fx.Graph:
     """
@@ -239,7 +241,8 @@ def _extract_graph_with_inputs_outputs(
             output_values.append(env[x])
         else:
             output_values.append(x)
-    new_graph.output(tuple(output_values))
+    out = new_graph.output(tuple(output_values))
+    out.meta["desc"] = outputs_descs
 
     new_graph.eliminate_dead_code()
     new_graph.lint()
@@ -299,13 +302,20 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs
-) -> tuple[list[fx.Node], list[fx.Node]]:
+) -> tuple[list[fx.Node], list[fx.Node], list[AOTOutput], list[AOTOutput]]:
     outputs = pytree.arg_tree_leaves(
         *(node.args for node in joint_module.graph.find_nodes(op="output"))
     )
+    outputs_descs = pytree.arg_tree_leaves(
+        next(iter(joint_module.graph.find_nodes(op="output"))).meta.get(
+            "desc", [None] * len(outputs)
+        )
+    )
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
-    return fwd_outputs, bwd_outputs
+    fwd_outputs_descs = outputs_descs[:num_fwd_outputs]
+    bwd_outputs_descs = outputs_descs[num_fwd_outputs:]
+    return fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs
 
 
 def _remove_by_name(saved_values: list[fx.Node], name: str):
@@ -827,8 +837,8 @@ def _extract_fwd_bwd_modules(
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
-        joint_module, num_fwd_outputs=num_fwd_outputs
+    fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
+        _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
@@ -841,6 +851,7 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs,
+        bwd_outputs_descs,
         "backward",
     )
 
@@ -914,6 +925,11 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
         fwd_outputs + saved_values + saved_sym_nodes,
+        fwd_outputs_descs
+        + [
+            SavedForBackwardsAOTOutput(i)
+            for i in range(len(saved_values) + len(saved_sym_nodes))
+        ],
         "forward",
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
@@ -924,6 +940,7 @@ def _extract_fwd_bwd_modules(
         + bwd_seed_offset_inputs
         + backward_state_inputs,
         bwd_outputs,
+        bwd_outputs_descs,
         "backward",
     )
 
@@ -976,11 +993,11 @@ def default_partition(
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
-        joint_module, num_fwd_outputs=num_fwd_outputs
+    fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
+        _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
     forward_only_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph, inputs, fwd_outputs, "forward"
+        joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
     )
     forward_node_names = OrderedSet(
         node.name for node in forward_only_graph.nodes if node.op != "output"
@@ -2398,7 +2415,7 @@ def choose_saved_values_set(
             # if idx in all_recomputable_banned_nodes:
             try:
                 dont_ban.add(all_recomputable_banned_nodes[idx])
-            except BaseException:
+            except BaseException:  # noqa: B036
                 pass
 
         assert dont_ban.issubset(all_recomputable_banned_nodes)
@@ -2581,6 +2598,88 @@ def _sync_decision_cross_ranks(
     return saved_values
 
 
+def thread_graphsafe_rng_from_hops(module, is_backward):
+    """
+    Graph-safe RNG lets torch.compile use CUDA Graphs for graphs with RNG ops.
+    For graphs without HOPs, the partitioner adds placeholder nodes
+    fwd_rng_state_* and bw_rng_state_* to the forward and backward graphs. At
+    runtime, the AOTDispatcher retrieves these RNG states and passes them to the
+    compiled graphs.
+
+    This works well for no-HOP graphs. With HOPs, the partitioner runs
+    recursively: it first partitions the HOP (producing forward/backward HOP
+    subgraphs) and then stitches them back into the outer joint graph. For HOPs
+    that contain RNG ops, the outer joint graph now includes HOP subgraph
+    modules with extra RNG placeholders. We must thread these placeholders
+    through the outer module partitioned forward and backward graphs—this
+    function does exactly that. It collects the RNG placeholder nodes from the
+    HOPs and creates corresponding placeholders in the outer forward and
+    backward graphs.
+
+    There is a catch: for a short period, the joint graph is in a “bad” state.
+    The HOP subgraphs expect additional inputs (because of the new
+    placeholders), but the outer graph call sites don't yet provide them. We
+    can't fix this in the joint graph because the joint graph's input signature
+    is fixed (primals, tangents). As a compromise, we keep the joint graph in
+    somewhat of a bad state for some time and, once the outer forward and
+    backward graphs are partitioned, insert the corresponding RNG placeholders
+    and wire up the calls.
+    """
+
+    rng_count = 0
+    rng_string = "bwd_rng_state" if is_backward else "fwd_rng_state"
+    last_input = next(reversed(module.graph.find_nodes(op="placeholder")))
+    for hop_node in module.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(module, hop_node.args[0].target)
+        if isinstance(subgraph, fx.GraphModule):
+            new_rng_inputs = []
+            for idx, placeholder_node in enumerate(
+                subgraph.graph.find_nodes(op="placeholder")
+            ):
+                if rng_string in placeholder_node.name:
+                    # Found a rng state placeholder in the hop graph, lets add
+                    # the corresponding node in the outer graph
+                    with module.graph.inserting_after(last_input):
+                        rng_state = module.graph.placeholder(
+                            f"{rng_string}_{rng_count}"
+                        )
+                        rng_count += 1
+                        rng_state.meta["val"] = placeholder_node.meta["val"]
+                        last_input = rng_state
+                        new_rng_inputs.append(rng_state)
+
+            if new_rng_inputs:
+                # Pass on the new args that include the new_rng_inputs
+                with module.graph.inserting_after(hop_node):
+                    new_hop_node_with_fixed_args = module.graph.create_node(
+                        "call_function",
+                        torch.ops.higher_order.invoke_subgraph,
+                        (*hop_node.args, *new_rng_inputs),  # type: ignore[arg-type]
+                        {},
+                    )
+                    hop_node.replace_all_uses_with(
+                        new_hop_node_with_fixed_args, propagate_meta=True
+                    )
+
+                # Setup the eager_input_vals
+                eager_vals = hop_node.meta.get("eager_input_vals")
+                if eager_vals:
+                    eager_args, eager_kwargs = eager_vals
+                    new_eager_args = (
+                        *eager_args,
+                        *[inp.meta["val"] for inp in new_rng_inputs],
+                    )
+                    new_hop_node_with_fixed_args.meta["eager_input_vals"] = (
+                        new_eager_args,
+                        eager_kwargs,
+                    )
+                module.graph.erase_node(hop_node)
+
+    return module
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs,
@@ -2651,14 +2750,14 @@ def min_cut_rematerialization_partition(
             filter(_is_fwd_seed_offset, joint_module.graph.nodes)
         )
         inputs = primal_inputs + fwd_seed_offset_inputs
-        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
-            joint_module, num_fwd_outputs=num_fwd_outputs
+        fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
+            _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
         )
         required_bw_nodes.update(
             o for o in bwd_outputs if o is not None and o.op != "output"
         )
         forward_only_graph = _extract_graph_with_inputs_outputs(
-            joint_module.graph, inputs, fwd_outputs, "forward"
+            joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
         )
         required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
             name_to_node[node.name]
@@ -2749,6 +2848,9 @@ def min_cut_rematerialization_partition(
     # this is helpful for memory, especially in the case of aot_eager backend
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
+
+    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values

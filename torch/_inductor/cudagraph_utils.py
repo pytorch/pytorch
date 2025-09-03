@@ -10,9 +10,11 @@ from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
 
+from .utils import is_using_cudagraph_partition
+
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Set as AbstractSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -108,7 +110,8 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
+    placeholders: Sequence[PlaceholderInfo],
+    mutation_indices: Union[AbstractSet[int], Sequence[int]],
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -170,7 +173,8 @@ def check_multiple_devices_or_any_cpu_nodes(
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    if torch._inductor.config.graph_partition:
+    # dynamo cudagraph does not support graph partition
+    if is_using_cudagraph_partition():
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 

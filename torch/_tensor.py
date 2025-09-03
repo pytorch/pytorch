@@ -1659,7 +1659,14 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, *, stream=None, max_version=None):
+    def __dlpack__(
+        self,
+        *,
+        stream: Optional[Any] = None,
+        max_version: Optional[tuple[int, int]] = None,
+        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
+        copy: Optional[bool] = None,
+    ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1670,22 +1677,31 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             stream (integer or None): An optional Python integer representing a
-            pointer to a CUDA stream. The current stream is synchronized with
-            this stream before the capsule is created, and since the capsule
-            shares its storage with the tensor this make it safe to access from
-            both streams.  If None or -1 is passed then no synchronization is performed.
-            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-            synchronization.
+                pointer to a CUDA stream. The current stream is synchronized with
+                this stream before the capsule is created, and since the capsule
+                shares its storage with the tensor this make it safe to access from
+                both streams.  If None or -1 is passed then no synchronization is performed.
+                If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+                synchronization.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
-            2 integers, representing the maximum version the caller supports. If
-            None (default), PyTorch will fallback to DLPack 0.8.
+                2 integers, representing the maximum version the caller supports. If
+                None (default), PyTorch will fallback to DLPack 0.8.
+
+            dl_device (tuple[DLDeviceType, int] or None): An optional tuple specifying
+                in which device the exported DLPack capsule should be on. If None (default),
+                the exported DLPack capsule will be on the same device as ``self``.
+
+            copy (bool or None): An optional boolean indicating whether or not to copy
+                ``self``. If None, PyTorch will copy only if necessary.
         """
         if has_torch_function_unary(self):
             args = (self,)
             kwargs = {
                 "stream": stream,
                 "max_version": max_version,
+                "dl_device": dl_device,
+                "copy": copy,
             }
             return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
@@ -1693,37 +1709,59 @@ class Tensor(torch._C.TensorBase):
         # so we prohibit exporting tensors that would lose their properties like
         # requires_grad and having the conjugate bit set.
         if self.requires_grad:
-            raise RuntimeError(
+            raise BufferError(
                 "Can't export tensors that require gradient, use tensor.detach()"
             )
         if self.is_conj():
-            raise RuntimeError("Can't export tensors with the conjugate bit set")
+            raise BufferError("Can't export tensors with the conjugate bit set")
         if self.layout != torch.strided:
-            raise RuntimeError(
+            raise BufferError(
                 "Can't export tensors with layout other than torch.strided"
+            )
+
+        if (
+            self.device.type == "cuda"
+            and self.device.index != torch.cuda.current_device()
+        ):
+            raise BufferError(
+                "Can't export tensors on a different CUDA device index. "
+                f"Expected: {self.device.index}. "
+                f"Current device: {torch.cuda.current_device()}."
             )
 
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
             raise TypeError("stream must be ``int`` or ``none``")
-        elif stream is not None and stream != -1:
-            if self.device.type == "cuda":
-                # NB: This logic handles the special case values for default
-                # streams and must be kept in sync with from_dlpack in
-                # torch/utils/dlpack.py
-                if stream == 1 and torch.version.hip is None:
-                    stream = torch.cuda.default_stream()
-                elif stream == 0 and torch.version.hip is not None:
-                    stream = torch.cuda.default_stream()
-                else:
-                    stream = torch.cuda.ExternalStream(stream)
-                # Only synchronize on different streams
-                sync_stream = torch.cuda.current_stream()
-                if stream != sync_stream:
-                    event = torch.cuda.Event()
-                    event.record(sync_stream)
-                    stream.wait_event(event)
+        elif self.device.type == "cuda" and stream != -1:
+            # NB: This logic handles the special case values for default
+            # streams and must be kept in sync with from_dlpack in
+            # torch/utils/dlpack.py
+            is_rocm = torch.version.hip is not None
+            is_cuda = not is_rocm
+
+            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
+                stream = torch.cuda.default_stream()
+            else:
+                if is_cuda and stream == 2:
+                    raise BufferError("per-thread default stream is not supported.")
+
+                device_str = "CUDA" if is_cuda else "ROCm"
+                assert (is_cuda and stream != 0) or (
+                    is_rocm and stream not in (1, 2)
+                ), f"unsupported stream on {device_str}: {stream}."
+
+                stream = torch.cuda.ExternalStream(stream)
+
+            # Only synchronize on different streams
+            current_stream = torch.cuda.current_stream()
+            if stream != current_stream:
+                event = torch.cuda.Event()
+                event.record(current_stream)
+                stream.wait_event(event)
+        elif self.device.type == "cpu":
+            assert stream is None, "stream should be None on cpu."
+
         if self.device.type == "xla":
             import torch_xla
             import torch_xla.utils.dlpack as xla_dlpack
@@ -1741,9 +1779,9 @@ class Tensor(torch._C.TensorBase):
 
         if max_version is None or max_version[0] < 1:
             # Fallback to the old, unversioned variant.
-            return torch.to_dlpack(self)
+            return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
 
-        return _C._to_dlpack_versioned(self)
+        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
@@ -1776,6 +1814,8 @@ class Tensor(torch._C.TensorBase):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
 
             device_type = DLDeviceType.kDLCUDA
+        elif torch_device_type == "mps":
+            device_type = DLDeviceType.kDLMetal
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

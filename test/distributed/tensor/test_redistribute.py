@@ -40,7 +40,7 @@ class RedistributeTest(DTensorTestBase):
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_shard_to_replicate_forward_backward(self, dtype):
         # 1) test shard -> replicate forward
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         input_sizes_and_shard_dim = [
@@ -82,7 +82,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_replicate_to_replicate_forward_backward(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
 
@@ -111,7 +111,7 @@ class RedistributeTest(DTensorTestBase):
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_replicate_to_local_partial_grad(self, dtype):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
         local_tensor = torch.randn(
             12, 3, device=self.device_type, requires_grad=True, dtype=dtype
@@ -132,7 +132,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_replicate_to_shard_forward_backward(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         input_sizes_and_shard_dim = [
@@ -185,7 +185,7 @@ class RedistributeTest(DTensorTestBase):
         # placement (i.e. user can't reshard to partial), we do allow
         # replicate to partial internally, and also partial to replicate
         # backward should work as expected
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         partial_local = torch.ones(
             12, 3, device=self.device_type, requires_grad=True, dtype=dtype
         )
@@ -220,7 +220,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_replicate_to_replicate_forward_backward_datatype_conversion(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         forward_datatypes = [
@@ -277,7 +277,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_shard_to_replicate_forward_backward_datatype_conversion(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         shard_dim_and_input_sizes = [
@@ -349,7 +349,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_replicate_to_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
         partial_spec = Partial()
         replica_spec = Replicate()
@@ -398,7 +398,7 @@ class RedistributeTest(DTensorTestBase):
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_partial_to_shard(self, dtype):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         partial_spec = [Partial()]
         my_rank = device_mesh.get_rank()
 
@@ -453,7 +453,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_redistribute_negative_shard_dim(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
         shard_spec = [Shard(1)]
         shard_minus_spec = [Shard(-1)]
@@ -491,7 +491,7 @@ class RedistributeTest(DTensorTestBase):
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
         # test 1d device mesh
-        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh_1d = self.build_device_mesh()
         data_to_test = [
             # evenly sharded case
             torch.randn((8, 8), device=self.device_type, dtype=dtype),

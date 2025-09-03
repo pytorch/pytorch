@@ -2,6 +2,12 @@
 
 #include <cstddef>
 
+#ifdef _WIN32
+  #define OPENREG_EXPORT __declspec(dllexport)
+#else
+  #define OPENREG_EXPORT __attribute__((visibility("default")))
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -28,19 +34,19 @@ struct orPointerAttributes {
   size_t size;
 };
 
-orError_t orMalloc(void** devPtr, size_t size);
-orError_t orFree(void* devPtr);
-orError_t orMallocHost(void** hostPtr, size_t size);
-orError_t orFreeHost(void* hostPtr);
-orError_t orMemcpy(void* dst, const void* src, size_t count, orMemcpyKind kind);
-orError_t orMemoryUnprotect(void* devPtr);
-orError_t orMemoryProtect(void* devPtr);
+OPENREG_EXPORT orError_t orMalloc(void** devPtr, size_t size);
+OPENREG_EXPORT orError_t orFree(void* devPtr);
+OPENREG_EXPORT orError_t orMallocHost(void** hostPtr, size_t size);
+OPENREG_EXPORT orError_t orFreeHost(void* hostPtr);
+OPENREG_EXPORT orError_t orMemcpy(void* dst, const void* src, size_t count, orMemcpyKind kind);
+OPENREG_EXPORT orError_t orMemoryUnprotect(void* devPtr);
+OPENREG_EXPORT orError_t orMemoryProtect(void* devPtr);
 
-orError_t orGetDeviceCount(int* count);
-orError_t orSetDevice(int device);
-orError_t orGetDevice(int* device);
+OPENREG_EXPORT orError_t orGetDeviceCount(int* count);
+OPENREG_EXPORT orError_t orSetDevice(int device);
+OPENREG_EXPORT orError_t orGetDevice(int* device);
 
-orError_t orPointerGetAttributes(
+OPENREG_EXPORT orError_t orPointerGetAttributes(
     orPointerAttributes* attributes,
     const void* ptr);
 
