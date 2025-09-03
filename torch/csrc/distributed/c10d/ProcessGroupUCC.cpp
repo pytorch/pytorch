@@ -3,10 +3,10 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.h>
+#include <torch/csrc/distributed/c10d/UCCTracing.h>
+#include <torch/csrc/distributed/c10d/UCCUtils.h>
 #include <list>
 #include <memory>
 #include <unordered_map>

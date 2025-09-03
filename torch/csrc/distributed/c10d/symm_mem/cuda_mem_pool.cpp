@@ -1,5 +1,5 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.h>
 
 namespace {
 using namespace c10d::symmetric_memory;

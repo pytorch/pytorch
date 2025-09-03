@@ -2,10 +2,10 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <torch/csrc/distributed/c10d/Backoff.hpp>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Backoff.h>
+#include <torch/csrc/distributed/c10d/TCPStore.h>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.h>
+#include <torch/csrc/distributed/c10d/Utils.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <chrono>

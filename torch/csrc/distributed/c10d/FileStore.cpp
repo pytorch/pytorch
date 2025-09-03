@@ -1,5 +1,5 @@
 #include <c10/util/error.h>
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.h>
 
 #include <fcntl.h>
 #include <sys/stat.h>

@@ -1,6 +1,6 @@
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/Utils.h>
+#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.h>
+#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.h>
 
 #if defined(USE_ROCM)
 #include <rocm_smi/rocm_smi.h>

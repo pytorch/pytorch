@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 
 #include <c10/util/env.h>

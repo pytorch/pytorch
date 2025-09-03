@@ -1,5 +1,5 @@
 #include <ATen/ThreadLocalState.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
+#include <torch/csrc/distributed/c10d/sequence_num.h>
 
 #include <c10/util/Logging.h>
 

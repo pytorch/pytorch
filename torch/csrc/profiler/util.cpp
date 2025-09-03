@@ -11,7 +11,7 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
-#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.h>
 
 namespace torch::profiler::impl {
 

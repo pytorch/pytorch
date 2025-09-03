@@ -1,6 +1,6 @@
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.h>
 
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.h>
 
 #ifdef USE_C10D_GLOO
 

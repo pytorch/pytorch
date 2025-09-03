@@ -1,5 +1,5 @@
 
-#include <torch/csrc/distributed/c10d/Functional.hpp>
+#include <torch/csrc/distributed/c10d/Functional.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 

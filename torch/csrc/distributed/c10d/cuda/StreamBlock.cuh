@@ -4,7 +4,7 @@
 
 #include <ATen/core/Tensor.h>
 
-#include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
+#include <torch/csrc/distributed/c10d/cuda/StreamBlock.h>
 
 namespace c10d::cuda::detail {
 

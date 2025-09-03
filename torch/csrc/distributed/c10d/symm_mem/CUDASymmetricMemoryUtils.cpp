@@ -12,9 +12,9 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/Store.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.h>
 
 namespace c10d::symmetric_memory {
 
