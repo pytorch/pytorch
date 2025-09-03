@@ -542,7 +542,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -600,6 +603,14 @@ def compute_elementwise_output_logical_to_physical_perm(
                 stride_b == 0
             ):
                 continue
+
+            # when stride_a = 1, we want stride_a < stride_b to be TRUE
+            # when stride_b = 1, we want stride_a < stride_b to be FALSE
+            if guard_or_false(stride_a == 1):
+                return -1
+
+            if guard_or_false(stride_b == 1):
+                return 1
 
             if guard_size_oblivious(stride_a < stride_b):
                 return -1
