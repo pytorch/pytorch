@@ -1,6 +1,6 @@
-#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.h>
 
-#include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <torch/csrc/distributed/c10d/RankLocal.h>
 
 namespace {
 

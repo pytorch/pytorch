@@ -1,15 +1,15 @@
 #include <c10/util/Exception.h>
 #include <c10/util/error.h>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.h>
 
 #ifdef USE_C10D_GLOO
 
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.h>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.h>
+#include <torch/csrc/distributed/c10d/Utils.h>
 #include <chrono>
 #include <exception>
 

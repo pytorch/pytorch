@@ -13,7 +13,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/distributed/c10d/Backoff.hpp>
+#include <torch/csrc/distributed/c10d/Backoff.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d::detail {

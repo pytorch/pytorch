@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.h>
 
 #include <unistd.h>
 #include <cstdint>

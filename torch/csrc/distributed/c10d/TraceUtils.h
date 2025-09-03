@@ -2,9 +2,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/Types.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Store.h>
+#include <torch/csrc/distributed/c10d/Types.h>
+#include <torch/csrc/distributed/c10d/Utils.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
