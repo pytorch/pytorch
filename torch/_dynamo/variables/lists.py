@@ -277,6 +277,16 @@ class RangeVariable(BaseListVariable):
         else:
             raise AssertionError
 
+        def maybe_as_int(x):
+            return (
+                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+            )
+
+        # cast each argument to an integer
+        start = maybe_as_int(start)
+        step = maybe_as_int(step)
+        stop = maybe_as_int(stop)
+
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
 
@@ -421,6 +431,20 @@ class RangeVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr(range(0), name))
 
+    def range_equals(self, other: "RangeVariable"):
+        r0, r1 = self, other
+        if (
+            self.range_length() != r1.range_length()
+            or self.range_length() == 0
+            or r0.start() != r1.start()
+        ):
+            return False
+
+        if len(r0) == 1:
+            return True
+
+        return r0.step() == r1.step()
+
     def call_method(self, tx, name, args, kwargs):
         if name == "__iter__":
             if not all(var.is_python_constant() for var in self.items):
@@ -431,22 +455,37 @@ class RangeVariable(BaseListVariable):
             return RangeIteratorVariable(
                 self.start(), self.stop(), self.step(), self.range_length()
             )
+        elif name == "__len__":
+            return ConstantVariable.create(self.range_length())
+        elif name in cmp_name_to_op_mapping:
+            other = args[0]
+            pt = other.python_type()
+            if name not in ("__eq__", "__ne__"):
+                # ranges are only comparable to other ranges
+                msg = f"{name} not supported between instances of 'range' and '{pt}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(msg)],
+                )
+
+            if pt is not range:
+                return ConstantVariable.create(NotImplemented)
+
+            cmp = self.range_equals(other)
+
+            # Two ranges are equal if they produce the same sequence of values
+            if name == "__eq__":
+                return ConstantVariable(cmp)
+            else:
+                return ConstantVariable(not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        if name == "__iter__":
-            return variables.GetAttrVariable(self, name)
-
-        unimplemented_v2(
-            gb_type="Unsupported attribute for range() object",
-            context=f"var_getattr {self} {name}",
-            explanation=f"Expected attribute to be one of {','.join(fields)} "
-            f"but got {name}",
-            hints=[*graph_break_hints.USER_ERROR],
-        )
+        return super().var_getattr(tx, name)
 
 
 class CommonListMethodsVariable(BaseListVariable):
