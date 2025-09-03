@@ -1052,21 +1052,9 @@ class NamedTupleVariable(TupleVariable):
     }
 
     def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
+        super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
         self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
-
-        # Modify mutability of namedtuple for sourcelesss instantiations.
-        if "source" not in kwargs:
-            mutation_type = None
-
-            if self.is_namedtuple() and tuple_cls.__bases__ != (tuple,):
-                from .base import AttributeMutationNew
-
-                mutation_type = AttributeMutationNew()
-
-            super().__init__(items, mutation_type=mutation_type, **kwargs)
-        else:
-            super().__init__(items, **kwargs)
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -1104,7 +1092,9 @@ class NamedTupleVariable(TupleVariable):
                 if hasattr(attr_value, "as_python_constant"):
                     python_value = attr_value.as_python_constant()
                 else:
-                    python_value = attr_value
+                    raise NotImplementedError(
+                        "Can not convert dynamic attribute without python constant value to python constant."
+                    )
                 setattr(result, attr_name, python_value)
 
         return result
@@ -1165,7 +1155,6 @@ class NamedTupleVariable(TupleVariable):
             ):
                 raise_observed_exception(AttributeError, tx)
             # Subclass of namedtuple type can have dynamic attributes
-
             tx.output.side_effects.mutation(self)
             tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
