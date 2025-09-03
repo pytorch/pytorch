@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
 #include <utility>
 
 namespace c10d {

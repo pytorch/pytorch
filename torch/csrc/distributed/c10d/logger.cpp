@@ -1,12 +1,12 @@
 #include <c10/util/StringUtil.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.h>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/logger.h>
 #include <string>
 
 #ifdef USE_C10D_GLOO
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.h>
 #endif
 
 namespace c10d {

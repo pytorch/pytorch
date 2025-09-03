@@ -1,7 +1,7 @@
 #ifdef USE_C10D_UCC
 
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.h>
+#include <torch/csrc/distributed/c10d/UCCUtils.h>
 
 #include <cctype>
 #include <string>

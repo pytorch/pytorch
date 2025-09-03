@@ -3,8 +3,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.h>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 

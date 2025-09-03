@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 

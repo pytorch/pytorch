@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
 
 #ifdef _WIN32
 std::string tmppath() {
