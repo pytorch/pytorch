@@ -6,6 +6,7 @@ import torch
 
 from ..ir import get_free_symbols
 from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import use_contiguous
 from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
 
@@ -19,14 +20,14 @@ if TYPE_CHECKING:
 @register_template_heuristic("contiguous_mm", None, op_name="mm")
 @register_template_heuristic("contiguous_addmm", None, op_name="addmm")
 class EmptyContiguousMMConfigHeuristics(TemplateConfigHeuristics):
-    """empty heuristics to skip contiguous mm on not hip"""
+    """empty heuristics to skip contiguous mm on not cuda"""
 
 
 @register_template_heuristic(
-    "contiguous_mm", "hip", register=torch.version.hip is not None, op_name="mm"
+    "contiguous_mm", "cuda", register=torch.version.hip is not None, op_name="mm"
 )
 @register_template_heuristic(
-    "contiguous_addmm", "hip", register=torch.version.hip is not None, op_name="addmm"
+    "contiguous_addmm", "cuda", register=torch.version.hip is not None, op_name="addmm"
 )
 class ContiguousMMHeuristics(TemplateConfigHeuristics):
     def get_template_configs(
@@ -52,5 +53,11 @@ class ContiguousMMHeuristics(TemplateConfigHeuristics):
         )
         if unbacked_symbols:
             return
-
+        mat2 = kernel_inputs.mat1mat2()[1]
+        if mat2.is_contiguous():
+            # no need for contiguous decomposition
+            return
+        m, n, k = kernel_inputs.mnk_symbolic()
+        if not use_contiguous(m, n, k):
+            return
         yield {}
