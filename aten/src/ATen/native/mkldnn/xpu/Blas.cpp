@@ -570,20 +570,16 @@ Tensor _weight_int8pack_mm_xpu(
 
   TORCH_CHECK(
       A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
-      __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
   TORCH_CHECK(
-      A.stride(1) == 1,
-      __func__,
-      " : A must be contiguous on the last dimension.");
-  TORCH_CHECK(B.dtype() == kChar, __func__, " : expect B to be int8 tensor.");
-  TORCH_CHECK(B.is_contiguous(), __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.size(1) == K, __func__, " : expect B.size(1) == ", K);
+      A.stride(1) == 1, " : A must be contiguous on the last dimension.");
+  TORCH_CHECK(B.dtype() == kChar, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(), " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K, " : expect B.size(1) == ", K);
 
   TORCH_CHECK(
       scales.dim() == 1 && scales.size(0) == N,
-      __func__,
       " : expect scales to be 1d tensor with size ",
       N);
 
@@ -599,7 +595,7 @@ Tensor _weight_int8pack_mm_xpu(
       A.contiguous(),
       1.0,
       0,
-      B.contiguous(),
+      B,
       non_const_scales,
       mat2_zero_points,
       bias,
