@@ -804,11 +804,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **kwargs,
                 **extra_kwargs,
             )
-            mm_contiguous_subgraph_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-            )
 
     if (
         is_nonzero
