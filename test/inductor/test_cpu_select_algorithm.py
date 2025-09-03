@@ -16,6 +16,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -2885,6 +2886,36 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(u.dtype) as (atol, rtol):
             self.common(mod, (u, v))
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.bfloat16, torch.half)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @torch._dynamo.config.patch(specialize_float=True)
+    def test_linear_with_gelu_erf_u20(self,batch_size,in_features,out_features,bias, dtype):
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.gelu = torch.nn.GELU()
+
+            def forward(self, x):
+                return self.gelu(self.linear(x))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            model=self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+            _, code = run_and_get_code(model, v)
+            self.assertRegex("".join(code), "erf_u20")
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
