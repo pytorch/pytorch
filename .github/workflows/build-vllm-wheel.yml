@@ -27,15 +27,17 @@ jobs:
         runner: [ 'linux.12xlarge' ]
         include:
           - device: cu128
-            docker-image: 'pytorch/manylinux2_28-builder:cuda12.8'
+            cuda-version: '12.8.1'
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
           - device: cu129
-            docker-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+            cuda-version: '12.9.1'
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     env:
       PY_VERS: ${{ matrix.python-version }}
-      DOCKER_IMAGE: ${{ matrix.docker-image }}
+      MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
       PLATFORM: 'manylinux_2_28_x86_64'
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -52,11 +54,6 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ env.DOCKER_IMAGE }}
-
       - name: Get latest PyTorch nightly
         shell: bash
         run: |
@@ -72,7 +69,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
-            "${DOCKER_IMAGE}"
+            "${MANYLINUX_IMAGE}"
           )
 
           # Determine python executable for given version (copied from build-triton-wheel)
@@ -112,7 +109,7 @@ jobs:
         uses: ./.github/actions/build-external-packages
         with:
           build-targets: vllm
-          docker-image: ${{ matrix.docker-image }}
+          docker-image: "nvidia/cuda:${{ matrix.cuda-version }}-devel-ubuntu22.04"
           cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
           output-dir: ${{ runner.temp }}/externals
