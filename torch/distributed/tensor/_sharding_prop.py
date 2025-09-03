@@ -301,7 +301,7 @@ class ShardingPropagator:
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
-        Use _propagate_tensor_meta instead to skip if compiling.
+        Use _propagate_tensor_meta instead to make compile-safe.
         """
         return self._propagate_tensor_meta_non_cached(op_schema)
 
@@ -310,8 +310,8 @@ class ShardingPropagator:
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. Uses the cached version unless
-        if actively tracing.
+        or a list/tuple of TensorMetas. Uses the cached version if not
+        actively tracing. Use this method if you need caching.
         """
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
