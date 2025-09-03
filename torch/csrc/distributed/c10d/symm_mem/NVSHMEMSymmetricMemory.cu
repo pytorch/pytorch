@@ -21,7 +21,7 @@
 namespace c10d {
 namespace symmetric_memory {
 
-/* Start of CUDASymmetricMemory implementation */
+/* Start of NVSHMEMSymmetricMemory implementation */
 
 static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
 
@@ -199,80 +199,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return offset_;
   }
 
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    const size_t numel = std::accumulate(
-        sizes.begin(),
-        sizes.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto element_size = c10::elementSize(dtype);
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= allocation_->buffer_size,
-        "NVSHMEMSymmetricMemory::get_buffer: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        allocation_->buffer_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(pai_->buffers_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(dtype).device(device);
-    return at::for_blob(data_ptr, sizes)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    // If the dtype is unspecified, default it to UInt32, as it
-    // is the most common type for signaling purposes.
-    if (!dtype.has_value()) {
-      dtype = c10::ScalarType::UInt32;
-    }
-
-    // If the shape is unspecified, treat the signal pad as a 1d tensor.
-    const auto element_size = c10::elementSize(*dtype);
-    std::vector<int64_t> shape;
-    if (!sizes.empty()) {
-      shape = sizes.vec();
-    } else {
-      shape.push_back(signal_pad_size / element_size);
-    }
-
-    const size_t numel = std::accumulate(
-        shape.begin(),
-        shape.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= signal_pad_size,
-        "NVSHMEMSymmetricMemory::get_signal_pad: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        signal_pad_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(pai_->signal_pads_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(*dtype).device(device);
-    return at::for_blob(data_ptr, shape)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
   void barrier(int channel, size_t timeout_ms) override {
     // TODO
   }
@@ -293,6 +219,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->world_size_;
   }
 
+  c10::Device get_device() override {
+    return c10::Device(c10::DeviceType::CUDA, device_idx_);
+  }
+
   const std::vector<int>& get_rank_to_global_rank() override {
     return pai_->rank_to_global_rank_;
   };
@@ -311,7 +241,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
-void maybe_initialize_env_vars() {
+static void maybe_initialize_env_vars() {
   auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
   auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
   auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
@@ -333,16 +263,20 @@ void maybe_initialize_env_vars() {
   }
 }
 
-void initialize_nvshmem_with_store(
+static void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
-    int world_size) {
+    int world_size,
+    int device_idx) {
   static bool is_initialized = false;
   if (is_initialized) {
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device_idx);
   maybe_initialize_env_vars();
+  // Make sure the CUDA runtime is initialized.
+  cudaFree(nullptr);
 
   nvshmemx_uniqueid_t unique_id;
   NVSHMEM_CHECK(
@@ -377,13 +311,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         group_name == std::nullopt,
         "NVSHMEMSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
+    c10::cuda::CUDAGuard guard(device_idx);
 
     auto group_info = get_group_info("0");
     auto store = group_info.store;
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    initialize_nvshmem_with_store(store, rank, world_size);
+    initialize_nvshmem_with_store(store, rank, world_size, device_idx);
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
     TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
