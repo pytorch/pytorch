@@ -213,9 +213,8 @@ if(USE_FLASH_ATTENTION)
         -mllvm
         -amdgpu-internalize-symbols
         -fvisibility=hidden
-        -Wno-float-equal)
-
-
+        -Wno-float-equal
+        -fgpu-flush-denormals-to-zero)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
@@ -249,12 +248,9 @@ if(USE_FLASH_ATTENTION)
         CK_ENABLE_FP64
         CK_ENABLE_FP8
         CK_ENABLE_INT8
-        CK_TILE_USE_WMMA=0
-        CK_TIME_KERNEL=1
         CK_USE_FNUZ_FP8
         CK_USE_GFX94
         CK_USE_XDL
-        USE_PROF_API=1
         __HIP_PLATFORM_AMD__=1
         __HIP_PLATFORM_HCC__=1
         CK_TILE_FMHA_FWD_FAST_EXP2=1
