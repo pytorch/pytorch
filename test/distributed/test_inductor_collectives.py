@@ -1572,6 +1572,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             {
                 "bucket_all_gathers_fx": "all",
                 "reorder_for_compute_comm_overlap": False,
+                "runtime_estimations_align_across_all_distributed_ranks": True,
+                "runtime_estimations_mms_benchmark": True,
             }
         ):
             compiled = torch.compile(func)
@@ -1821,6 +1823,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 ],
                 "allow_buffer_reuse": False,
                 "test_configs.track_memory_lifecycle": "error",
+                "runtime_estimations_align_across_all_distributed_ranks": True,
+                "runtime_estimations_mms_benchmark": True,
             }
         ):
             compiled = torch.compile(func, fullgraph=True)

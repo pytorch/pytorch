@@ -2265,7 +2265,7 @@ class Scheduler:
                 )
 
             runtime_estimations = None
-            if config.reorder_for_compute_comm_overlap_broadcast_runtime_estimations:
+            if config.runtime_estimations_align_across_all_distributed_ranks:
                 runtime_estimations = {}
                 for snode in self.nodes:
                     runtime_estimations[snode] = snode.get_estimated_runtime()
