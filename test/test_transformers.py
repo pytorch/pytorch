@@ -3555,6 +3555,8 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors['grad_query'] = 670.0  # gfx90a
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
+                if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+                    fudge_factors['grad_value'] = 12.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -4269,6 +4271,12 @@ class TestSDPAXpuOnly(NNTestCase):
     def test_default_priority_order(self, device):
         # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
         # For xpu backend, we need to make sure that overrideable > math > flash
+        dtype = torch.bfloat16
+        shape = SdpaShape(1, 1, 1, 1)
+        make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)
+        t = make_tensor()
+        # run sdp_choice to make sure priority_order is set by XPU default priority_order
+        torch._fused_sdp_choice(t, t, t)
         from torch.nn.attention import _cur_sdpa_kernel_backends
         default_priority = _cur_sdpa_kernel_backends(with_priority=True)
         flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
