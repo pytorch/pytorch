@@ -25,7 +25,6 @@ USER root
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
-ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python and other dependencies
@@ -115,12 +114,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Install common dependencies from vllm common.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-uv pip install --system -r requirements/common.txt
+    uv pip install --system -r requirements/common.txt
 
 
 # Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG exformer_cuda_arch_list='7.5;8.0+PTX;9.0a'
-ENV TORCH_CUDA_ARCH_LIST=${exformer_cuda_arch_list}
+ARG xformer_cuda_arch_list='7.5;8.0+PTX;9.0a'
+ENV TORCH_CUDA_ARCH_LIST=${xformer_cuda_arch_list}
 
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
@@ -229,9 +228,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
     fi
 
-RUN echo "[DEBUG] Listing  current directory:" && \
+RUN echo "[INFO] Listing current directory:" && \
     ls -al && \
-    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
 #################### WHEEL BUILD IMAGE ####################
@@ -267,9 +266,9 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-RUN echo "[DEBUG] Listing current directory before torch install step:" && \
+RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
-    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
@@ -277,7 +276,6 @@ RUN echo "[DEBUG] Listing current directory before torch install step:" && \
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
