@@ -15,7 +15,7 @@ optree==0.13.0
 packaging==23.1
 parameterized==0.8.1
 pillow==10.3.0
-protobuf==5.29.4
+protobuf==5.29.5
 psutil==5.9.8
 pygments==2.15.0
 pytest-cpp==2.3.0
