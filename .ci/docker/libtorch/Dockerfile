@@ -73,6 +73,11 @@ FROM cuda as cuda13.0
 RUN bash ./install_cuda.sh 13.0
 RUN bash ./install_magma.sh 13.0
 RUN ln -sf /usr/local/cuda-13.0 /usr/local/cuda
+# Install libibverbs and copy to CUDA directory
+RUN yum install -y libibverbs-devel && \
+    cp /usr/lib64/libmlx5.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib64/librdmacm.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib64/libibverbs.so* /usr/local/cuda/lib64/
 
 FROM cpu as rocm
 ARG ROCM_VERSION
