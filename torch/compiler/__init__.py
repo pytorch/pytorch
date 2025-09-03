@@ -685,8 +685,7 @@ def error_on_graph_break(error_on_graph_break: bool):
     >>>     torch._dynamo.graph_break()
     >>>     return x + 2
     >>>
-    >>> @torch.compiler.error_on_graph_break(True)
-    >>> @torch.compile  # NOTE: fullgraph=False
+    >>> @torch.compile(error_on_graph_break=True)  # NOTE: fullgraph=False
     >>> def outer(x):
     >>>     x = x + 4
     >>>     with torch.compiler.error_on_graph_break(False):
