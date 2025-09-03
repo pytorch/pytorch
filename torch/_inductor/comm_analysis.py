@@ -1,26 +1,20 @@
 import functools
-import logging
 import math
 from enum import IntEnum
-from typing import Optional
 
 import sympy
 
 import torch
 
 from . import ir
-from .utils import get_dtype_size, snode_args_kwargs, sympy_product
+from .utils import get_dtype_size, sympy_product
 from .virtualized import V
-
-
-log = logging.getLogger(__name__)
 
 
 class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
-    ALL_TO_ALL = 3
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -55,8 +49,6 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
-    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
-        return NCCL_COLL.ALL_TO_ALL
     else:
         raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
@@ -166,49 +158,6 @@ llMaxBws = [
 ]
 
 
-def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  # type: ignore[no-untyped-def]
-    try:
-        kernel = snode.node
-        assert kernel is not None
-        py_kernel_name = getattr(kernel, "python_kernel_name", "")
-        if not ("all_gather" in py_kernel_name or "reduce_scatter" in py_kernel_name):
-            # NCCL of version 2.27 sometimes unrecoverably fail for all_to_all, all_reduce
-            return None
-
-        from torch.distributed.distributed_c10d import _resolve_process_group
-
-        pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
-        pg = _resolve_process_group(pg_name)
-        rank: int = torch.distributed.get_rank(pg)
-        # TODO(ivankobzarev): Figure out how we can use time estimations,
-        # without cuda allocations.
-        device = torch.device(f"cuda:{rank}")
-
-        fn = eval(py_kernel_name)
-        args, kwargs = snode_args_kwargs(snode)
-        # TODO(ivankobzarev): fix out variants snode_args_kwargs
-        if "all_gather_into_tensor_out" in py_kernel_name:
-            args = args[1:] + args[0]
-
-        with torch.distributed._time_estimator(
-            group=pg, device=device
-        ) as time_estimator:
-            w = fn(*args, **kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
-
-        est_time_us = time_estimator.estimated_time
-        # -1000 constant is NCCL return in case of error during estimations.
-        # Observed it for all_to_all estimations.
-        if est_time_us < 0:
-            return None
-        est_time_ns = est_time_us * 1e3
-        return est_time_ns
-    except Exception as e:
-        # NCCL estimator can fail
-        log.info(e)
-        return None
-
-
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -271,8 +220,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     if coll == NCCL_COLL.ALL_REDUCE:
         nsteps = 2 * (nRanks - 1)
-    elif coll == NCCL_COLL.ALL_TO_ALL:
-        nsteps = 2 * (nRanks - 1)
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nsteps = nRanks - 1
 
@@ -290,12 +237,8 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
             nInterSteps = 2 * nNodes
         else:
             nInterSteps = 0
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nInterSteps = nNodes - 1
-
-    tensor_size_mult = 1.0
-    if coll == NCCL_COLL.ALL_TO_ALL:
-        tensor_size_mult = 2.0 / group_size
 
     # First compute latency in us; then at the end, convert it to ns
     latency = baseLat[nccl_algo][nccl_proto]
@@ -312,7 +255,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     latency_ns = latency * 1e3
 
     # =============== final result ===============
-    transport_ns = tensor_size_mult * tensor_storage_size_GB / bandwidth_GB_per_ns
+    transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
     return transport_ns + latency_ns
 
 

@@ -399,26 +399,6 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
-
-# Comparing estimations vs real benchmarks showed big divergence.
-# Exposing extensive config for easier experimentation.
-reorder_iterative_use_runtime_estimations: bool = False
-sink_iterative_use_runtime_estimations: bool = False
-
-reorder_sink_runtime_estimations_comm_mult: float = 1.0
-reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
-# Ratio of comm_time to cover deviations of comm_time from estimations
-reorder_iterative_extra_comm_comp_overlap: float = 0.5
-sink_iterative_extra_comm_comp_overlap: float = 1.0
-reorder_iterative_peak_memory_budget: float = 0.2
-sink_iterative_peak_memory_budget: float = 0.2
-
-# Experimental unsafe configuration that allows changing relative collectives order,
-# No guarantees for now that all the rank will do the same order of collectives,
-# which can result in collective hangs.
-reorder_iterative_unsafe_collectives_reorder: bool = False
-sink_waits_iterative_unsafe_collectives_reorder: bool = False
-
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -432,9 +412,6 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
-
-runtime_estimations_use_nccl_lib_estimations: bool = True
-runtime_estimations_mms_benchmark: bool = True
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
@@ -469,6 +446,12 @@ autotune_num_choices_displayed: Optional[int] = 10
 # Report the autotune choices and their benchmark results. Default is True.
 max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
+)
+
+# Prune configs that require more shared memory than the hardware limit
+max_autotune_prune_choices_based_on_shared_mem = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    == "1"
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
@@ -573,6 +556,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -1250,6 +1238,15 @@ class triton:
     # always run cudagraphs in the eager warmup stage
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
+
+    # If False (default), torch.compile skips cudagraph for a graph if it
+    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
+    # be captured into cudagraph. If this is not possible, this will raise
+    # an error.
+    cudagraph_or_error: bool = Config(
+        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
+        default=False,
+    )
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False

@@ -59,7 +59,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -1562,12 +1561,26 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 @functools.lru_cache
 def get_max_num_sms() -> int:
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10
 
 
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
+    if torch.xpu.is_available():
+        return get_max_num_sms()
     carveout = torch._C._get_sm_carveout_experimental()
     return get_max_num_sms() - (carveout if carveout is not None else 0)
 
@@ -2538,16 +2551,13 @@ def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     return type(node) == ir._WaitKernel
 
 
-def contains_collective(
-    snode: BaseSchedulerNode,
-    filter_fn: Optional[Callable[[BaseSchedulerNode], bool]] = None,
-) -> bool:
+def contains_collective(snode: BaseSchedulerNode) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(snode.node) and (filter_fn is None or filter_fn(snode))
+    return is_collective(snode.node)
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:
@@ -3564,38 +3574,3 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
-
-
-def snode_args_kwargs(snode: BaseSchedulerNode):  # type: ignore[no-untyped-def]
-    args = snode.node.inputs  # type: ignore[union-attr]
-    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
-        snode.node.kwargs,  # type: ignore[union-attr]
-    )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
-    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
-
-    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
-        return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
-            x, torch._inductor.ir.GeneratorState
-        )
-
-    flat_args = [
-        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
-        if _is_tensor_ir(a)
-        else a
-        for a in flat_args
-    ]
-
-    def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        return torch.empty(size, dtype=dtype, device=device)
-
-    def to_real_tensor(e: Any) -> Any:
-        if not isinstance(e, torch.Tensor):
-            return e
-        out = _tensor(e.size(), e.dtype, e.device)
-        return out
-
-    flat_args = [to_real_tensor(a) for a in flat_args]
-    args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
-    return args, kwargs
