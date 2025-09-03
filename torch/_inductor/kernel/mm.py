@@ -694,12 +694,56 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 
 
 decompose_k_subgraph_template = DecomposeKSugraphTemplate()
-def contiguous(a, b):
+
+
+class ContiguousTemplate(SubgraphTemplate):
+    def __init__(self, name: str, description: str, fn: Any):
+        self.name = name
+        self.description = description
+        self.fn = fn
+        super().__init__(
+            name=name,
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                self.fn,
+                decompositions,
+            )
+
+            return super().generate(
+                name=self.name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=self.description,
+            )
+
+
+def contiguous_mm(a, b):
     return torch.mm(a, b.contiguous())
 
 
 def contiguous_addmm(inp, a, b):
     return torch.addmm(inp, a, b.contiguous())
+
+
+mm_contiguous_subgraph_template = ContiguousTemplate(
+    "contiguous_mm", "contiguous mm", contiguous_mm
+)
+addmm_contiguous_subgraph_template = ContiguousTemplate(
+    "contiguous_addmm", "contiguous addmm", contiguous_addmm
+)
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
@@ -780,26 +824,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     layout=layout,
                     **kwargs,
                 )
-        if (
-            not mat2.get_layout().is_contiguous()
-            and use_contiguous(m, n, k)
-            and not unbacked_symbols
-        ):
-            from torch._dispatch.python import enable_python_dispatcher
-
-            from ..decomposition import select_decomp_table
-
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
-
-                contiguous_subgraph_template = SubgraphTemplate(
-                    name="contiguous_mm",
-                    make_fx_graph=make_fx(
-                        contiguous,
-                        decompositions,
-                    ),
-                )
-            contiguous_subgraph_template.maybe_append_choice(
+        if not mat2.get_layout().is_contiguous() and use_contiguous(m, n, k):
+            mm_contiguous_subgraph_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
@@ -1068,39 +1094,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-        # Add contiguous subgraph decomposition
-        from torch._inductor.ir import get_free_symbols
-
-        # Only do contiguous optimization if mat2 is not contiguous and there aren't any unbacked symbols
-        unbacked_symbols = any(
-            len(get_free_symbols(itr, unbacked_only=True)) > 0
-            for itr in (
-                mat1.get_size(),
-                mat1.get_stride(),
-                mat2.get_size(),
-                mat2.get_stride(),
-            )
-        )
-        if (
-            not mat2.get_layout().is_contiguous()
-            and use_contiguous(m, n, k)
-            and not unbacked_symbols
-        ):
-            from torch._dispatch.python import enable_python_dispatcher
-
-            from ..decomposition import select_decomp_table
-
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
-
-                contiguous_subgraph_template = SubgraphTemplate(
-                    name="contiguous_addmm",
-                    make_fx_graph=make_fx(
-                        contiguous_addmm,
-                        decompositions,
-                    ),
-                )
-            contiguous_subgraph_template.maybe_append_choice(
+        if not mat2.get_layout().is_contiguous() and use_contiguous(m, n, k):
+            addmm_contiguous_subgraph_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
                 layout=layout,

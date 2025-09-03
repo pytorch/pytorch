@@ -75,7 +75,7 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("higher")
+torch.set_float32_matmul_precision("high")
 
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
@@ -1184,7 +1184,11 @@ class TestMaxAutotune(TestCase):
                 "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 32").run(code[0])
+            ).check_regex(
+                "s[0-9]+ = 32"
+            ).run(
+                code[0]
+            )
             torch.testing.assert_close(
                 out,
                 f(a, b),
@@ -1232,7 +1236,9 @@ class TestMaxAutotune(TestCase):
                 "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"256\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 8").run(
+            ).check_regex(
+                "s[0-9]+ = 8"
+            ).run(
                 # code[1] in this case given backwards
                 code[1]
             )
@@ -1280,6 +1286,7 @@ class TestMaxAutotune(TestCase):
                 code[0]
             )
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
     @config.patch(
@@ -1298,6 +1305,11 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
         b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
 
+        # Compute fp64 baseline
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = mm_transpose(a_fp64, b_fp64)
+
         # Force only contiguous choice to test the transform
         with (
             mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
@@ -1307,13 +1319,15 @@ class TestMaxAutotune(TestCase):
             compiled_func = torch.compile(mm_transpose)
             out, code = run_and_get_code(compiled_func, a, b)
 
-            # Verify correctness
-            expected = mm_transpose(a, b)
-            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(dtype), atol=1e-2, rtol=1e-2
+            )
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
     @config.patch(
@@ -1332,6 +1346,12 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
         b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
 
+        # Compute fp64 baseline
+        inp_fp64 = inp.to(torch.float64)
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = addmm_transpose(inp_fp64, a_fp64, b_fp64)
+
         # Force contiguous choice to test the transform
         with (
             mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
@@ -1341,13 +1361,15 @@ class TestMaxAutotune(TestCase):
             compiled_func = torch.compile(addmm_transpose)
             out, code = run_and_get_code(compiled_func, inp, a, b)
 
-            # Verify correctness
-            expected = addmm_transpose(inp, a, b)
-            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(dtype), atol=1e-2, rtol=1e-2
+            )
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_addmm").run(code[0])
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
         self, dynamic
@@ -1414,6 +1436,7 @@ class TestMaxAutotune(TestCase):
             out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
         )
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -1912,12 +1935,12 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert fake_choice.thread_id is not None, (
-                    "Expected all ChoiceCaller's precompile method to have been called"
-                )
-                assert fake_choice.thread_id != main_thread_id, (
-                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
-                )
+                assert (
+                    fake_choice.thread_id is not None
+                ), "Expected all ChoiceCaller's precompile method to have been called"
+                assert (
+                    fake_choice.thread_id != main_thread_id
+                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
         finally:
             V.set_debug_handler(old_debug_handler)
 
