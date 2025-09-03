@@ -33,7 +33,7 @@ jobs:
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+    timeout-minutes: 480
     env:
       PY_VERS: ${{ matrix.python-version }}
       MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
@@ -121,7 +121,7 @@ jobs:
         run: |
           set -eux
 
-          # sleep 7200
+          sleep 7200
 
           docker exec -t "${container_name}" bash -c "
             set -eux
