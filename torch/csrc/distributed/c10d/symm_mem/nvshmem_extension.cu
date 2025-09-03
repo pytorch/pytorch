@@ -106,19 +106,20 @@ nvshmem_team_t group_to_team(
   return team;
 }
 
-at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
+at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  int world_size = input_hdl->get_world_size();
   auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
+  int team_size = nvshmem_team_n_pes(team);
+  TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), 0, stream);
+  nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), root, stream);
   return input;
 }
 
-void nvshmem_put(at::Tensor& tensor, int64_t peer) {
+void nvshmem_put(at::Tensor& tensor, const int64_t peer) {
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -127,13 +128,14 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
-void nvshmem_get(at::Tensor& tensor, int64_t peer) {
+void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
@@ -142,6 +144,7 @@ void nvshmem_get(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -256,7 +259,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = peer_offsets[peer] * stride + block_offset;
-    nvshmemx_getmem_block(
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       block_size,
@@ -266,6 +269,8 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
@@ -542,7 +547,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
     auto source_offset = source_offsets[eid] * stride;
     auto e_offset = tile_prefix_sums[row][col];
     auto write_offset = e_offset * stride;
-    nvshmemx_getmem_block(
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       peer_size,
@@ -552,6 +557,8 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
