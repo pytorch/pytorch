@@ -12,6 +12,9 @@ ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 # by default, it uses devel-ubuntu22.04 official image.
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
+# The logic is copied from https://github.com/vllm-project/vllm/blob/main/docker/Dockerfile
+ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
+
 
 #################### BASE BUILD IMAGE ####################
 # A base image for building vLLM with torch nightly or torch wheels
@@ -19,8 +22,9 @@ ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 FROM ${BUILD_BASE_IMAGE} AS base
 USER root
 
-ARG CUDA_VERSION=12.8.1
-ARG PYTHON_VERSION=3.12
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+ARG GET_PIP_URL
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -28,20 +32,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
     && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl sudo \
-    && if [ ! -z ${DEADSNAKES_MIRROR_URL} ] ; then \
-        if [ ! -z "${DEADSNAKES_GPGKEY_URL}" ] ; then \
-            mkdir -p -m 0755 /etc/apt/keyrings ; \
-            curl -L ${DEADSNAKES_GPGKEY_URL} | gpg --dearmor > /etc/apt/keyrings/deadsnakes.gpg ; \
-            sudo chmod 644 /etc/apt/keyrings/deadsnakes.gpg ; \
-            echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] ${DEADSNAKES_MIRROR_URL} $(lsb_release -cs) main" > /etc/apt/sources.list.d/deadsnakes.list ; \
-        fi ; \
-    else \
-        for i in 1 2 3; do \
-            add-apt-repository -y ppa:deadsnakes/ppa && break || \
-            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-        done ; \
-    fi \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim libgl1-mesa-dev \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update -y \
     && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
@@ -249,6 +241,11 @@ RUN echo "[DEBUG] Listing  current directory:" && \
 # Setup clean environment for vLLM for test and api server using ubuntu22.04 with AOT flashinfer
 FROM ${FINAL_BASE_IMAGE} AS vllm-base
 USER root
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+ARG GET_PIP_URL
+
 # prepare for environment starts
 WORKDIR /workspace
 
@@ -256,20 +253,8 @@ WORKDIR /workspace
 RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
     && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl sudo \
-    && if [ ! -z ${DEADSNAKES_MIRROR_URL} ] ; then \
-        if [ ! -z "${DEADSNAKES_GPGKEY_URL}" ] ; then \
-            mkdir -p -m 0755 /etc/apt/keyrings ; \
-            curl -L ${DEADSNAKES_GPGKEY_URL} | gpg --dearmor > /etc/apt/keyrings/deadsnakes.gpg ; \
-            sudo chmod 644 /etc/apt/keyrings/deadsnakes.gpg ; \
-            echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] ${DEADSNAKES_MIRROR_URL} $(lsb_release -cs) main" > /etc/apt/sources.list.d/deadsnakes.list ; \
-        fi ; \
-    else \
-        for i in 1 2 3; do \
-            add-apt-repository -y ppa:deadsnakes/ppa && break || \
-            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-        done ; \
-    fi \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim libgl1-mesa-dev \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update -y \
     && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
@@ -331,7 +316,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install xformers wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
-
 
 # Build flashinfer from source.
 ARG torch_cuda_arch_list='8.0;8.9;9.0a'
