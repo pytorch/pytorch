@@ -185,6 +185,7 @@ struct HashCombine {
   }
 };
 
+#ifdef USE_DISTRIBUTED
 constexpr auto kCommsName = "Collective name";
 constexpr auto kDtype = "dtype";
 constexpr auto kInMsgNelems = "In msg nelems";
@@ -202,5 +203,6 @@ constexpr auto kP2pSrc = "Src Rank";
 constexpr auto kP2pDst = "Dst Rank";
 constexpr auto kInTensorsStart = "Input Tensors start";
 constexpr auto kOutTensorsStart = "Output Tensors start";
+#endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl
