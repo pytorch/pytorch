@@ -47,7 +47,8 @@ TEST(MulOverflowsTest, Int64LargeNumbersNoOverflow) {
 
   ASSERT_EQ(mul_overflows<int64_t>(1ull << 30L, 1ull << 30L), 1ull << 60);
   ASSERT_EQ(mul_overflows<int64_t>(1ull << 32L, 1ull << 32L), std::nullopt);
-  ASSERT_EQ(mul_overflows<int64_t>(-(1ull << 30L), 1ull << 30L), -(1ull << 60L));
+  ASSERT_EQ(
+      mul_overflows<int64_t>(-(1ull << 30L), 1ull << 30L), -(1ull << 60L));
   ASSERT_EQ(mul_overflows<int64_t>(1ull << 32L, -(1ull << 32L)), std::nullopt);
 
   // max_val is odd, so max_val/2 * 2 = max_val - 1
