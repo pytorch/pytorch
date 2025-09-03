@@ -809,10 +809,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if last_conv is None:
                     last_conv = n
                 continue
-            if (
-                n.target in nodes_cannot_propagate
-                and n.args[0].meta["val"].device.type == "xpu"
-            ):
+            if n.target in nodes_cannot_propagate:
                 continue
             for user in n.users:
                 if user in output_set:
@@ -835,19 +832,11 @@ class GraphLowering(torch.fx.Interpreter):
         # - sebotnet33ts_256
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
             # layout propagation ends at last conv node, which will benefit vison transformers.
-            if (
-                last_conv is not None
-                and n == last_conv
-                and n.args[0].meta["val"].device.type == "xpu"
-            ):
+            if last_conv is not None and n == last_conv:
                 break
             if n in output_set:
                 for user in n.users:
-                    if (
-                        user.target in nodes_cannot_propagate
-                        and n == last_conv
-                        and n.args[0].meta["val"].device.type == "xpu"
-                    ):
+                    if user.target in nodes_cannot_propagate:
                         continue
                     output_set.add(user)
 
