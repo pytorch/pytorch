@@ -1,5 +1,6 @@
 import abc
 import builtins
+import contextlib
 import importlib
 import inspect
 import pickle
@@ -26,6 +27,35 @@ class SerializableCallable(abc.ABC):
         pass
 
 
+class BundledAOTAutogradSerializableCallable(SerializableCallable):
+    def __init__(self, compiled_fn, backend_id=None, serialized=None):
+        from torch._dynamo.precompile_context import PrecompileContext
+        self.compiled_fn = compiled_fn
+        if serialized is None:
+            assert backend_id is not None
+            bundled = PrecompileContext.serialize_artifact_by_key(backend_id)
+            self.serialized = bundled.content
+            self.compiled_fn = bundled.after_deserialization()
+
+    def __getattr__(self, attr):
+        if hasattr(self, attr):
+            return getattr(super(), attr)
+        else:
+            return getattr(self.compiled_fn, attr)
+
+    @classmethod
+    def serialize_compile_artifacts(cls, fn: Any) -> bytes:
+        return fn.serialized
+
+    @classmethod
+    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
+        from torch._functorch._aot_autograd.autograd_cache import BundledAOTAutogradCacheArtifact
+        compiled_fn = BundledAOTAutogradCacheArtifact("key", data).after_deserialization()
+        return cls(compiled_fn, data)
+
+    def __call__(self, *args):
+        return self.compiled_fn(*args)
+
 def bind_locals(
     signature: inspect.Signature, *args: Any, **kwargs: Any
 ) -> dict[str, Any]:
@@ -33,6 +63,12 @@ def bind_locals(
     bound_arguments.apply_defaults()
     return bound_arguments.arguments
 
+
+@dataclass
+class ModelInput:
+    args: tuple[Any]
+    kwargs: dict[str, Any]
+    contexts: list[contextlib.AbstractContextManager[Any]]
 
 @dataclass
 class CompileArtifacts:
@@ -45,37 +81,32 @@ class CompileArtifacts:
     compiled_fn: SerializableCallable
     original_code: types.CodeType
 
-    def compiled_function(self) -> Any:
+
+    def guard_check(self, *args: Any, **kwargs: Any) -> bool:
+        f_locals = bind_locals(self.signature, *args, **kwargs)
+        assert self.guard_manager is not None
+        return self.guard_manager.check(f_locals)
+
+    def __post_init__(self) -> None:
         import_sources = {
             alias: importlib.import_module(module_name)
             for alias, module_name in self.import_sources.items()
         }
         f_globals = {**import_sources, self.backend_id: self.compiled_fn}
-        core = types.FunctionType(self.bytecode, f_globals)
+        self.fn = types.FunctionType(self.bytecode, f_globals)
 
-        def optimized_call(*args: Any, **kwargs: Any) -> Any:
-            f_locals = bind_locals(self.signature, *args, **kwargs)
-            assert self.guard_manager is not None
-            if not self.guard_manager.check(f_locals):
-                reason = str(self.guard_manager.check_verbose(f_locals))
-                raise RuntimeError(f"GuardManager check failed, reason: {reason}")
-            return core(*args, **kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        f_locals = bind_locals(self.signature, *args, **kwargs)
+        assert self.guard_manager is not None
+        if not self.guard_manager.check(f_locals):
+            reason = str(self.guard_manager.check_verbose(f_locals))
+            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+        return self.fn(*args, **kwargs)
 
-        if self.guard_manager is None:
-            guards_state = pickle.loads(self.guards_state)
-            self.guard_manager = torch._dynamo.guards.CheckFunctionManager(
-                self.original_code,
-                guards_state.output_graph,
-                shape_code_parts=guards_state.shape_code_parts,
-                runtime_global_scope=f_globals,
-            ).guard_manager
+    def save_compiled_function(self, path: str) -> None:
+        with open(path, "wb") as f:
+            f.write(type(self).serialize(self))
 
-        def save_compiled_function(path: str) -> None:
-            with open(path, "wb") as f:
-                f.write(type(self).serialize(self))
-
-        optimized_call.save_compiled_function = save_compiled_function  # type: ignore[attr-defined]
-        return optimized_call
 
     @classmethod
     def serialize(cls, artifacts: "CompileArtifacts") -> bytes:
@@ -109,7 +140,7 @@ def aot_compile_fullgraph(
     example_inputs: tuple[tuple[Any, ...], dict[str, Any]],
     hooks: Hooks,
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
-) -> Any:
+) -> CompileArtifacts:
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import compile_context, CompileContext, TracingContext
 
@@ -143,11 +174,16 @@ def aot_compile_fullgraph(
         assert check_fn.guards_state is not None
 
     backend_input = capture_output.backend_input
+    backend_input.graph_module._backend_id = backend_input.backend_id
     output_graph = dynamo_output.tracer_output.output_graph
     assert output_graph is not None
     import_sources = output_graph.import_sources
     with torch._guards.tracing(TracingContext(backend_input.fake_mode)):
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
+
+    # Inductor Backend
+    if isinstance(backend, torch._TorchCompileInductorWrapper):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn, backend_input.backend_id)
 
     if not isinstance(compiled_fn, SerializableCallable):
         if hasattr(backend, "compiler_fn"):
@@ -168,4 +204,4 @@ def aot_compile_fullgraph(
         compiled_fn=compiled_fn,
         original_code=fn.__code__,
     )
-    return compile_artifacts.compiled_function()
+    return compile_artifacts

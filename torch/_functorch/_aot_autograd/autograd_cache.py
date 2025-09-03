@@ -1044,7 +1044,7 @@ class AOTAutogradCacheArtifact(CacheArtifact):
 
 
 @CacheArtifactFactory.register
-class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
+class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable], torch._dynamo.aot_compile.SerializableCallable):
     @override
     @staticmethod
     def type():
@@ -1076,6 +1076,15 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
             return compiled_fn(list(runtime_args))
 
         return forward
+
+    @classmethod
+    def serialize_compile_artifacts(cls, fn: BundledAOTAutogradCacheArtifact) -> bytes:
+        return fn.content
+
+    @classmethod
+    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
+        compiled_fn = cls("key", data).after_deserialization()
+        return compiled_fn
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
