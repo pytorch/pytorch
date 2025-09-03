@@ -160,7 +160,7 @@ dtensor_fails = {
     xfail('fill'),
     xfail('flatten'),
     xfail('flip'),
-    xfail('fliplr'),Z
+    xfail('fliplr'),
     xfail('flipud'),
     xfail('floor_divide'),
     xfail('fmax'),
