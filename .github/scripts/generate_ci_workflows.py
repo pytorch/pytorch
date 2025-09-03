@@ -22,7 +22,7 @@ LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
 LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries_wheel"
-LABEL_CIFLOW_ROCM = "ciflow/rocm"
+LABEL_CIFLOW_ROCM = "ciflow/rocm-mi300"
 
 
 @dataclass
