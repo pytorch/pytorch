@@ -37,10 +37,3 @@ pytorch_main_components
 
 ../notes
 ```
-
-```{toctree}
-:maxdepth: 1
-:caption: Accelerator Integration
-
-../accelerator/index
-```

@@ -448,12 +448,6 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
-# Prune configs that require more shared memory than the hardware limit
-max_autotune_prune_choices_based_on_shared_mem = (
-    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
-    == "1"
-)
-
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
@@ -1238,15 +1232,6 @@ class triton:
     # always run cudagraphs in the eager warmup stage
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
-
-    # If False (default), torch.compile skips cudagraph for a graph if it
-    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
-    # be captured into cudagraph. If this is not possible, this will raise
-    # an error.
-    cudagraph_or_error: bool = Config(
-        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
-        default=False,
-    )
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False

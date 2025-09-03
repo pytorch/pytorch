@@ -41,9 +41,7 @@ from pytorch_test_common import (
 import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import errors
-from torch.onnx._internal.torchscript_exporter import verification
-from torch.onnx._internal.torchscript_exporter._type_utils import JitScalarType
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -897,11 +895,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # export succeeds, but running ORT through run_test would fail because the exported model
         # has the inputs flattened into 3 inputs.
         torch.onnx.export(
-            model,
-            (x, {"y": (y0, y1)}),
-            io.BytesIO(),
-            opset_version=self.opset_version,
-            dynamo=False,
+            model, (x, {"y": (y0, y1)}), io.BytesIO(), opset_version=self.opset_version
         )
 
     def test_primitive_input_integer(self):
@@ -10795,7 +10789,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             opset_version=self.opset_version,
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
-            dynamo=False,
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_onnx(ort_sess, (x,))
@@ -10811,7 +10804,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             opset_version=self.opset_version,
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
-            dynamo=False,
         )
         ort_outs = verification._run_onnx(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
@@ -10845,7 +10837,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             opset_version=self.opset_version,
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
-            dynamo=False,
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_onnx(ort_sess, (x,))
@@ -10871,7 +10862,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             opset_version=self.opset_version,
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
-            dynamo=False,
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_onnx(ort_sess, (x,))
@@ -12632,11 +12622,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_std]))
         model_onnx = io.BytesIO()
         torch.onnx.export(
-            model_export,
-            dummy_input,
-            model_onnx,
-            opset_version=self.opset_version,
-            dynamo=False,
+            model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_out = verification._run_onnx(ort_sess, inputs=dummy_input)
@@ -12667,11 +12653,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model_onnx = io.BytesIO()
         test_inputs = ()
         torch.onnx.export(
-            model_export,
-            test_inputs,
-            model_onnx,
-            opset_version=self.opset_version,
-            dynamo=False,
+            model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_out = verification._run_onnx(ort_sess, inputs=test_inputs)
@@ -12714,11 +12696,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         dummy_input = (torch.tensor([expected_min]), torch.tensor([expected_max]))
         model_onnx = io.BytesIO()
         torch.onnx.export(
-            model_export,
-            dummy_input,
-            model_onnx,
-            opset_version=self.opset_version,
-            dynamo=False,
+            model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
 
@@ -13725,10 +13703,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             # Ensure condition is not constant
             dynamic_axes={"x": {0: dynamic_axis_name}},
             input_names=["x"],
-            dynamo=False,
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = JitScalarType.from_value(x).onnx_type()
+        expected_elem_type = torch.onnx.JitScalarType.from_value(x).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
