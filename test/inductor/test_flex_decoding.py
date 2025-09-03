@@ -29,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+from torch.utils._triton import has_triton_tma_device
 
 
 if IS_WINDOWS and IS_CI:
@@ -265,6 +266,8 @@ test_input_strides = [
     input_strides_3,
     input_strides_4,
 ]
+
+test_tma_options = [True] if supported_platform and has_triton_tma_device() else [False]
 
 
 def query_key_value_clones(
@@ -824,6 +827,57 @@ class TestFlexDecoding(InductorTestCase):
             noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
+
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("use_tma", test_tma_options)
+    def test_tma_decoding(self, device, dtype: torch.dtype, use_tma):
+        n_heads, head_dim, seq_len = 4, 16, 128
+
+        q = torch.randn(
+            1,
+            n_heads,
+            1,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+        k = torch.randn(
+            1,
+            n_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+        v = torch.randn(
+            1,
+            n_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+
+        score_mod = _generate_alibi_bias(8)
+        kernel_options = {"USE_TMA": use_tma}
+        sdpa_partial = create_attention(
+            score_mod=score_mod,
+            block_mask=None,
+            enable_gqa=(not Hq == Hkv),
+            kernel_options=kernel_options,
+        )
+
+        compiled_sdpa = torch.compile(sdpa_partial)
+
+        ref_out = sdpa_partial(q, k, v)
+        compiled_out = compiled_sdpa(q, k, v)
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
