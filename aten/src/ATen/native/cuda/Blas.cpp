@@ -1657,7 +1657,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
     "torch._scaled_mm: when using FP8 inputs please pass out_dtype "
     "(e.g., torch.float16 or torch.float32). Omitting it leads to an "
     "unsupported configuration in the CUDA backend."
-  );            
+  );
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
