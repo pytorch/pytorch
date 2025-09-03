@@ -188,7 +188,6 @@ class PerformanceModelChoices(InductorChoices):
             if choice.template.uid not in template_uid_to_ktc:
                 template_uid_to_ktc[choice.template.uid] = []
             template_uid_to_ktc[choice.template.uid].append(choice)
-        print(f"{len(actualized_choices)=}")
         # Apply performance model prediction and filtering
         filtered_choices = predict_and_filter_choices(
             ktc_stack=actualized_choices,
@@ -197,7 +196,6 @@ class PerformanceModelChoices(InductorChoices):
             topk=topk,
             discard_unranked=config.performance_model.discard_unranked,
         )
-        print(f"{len(filtered_choices)=}")
         log.info(
             "Performance model complete: orig=%d exp=%d filt=%d topk=%d",
             original_sizes,

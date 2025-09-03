@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
 from unittest.mock import MagicMock
 
 from torch._inductor.performance_model.core import filter_and_sort_choices
@@ -11,7 +10,7 @@ from torch._inductor.performance_model.registry import (
     register_performance_model,
     register_performance_model_fn,
 )
-from torch._inductor.test_case import run_tests
+from torch._inductor.test_case import run_tests, TestCase
 
 
 # Mock performance model functions for testing
@@ -36,7 +35,7 @@ def mock_model_c(choices, op_name, factor=3.0):
     return choices
 
 
-class TestPerformanceModelInterface(unittest.TestCase):
+class TestPerformanceModelInterface(TestCase):
     def setUp(self):
         """Clear registry before each test."""
         clear_registry()
@@ -271,7 +270,7 @@ class TestPerformanceModelInterface(unittest.TestCase):
             self.assertEqual(choice.performance_prediction, 3.5)
 
 
-class TestFilterAndSortChoices(unittest.TestCase):
+class TestFilterAndSortChoices(TestCase):
     """Test cases for filter_and_sort_choices function."""
 
     def _create_mock_ktc(self, performance_prediction=None):
