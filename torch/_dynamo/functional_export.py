@@ -304,8 +304,8 @@ def _dynamo_graph_capture_for_export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=True,
-            allow_complex_guards_as_runtime_asserts=True,
+            prefer_deferred_runtime_asserts_over_guards=False,
+            allow_complex_guards_as_runtime_asserts=False,
             log_graph_in_out_metadata=True,
         )
 
@@ -317,8 +317,8 @@ def _dynamo_graph_capture_for_export(
         ):
             out = fullgraph_capture(
                 frame,
+                constraints=_constraints,
                 _is_export_deprecated_do_not_use=True,
-                _export_constraints=_constraints,
             )
 
             assert out.dynamo_output.tracer_output.output_graph is not None

@@ -5536,16 +5536,13 @@ class ShapeEnv:
                     if not (
                         s == constraint.vr.lower == constraint.vr.upper
                     ):  # allow static constraints
-                        breakpoint()
                         constraint_violated = True
                 elif isinstance(constraint, RelaxedUnspecConstraint):
                     # Don't complain about 0/1 specialization, we
                     # expect to have to compile in this case anyway
                     if val not in (0, 1):
-                        breakpoint()
                         constraint_violated = True
                 if constraint_violated:
-                    breakpoint()
                     assert constraint is not None
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint

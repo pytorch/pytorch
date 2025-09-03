@@ -913,8 +913,9 @@ class FrameInfo:
 
 def fullgraph_capture(
     frame: FrameInfo,
+    *,
+    constraints: Optional[list[Constraint]] = None,
     _is_export_deprecated_do_not_use: bool = False,
-    _export_constraints: Optional[list[Constraint]] = None,
 ) -> CaptureOutput:
     """
     A standalone function which takes a frame and returns dynamo captured graph
@@ -957,7 +958,7 @@ def fullgraph_capture(
         frame.closure,
         compiler_fn=fullgraph_compiler,
         export=_is_export_deprecated_do_not_use,
-        export_constraints=_export_constraints,  # type: ignore[arg-type]
+        export_constraints=constraints,  # type: ignore[arg-type]
         one_graph=True,
         restart_reasons=set(),
     )
