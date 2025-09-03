@@ -252,9 +252,8 @@ def math_attention(
     masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
     logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
-    max_scores = torch.max(post_mod_scores, dim=-1)[0]
     # working precision will be used so no need to cast to fp32
-    max_scores = torch.where(masked_rows, -float("inf"), max_scores)
+    max_scores = torch.max(post_mod_scores, dim=-1)[0]
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
@@ -510,7 +509,7 @@ def flex_attention_fake_impl(
     if query.is_nested:
         out = torch.empty_like(query, memory_format=torch.contiguous_format)
         logsumexp = query.sum(dim=-1)
-        max_scores = query.sum(dim=-1)
+        max_scores = query.max(dim=-1)[0]
         return out, logsumexp, max_scores
 
     v_head_dim = value.size(-1)
