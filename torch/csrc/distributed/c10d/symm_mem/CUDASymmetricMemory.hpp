@@ -115,7 +115,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      const at::Tensor& tensor,
+      void* ptr,
       const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
   c10::DeviceType supported_device_type() override;
