@@ -2044,6 +2044,42 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             outer_f2(inp)
 
+    def test_compile_error_on_graph_break_kwarg(self):
+        def f(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        with torch.compiler.error_on_graph_break(False):
+            torch.compile(f, backend="eager")(torch.ones(3))
+            torch.compiler.reset()
+            with self.assertRaises(Unsupported):
+                torch.compile(f, backend="eager", error_on_graph_break=True)(
+                    torch.ones(3)
+                )
+
+        with torch.compiler.error_on_graph_break(True):
+            torch.compiler.reset()
+            torch.compile(f, backend="eager", error_on_graph_break=False)(torch.ones(3))
+            torch.compiler.reset()
+            with self.assertRaises(Unsupported):
+                torch.compile(f, backend="eager")(torch.ones(3))
+
+    def test_nested_compile_error_on_graph_break_kwarg(self):
+        @torch.compile(backend="eager", error_on_graph_break=True)
+        def f(inner, x):
+            return inner(x)
+
+        def g(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        f(torch.compile(g, backend="eager", error_on_graph_break=False), torch.ones(3))
+        torch.compiler.reset()
+        with self.assertRaises(Unsupported):
+            f(torch.compile(g, backend="eager"), torch.ones(3))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

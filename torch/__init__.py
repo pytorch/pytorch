@@ -2437,6 +2437,7 @@ def compile(
     model: _Callable[_InputT, _RetT],
     *,
     fullgraph: builtins.bool = False,
+    error_on_graph_break: _Optional[builtins.bool] = None,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2452,6 +2453,7 @@ def compile(
     model: None = None,
     *,
     fullgraph: builtins.bool = False,
+    error_on_graph_break: _Optional[builtins.bool] = None,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2466,6 +2468,7 @@ def compile(
     model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
+    error_on_graph_break: _Optional[builtins.bool] = None,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
@@ -2499,6 +2502,20 @@ def compile(
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
         then this will raise an error.
+       error_on_graph_break (bool or None): Initial value of `error_on_graph_break`, which controls
+        whether or not `torch.compile` errors or continues compiling when encountering a graph break.
+        If the given value is `None`, `error_on_graph_break` is left as its previous value.
+
+        If `fullgraph=True`, `error_on_graph_break` has no effect.
+
+        `error_on_graph_break` can be toggled during compile time with `torch._dynamo.error_on_graph_break()`
+        to allow graph breaks in some compiled regions but not others.
+        One key difference from `fullgraph=True` is that `error_on_graph_break=True`
+        does NOT guarantee that a single graph is captured from the compiled function.
+
+        See `torch.compiler.error_on_graph_break()` and
+        https://docs.pytorch.org/docs/main/compile/programming_model.error_on_graph_break.html for more details
+        and examples.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
@@ -2594,6 +2611,7 @@ def compile(
             return compile(
                 model,
                 fullgraph=fullgraph,
+                error_on_graph_break=error_on_graph_break,
                 dynamic=dynamic,
                 backend=backend,
                 mode=mode,
@@ -2627,6 +2645,7 @@ def compile(
     return torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
+        error_on_graph_break=error_on_graph_break,
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
