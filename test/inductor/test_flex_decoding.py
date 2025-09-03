@@ -829,9 +829,9 @@ class TestFlexDecoding(InductorTestCase):
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
+    @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize("use_tma", test_tma_options)
-    def test_tma_decoding(self, device, dtype: torch.dtype, use_tma):
+    def test_tma_decoding(self, device, dtype: torch.dtype):
         n_heads, head_dim, seq_len = 4, 16, 128
 
         q = torch.randn(
@@ -862,8 +862,8 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
 
-        score_mod = _generate_alibi_bias(8)
-        kernel_options = {"USE_TMA": use_tma}
+        score_mod = _generate_alibi_bias(n_heads)
+        kernel_options = {"USE_TMA": True}
         sdpa_partial = create_attention(
             score_mod=score_mod,
             block_mask=None,
