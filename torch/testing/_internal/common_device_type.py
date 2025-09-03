@@ -1277,25 +1277,39 @@ class skipPRIVATEUSE1If(skipIf):
 
 
 def _has_sufficient_memory(device, size):
-    if device == "xla":
-        raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
-
-    device_type = torch.device(device).type
-    if device_type != "cpu":
+    device_ = torch.device(device)
+    device_type = device_.type
+    if device_type in ["cuda", "xpu"]:
+        acc = torch.accelerator.current_accelerator()
+        # Case 1: no accelerator found
+        if not acc:
+            return False
+        # Case 2: accelerator found but not matching device type
+        if acc.type != device_type:
+            return True
+        # Case 3: accelerator found and matching device type but not available
         if not torch.accelerator.is_available():
             return False
+        # Case 4: accelerator found and matching device type and available
         gc.collect()
         torch.accelerator.empty_cache()
 
+        if device_.index is None:
+            device_ = torch.device(device_type, 0)
+
         if device_type == "cuda":
             return (
-                torch.cuda.memory.mem_get_info()[0]
-                * torch.cuda.memory.get_per_process_memory_fraction(device)
+                torch.cuda.memory.mem_get_info(device_)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device_)
             ) >= size
-        elif device_type == "xpu":
-            return torch.xpu.memory.mem_get_info()[0] >= size
 
-    if device != "cpu":
+        if device_type == "xpu":
+            return torch.xpu.memory.mem_get_info(device_)[0] >= size
+
+    if device_type == "xla":
+        raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
+
+    if device_type != "cpu":
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
