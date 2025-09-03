@@ -611,6 +611,9 @@ class BaseSchedulerNode:
                     + stack_trace_last_line.replace("{", "{{")
                     .replace("}", "}}")
                     .replace("\n", "\\")
+                    .replace(
+                        "\\", "\\\\"
+                    )  # For windows safe path, avoid for example \x, \U.
                 )
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
@@ -1276,6 +1279,13 @@ class SchedulerNode(BaseSchedulerNode):
                     )
         return buffers_store_as_atomic_add
 
+    @cache_on_self
+    def has_side_effects(self) -> bool:
+        # self._body is None sometimes that's why this check was added
+        if self._body is not None and self._body.has_op("device_assert_async"):
+            return True
+        return super().has_side_effects()
+
 
 def refresh_group_node_dependencies(
     group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
@@ -1544,6 +1554,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
         return buf.getrawvalue().rstrip()
+
+    @cache_on_self
+    def has_side_effects(self) -> bool:
+        if self.snodes is not None:
+            return any(node.has_side_effects() for node in self.snodes)
+        return super().has_side_effects()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -2160,6 +2176,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2556,7 +2578,7 @@ class Scheduler:
             )
 
         graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-        buf_info_list, _ = compute_memory_timeline(
+        buf_info_list, _, _ = compute_memory_timeline(
             self.nodes,
             name_to_freeable_input_buf,
             graph_outputs,
@@ -2749,10 +2771,10 @@ class Scheduler:
             node.max_order = order
 
     def merge_loops(self) -> None:
-        for node in self.nodes:
-            if not config.loop_ordering_after_fusion:
-                continue
+        if not config.loop_ordering_after_fusion:
+            return
 
+        for node in self.nodes:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
@@ -3868,7 +3890,6 @@ class Scheduler:
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
         """
-
         if node1 is node2:
             return False
 
@@ -3972,7 +3993,6 @@ class Scheduler:
         ):
             why("fusion for buffer explicit disabled")
             return False
-
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:

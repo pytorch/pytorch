@@ -584,7 +584,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are promoted in the JIT mode
                     num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                     # release GIL to support multiple instances inference (in different threads of the same process)
-                    self.prefix.splice("py::gil_scoped_release release;")
+                    self.prefix.splice("py::gil_scoped_release_simple release;")
 
                 self.prefix.splice(
                     f"""
@@ -1219,6 +1219,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
+        debug_handle: Optional[int] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1235,14 +1236,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
+            self.write_provenance_debug_handle(shim_fn, debug_handle)
             shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
             if enable_kernel_profile:
+                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1338,6 +1341,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        debug_handle: Optional[int] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1346,7 +1350,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(
+            kernel, args, device, debug_handle=debug_handle
+        )
 
     def generate_scatter_fallback(
         self,
@@ -1546,14 +1552,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if int_array == "{}":
             #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                if config.cpp.use_constexpr_for_int_array:
+                    writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                else:
+                    writeline(f"static const {ctype} *{var}=nullptr;")
             else:
                 writeline(f"const {ctype} *{var}=nullptr;")
         else:
             if var not in self.declared_int_array_vars:
                 self.declared_int_array_vars.add(var)
                 if known_statically:
-                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    if config.cpp.use_constexpr_for_int_array:
+                        writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    else:
+                        writeline(f"static const {ctype} {var}[] = {int_array};")
                 else:
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
@@ -2249,7 +2261,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
-            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writeline("py::gil_scoped_acquire_simple acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
         return scoped_lines._lines
