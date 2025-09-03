@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
+      - run: echo $AAAA
+        env:
+          AAAA: '[\"pull\", \"trunk\", \"lint\", \"^(?!.*rocm).*linux-binary.*\", \"linux-aarch64\"]'
       - name: Update viable/strict
         uses: pytorch/test-infra/.github/actions/update-viablestrict@main
         id: update_viablestrict
