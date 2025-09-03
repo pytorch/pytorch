@@ -224,7 +224,7 @@ TuningResultsValidator::TuningResultsValidator() {
   {
     // HIP version is more accurate than ROCm version.  User's environment could be a stock
     // ROCm install but with a mix of newer components, making ROCm version meaningless.
-    std::string hip_version = TORCH_HIP_VERSION;
+    std::string hip_version = c10::str(TORCH_HIP_VERSION);
     RegisterValidator(
        "HIP_VERSION",
        [hip_version]() { return hip_version; },
