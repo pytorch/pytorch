@@ -541,8 +541,6 @@ BatchNormBackend _select_batch_norm_backend(
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
       && (input.suggest_memory_format() == MemoryFormat::Contiguous
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60500)
         || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
