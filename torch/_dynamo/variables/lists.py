@@ -374,7 +374,12 @@ class RangeVariable(BaseListVariable):
             index = length + index
 
         if index < 0 or index >= length:
-            raise IndexError(f"index {index} is out of range")
+            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+            raise_observed_exception(
+                IndexError,
+                tx,
+                args=[ConstantVariable("range object index out of range")],
+            )
 
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
 
@@ -408,8 +413,11 @@ class RangeVariable(BaseListVariable):
 
         if isinstance(index, slice):
             return self.apply_slice(index)
-        else:
+        elif isinstance(index, int):
             return self.apply_index(index)
+        else:
+            msg = ConstantVariable("range indices must be integers or slices")
+            raise_observed_exception(TypeError, tx, args=[msg])
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
@@ -482,6 +490,8 @@ class RangeVariable(BaseListVariable):
             return ConstantVariable.create(self.range_length())
         elif name in ("count", "__contains__"):
             return ConstantVariable(self.range_count(*args))
+        elif name == "__getitem__":
+            return self.getitem_const(tx, *args)
         elif name in cmp_name_to_op_mapping:
             other = args[0]
             pt = other.python_type()
