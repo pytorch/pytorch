@@ -23,10 +23,16 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         t);
   }
 
+  /**
+   * Return the type of device managed by this guard implementation.
+   */
   c10::DeviceType type() const override {
     return static_type;
   }
 
+  /**
+   * Set the current device to Device, and return the previous c10::Device.
+   */
   c10::Device exchangeDevice(c10::Device d) const override {
     TORCH_CHECK(
         d.is_privateuseone(), "Excepted a PrivateUse1 device, but got ", d);
@@ -35,11 +41,17 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return c10::Device(static_type, old_device_index);
   }
 
+  /**
+   * Get the current device.
+   */
   c10::Device getDevice() const override {
     int device_index = current_device();
     return c10::Device(static_type, device_index);
   }
 
+  /**
+   * Set the current device to c10::Device.
+   */
   void setDevice(c10::Device d) const override {
     TORCH_CHECK(
         d.is_privateuseone(), "Excepted a PrivateUse1 device, but got ", d);
@@ -47,27 +59,50 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(d.index());
   }
 
+  /**
+   * Set the current device to c10::Device, without checking for errors
+   * (so, e.g., this can be called from a destructor).
+   */
   void uncheckedSetDevice(c10::Device d) const noexcept override {
     set_device(d.index());
   }
 
+  /**
+   * Get the current stream for a given device.
+   */
   c10::Stream getStream(c10::Device d) const noexcept override {
     return getCurrentOpenRegStream(d.index()).unwrap();
   }
 
+  /**
+   * Get the default stream for a given device.
+   */
   c10::Stream getDefaultStream(c10::Device d) const override {
     return getDefaultOpenRegStream(d.index());
   }
 
+  /**
+   * Return a new stream for a given device and priority. The stream will be
+   * copied and shared around, device backend should be able to correctly handle
+   * the lifetime of the stream.
+   */
   Stream getNewStream(Device d, int priority = 0) const override {
     return getStreamFromPool(priority, d.index());
   }
 
+  /**
+   * Get a stream from the global pool for a given device.
+   */
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false)
       const override {
     return getStreamFromPool(isHighPriority, d.index());
   }
 
+  /**
+   * Set a stream to be the thread local current stream for its device.
+   * Return the previous stream for that device. You are NOT required
+   * to set the current device to match the device of this stream.
+   */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
     const OpenRegStream stream(s);
     const auto old_stream = getCurrentOpenRegStream(s.device().index());
@@ -75,10 +110,20 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
 
+  /**
+   * Get the number of devices.
+   *
+   * WARNING: This is REQUIRED to not raise an exception.
+   * If there is some sort of problem, e.g., driver error,
+   * you should report that there are zero available devices.
+   */
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
   }
 
+  /**
+   * Destroys the given event.
+   */
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
     if (!event)
@@ -91,6 +136,12 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(orig_device);
   }
 
+  /**
+   * Increments the event's version and enqueues a job with this version
+   * in the stream's work queue. When the stream process that job
+   * it notifies all streams waiting on / blocked by that version of the
+   * event to continue and marks that version as recorded.
+   * */
   void record(
       void** event,
       const c10::Stream& stream,
@@ -132,6 +183,14 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(orig_device);
   }
 
+  /**
+   * Does nothing if the event has not been scheduled to be recorded.
+   * If the event was previously enqueued to be recorded, a command
+   * to wait for the version of the event that exists at the time of this call
+   * is inserted in the stream's work queue.
+   * When the stream reaches this command it will stop processing
+   * additional commands until that version of the event is marked as recorded.
+   */
   void block(void* event, const c10::Stream& stream) const override {
     if (!event)
       return;
@@ -144,6 +203,12 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(orig_device);
   }
 
+  /**
+   * Returns true if (and only if)
+   *  (1) the event has never been scheduled to be recorded
+   *  (2) the current version is marked as recorded.
+   * Returns false otherwise.
+   */
   bool queryEvent(void* event) const override {
     if (!event)
       return true;
@@ -154,16 +219,28 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return err == orSuccess ? true : false;
   }
 
+  /**
+   * Return true if all the work previously enqueued on the stream for
+   * asynchronous execution has completed running on the device.
+   */
   bool queryStream(const c10::Stream& stream) const override {
     OpenRegStream or_stream{stream};
     return or_stream.query();
   }
 
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the stream has completed running on the device.
+   */
   void synchronizeStream(const c10::Stream& stream) const override {
     OpenRegStream or_stream{stream};
     or_stream.synchronize();
   }
 
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * recorded on the event has completed running on the device.
+   */
   void synchronizeEvent(void* event) const override {
     if (!event)
       return;
@@ -172,6 +249,10 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     orEventSynchronize(or_event);
   }
 
+  /**
+   * Wait (by blocking the calling thread) until all the work has
+   * completed running on the device.
+   */
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     DeviceIndex orig_device{-1};
     auto orig_devicec = current_device();
@@ -180,6 +261,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(orig_device);
   }
 
+  /**
+   * Fetch the elapsed time between two recorded events.
+   */
   double elapsedTime(
       void* event1,
       void* event2,
