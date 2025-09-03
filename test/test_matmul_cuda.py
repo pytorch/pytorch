@@ -383,7 +383,7 @@ class TestMatmulCuda(TestCase):
 
             a.grad = None
             b.grad = None
-            offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
@@ -472,7 +472,7 @@ class TestMatmulCuda(TestCase):
             if check_zero_size and n_groups <= 1:
                 continue
 
-            offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
@@ -495,8 +495,8 @@ class TestMatmulCuda(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
-    # TODO(future PR): enable compile for SM80+
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    # TODO(future PR): enable compile for torch._grouped_mm fallback path
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
