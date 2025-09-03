@@ -768,7 +768,7 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
-        self.gm.graph.call_function(
+        node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
@@ -778,6 +778,8 @@ class FxConverter:
                 "kwargs": call_kwargs,
             },
         )
+        if extra := triton_meta.get("extra", None):
+            node.meta.setdefault("triton_meta", {})["extra"] = extra
 
     def _generate_extern_kernel_alloc(self, line: WrapperLine) -> None:
         assert isinstance(line, ExternKernelAllocLine)

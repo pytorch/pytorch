@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -679,6 +680,46 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.rand([4, 4, 4, 4], device=self.device)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+    @parametrize("enable_tuning", (False, True))
+    def test_triton_meta_extra_not_set(self, enable_tuning):
+        # test that if kernel's triton_meta does not contain `extra` field,
+        # node.meta does not contain `["triton_meta"]["extra"]`
+
+        with config.patch("triton.autotune_at_compile_time", enable_tuning):
+            args = [torch.randn(8, device=self.device) for _ in range(2)]
+            (gm,) = self._compile_and_check(torch.add, args)
+            (triton_node,) = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+            self.assertNotIn("triton_meta", triton_node.meta)
+
+    @parametrize("enable_tuning", (False, True))
+    def test_triton_meta_extra_is_set(self, enable_tuning):
+        # test that if kernel's triton_meta contains `extra` field,
+        # node.meta contains `["triton_meta"]["extra"]`
+
+        # create an autotuner and populate extra in triton_meta
+        class TestAutotuner(CachingAutotuner):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.triton_meta["extra"] = "test_extra"
+
+        with (
+            config.patch("triton.autotune_at_compile_time", enable_tuning),
+            unittest.mock.patch(
+                "torch._inductor.runtime.triton_heuristics.CachingAutotuner",
+                TestAutotuner,
+            ),
+        ):
+            args = [torch.randn(8, device=self.device) for _ in range(2)]
+            (gm,) = self._compile_and_check(torch.add, args)
+            (triton_node,) = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+            self.assertIn("triton_meta", triton_node.meta)
+            self.assertIn("extra", triton_node.meta["triton_meta"])
+            self.assertEqual(triton_node.meta["triton_meta"]["extra"], "test_extra")
 
 
 class AOTFxirTestCase(InductorTestCase):
