@@ -24,7 +24,7 @@ jobs:
       matrix:
         python-version: [ '3.12' ]
         device: [ 'cu128', 'cu129' ]
-        runner: [ 'linux.12xlarge' ]
+        runner: [ 'linux.12xlarge.memory' ]
         include:
           - device: cu128
             cuda-version: '12.8.1'
@@ -106,6 +106,9 @@ jobs:
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
+          # Save this for later
+          echo "container_name=${container_name}" >> "$GITHUB_ENV"
+
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -119,6 +122,13 @@ jobs:
           cuda-arch-list: '8.0;8.9;9.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
           output-dir: ${{ runner.temp }}/externals
+
+      - name: Prepare vLLM wheel
+        shell: bash
+        run: |
+          set -eux
+
+          sleep 7200
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:

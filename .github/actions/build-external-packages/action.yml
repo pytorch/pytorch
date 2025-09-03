@@ -77,8 +77,6 @@ runs:
           python3 -m cli.run build external "$target"
         done
 
-        sleep 7200
-
         END_TIME=$(date +%s)
         {
           echo "build_time=$((END_TIME - START_TIME))"
