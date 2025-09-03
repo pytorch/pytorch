@@ -7770,6 +7770,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_cuda_sync(self):
+        def fn(x):
+            y = x + 1
+            torch.cuda.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device="cuda")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 
