@@ -20,4 +20,8 @@
 #error "CAFFE2_STATIC_LINK_CUDA should not be visible in public headers"
 #endif
 
-auto main() -> int {}
+#include <gtest/gtest.h>
+
+TEST(VerifyApiVisibility, Test) {
+  ASSERT_EQ(1, 1);
+}

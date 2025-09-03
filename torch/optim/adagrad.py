@@ -13,6 +13,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -53,17 +54,17 @@ class Adagrad(Optimizer):
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
 
-        defaults = dict(
-            lr=lr,
-            lr_decay=lr_decay,
-            eps=eps,
-            weight_decay=weight_decay,
-            initial_accumulator_value=initial_accumulator_value,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            fused=fused,
-        )
+        defaults = {
+            "lr": lr,
+            "lr_decay": lr_decay,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "initial_accumulator_value": initial_accumulator_value,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "fused": fused,
+        }
         super().__init__(params, defaults)
 
         if fused:
@@ -116,6 +117,7 @@ class Adagrad(Optimizer):
                 )
 
     def share_memory(self):
+        """Calls tensor.share_memory_() on the state sum tensors."""
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
@@ -336,6 +338,10 @@ def _single_tensor_adagrad(
     has_complex: bool,
 ):
     assert grad_scale is None and found_inf is None
+
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for param, grad, state_sum, step_t in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
@@ -403,6 +409,8 @@ def _multi_tensor_adagrad(
     if len(params) == 0:
         return
 
+    lr = _to_scalar(lr)
+
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, state_sums, state_steps]  # type: ignore[list-item]
     )
@@ -459,7 +467,7 @@ def _multi_tensor_adagrad(
             torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            # Reuse the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
@@ -477,7 +485,7 @@ def _multi_tensor_adagrad(
         torch._foreach_add_(std, eps)
 
         if weight_decay != 0 or maximize:
-            # Again, re-use the intermediate memory (device_grads) already allocated
+            # Again, reuse the intermediate memory (device_grads) already allocated
             torch._foreach_mul_(device_grads, minus_clr)
             numerator = device_grads
         else:
@@ -512,6 +520,8 @@ def _fused_adagrad(
         raise RuntimeError(
             "adagrad with fused=True does not support differentiable=True"
         )
+
+    lr = _to_scalar(lr)
 
     grad_scale_dict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else None

@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import io
+import json
 import operator
 import os
 import pickle
@@ -13,9 +14,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, Callable, cast, Final, IO, Optional, Union
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -27,6 +29,13 @@ from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._extension import (
     ExtensionRegistry,
     StreamTransformExtension,
+)
+from torch.distributed.checkpoint._hf_utils import (
+    CUSTOM_METADATA_KEY,
+    DCP_VERSION_KEY,
+    FORMAT_KEY,
+    FORMAT_VALUE,
+    HF_DCP_VERSION,
 )
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -49,9 +58,17 @@ from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
 
-__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
+__all__ = [
+    "FileSystemWriter",
+    "FileSystemReader",
+    "FileSystem",
+    "FileSystemBase",
+    "SerializationFormat",
+]
 
 _metadata_fn: str = ".metadata"
+
+CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
 
 @dataclass
@@ -70,6 +87,11 @@ class _StorageInfo:
 @dataclass
 class _StoragePrefix:
     prefix: str
+
+
+class SerializationFormat(Enum):
+    TORCH_SAVE = "torch_save"
+    SAFETENSORS = "safetensors"
 
 
 DEFAULT_SUFFIX = ".distcp"
@@ -298,7 +320,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
-    safe_tensors: bool = False,
+    serialization_format: SerializationFormat,
 ) -> WriteResult:
     offset = stream.tell()
 
@@ -312,12 +334,14 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        if not safe_tensors:
+        if serialization_format == SerializationFormat.TORCH_SAVE:
             torch.save(data, transform_to)
 
     transform_to.close()
 
-    if not safe_tensors or isinstance(data, io.BytesIO):
+    if serialization_format == SerializationFormat.TORCH_SAVE or isinstance(
+        data, io.BytesIO
+    ):
         length = stream.tell() - offset
     else:
         length = data.numel() * data.element_size()
@@ -349,7 +373,7 @@ def _write_files_from_queue(
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
-    safe_tensors: bool,
+    serialization_format: SerializationFormat,
 ) -> None:
     try:
         while True:
@@ -360,7 +384,7 @@ def _write_files_from_queue(
             custom_device_mod = getattr(torch, custom_backend_name, None)
 
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
-            # performance degredation, observed as being related to cuda stream syncs. We
+            # performance degradation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
@@ -397,11 +421,12 @@ def _write_files_from_queue(
                             data,
                             write_item,
                             storage_key,
-                            safe_tensors,
+                            serialization_format,
                         )
                     )
 
                 tensor_dict = {}
+                metadata_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
@@ -409,17 +434,29 @@ def _write_files_from_queue(
                             transforms,
                             stream,
                             tensor,
-                            write_item,
+                            write_item,  # type: ignore[arg-type]
                             storage_key,
-                            safe_tensors,
+                            serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor
+                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
+                    metadata_dict[write_item.index.fqn] = {  # type: ignore[attr-defined]
+                        "saved_offsets": write_item.tensor_data.chunk.offsets  # type: ignore[attr-defined]
+                    }
 
-                if safe_tensors:
+                if serialization_format == SerializationFormat.SAFETENSORS:
                     from safetensors.torch import save  # type: ignore[import-not-found]
 
-                    stream.write(save(tensor_dict))
+                    stream.write(
+                        save(
+                            tensor_dict,
+                            metadata={
+                                CUSTOM_METADATA_KEY: json.dumps(metadata_dict),
+                                DCP_VERSION_KEY: str(HF_DCP_VERSION),
+                                FORMAT_KEY: FORMAT_VALUE,
+                            },
+                        )
+                    )
 
                 if use_fsync:
                     try:
@@ -525,6 +562,11 @@ class FileSystem(FileSystemBase):
             path = Path(path)
         path.unlink()
 
+    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return [str(p) for p in path.iterdir()]
+
 
 class _FileSystemWriter(StorageWriter):
     """
@@ -549,6 +591,7 @@ class _FileSystemWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -576,32 +619,56 @@ class _FileSystemWriter(StorageWriter):
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
         self.transforms = _StorageWriterTransforms(_extensions)
+        self.serialization_format = serialization_format
+        self.rank: Optional[int] = None
+        self.use_collectives: bool = True
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.save_id = _generate_uuid()
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
-        pass
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
+        self.rank = kwargs.get("rank", None)
+        self.use_collectives = kwargs.get("use_collectives", True)
+
+    def _metadata_exists(self) -> bool:
+        if self.use_collectives:
+            # A global checkpoint metadata file
+            metadata_path = self._get_metadata_path(rank=None)
+        else:
+            # A rank 0 specific metadata file if every rank has written its own metadata
+            # Just looking for lowest rank metadata file is sufficient
+            metadata_path = self._get_metadata_path(rank=0)
+
+        return self.fs.exists(metadata_path)
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
-        if self.fs.exists(self.metadata_path):
+        if self._metadata_exists():
             if self.overwrite:
                 warnings.warn(
-                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
                     " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
                     " maintain this functionality or False to raise when an existing checkpoint is found."
                 )
             else:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
 
+        if self.rank is not None and not self.use_collectives:
+            plan = dataclasses.replace(
+                plan, storage_data=_StoragePrefix(f"__{self.rank}_")
+            )
+
         return plan
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
+            if plan.storage_data is None
+            else plan
             for i, plan in enumerate(plans)
         ]
         return new_plans
@@ -638,7 +705,6 @@ class _FileSystemWriter(StorageWriter):
         self,
         planner: SavePlanner,
         file_queue: queue.Queue,
-        safe_tensors: bool = False,
     ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
@@ -655,7 +721,7 @@ class _FileSystemWriter(StorageWriter):
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
-                    safe_tensors,
+                    self.serialization_format,
                 ),
             )
             t.start()
@@ -670,7 +736,7 @@ class _FileSystemWriter(StorageWriter):
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
-            safe_tensors=safe_tensors,
+            serialization_format=self.serialization_format,
         )
 
         for t in threads:
@@ -686,14 +752,20 @@ class _FileSystemWriter(StorageWriter):
             return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+        metadata = dataclasses.replace(metadata, version=CURRENT_DCP_VERSION)
+
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
 
         metadata.storage_meta = self.storage_meta()
-
-        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
+        tmp_filename = (
+            f"__{self.rank}{_metadata_fn}.tmp"
+            if not self.use_collectives and self.rank is not None
+            else f"{_metadata_fn}.tmp"
+        )
+        tmp_path = cast(Path, self.fs.concat_path(self.path, tmp_filename))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
@@ -703,17 +775,22 @@ class _FileSystemWriter(StorageWriter):
                     os.sync()
 
         # delete in-case other checkpoints were present.
-        if self.fs.exists(self.metadata_path):
-            self.fs.rm_file(self.metadata_path)
+        if not self.use_collectives and self.rank is not None:
+            metadata_path = self._get_metadata_path(self.rank)
+        else:
+            metadata_path = self._get_metadata_path()
 
-        self.fs.rename(tmp_path, self.metadata_path)
+        if self.fs.exists(metadata_path):
+            self.fs.rm_file(metadata_path)
+
+        self.fs.rename(tmp_path, metadata_path)
 
     def storage_meta(self) -> Optional[StorageMeta]:
         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
 
-    @property
-    def metadata_path(self) -> Union[str, os.PathLike]:
-        return cast(Path, self.fs.concat_path(self.path, _metadata_fn))
+    def _get_metadata_path(self, rank: Optional[int] = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
@@ -765,6 +842,8 @@ class FileSystemReader(StorageReader):
         self.storage_data: dict[Any, Any] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
+        self.rank = None
+        self.use_collectives = True
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
@@ -834,9 +913,14 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
+    def _get_metadata_path(self, rank: Optional[int] = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
+
     # Implementing the abstract function in StorageReader
-    def read_metadata(self) -> Metadata:
-        path = self.fs.concat_path(self.path, ".metadata")
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
+        rank = kwargs.get("rank", None)
+        path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
 
@@ -846,8 +930,12 @@ class FileSystemReader(StorageReader):
 
         return metadata
 
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         self.storage_data = metadata.storage_data
+        self.rank = kwargs.get("rank", None)
+        self.use_collectives = kwargs.get("use_collectives", True)
         assert self.storage_data is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
@@ -878,7 +966,8 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
     * File creation is atomic
 
     The checkpoint consist of one file per write request plus
-    a `.metadata` file with the serialized metadata.
+    a global `.metadata` file with the serialized metadata if rank coordination is enabled.
+    a rank local `__{rank}.metadata` file with the serialized metadata if rank coordination is NOT enabled.
 
     """
 
@@ -892,6 +981,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -904,7 +994,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
-                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
@@ -919,6 +1009,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead=per_thread_copy_ahead,
             overwrite=overwrite,
             _extensions=_extensions,
+            serialization_format=serialization_format,
         )
         BlockingAsyncStager.__init__(
             self,

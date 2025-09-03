@@ -1,14 +1,26 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import sys
 import unittest
+from unittest import skipUnless
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
+from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    runOnRocm,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     requires_cuda_with_enough_memory,
 )
@@ -34,11 +46,37 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
+    template,
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
 
 
+@triton.jit
+def amd_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    data = tl.load(in_ptr + offsets, mask=offsets < numel)
+    sqr = data * data
+    tl.store(out_ptr + offsets, sqr, mask=offsets < numel)
+
+
+@functools.lru_cache
+def get_autotuned_amd_sqr_kernel():
+    return triton.autotune(
+        configs=[
+            triton.Config(
+                {
+                    "BLOCK_SIZE": 64,
+                    "waves_per_eu": 3,
+                }
+            )
+        ],
+        key=[],
+    )(amd_sqr_kernel)
+
+
+@instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
 
@@ -184,6 +222,83 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+
+    @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
+    def test_template_function_ws(self):
+        triton_meta = {"device": MagicMock()}
+        num_stages = 2
+        num_warps = 4
+        num_consumer_groups = 3
+        num_buffers_warp_spec = 5
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.cached_autotune"
+        ) as mock_cached_autotune:
+            template(
+                num_stages=num_stages,
+                num_warps=num_warps,
+                triton_meta=triton_meta,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )
+            mock_cached_autotune.assert_called_once()
+            configs = mock_cached_autotune.call_args[0][1]
+            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
+            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+    @runOnRocm
+    def test_amd_special_config_args(self):
+        """
+        waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
+        in a config, the kwarg will exist in the kwargs but not in the function signature.
+        """
+
+        @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
+        def triton_sqr(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
+                x, y, x.numel()
+            )
+
+        def fn(x):
+            return triton_sqr(x)
+
+        x = torch.randn(32, device=GPU_TYPE)
+        ref = fn(x)
+        res = torch.compile(fn)(x)
+        self.assertEqual(ref, res)
+
+    @skipIfXpu
+    @skipIfRocm
+    @skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, do_pruning):
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+        )
+
+        expected_count = 1 if do_pruning else 2
+        mm_configs = [
+            GemmConfig(32, 32, 32, 1, 8, 8),
+            GemmConfig(
+                128, 128, 128, 100, 8, 4
+            ),  # intentionally large to exceed shared memory limit
+        ]
+        with config.patch(
+            {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
+        ):
+            config_heuristic = CUDAConfigHeuristic()
+            config_heuristic.should_scale_configs = False
+            config_heuristic.mm_configs = mm_configs
+            configs = list(
+                config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
+            )
+            self.assertEqual(len(configs), expected_count)
 
 
 class TestArgumentCloneAndRestore(TestCase):

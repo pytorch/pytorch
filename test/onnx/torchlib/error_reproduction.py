@@ -205,7 +205,7 @@ onnxruntime=={ort.__version__}
 onnxscript=={onnxscript.__version__}
 numpy=={np.__version__}
 torch=={torch.__version__}"""
-    short_test_name = test_name.split(".")[-1]
+    short_test_name = test_name.rsplit(".", maxsplit=1)[-1]
     reproduction_code = _REPRODUCTION_TEMPLATE.format(
         onnx_model_text=onnx_model_text,
         ort_inputs=input_text,
@@ -245,7 +245,7 @@ def create_mismatch_report(
 
     error_text = str(error)
     error_stack = error_text + "\n" + "".join(traceback.format_tb(error.__traceback__))
-    short_test_name = test_name.split(".")[-1]
+    short_test_name = test_name.rsplit(".", maxsplit=1)[-1]
     diff = difflib.unified_diff(
         str(actual).splitlines(),
         str(expected).splitlines(),

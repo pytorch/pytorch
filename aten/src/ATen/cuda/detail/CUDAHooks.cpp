@@ -89,9 +89,6 @@ void CUDAHooks::init() const {
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  // Sets the CUDA_MODULE_LOADING environment variable
-  // if it's not set by the user.
-  c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
@@ -180,6 +177,27 @@ bool CUDAHooks::hasCuBLASLt() const {
   return true;
 #else
   return false;
+#endif
+}
+
+
+bool CUDAHooks::hasCKSDPA() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_SDPA)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CUDAHooks::hasCKGEMM() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
+    return true;
+#else
+    return false;
 #endif
 }
 
@@ -304,6 +322,16 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionMIOpen() const {
+#if AT_ROCM_ENABLED()
+  return MIOPEN_VERSION_MAJOR * 10000 +
+         MIOPEN_VERSION_MINOR * 100 +
+         MIOPEN_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
 #endif
 }
 
@@ -448,8 +476,14 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
 }
 
 #ifdef USE_ROCM
-bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
-  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index) const {
+  hipDeviceProp_t* prop;
+  if (device_index == -1){
+      prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+      prop = at::cuda::getDeviceProperties(device_index);
+  }
+
   std::string device_arch = prop->gcnArchName;
   for (std::string arch : archs) {
       size_t substring = device_arch.find(arch);

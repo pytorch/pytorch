@@ -63,10 +63,11 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
@@ -85,6 +86,8 @@ prims = torch.ops.prims
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
+
+backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
 
 class SearchFn(Protocol):
@@ -127,7 +130,7 @@ def _transfer_meta(
     # transfer metadata after pattern matching occurs.
     # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
     # to remain accurate after pattern matching has occurred.
-    if config.trace.enabled:
+    if config.trace.provenance_tracking_level == 1:
         # We handle "from_node" field of the node meta specially to record that the new node comes from the old_node.
         new_from_node = new_meta.get("from_node", []).copy()
         new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
@@ -143,6 +146,8 @@ def _transfer_meta(
             for k, v in old_node.meta.items()
             if k in torch.fx.proxy._COPY_META_FIELDS
         )
+    if "stack_trace" in old_node.meta:
+        new_meta["stack_trace"] = old_node.meta["stack_trace"]
 
 
 class Match:
@@ -251,14 +256,80 @@ class Match:
             else contextlib.nullcontext()
         )
 
+        def should_propagate_eager_input_vals(nodes: list[torch.fx.Node]) -> bool:
+            if len(nodes) != 1:
+                return False
+            node = nodes[0]
+            if "eager_input_vals" not in node.meta:
+                return False
+            return node.target in OrderedSet(
+                [
+                    torch.ops.higher_order.triton_kernel_wrapper_functional,
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ]
+            )
+
         with context:
             if trace_fn is None:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-            replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-            )
+
+            if should_propagate_eager_input_vals(self.nodes):
+                # Our strategy is:
+                # 1) trace out the graph with eager_input_vals (which have accurate eager-mode metadata)
+                # 2) trace out the graph with vals (which have the accurate Inductor metadata)
+                # 3) Propagate the eager_input_vals from the first graph to the second.
+                # 4) Use the second graph as the replacement graph.
+
+                # Construct a map of node -> FakeTensor val in eager_input_vals
+                node_to_val = {}
+
+                fake_args, fake_kwargs = self.nodes[0].meta["eager_input_vals"]
+                fake_kwargs = {**fake_kwargs}
+                match_args, match_kwargs = tuple(self.args), self.kwargs
+
+                def record(node: torch.fx.Node, val: Any) -> None:
+                    if isinstance(node, torch.fx.Node):
+                        node_to_val[node] = val
+
+                torch.utils._pytree.tree_map(
+                    record, (match_args, match_kwargs), (fake_args, fake_kwargs)
+                )
+                # map args to their FakeTensor val in eager_input_vals
+                example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
+
+                # first graph
+                graph_with_eager_vals = trace_fn(replacement_fn, example_vals)
+
+                # second graph
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement = trace_fn(graph_with_eager_vals, example_vals)
+
+                # propagate metadata from first graph to second
+                # NB: This assertion might not be true in general, but it is true for
+                # the two use cases we have
+                # (triton_kernel_wrapper_functional, auto_functionalized)
+                assert len(graph_with_eager_vals.graph.nodes) == len(
+                    replacement.graph.nodes
+                )
+                for old_node, new_node in zip(
+                    graph_with_eager_vals.graph.nodes, replacement.graph.nodes
+                ):
+                    if "eager_input_vals" in old_node.meta:
+                        new_node.meta["eager_input_vals"] = old_node.meta[
+                            "eager_input_vals"
+                        ]
+
+            else:
+                example_vals = torch.fx.map_arg(
+                    args,
+                    lambda arg: arg.meta["val"]
+                    if "val" in arg.meta
+                    else arg.meta["example_value"],
+                )
+                replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -477,7 +548,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())
+                fns.extend(getattr(fn, overload) for overload in fn.overloads())  # noqa: B909
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -949,7 +1020,7 @@ class PatternPrettyPrinter:
         self.memoized_objs_pp: dict[PatternExpr, str] = {}
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def run(obj: PatternExpr, output_name: str = "output") -> str:
         """
         Serializes obj to python code with obj written out to `output_name`
@@ -1073,9 +1144,9 @@ class ReplacementPatternEntry(PatternEntry):
             def run_node(self, node: torch.fx.Node) -> Any:
                 if node.op in ("placeholder", "output"):
                     return super().run_node(node)
+                target = node.target
+                args, kwargs = self.fetch_args_kwargs_from_env(node)
                 if node.op == "call_function":
-                    target = node.target
-                    args, kwargs = self.fetch_args_kwargs_from_env(node)
                     assert callable(target)
                     result = graph.call_function(target, args, kwargs)
                     _transfer_meta(
@@ -1083,12 +1154,43 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name="Interpreter_Replacer",
                     )
+                    # This function copy-pastes the replacement graph into
+                    # the graph. If the replacement graph had any eager_input_vals,
+                    # or val/tensor_meta, we propagate those over.
+                    if "eager_input_vals" in node.meta:
+                        result.meta["eager_input_vals"] = node.meta["eager_input_vals"]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
                             assert "tensor_meta" in node.meta
                             result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
+                if node.op == "get_attr":
+                    # If the replacement graph contains a HOP, the subgraphs of the HOP are "get_attr" nodes.
+                    # We need to fetch the subgraph of the HOP then register the subgraph to the replaced graph's root.
+                    from torch._higher_order_ops.utils import (
+                        unique_graph_name_with_root,
+                    )
+
+                    sub_gm = super().get_attr(target, args, kwargs)
+                    if not isinstance(sub_gm, torch.fx.GraphModule):
+                        raise NotImplementedError(
+                            f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}."
+                        )
+                    assert graph.owning_module is not None
+                    graph_name = None
+                    for n, mod in graph.owning_module.named_modules():
+                        if sub_gm is mod:
+                            graph_name = n
+                            break
+                    if graph_name is None:
+                        assert isinstance(target, str)
+                        _, graph_name = unique_graph_name_with_root(
+                            graph.owning_module, target
+                        )
+                        graph.owning_module.register_module(graph_name, sub_gm)
+                    return graph.get_attr(graph_name)
+
                 raise NotImplementedError(f"unhandled {node}")
 
         output_nodes = match.output_nodes()
@@ -1204,7 +1306,9 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError("can't handle")
+                        raise AssertionError(
+                            "Deleted index from getitem, did you erase the index and not properly replace it?"
+                        )
                     replace(user, new[idx])
                 graph.erase_node(old)
 
@@ -1330,7 +1434,9 @@ def register_replacement(
         )
 
         sym_args: list[torch.SymInt] = []
-        with torch._dynamo.utils.detect_fake_mode(args):
+        fake_mode = torch._dynamo.utils.detect_fake_mode(args)
+        assert fake_mode is not None
+        with fake_mode:
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
                     if grad and is_integer_dtype(args[i].dtype):
@@ -1472,10 +1578,10 @@ def register_replacement(
             normalize_args=normalize_args,
         )
         pattern.register(pass_dicts)
-        return pattern.pattern
+        return pattern.pattern  # type: ignore[return-value]
 
 
-_serialized_patterns = OrderedSet[str]()
+_serialized_patterns: OrderedSet[str] = OrderedSet()
 
 
 def _serialize_pattern(
@@ -1513,8 +1619,13 @@ def _serialize_pattern(
         pattern_matcher_imports = []
         for name in dir(torch._inductor.pattern_matcher):
             attr = getattr(torch._inductor.pattern_matcher, name)
-            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
-                pattern_matcher_imports.append(name)
+            try:
+                if isinstance(attr, type) and issubclass(
+                    attr, (PatternExpr, _TargetExpr)
+                ):
+                    pattern_matcher_imports.append(name)
+            except TypeError:
+                pass
 
         formatted_imports = ",\n   ".join(pattern_matcher_imports)
         formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"
@@ -1867,11 +1978,12 @@ class PatternMatcherPass:
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
+
+                    if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
                         entry.apply(m, graph, node)
-                        counters["inductor"]["pattern_matcher_count"] += 1
-                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+                        counters[backend]["pattern_matcher_count"] += 1
+                        counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self) -> None:
@@ -1996,7 +2108,7 @@ def fwd_only(
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with enable_python_dispatcher():
+    with enable_python_dispatcher(), preserve_node_meta():
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
@@ -2104,16 +2216,16 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
 def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     """Wrapper around lazy init functions in fx_passes/"""
 
-    @functools.lru_cache(None)
+    @functools.cache
     @functools.wraps(fn)
     def lazy_init() -> Any:
-        counters_ref = counters["inductor"].copy()
+        counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn()
 
         # clear view matches encountered during tracing
-        counters["inductor"] = counters_ref
+        counters[backend] = counters_ref
 
         return result
 
@@ -2144,7 +2256,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 
 # TODO: remove in follow up diff, used internally
-_seen_patterns = OrderedSet[str]()
+_seen_patterns: OrderedSet[str] = OrderedSet()
 
 
 def get_arg_value(

@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import gc
 import sys
 import unittest
 
@@ -10,6 +11,8 @@ from torch.testing._internal.common_utils import NoTest, run_tests, TEST_MPS, Te
 if not torch.accelerator.is_available():
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
+    # Skip because failing when run on cuda build with no GPU, see #150059 for example
+    sys.exit()
 
 TEST_MULTIACCELERATOR = torch.accelerator.device_count() > 1
 
@@ -79,6 +82,24 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.current_stream(other_device)
 
+    def test_device_context_manager(self):
+        prev_device = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.accelerator.current_device_index(), 0)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+
     def test_stream_context_manager(self):
         prev_stream = torch.accelerator.current_stream()
         with torch.Stream() as s:
@@ -109,6 +130,109 @@ class TestAccelerator(TestCase):
         torch.accelerator.synchronize()
         self.assertTrue(t_host.is_pinned())
         self.assertEqual(t_acc.cpu(), t_host)
+
+    def test_generic_event_behavior(self):
+        event1 = torch.Event(enable_timing=False)
+        event2 = torch.Event(enable_timing=False)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+        event1 = torch.Event(enable_timing=True)
+        event2 = torch.Event(enable_timing=True)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be recorded before calculating elapsed time",
+        ):
+            event1.elapsed_time(event2)
+
+        # check default value of enable_timing: False
+        event1 = torch.Event()
+        event2 = torch.Event()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    def test_memory_stats(self):
+        # Ensure that device allocator is initialized
+        acc = torch.accelerator.current_accelerator()
+        tmp = torch.randn(100, device=acc)
+        del tmp
+        gc.collect()
+        self.assertTrue(torch._C._accelerator_isAllocatorInitialized())
+        torch.accelerator.empty_cache()
+
+        pool_type = ["all", "small_pool", "large_pool"]
+        metric_type = ["peak", "current", "allocated", "freed"]
+        stats_type = [
+            "allocated_bytes",
+            "reserved_bytes",
+            "active_bytes",
+            "requested_bytes",
+        ]
+        mem_stats = torch.accelerator.memory_stats()
+        expected_stats = [
+            f"{st}.{pt}.{mt}"
+            for st in stats_type
+            for pt in pool_type
+            for mt in metric_type
+        ]
+        missing_stats = [stat for stat in expected_stats if stat not in mem_stats]
+        self.assertEqual(
+            len(missing_stats),
+            0,
+            f"Missing expected memory statistics: {missing_stats}",
+        )
+
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertGreaterEqual(prev_allocated, 0)
+        self.assertGreaterEqual(prev_reserved, 0)
+        self.assertGreater(prev_max_allocated, 0)
+        self.assertGreater(prev_max_reserved, 0)
+        tmp = torch.ones(256, device=acc)
+        self.assertGreater(torch.accelerator.memory_allocated(), prev_allocated)
+        self.assertGreaterEqual(torch.accelerator.memory_reserved(), prev_reserved)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.memory_allocated(), prev_allocated)
+        self.assertEqual(torch.accelerator.memory_reserved(), prev_reserved)
+        torch.accelerator.reset_accumulated_memory_stats()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device=acc)
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
 
 if __name__ == "__main__":

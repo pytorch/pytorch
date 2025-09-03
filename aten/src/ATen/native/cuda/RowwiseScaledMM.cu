@@ -8,6 +8,8 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -41,6 +43,9 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+#include <ATen/native/cuda/cutlass_common.cuh>
+
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
@@ -221,10 +226,11 @@ void f8f8bf16_rowwise_impl(
           typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
 
-  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      cute::Shape<int, int, int>,
-      CollectiveMainloop,
-      CollectiveEpilogue>;
+  using GemmKernel = at::cuda::detail::enable_3x_kernel_for_sm9x<
+      cutlass::gemm::kernel::GemmUniversal<
+          cute::Shape<int, int, int>,
+          CollectiveMainloop,
+          CollectiveEpilogue>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
@@ -298,8 +304,9 @@ void f8f8bf16_rowwise_impl(
 }
 
 
-// Cutlass rowwise kernel for SM100
+// Cutlass rowwise kernel for SM100/SM120
 template <
+    typename ArchTag,
     typename TileShape,
     typename ClusterShape,
     typename Transposed,
@@ -307,7 +314,7 @@ template <
     typename DtypeA,
     typename DtypeB,
     typename DtypeBias>
-void f8f8bf16_rowwise_impl_sm100(
+void f8f8bf16_rowwise_impl_sm100_sm120(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
     at::Tensor x_scale,
@@ -340,8 +347,6 @@ void f8f8bf16_rowwise_impl_sm100(
       cutlass::layout::RowMajor>;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  // Tag indicating the minimum SM that supports the intended feature
-  using ArchTag = cutlass::arch::Sm100;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
 
   // Implement rowwise scaling epilogue.
@@ -376,7 +381,7 @@ void f8f8bf16_rowwise_impl_sm100(
 
   using EpilogueScheduleType = cutlass::epilogue::collective::EpilogueScheduleAuto;
   using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-      cutlass::arch::Sm100, OperatorClass,
+      ArchTag, OperatorClass,
       TileShape, ClusterShape,
       cutlass::epilogue::collective::EpilogueTileAuto,
       DtypeAccum, DtypeEpilogue,
@@ -385,7 +390,13 @@ void f8f8bf16_rowwise_impl_sm100(
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
 
-  using MainloopScheduleType = cutlass::gemm::collective::KernelScheduleAuto;
+  // as of CUTLASS 3.9.2, on sm120, KernelScheduleAuto resolves to
+  // KernelTmaWarpSpecializedCooperativeSm120<2>>,
+  // which does not support TileShape.M < 128
+  using MainloopScheduleType = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm120> && cute::size<0>(TileShape{}) < 128,
+      cutlass::gemm::KernelTmaWarpSpecializedPingpong,
+      cutlass::gemm::collective::KernelScheduleAuto>;
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
@@ -402,10 +413,11 @@ void f8f8bf16_rowwise_impl_sm100(
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
           MainloopScheduleType>::CollectiveOp;
 
-  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      cute::Shape<int, int, int>,
-      CollectiveMainloop,
-      CollectiveEpilogue>;
+  using GemmKernel = at::cuda::detail::enable_3x_kernel_for_sm10_or_later<
+      cutlass::gemm::kernel::GemmUniversal<
+          cute::Shape<int, int, int>,
+          CollectiveMainloop,
+          CollectiveEpilogue>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
@@ -480,6 +492,9 @@ void f8f8bf16_rowwise_impl_sm100(
 
 // Cutlass rowwise kernel for SM89
 template <
+    typename ThreadblockShape,
+    typename WarpShape,
+    int NumStages,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -511,12 +526,7 @@ void f8f8bf16_rowwise_impl_sm89(
   using ThreadblockSwizzle =
       cutlass::gemm::threadblock::ThreadblockSwizzleStreamK;
 
-  // TODO: instead of fixing these values, implement logic alike to
-  // what is used for SM90+.
-  using ThreadblockShape = cutlass::gemm::GemmShape<64, 128, 64>;
-  using WarpShape = cutlass::gemm::GemmShape<32, 64, 64>;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
-  constexpr auto NumStages = 4;
 
   using Operator = std::conditional_t<
       FastAccum::value,
@@ -586,23 +596,23 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
-      DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
-      DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
-      DtypeOutput, LayoutOutput, AlignmentOutput,
-      DtypeAccum,
-      DtypeEpilogue,
-      OperatorClass,
-      ArchTag,
-      ThreadblockShape,
-      WarpShape,
-      InstructionShape,
-      EVTOutput,
-      ThreadblockSwizzle,
-      NumStages,
-      Operator,
-      NumEVTEpilogueStages
-  >::GemmKernel;
+  using EVTKernel = at::cuda::detail::enable_2x_kernel_for_sm89<
+      typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
+          DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
+          DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
+          DtypeOutput, LayoutOutput, AlignmentOutput,
+          DtypeAccum,
+          DtypeEpilogue,
+          OperatorClass,
+          ArchTag,
+          ThreadblockShape,
+          WarpShape,
+          InstructionShape,
+          EVTOutput,
+          ThreadblockSwizzle,
+          NumStages,
+          Operator,
+          NumEVTEpilogueStages>::GemmKernel>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<EVTKernel>;
 
@@ -695,7 +705,7 @@ void f8f8bf16_rowwise_impl_sm89(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <typename ClusterShape, typename... Types>
+template <typename ClusterShape, typename ArchTag, typename... Types>
 void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -712,9 +722,6 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
   }
 
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm10x = properties != nullptr && properties->major == 10;
-
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
@@ -723,33 +730,38 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
       smTarget / cute::size(ClusterShape{});
 
   if (use_smaller_tiles) {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+          /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+          ClusterShape,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }
 
 template <
     typename ClusterShape,
     typename Transposed,
+    typename ArchTag,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -765,6 +777,7 @@ void handle_transposition(
   if constexpr (!Transposed::value) {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeA,
@@ -773,6 +786,7 @@ void handle_transposition(
   } else {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeB,
@@ -881,6 +895,49 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
 }
 
 template <typename... Types>
+void dispatch_fp8_rowwise_kernel_sm89(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  int M = XQ.size(0);
+
+  if (M <= 16) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<16, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<16, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 32) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<32, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<16, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 64) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<64, 64, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<32, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (M <= 256) {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<64, 128, 128>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<64, 64, 64>,
+        /*NumStages=*/3,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    return f8f8bf16_rowwise_impl_sm89<
+        /*ThreadblockShape=*/cutlass::gemm::GemmShape<128, 128, 64>,
+        /*WarpShape=*/cutlass::gemm::GemmShape<64, 64, 64>,
+        /*NumStages=*/5,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
+template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -892,15 +949,29 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
-  if (!(sm89 || sm9x || sm10x)) {
+  const bool sm12x = properties != nullptr && properties->major == 12;
+  if (!(sm89 || sm9x || sm10x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm9x || sm10x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  if (sm9x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm90,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm10x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm100,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm12x) {
+    // sm12x doesn't have multicast feature
+    handle_transposition<
+      /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
+      /*Transposed=*/std::false_type,
+      /*ArchTag=*/cutlass::arch::Sm120,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
@@ -946,7 +1017,6 @@ void dispatch_fp8_rowwise_kernel_on_input_dtypes(
   }
 }
 
-template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -957,12 +1027,13 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor out) {
   if (bias.has_value() && bias->dtype() == at::kBFloat16) {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        cutlass::bfloat16_t,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+        cutlass::bfloat16_t>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        float,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+        float>
+        //Types...>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
 }
 

@@ -12,11 +12,6 @@
 # serve to show the default.
 
 import inspect
-
-# If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-#
 import os
 
 # import sys
@@ -29,6 +24,11 @@ from os import path
 import torch
 
 
+# If extensions (or modules to document with autodoc) are in another directory,
+# add these directories to sys.path here. If the directory is relative to the
+# documentation root, use os.path.abspath to make it absolute, like shown here.
+
+
 try:
     import torchvision  # noqa: F401
 except ImportError:
@@ -38,14 +38,14 @@ except ImportError:
 
 RELEASE = os.environ.get("RELEASE", False)
 
-import pytorch_sphinx_theme
+import pytorch_sphinx_theme2
+
+
+html_theme = "pytorch_sphinx_theme2"
+html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 
 # -- General configuration ------------------------------------------------
-
-# If your documentation needs a minimal Sphinx version, state it here.
-#
-needs_sphinx = "3.1.2"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -58,21 +58,37 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.coverage",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
-    "sphinxcontrib.katex",
     "sphinx.ext.autosectionlabel",
+    "sphinxcontrib.katex",
     "sphinx_copybutton",
-    "sphinx_panels",
-    "myst_parser",
+    "sphinx_design",
+    "myst_nb",
     "sphinx.ext.linkcode",
+    "sphinxcontrib.mermaid",
+    "sphinx_sitemap",
 ]
+
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "html_image",
+]
+
+html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
+]
+sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
-
-# Theme has bootstrap already
-panels_add_bootstrap_css = False
 
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
@@ -85,14 +101,111 @@ autosectionlabel_prefix_document = True
 
 katex_prerender = True
 
+# General information about the project.
+project = "PyTorch"
+copyright = "PyTorch Contributors"
+author = "PyTorch Contributors"
+torch_version = str(torch.__version__)
+
+# The version info for the project you're documenting, acts as replacement for
+# |version| and |release|, also used in various other places throughout the
+# built documents.
+#
+# The short X.Y version.
+# TODO: change to [:2] at v1.0
+version = "main (" + torch_version + " )"
+# The full version, including alpha/beta/rc tags.
+release = "main"
+
+# Customized html_title here.
+# Default is " ".join(project, release, "documentation") if not set
+if RELEASE:
+    # Turn 1.11.0aHASH into 1.11
+    # Note: the release candidates should no longer have the aHASH suffix, but in any
+    # case we wish to leave only major.minor, even for rc builds.
+    version = ".".join(torch_version.split(".")[:2])
+    html_title = " ".join((project, version, "documentation"))
+    release = version
+
+switcher_version = "main" if not RELEASE else version
+
+html_static_path = ["_static"]
+html_theme_options = {
+    "logo": {"text": "Home"},
+    "analytics_id": "GTM-T8XT4PS",
+    "canonical_url": "https://pytorch.org/docs/stable/",
+    "switcher": {
+        "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
+        "version_match": switcher_version,
+    },
+    "show_toc_level": 2,
+    "navigation_with_keys": False,
+    "external_links": [
+        {
+            "name": "Tutorials",
+            "url": "https://pytorch.org/tutorials/",
+        },
+    ],
+    "show_version_warning_banner": True,
+    "icon_links": [
+        {
+            "name": "X",
+            "url": "https://x.com/PyTorch",
+            "icon": "fa-brands fa-x-twitter",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/pytorch",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "PyTorch Forum",
+            "url": "https://discuss.pytorch.org/",
+            "icon": "fa-brands fa-discourse",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torch/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
+    "navbar_align": "left",
+    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_center": ["navbar-nav"],
+    "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
+    "header_links_before_dropdown": 6,
+    "navbar_persistent": [],
+    "use_edit_page_button": True,
+    "pytorch_project": "docs",
+}
+
+theme_variables = pytorch_sphinx_theme2.get_theme_variables()
+html_context = {
+    "github_url": "https://github.com",
+    "github_user": "pytorch",
+    "github_repo": "pytorch",
+    "feedback_url": "https://github.com/pytorch/pytorch",
+    "github_version": "main",
+    "pytorch_project": "docs",
+    "doc_path": "docs/source",
+    "theme_variables": theme_variables,
+    # library links are defined in
+    # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
+    "library_links": theme_variables.get("library_links", []),
+    "version": version,
+    "date_info": {
+        "paths_to_skip": ["generated/", "index"],
+    },
+}
+
 napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
-
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+]
 # TODO: document these and remove them from here.
-
-html_domain_indices = False
 
 coverage_ignore_functions = [
     # torch
@@ -150,8 +263,6 @@ coverage_ignore_functions = [
     "flags_frozen",
     # torch.distributed.algorithms.ddp_comm_hooks
     "register_ddp_comm_hook",
-    # torch.nn
-    "factory_kwargs",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
@@ -406,34 +517,8 @@ coverage_ignore_functions = [
     "graph_pool_handle",
     "is_current_stream_capturing",
     "make_graphed_callables",
-    # torch.cuda.memory
-    "caching_allocator_alloc",
-    "caching_allocator_delete",
-    "change_current_allocator",
-    "empty_cache",
-    "get_allocator_backend",
-    "get_per_process_memory_fraction",
-    "list_gpu_processes",
-    "max_memory_allocated",
-    "max_memory_cached",
-    "max_memory_reserved",
-    "mem_get_info",
-    "memory_allocated",
-    "memory_cached",
-    "memory_reserved",
-    "memory_snapshot",
-    "memory_stats",
-    "memory_stats_as_nested_dict",
-    "host_memory_stats",
-    "host_memory_stats_as_nested_dict",
-    "memory_summary",
-    "reset_accumulated_memory_stats",
-    "reset_accumulated_host_memory_stats",
-    "reset_max_memory_allocated",
-    "reset_max_memory_cached",
+    # torch.mtia.memory
     "reset_peak_memory_stats",
-    "reset_peak_host_memory_stats",
-    "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -651,27 +736,6 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.functional
-    "align_tensors",
-    "atleast_1d",
-    "atleast_2d",
-    "atleast_3d",
-    "block_diag",
-    "broadcast_shapes",
-    "broadcast_tensors",
-    "cartesian_prod",
-    "cdist",
-    "chain_matmul",
-    "einsum",
-    "lu",
-    "meshgrid",
-    "norm",
-    "split",
-    "stft",
-    "tensordot",
-    "unique",
-    "unique_consecutive",
-    "unravel_index",
     # torch.fx.annotate
     "annotate",
     # torch.fx.experimental.accelerator_partitioner
@@ -890,7 +954,6 @@ coverage_ignore_functions = [
     "to_node",
     "wrap_node",
     "sym_sqrt",
-    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -999,7 +1062,6 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
-    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
@@ -1161,37 +1223,37 @@ coverage_ignore_functions = [
     # torch.multiprocessing.spawn
     "start_processes",
     # torch.nn.functional
-    "adaptive_max_pool1d_with_indices",
-    "adaptive_max_pool2d_with_indices",
-    "adaptive_max_pool3d_with_indices",
-    "assert_int_or_pair",
-    "fractional_max_pool2d_with_indices",
-    "fractional_max_pool3d_with_indices",
-    "max_pool1d_with_indices",
-    "max_pool2d_with_indices",
-    "max_pool3d_with_indices",
+    "adaptive_max_pool1d_with_indices",  # documented as adaptive_max_pool1d
+    "adaptive_max_pool2d_with_indices",  # documented as adaptive_max_pool2d
+    "adaptive_max_pool3d_with_indices",  # documented as adaptive_max_pool3d
+    "assert_int_or_pair",  # looks unintentionally public
+    "fractional_max_pool2d_with_indices",  # documented as fractional_max_pool2d
+    "fractional_max_pool3d_with_indices",  # documented as fractional_max_pool3d
+    "max_pool1d_with_indices",  # documented as max_pool1d
+    "max_pool2d_with_indices",  # documented as max_pool2d
+    "max_pool3d_with_indices",  # documented as max_pool3d
     "multi_head_attention_forward",
     # torch.nn.grad
-    "conv1d_input",
-    "conv1d_weight",
-    "conv2d_input",
-    "conv2d_weight",
-    "conv3d_input",
-    "conv3d_weight",
+    "conv1d_input",  # legacy helper for gradient computation
+    "conv1d_weight",  # legacy helper for gradient computation
+    "conv2d_input",  # legacy helper for gradient computation
+    "conv2d_weight",  # legacy helper for gradient computation
+    "conv3d_input",  # legacy helper for gradient computation
+    "conv3d_weight",  # legacy helper for gradient computation
     # torch.nn.init
-    "constant",
-    "dirac",
-    "eye",
-    "kaiming_normal",
-    "kaiming_uniform",
-    "normal",
-    "orthogonal",
-    "sparse",
-    "uniform",
-    "xavier_normal",
-    "xavier_uniform",
+    "constant",  # deprecated
+    "dirac",  # deprecated
+    "eye",  # deprecated
+    "kaiming_normal",  # deprecated
+    "kaiming_uniform",  # deprecated
+    "normal",  # deprecated
+    "orthogonal",  # deprecated
+    "sparse",  # deprecated
+    "uniform",  # deprecated
+    "xavier_normal",  # deprecated
+    "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
-    "apply_permutation",
+    "apply_permutation",  # deprecated
     # torch.nn.modules.utils
     "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
@@ -1213,38 +1275,8 @@ coverage_ignore_functions = [
     "is_namedtuple",
     "scatter",
     "scatter_kwargs",
-    # torch.nn.parameter
-    "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
-    # torch.nn.utils.convert_parameters
-    "parameters_to_vector",
-    "vector_to_parameters",
-    # torch.nn.utils.fusion
-    "fuse_conv_bn_eval",
-    "fuse_conv_bn_weights",
-    "fuse_linear_bn_eval",
-    "fuse_linear_bn_weights",
-    # torch.nn.utils.init
-    "skip_init",
-    # torch.nn.utils.memory_format
-    "convert_conv2d_weight_memory_format",
-    # torch.nn.utils.parametrizations
-    "weight_norm",
-    # torch.nn.utils.parametrize
-    "transfer_parametrizations_and_params",
-    "type_before_parametrizations",
     # torch.nn.utils.rnn
-    "bind",
-    "invert_permutation",
-    # torch.nn.utils.spectral_norm
-    "remove_spectral_norm",
-    "spectral_norm",
-    # torch.nn.utils.weight_norm
-    "remove_weight_norm",
-    "weight_norm",
+    "bind",  # looks unintentionally public
     # torch.onnx.operators
     "reshape_from_tensor_shape",
     "shape_as_tensor",
@@ -1758,37 +1790,9 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
-    # torch.optim.swa_utils
-    "get_ema_avg_fn",
-    "get_ema_multi_avg_fn",
-    "get_swa_avg_fn",
-    "get_swa_multi_avg_fn",
-    "update_bn",
     # torch.overrides
     "enable_reentrant_dispatch",
     # torch.package.analyze.find_first_use_of_broken_modules
@@ -1833,8 +1837,6 @@ coverage_ignore_functions = [
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "conda_run",
     # torch.utils.benchmark.examples.op_benchmark
     "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
@@ -2176,7 +2178,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2510,6 +2511,9 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
     "FileSystemWriter",
+    # torch.distributed.checkpoint.hf_storage
+    "HuggingFaceStorageReader",
+    "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -2646,6 +2650,8 @@ coverage_ignore_classes = [
     "ExpRelaxedCategorical",
     # torch.distributions.utils
     "lazy_property",
+    # torch.export.unflatten
+    "UnflattenedModule",
     # torch.export.exported_program
     "ConstantArgument",
     "ExportedProgram",
@@ -2855,151 +2861,18 @@ coverage_ignore_classes = [
     # torch.nn.cpp
     "ModuleWrapper",
     "OrderedDictWrapper",
-    # torch.nn.modules.activation
-    "CELU",
-    "ELU",
-    "GELU",
-    "GLU",
-    "Hardshrink",
-    "Hardsigmoid",
-    "Hardswish",
-    "Hardtanh",
-    "LeakyReLU",
-    "LogSigmoid",
-    "LogSoftmax",
-    "Mish",
-    "MultiheadAttention",
-    "PReLU",
-    "RReLU",
-    "ReLU",
-    "ReLU6",
-    "SELU",
-    "SiLU",
-    "Sigmoid",
-    "Softmax",
-    "Softmax2d",
-    "Softmin",
-    "Softplus",
-    "Softshrink",
-    "Softsign",
-    "Tanh",
-    "Tanhshrink",
-    "Threshold",
-    # torch.nn.modules.adaptive
-    "AdaptiveLogSoftmaxWithLoss",
-    # torch.nn.modules.batchnorm
-    "SyncBatchNorm",
-    # torch.nn.modules.channelshuffle
-    "ChannelShuffle",
     # torch.nn.modules.container
-    "Container",
-    "ModuleList",
-    "ParameterList",
-    "Sequential",
-    # torch.nn.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    # torch.nn.modules.distance
-    "CosineSimilarity",
-    "PairwiseDistance",
-    # torch.nn.modules.dropout
-    "AlphaDropout",
-    "Dropout",
-    "Dropout1d",
-    "Dropout2d",
-    "Dropout3d",
-    "FeatureAlphaDropout",
-    # torch.nn.modules.flatten
-    "Flatten",
-    "Unflatten",
-    # torch.nn.modules.fold
-    "Fold",
-    "Unfold",
+    "Container",  # deprecated
     # torch.nn.modules.linear
-    "Bilinear",
-    "Identity",
-    "LazyLinear",
-    "Linear",
     "NonDynamicallyQuantizableLinear",
-    # torch.nn.modules.loss
-    "BCELoss",
-    "BCEWithLogitsLoss",
-    "CTCLoss",
-    "CosineEmbeddingLoss",
-    "CrossEntropyLoss",
-    "GaussianNLLLoss",
-    "HingeEmbeddingLoss",
-    "HuberLoss",
-    "KLDivLoss",
-    "L1Loss",
-    "MSELoss",
-    "MarginRankingLoss",
-    "MultiLabelMarginLoss",
-    "MultiLabelSoftMarginLoss",
-    "MultiMarginLoss",
-    "NLLLoss",
-    "NLLLoss2d",
-    "PoissonNLLLoss",
-    "SmoothL1Loss",
-    "SoftMarginLoss",
-    "TripletMarginLoss",
-    "TripletMarginWithDistanceLoss",
     # torch.nn.modules.module
+    # TODO: causes multiple sphinx warnings
+    # WARNING: more than one target found for cross-reference 'Module'
     "Module",
+    # torch.nn.modules.loss
+    "NLLLoss2d",  # deprecated
     # torch.nn.modules.normalization
     "CrossMapLRN2d",
-    "GroupNorm",
-    "LayerNorm",
-    "LocalResponseNorm",
-    # torch.nn.modules.padding
-    "CircularPad1d",
-    "CircularPad2d",
-    "CircularPad3d",
-    "ZeroPad1d",
-    "ZeroPad2d",
-    "ZeroPad3d",
-    # torch.nn.modules.pixelshuffle
-    "PixelShuffle",
-    "PixelUnshuffle",
-    # torch.nn.modules.pooling
-    "AdaptiveAvgPool1d",
-    "AdaptiveAvgPool2d",
-    "AdaptiveAvgPool3d",
-    "AdaptiveMaxPool1d",
-    "AdaptiveMaxPool2d",
-    "AdaptiveMaxPool3d",
-    "AvgPool1d",
-    "AvgPool2d",
-    "AvgPool3d",
-    "FractionalMaxPool2d",
-    "FractionalMaxPool3d",
-    "LPPool1d",
-    "LPPool2d",
-    "LPPool3d",
-    "MaxPool1d",
-    "MaxPool2d",
-    "MaxPool3d",
-    "MaxUnpool1d",
-    "MaxUnpool2d",
-    "MaxUnpool3d",
-    # torch.nn.modules.rnn
-    "GRU",
-    "GRUCell",
-    "LSTM",
-    "LSTMCell",
-    "RNN",
-    "RNNBase",
-    "RNNCell",
-    "RNNCellBase",
-    # torch.nn.modules.sparse
-    "Embedding",
-    "EmbeddingBag",
-    # torch.nn.modules.upsampling
-    "Upsample",
     # torch.nn.parallel.data_parallel
     "DataParallel",
     # torch.nn.parallel.distributed
@@ -3030,54 +2903,8 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
-    # torch.optim.adamax
-    "Adamax",
-    # torch.optim.adamw
-    "AdamW",
-    # torch.optim.asgd
-    "ASGD",
-    # torch.optim.lbfgs
-    "LBFGS",
-    # torch.optim.lr_scheduler
-    "ChainedScheduler",
-    "ConstantLR",
-    "CosineAnnealingLR",
-    "CosineAnnealingWarmRestarts",
-    "CyclicLR",
-    "ExponentialLR",
-    "LRScheduler",
-    "LambdaLR",
-    "LinearLR",
-    "MultiStepLR",
-    "MultiplicativeLR",
-    "OneCycleLR",
-    "PolynomialLR",
-    "ReduceLROnPlateau",
-    "SequentialLR",
-    "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
@@ -3177,8 +3004,6 @@ coverage_ignore_classes = [
     "TorchVersion",
     # torch.types
     "SymInt",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "SubEnvSpec",
     # torch.utils.benchmark.examples.compare
     "FauxTorch",
     # torch.utils.benchmark.examples.spectral_ops_fuzz_test
@@ -3364,33 +3189,6 @@ source_suffix = ".rst"
 # The master toctree document.
 master_doc = "index"
 
-# General information about the project.
-project = "PyTorch"
-copyright = "PyTorch Contributors"
-author = "PyTorch Contributors"
-torch_version = str(torch.__version__)
-
-# The version info for the project you're documenting, acts as replacement for
-# |version| and |release|, also used in various other places throughout the
-# built documents.
-#
-# The short X.Y version.
-# TODO: change to [:2] at v1.0
-version = "main (" + torch_version + " )"
-# The full version, including alpha/beta/rc tags.
-# TODO: verify this works as expected
-release = "main"
-
-# Customized html_title here.
-# Default is " ".join(project, release, "documentation") if not set
-if RELEASE:
-    # Turn 1.11.0aHASH into 1.11
-    # Note: the release candidates should no longer have the aHASH suffix, but in any
-    # case we wish to leave only major.minor, even for rc builds.
-    version = ".".join(torch_version.split(".")[:2])
-    html_title = " ".join((project, version, "documentation"))
-    release = version
-
 
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
@@ -3446,8 +3244,6 @@ exclude_patterns = []
 pygments_style = "sphinx"
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
-todo_include_todos = True
-
 # Disable docstring inheritance
 autodoc_inherit_docstrings = False
 
@@ -3497,33 +3293,22 @@ autodoc_docstring_signature = True
 #
 #
 
-html_theme = "pytorch_sphinx_theme"
-html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 
-html_theme_options = {
-    "pytorch_project": "docs",
-    "canonical_url": "https://pytorch.org/docs/stable/",
-    "collapse_navigation": False,
-    "display_version": True,
-    "logo_only": True,
-    "analytics_id": "GTM-T8XT4PS",
-}
-
-html_logo = "_static/img/pytorch-logo-dark-unstable.png"
-if RELEASE:
-    html_logo = "_static/img/pytorch-logo-dark.svg"
-
-
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
 
-html_css_files = ["css/jit.css", "css/custom.css"]
+html_css_files = [
+    "css/jit.css",
+    "css/custom.css",
+    "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
+]
+
+html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
@@ -3545,13 +3330,6 @@ def coverage_post_process(app, exception):
     # Only run this test for the coverage build
     if not isinstance(app.builder, CoverageBuilder):
         return
-
-    if not torch.distributed.is_available():
-        raise RuntimeError(
-            "The coverage tool cannot run with a version "
-            "of PyTorch that was built with USE_DISTRIBUTED=0 "
-            "as this module's API changes."
-        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
@@ -3626,7 +3404,6 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines (List[str]): the lines of the docstring, see above
 
     References:
-        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
     """
     import re
@@ -3647,23 +3424,17 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines.append("")
 
 
-# Called automatically by Sphinx, making this `conf.py` an "extension".
 def setup(app):
-    # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
-    # and can be moved outside of this function (and the setup(app) function
-    # can be deleted).
-    html_css_files = [
-        "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css"
-    ]
-
-    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
-    # `add_stylesheet` (deprecated in 1.8).
-    add_css = getattr(app, "add_css_file", app.add_stylesheet)
-    for css_file in html_css_files:
-        add_css(css_file)
-
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
+    app.connect("html-page-context", hide_edit_button_for_pages)
+    app.config.add_last_updated = True
+    return {"version": "0.1", "parallel_read_safe": True}
+
+
+def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
+    if pagename.startswith("generated/"):
+        context["theme_use_edit_page_button"] = False
 
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and
@@ -3711,24 +3482,32 @@ htmlhelp_basename = "PyTorchdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
+latex_engine = "lualatex"
+latex_show_urls = "footnote"
+
 latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
+    "papersize": "letterpaper",
+    "pointsize": "10pt",
+    "tableofcontents": r"\pdfbookmark[0]{Contents}{toc}\tableofcontents",
+    "preamble": r"""
+       \usepackage{tocloft}
+       \setcounter{tocdepth}{3}
+       \setcounter{secnumdepth}{3}
+       % Fix table column widths
+       \renewenvironment{tabulary}{\begin{longtable}{p{0.3\linewidth}p{0.7\linewidth}}}{\end{longtable}}
+
+       % Ensure tables don't overflow
+       \AtBeginEnvironment{tabular}{\sloppy}
+    """,
+    "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
+    "extraclassoptions": "oneside",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
+
+
 latex_documents = [
     (
         master_doc,
@@ -3738,6 +3517,7 @@ latex_documents = [
         "manual",
     ),
 ]
+latex_use_xindy = False
 
 
 # -- Options for manual page output ---------------------------------------

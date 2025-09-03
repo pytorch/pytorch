@@ -55,7 +55,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
     unMarkDynamoStrictTest,
-    xfailIfS390X,
 )
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
@@ -399,6 +398,38 @@ skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
 }
+
+bool_unsupported_ordered_ops = {
+    "topk",
+    "argmin",
+    "ceil",
+    "argmax",
+    "floor",
+}
+bool_ordered_op_db = tuple(
+    filter(lambda op: op.name in bool_unsupported_ordered_ops, op_db)
+)
+
+complex_unsupported_ordered_ops = {
+    "sort",
+    "topk",
+    "lt",
+    "argmin",
+    "le",
+    "ge",
+    "amax",
+    "maximum",
+    "minimum",
+    "clamp",
+    "amin",
+    "gt",
+    "ceil",
+    "argmax",
+    "floor",
+}
+complex_ordered_op_db = tuple(
+    filter(lambda op: op.name in complex_unsupported_ordered_ops, op_db)
+)
 
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
@@ -1031,12 +1062,6 @@ class TestOperators(TestCase):
                 xfail(
                     "unbind_copy"
                 ),  # Batching rule not implemented for aten::unbind_copy.int.
-                decorate("linalg.tensorsolve", decorator=xfailIfS390X),
-                decorate("nn.functional.max_pool1d", decorator=xfailIfS390X),
-                decorate("nn.functional.max_unpool2d", decorator=xfailIfS390X),
-                decorate(
-                    "nn.functional.multilabel_margin_loss", decorator=xfailIfS390X
-                ),
             }
         ),
     )
@@ -2161,9 +2186,9 @@ class TestOperators(TestCase):
                 else:
                     weight = torch.randn(weight_shape, device=device)
                 target = torch.randint(0, C, target_shape, device=device)
-                target[
-                    0
-                ] = 1  # since we're ignoring index 0, at least one element must be non-zero
+                target[0] = (
+                    1  # since we're ignoring index 0, at least one element must be non-zero
+                )
 
                 fn = functools.partial(
                     torch.nn.functional.nll_loss, target=target, weight=weight, **kwargs
@@ -2974,6 +2999,39 @@ class TestOperators(TestCase):
             expected_fn(torch.ones_like(expected_o)),
             actual_fn(torch.ones_like(actual_o)),
         )
+
+    @ops(bool_ordered_op_db, dtypes=[torch.bool])
+    def test_ordered_bool_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
+
+    @ops(
+        complex_ordered_op_db,
+        dtypes=[torch.complex32, torch.complex64, torch.complex128],
+    )
+    def test_ordered_complex_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
 
 
 only_for = ("cpu", "cuda")

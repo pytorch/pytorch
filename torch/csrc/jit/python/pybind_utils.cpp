@@ -59,7 +59,7 @@ void clear_registered_instances(void* ptr) {
 // SymIntList is in fact only ints, and if so, you called this with T=int64_t.
 // This precondition is NOT checked at runtime.
 template <typename T>
-IValue listToIValue(py::handle obj) {
+static IValue listToIValue(py::handle obj) {
   c10::List<T> rs;
   for (auto it = obj.begin(); it != obj.end(); it++) {
     auto elm = *it;
@@ -90,7 +90,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
         } else if (THPUtils_checkLong(obj.ptr())) {
-          scalar = at::Scalar(THPUtils_unpackLong(obj.ptr()));
+          scalar = THPUtils_unpackInteger<at::Scalar>(obj.ptr());
         } else if (PyComplex_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
@@ -313,7 +313,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint(elm)) {
+            if (torch::is_symint(elm) || THPVariable_Check(elm.ptr())) {
               is_symbolic = true;
               break;
             }
@@ -468,8 +468,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch._jit_internal")
-                                     .attr("_qualified_name")(obj.get_type());
+        py::str qualified_name =
+            py::module::import("torch._jit_internal")
+                .attr("_qualified_name")(py::type::handle_of(obj));
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
@@ -511,7 +512,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       if (py::isinstance<py::bool_>(obj)) {
         return py::cast<bool>(obj);
       } else if (py::isinstance<py::int_>(obj)) {
-        return py::cast<int64_t>(obj);
+        return THPUtils_unpackInteger<IValue>(obj.ptr());
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       } else if (PyComplex_CheckExact(obj.ptr())) {
@@ -597,6 +598,8 @@ py::object toPyObject(IValue ivalue) {
           return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
           return py::cast(*tensor.const_data_ptr<int64_t>());
+        case at::ScalarType::UInt64:
+          return py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
           return py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
@@ -641,7 +644,11 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(t);
+#else
+    return t;
+#endif
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
@@ -676,7 +683,11 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
       return std::move(t);
+#else
+      return t;
+#endif
     }
   } else if (ivalue.isDevice()) {
     return py::cast(std::move(ivalue).toDevice());
@@ -689,7 +700,11 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(py_dict);
+#else
+    return py_dict;
+#endif
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =
@@ -750,6 +765,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toSymFloat());
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
+  } else if (ivalue.isUnsigned()) {
+    return py::cast(std::move(ivalue).toUInt());
   } else {
     TORCH_CHECK(
         false,
@@ -796,7 +813,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 }
 
 // This function is used to check if the schema is valid for the given args and
-// kwargs. It checks script object by checking wether the FakeScriptObject is
+// kwargs. It checks script object by checking whether the FakeScriptObject is
 // an instance of the corresponding fake class for the actual class used in
 // schema.
 bool checkSchemaAllowFakeScriptObject(

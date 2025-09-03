@@ -827,7 +827,7 @@ class TestFuseFx(QuantizationTestCase):
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
             if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
-                self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
+                self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
         """This test tests that the node matched by MatchAllNode will be regared as an input
@@ -6648,7 +6648,7 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.w = nn.Parameter(torch.randn(input_dim, output_dim))
                 self.b = nn.Parameter(torch.randn(input_dim))
 
@@ -6661,11 +6661,12 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, hidden_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.submodule_1 = SubModule(hidden_dim, input_dim)
                 setattr(self, 'submodule|2', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule/3', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule:4', SubModule(hidden_dim, hidden_dim))
+                setattr(self, 'submodule: 5', SubModule(hidden_dim, hidden_dim))
                 self._w = nn.Parameter(torch.randn(output_dim, hidden_dim))
 
             def forward(self, x):
@@ -6673,8 +6674,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 x2 = getattr(self, 'submodule|2')(x1)
                 x3 = getattr(self, 'submodule/3')(x2)
                 x4 = getattr(self, 'submodule:4')(x3)
-                x5 = F.linear(x4, self._w)
-                return x5
+                x5 = getattr(self, 'submodule: 5')(x4)
+                x6 = F.linear(x5, self._w)
+                return x6
 
         input_dim = 10
         hidden_dim = 20
@@ -6688,7 +6690,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepared_model(example_inputs)
         quantized_model = convert_fx(prepared_model, keep_original_weights=True)
 
-        self.assertTrue(len(quantized_model.original_weights_lookup) == 5)
+        self.assertTrue(len(quantized_model.original_weights_lookup) == 6)
         self.assertTrue("submodule_1_packed_weight_0" in quantized_model.original_weights_lookup)
         torch.testing.assert_close(
             quantized_model.original_weights_lookup["submodule_1_packed_weight_0"][0],
@@ -6724,6 +6726,15 @@ class TestQuantizeFx(QuantizationTestCase):
         torch.testing.assert_close(
             quantized_model.original_weights_lookup["submodule_4_packed_weight_0"][1],
             getattr(model, "submodule:4").b
+        )
+        self.assertTrue("submodule_5_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][0],
+            getattr(model, "submodule: 5").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][1],
+            getattr(model, "submodule: 5").b
         )
         self.assertTrue("_packed_weight_0" in quantized_model.original_weights_lookup)
         torch.testing.assert_close(

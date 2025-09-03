@@ -53,8 +53,8 @@ std::tuple<Tensor,Tensor> weight_norm_cpu(
     int64_t dim) {
   auto w = at::empty_like(v, at::MemoryFormat::Contiguous);
 
-  // align with cuda behavior, keep norm in 'Float' when g is 'BFloat16'
-  const auto dtype = g.scalar_type() == at::ScalarType::BFloat16 ?
+  // align with cuda behavior, keep norm in 'Float' when g is 'BFloat16'/'Half'
+  const auto dtype = (g.scalar_type() == at::ScalarType::BFloat16 || g.scalar_type() == at::ScalarType::Half) ?
       at::ScalarType::Float : g.scalar_type();
   auto norm = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(dtype));
   weight_norm_stub(kCPU, w, norm, v, g, dim);
@@ -93,10 +93,7 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  auto has_half_dtype = v.scalar_type() == at::ScalarType::Half
-    || g.scalar_type() == at::ScalarType::Half;
-
-  bool can_use_fused = !has_half_dtype && ((dim == 0) || (dim == v.dim() - 1));
+  bool can_use_fused = (dim == 0) || (dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through

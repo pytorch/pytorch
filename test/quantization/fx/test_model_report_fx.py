@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     override_quantized_engine,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 """
@@ -1944,7 +1945,7 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     example_input = example_input.to(torch.float)
     q_config_mapping = torch.ao.quantization.get_default_qconfig_mapping()
 
-    # if they passed in fusion paramter, make sure to test that
+    # if they passed in fusion parameter, make sure to test that
     if fused:
         model = torch.ao.quantization.fuse_modules(model, model.get_fusion_modules())
 
@@ -1956,3 +1957,6 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
     return (prepared_for_callibrate_model, model_report)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

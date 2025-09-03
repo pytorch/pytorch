@@ -39,6 +39,10 @@ def add(x):
     return x + 1
 
 
+def break_it(x):
+    return x.sum().item()
+
+
 def create_dummy_module_and_function():
     module = types.ModuleType("dummy_module")
     module.__spec__ = importlib.machinery.ModuleSpec(

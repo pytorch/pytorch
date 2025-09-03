@@ -13,11 +13,22 @@ The metrics system enables comprehensive monitoring and analysis of both compila
 execution performance.
 """
 
+from __future__ import annotations
+
 import heapq
+import logging
 import time
-from collections.abc import Iterator
-from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
+from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing_extensions import Self, TypeAlias
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+from torch.utils._traceback import CapturedTraceback
+
+
+log = logging.getLogger(__name__)
 
 
 class TopN:
@@ -59,8 +70,9 @@ class MetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
+        self._edits: list[tuple[CapturedTraceback, set[str]]] = []
 
-    def __enter__(self) -> "MetricsContext":
+    def __enter__(self) -> Self:
         """
         Initialize metrics recording.
         """
@@ -84,10 +96,13 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            end_time_ns = time.time_ns()
-            self._on_exit(
-                self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
-            )
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
+                )
+            except Exception:
+                log.exception("Unexpected exception logging compilation metrics")
 
     def in_progress(self) -> bool:
         """
@@ -105,6 +120,13 @@ class MetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
+    def _render_edits(self, pred: set[str]) -> str:
+        return "\n\n" + "\n\n".join(
+            "Previous Traceback:\n" + "".join(e.format())
+            for e, k in self._edits
+            if k & pred
+        )
+
     def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
         """
         Set a metric to a given value. Raises if the metric has been assigned previously
@@ -114,8 +136,11 @@ class MetricsContext:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
         if metric in self._metrics and not overwrite:
             raise RuntimeError(
-                f"Metric '{metric}' has already been set in the current context"
+                self._render_edits({metric})
+                + f"\n\nRuntimeError: Metric '{metric}' has already been set in the current context "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), {metric}))
         self._metrics[metric] = value
 
     def set_key_value(self, metric: str, key: str, value: Any) -> None:
@@ -143,8 +168,11 @@ class MetricsContext:
         existing = self._metrics.keys() & values.keys()
         if existing and not overwrite:
             raise RuntimeError(
-                f"Metric(s) {existing} have already been set in the current context"
+                self._render_edits(set(values.keys()))
+                + f"\n\nRuntimeError: Metric(s) {existing} have already been set in the current context.  "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), set(values.keys())))
         self._metrics.update(values)
 
     def update_outer(self, values: dict[str, Any]) -> None:
@@ -189,7 +217,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]]
+        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
     ) -> None:
         """
         Increment a metric by a given amount.
@@ -211,6 +239,12 @@ class RuntimeMetricsContext:
         Call the on_exit function with the metrics gathered so far and reset.
         """
         if self._metrics:
-            end_time_ns = time.time_ns()
-            self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
-            self._metrics = {}
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, None, None
+                )
+            except Exception:
+                log.exception("Unexpected exception logging runtime metrics")
+            finally:
+                self._metrics = {}

@@ -31,52 +31,70 @@ def build_ArmComputeLibrary() -> None:
         "build=native",
     ]
     acl_install_dir = "/acl"
-    acl_checkout_dir = "ComputeLibrary"
-    os.makedirs(acl_install_dir)
-    check_call(
-        [
-            "git",
-            "clone",
-            "https://github.com/ARM-software/ComputeLibrary.git",
-            "-b",
-            "v25.02",
-            "--depth",
-            "1",
-            "--shallow-submodules",
-        ]
-    )
+    acl_checkout_dir = os.getenv("ACL_SOURCE_DIR", "ComputeLibrary")
+    if os.path.isdir(acl_install_dir):
+        shutil.rmtree(acl_install_dir)
+    if not os.path.isdir(acl_checkout_dir) or not len(os.listdir(acl_checkout_dir)):
+        check_call(
+            [
+                "git",
+                "clone",
+                "https://github.com/ARM-software/ComputeLibrary.git",
+                "-b",
+                "v25.02",
+                "--depth",
+                "1",
+                "--shallow-submodules",
+            ]
+        )
 
     check_call(
-        ["scons", "Werror=1", "-j8", f"build_dir=/{acl_install_dir}/build"]
-        + acl_build_flags,
+        ["scons", "Werror=1", f"-j{os.cpu_count()}"] + acl_build_flags,
         cwd=acl_checkout_dir,
     )
-    for d in ["arm_compute", "include", "utils", "support", "src"]:
+    for d in ["arm_compute", "include", "utils", "support", "src", "build"]:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
 
-def update_wheel(wheel_path, desired_cuda) -> None:
+def replace_tag(filename) -> None:
+    with open(filename) as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith("Tag:"):
+            lines[i] = line.replace("-linux_", "-manylinux_2_28_")
+            print(f"Updated tag from {line} to {lines[i]}")
+            break
+
+    with open(filename, "w") as f:
+        f.writelines(lines)
+
+
+def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     """
-    Update the cuda wheel libraries
+    Package the cuda wheel libraries
     """
     folder = os.path.dirname(wheel_path)
     wheelname = os.path.basename(wheel_path)
     os.mkdir(f"{folder}/tmp")
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
-    libs_to_copy = [
-        "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
+    # Common libraries for all CUDA versions
+    common_libs = [
+        # Non-NVIDIA system libraries
+        "/lib64/libgomp.so.1",
+        "/usr/lib64/libgfortran.so.5",
+        "/acl/build/libarm_compute.so",
+        "/acl/build/libarm_compute_graph.so",
+        # Common CUDA libraries (same for all versions)
+        "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
+        "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
+        "/usr/local/lib/libnvpl_lapack_core.so.0",
+        "/usr/local/lib/libnvpl_blas_core.so.0",
+        "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
         "/usr/local/cuda/lib64/libcudnn.so.9",
-        "/usr/local/cuda/lib64/libcublas.so.12",
-        "/usr/local/cuda/lib64/libcublasLt.so.12",
-        "/usr/local/cuda/lib64/libcudart.so.12",
-        "/usr/local/cuda/lib64/libcufft.so.11",
-        "/usr/local/cuda/lib64/libcusparse.so.12",
         "/usr/local/cuda/lib64/libcusparseLt.so.0",
-        "/usr/local/cuda/lib64/libcusolver.so.11",
         "/usr/local/cuda/lib64/libcurand.so.10",
-        "/usr/local/cuda/lib64/libnvToolsExt.so.1",
-        "/usr/local/cuda/lib64/libnvJitLink.so.12",
-        "/usr/local/cuda/lib64/libnvrtc.so.12",
+        "/usr/local/cuda/lib64/libnccl.so.2",
+        "/usr/local/cuda/lib64/libnvshmem_host.so.3",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",
@@ -84,34 +102,42 @@ def update_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
-        "/lib64/libgomp.so.1",
-        "/usr/lib64/libgfortran.so.5",
-        "/acl/build/libarm_compute.so",
-        "/acl/build/libarm_compute_graph.so",
+        "/usr/local/cuda/lib64/libcufile.so.0",
+        "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+        "/usr/local/cuda/lib64/libcusparse.so.12",
     ]
-    if enable_cuda:
-        libs_to_copy += [
-            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
-            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
-            "/usr/local/lib/libnvpl_lapack_core.so.0",
-            "/usr/local/lib/libnvpl_blas_core.so.0",
+
+    # CUDA version-specific libraries
+    if "130" in desired_cuda:
+        version_specific_libs = [
+            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13",
+            "/usr/local/cuda/lib64/libcublas.so.13",
+            "/usr/local/cuda/lib64/libcublasLt.so.13",
+            "/usr/local/cuda/lib64/libcudart.so.13",
+            "/usr/local/cuda/lib64/libcufft.so.12",
+            "/usr/local/cuda/lib64/libcusolver.so.12",
+            "/usr/local/cuda/lib64/libnvJitLink.so.13",
+            "/usr/local/cuda/lib64/libnvrtc.so.13",
+            "/usr/local/cuda/lib64/libnvrtc-builtins.so.13.0",
         ]
-        if "126" in desired_cuda:
-            libs_to_copy += [
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
-                "/usr/local/cuda/lib64/libcufile.so.0",
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
-            ]
-        elif "128" in desired_cuda:
-            libs_to_copy += [
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
-                "/usr/local/cuda/lib64/libcufile.so.0",
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
-            ]
-    else:
-        libs_to_copy += [
-            "/opt/OpenBLAS/lib/libopenblas.so.0",
+    elif "12" in desired_cuda:
+        # Get the last character for libnvrtc-builtins version (e.g., "129" -> "9")
+        minor_version = desired_cuda[-1]
+        version_specific_libs = [
+            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
+            "/usr/local/cuda/lib64/libcublas.so.12",
+            "/usr/local/cuda/lib64/libcublasLt.so.12",
+            "/usr/local/cuda/lib64/libcudart.so.12",
+            "/usr/local/cuda/lib64/libcufft.so.11",
+            "/usr/local/cuda/lib64/libcusolver.so.11",
+            "/usr/local/cuda/lib64/libnvJitLink.so.12",
+            "/usr/local/cuda/lib64/libnvrtc.so.12",
+            f"/usr/local/cuda/lib64/libnvrtc-builtins.so.12.{minor_version}",
         ]
+
+    # Combine all libraries
+    libs_to_copy = common_libs + version_specific_libs
+
     # Copy libraries to unzipped_folder/a/lib
     for lib_path in libs_to_copy:
         lib_name = os.path.basename(lib_path)
@@ -120,6 +146,13 @@ def update_wheel(wheel_path, desired_cuda) -> None:
             f"cd {folder}/tmp/torch/lib/; "
             f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
         )
+
+    # Make sure the wheel is tagged with manylinux_2_28
+    for f in os.scandir(f"{folder}/tmp/"):
+        if f.is_dir() and f.name.endswith(".dist-info"):
+            replace_tag(f"{f.path}/WHEEL")
+            break
+
     os.mkdir(f"{folder}/cuda_wheel")
     os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
     shutil.move(
@@ -136,6 +169,9 @@ def complete_wheel(folder: str) -> str:
     """
     wheel_name = list_dir(f"/{folder}/dist")[0]
 
+    # Please note for cuda we don't run auditwheel since we use custom script to package
+    # the cuda dependencies to the wheel file using update_wheel() method.
+    # However we need to make sure filename reflects the correct Manylinux platform.
     if "pytorch" in folder and not enable_cuda:
         print("Repairing Wheel with AuditWheel")
         check_call(["auditwheel", "repair", f"dist/{wheel_name}"], cwd=folder)
@@ -147,7 +183,14 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/dist/{repaired_wheel_name}",
         )
     else:
-        repaired_wheel_name = wheel_name
+        repaired_wheel_name = wheel_name.replace(
+            "linux_aarch64", "manylinux_2_28_aarch64"
+        )
+        print(f"Renaming {wheel_name} wheel to {repaired_wheel_name}")
+        os.rename(
+            f"/{folder}/dist/{wheel_name}",
+            f"/{folder}/dist/{repaired_wheel_name}",
+        )
 
     print(f"Copying {repaired_wheel_name} to artifacts")
     shutil.copy2(
@@ -184,8 +227,10 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
-    build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
-    os.system("cd /pytorch; python setup.py clean")
+    build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
+    # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
+    if enable_cuda:
+        build_vars += "MAX_JOBS=5 "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")
@@ -232,6 +277,6 @@ if __name__ == "__main__":
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")
         wheel_path = f"/pytorch/dist/{filename[0]}"
-        update_wheel(wheel_path, desired_cuda)
+        package_cuda_wheel(wheel_path, desired_cuda)
     pytorch_wheel_name = complete_wheel("/pytorch/")
     print(f"Build Complete. Created {pytorch_wheel_name}..")

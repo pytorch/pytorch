@@ -24,9 +24,6 @@ Supported features:
 
 See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
 for more information on the design.
-
-To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses
-in torch/_dynamo/config.py
 """
 
 import collections
@@ -41,13 +38,13 @@ import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch.overrides import (
     _get_overloaded_args,
-    BaseTorchFunctionMode,
     get_default_nowrap_functions,
     TorchFunctionMode,
 )
 from torch.utils._device import DeviceContext
 
-from ..exc import unimplemented
+from .. import graph_break_hints
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
@@ -62,6 +59,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -69,6 +67,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -124,73 +123,6 @@ un_ops = [
     operator.length_hint,
 ]
 
-BUILTIN_TO_TENSOR_FN_MAP = {}
-
-# These functions represent the r* versions of the above ops
-# Basically, if __add__(1, Tensor) is called, it is translated
-# to __radd__(Tensor, 1).
-# In the builtin var, we check if there is a tensor in the first args position,
-# if not, we swap the args and use the r* version of the op.
-BUILTIN_TO_TENSOR_RFN_MAP = {}
-
-
-def populate_builtin_to_tensor_fn_map():
-    global BUILTIN_TO_TENSOR_FN_MAP
-
-    most_recent_func = None
-
-    class GetMethodMode(BaseTorchFunctionMode):
-        """
-        Mode to extract the correct methods from torch function invocations
-        (Used to get the correct torch.Tensor methods from builtins)
-        """
-
-        def __torch_function__(self, func, types, args=(), kwargs=None):
-            kwargs = kwargs or {}
-            nonlocal most_recent_func
-            most_recent_func = func
-            return func(*args, **kwargs)
-
-    inp0 = torch.ones(1)
-    inp1 = torch.ones(1)
-    inp0_int = torch.ones(1, dtype=torch.int32)
-    inp1_int = torch.ones(1, dtype=torch.int32)
-    with GetMethodMode():
-        setups_and_oplists = [
-            (lambda o: o(inp0), un_ops),
-            (lambda o: o(inp0_int), un_int_ops),
-            (lambda o: o(inp0, inp1), bin_ops),
-            (lambda o: o(inp0_int, inp1_int), bin_int_ops),
-            (lambda o: o(inp0_int, 0), tensor_and_int_ops),
-        ]
-        for setup_fn, op_list in setups_and_oplists:
-            for op in op_list:
-                setup_fn(op)
-                assert most_recent_func is not None
-                BUILTIN_TO_TENSOR_FN_MAP[op] = most_recent_func
-
-        # gather the reverse functions
-        rsetups_and_oplists = [
-            (
-                lambda o: o(1, inp1),
-                bin_ops,
-            ),  # Get r* ops, (ex. __sub__(int, Tensor) -> __rsub__(Tensor, int))
-            (lambda o: o(1, inp1_int), bin_int_ops),
-            (lambda o: o(0, inp0_int), tensor_and_int_ops),
-        ]
-
-        rskips = {operator.matmul, operator.imatmul, operator.getitem}
-        for setup_fn, op_list in rsetups_and_oplists:
-            for op in op_list:
-                if op in rskips:
-                    continue
-                setup_fn(op)
-                assert most_recent_func is not None
-                if most_recent_func != BUILTIN_TO_TENSOR_FN_MAP[op]:
-                    BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
-
-
-populate_builtin_to_tensor_fn_map()
 
 banned_attrs = [
     fn.__self__.__name__
@@ -199,7 +131,7 @@ banned_attrs = [
 ]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_prev_stack_var_name():
     from ..bytecode_transformation import unique_id
 
@@ -368,7 +300,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         # We are able to trace custom modes but if there are graph breaks under them
         # and they have a custom __enter__/__exit__ we don't handle this for the
         # same reason we don't handle generic context managers: there may be side effects
-        # that are now affected by executing the funtion across two frames instead of one
+        # that are now affected by executing the function across two frames instead of one
         # Today we support the enter/exit of the default TorchFunctionMode as well as
         # DeviceContext (which is used for set_default_device)
         return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (
@@ -384,7 +316,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.cm_obj = value  # needed for BC with calling enter from CM code
         self.source = source
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         # This shouldn't be called unless we have a source
         assert self.source
         self.source.reconstruct(codegen)
@@ -401,8 +333,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self,
-            build_torch_function_fn(tx, self.value, self.source),
+            get_torch_function_fn(tx, self),
             fn,
             types,
             args,
@@ -428,7 +359,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
         return ConstantVariable.create(None)
 
-    def reconstruct_type(self, codegen):
+    def reconstruct_type(self, codegen: "PyCodegen"):
         ty = NoEnterTorchFunctionMode
         codegen(
             AttrSource(
@@ -458,7 +389,7 @@ def _flatten_vts(vts):
     output = []
 
     while vts:
-        vt = vts.pop()
+        vt = vts.popleft()
 
         if not vt.is_realized() and vt.peek_type() in (dict, list, tuple):
             vt.realize()
@@ -466,8 +397,10 @@ def _flatten_vts(vts):
         if vt.is_realized():
             if isinstance(vt, ListVariable):
                 vts.extend(vt.items)
+                continue
             elif isinstance(vt, ConstDictVariable):
                 vts.extend(vt.items.values())
+                continue
 
         output.append(vt)
 
@@ -488,7 +421,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return VariableTracker.build(tx, var.python_type(), source)
 
 
-def _is_attr_overidden(tx: "InstructionTranslator", var, name):
+def _is_attr_overridden(tx: "InstructionTranslator", var, name):
     import torch
 
     overridden = False
@@ -501,31 +434,32 @@ def _is_attr_overidden(tx: "InstructionTranslator", var, name):
     return overridden
 
 
-def call_torch_function(
-    tx, torch_function_type, torch_function_var, fn, types, args, kwargs
-):
-    # signature:
-    # def __torch_function__(cls, func, types, args=(), kwargs=None):
-    tf_args = (
-        torch_function_type,
+def call_torch_function(tx, torch_function_var, fn, types, args, kwargs):
+    # This emulates calling __torch_function__, which has a signature
+    #   def __torch_function__(cls, func, types, args=(), kwargs=None):
+    #
+    # Also notice the `cls` is not explicitly passed in the reference
+    # implementations:
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
+    # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
+    tf_args = [
         fn,
         types,
         VariableTracker.build(tx, tuple(args)),
         VariableTracker.build(tx, kwargs),
-    )
-    return tx.inline_user_function_return(torch_function_var, tf_args, {})
+    ]
+    return torch_function_var.call_function(tx, tf_args, {})
 
 
-def build_torch_function_fn(tx: "InstructionTranslator", value, source):
-    from types import FunctionType
+def get_torch_function_fn(tx: "InstructionTranslator", vt):
+    # The underlying function could be a classmethod, staticmethod, regular
+    # function or a function with C-implementation. It doesn't matter as long as
+    # they satisfy the calling convention in `call_torch_function`.
+    from .builtin import BuiltinVariable
 
-    func = value.__torch_function__.__func__
-
-    if not isinstance(func, FunctionType):
-        unimplemented("Builtin/C++ torch function implementations NYI")
-
-    source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.build(tx, func, source)
+    args = [vt, ConstantVariable("__torch_function__")]
+    func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
+    return func_vt
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -568,8 +502,13 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
         if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
             return res
 
-    unimplemented(
-        f"All __torch_function__ overrides for call {fn} with args {args} and kwargs {kwargs} returned NotImplemented"
+    unimplemented_v2(
+        gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
+        context=f"{fn=}, {args=}, {kwargs=}",
+        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        hints=[
+            *graph_break_hints.USER_ERROR,
+        ],
     )
 
 
@@ -578,19 +517,19 @@ class TensorWithTFOverrideVariable(TensorVariable):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        self.torch_function_fn = kwargs.pop("torch_function_fn")
-        super().__init__(*args, **kwargs)
-
     @classmethod
-    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+    def from_tensor_var(cls, tx, tensor_var, class_type, cls_source):
+        # [Note: __torch_function__] coerce `tensor_var` into a
+        # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
+        # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
-        assert kwargs.pop("class_type") is torch.Tensor, (
-            "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        input_tensor_type = kwargs.pop("class_type")
+        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter), (
+            f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
         )
-        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+        var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
 
@@ -622,40 +561,94 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # base tensors, custom attribute accesses will graph break.
         import torch
 
+        # I think only `_base` is breaking because we aren't modelling view
+        # relationship perfectly in some scenarios.
         if name in banned_attrs:
-            unimplemented(
-                f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
+            unimplemented_v2(
+                gb_type="Unsupported tensor subclass attribute access",
+                context=f"{name}",
+                explanation="`torch.compile` currently can't trace this",
+                hints=[
+                    f"Avoid accessing {name} of tensor subclass in torch.compile region",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
-        if _is_attr_overidden(tx, self, name):
-            unimplemented(
-                f"Accessing overridden method/attribute {name} on a tensor"
-                " subclass with a __torch_function__ override is not supported"
-            )
-
-        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
-            if self.source:
-                install_guard(
-                    AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
-                        GuardBuilder.FUNCTION_MATCH
+        # Handle non-overridden attributes inherited from `torch.Tensor`.
+        attr_is_overridden = _is_attr_overridden(tx, self, name)
+        if (
+            hasattr(torch.Tensor, name)
+            and not attr_is_overridden
+            and not inspect.ismethoddescriptor(getattr(torch.Tensor, name))
+        ):
+            args, kwargs = [self], {}
+            if can_dispatch_torch_function(tx, args, kwargs):
+                if self.source:
+                    install_guard(
+                        AttrSource(
+                            AttrSource(self.source, "__class__"), name
+                        ).make_guard(GuardBuilder.FUNCTION_MATCH)
                     )
-                )
-            get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
+                get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
 
-            return self.call_torch_function(
-                tx,
-                get_fn,
-                TupleVariable([self.class_type_var(tx)]),
-                [self],
-                {},
-            )
+                return self.call_torch_function(
+                    tx,
+                    get_fn,
+                    TupleVariable([self.class_type_var(tx)]),
+                    args,
+                    kwargs,
+                )
         else:
-            return super().var_getattr(tx, name)
+            # `TensorVariable.var_getattr` doesn't handle user-defined
+            # function/attribute well, so we explicitly handle them here.
+            #
+            # TODO move this logic into `TensorVariable`, or try to merge it
+            # with similar logic in `UserDefinedObjectVariable`.
+            try:
+                attr = inspect.getattr_static(self.class_type, name)
+            except AttributeError:
+                pass
+            else:
+                import types
+
+                cls_source = GlobalSource(self.global_mangled_class_name(tx))
+                attr_source = AttrSource(cls_source, name)
+                if isinstance(attr, types.FunctionType):
+                    install_guard(attr_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    return UserMethodVariable(attr, self)
+
+                elif isinstance(attr, property):
+                    getter_source = AttrSource(attr_source, "fget")
+                    getter = attr.fget
+                    getter_var = UserFunctionVariable(getter, source=getter_source)
+                    return getter_var.call_function(tx, [self], {})
+
+                elif isinstance(attr, classmethod):
+                    return UserMethodVariable(
+                        attr.__func__, self.class_type_var(tx), source=attr_source
+                    )
+
+                elif attr_is_overridden:
+                    unimplemented_v2(
+                        gb_type="Unsupported tensor subclass overridden attribute access",
+                        context=f"{name}",
+                        explanation="`torch.compile` only support tracing certain types of overridden tensor subclass attributes",
+                        hints=[
+                            f"Avoid accessing {name} of tensor subclass in torch.compile region",
+                            f"Renaming attribute `{name}` of type {self.class_type}",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+
+        return super().var_getattr(tx, name)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
+        # NOTE this assumes `__torch_function__` isn't modified during tracing.
+        if not hasattr(self, "torch_function_fn"):
+            self.torch_function_fn = get_torch_function_fn(tx, self)
+
         return call_torch_function(
             tx,
-            self.class_type_var(tx),
             self.torch_function_fn,
             fn,
             types,
@@ -672,13 +665,20 @@ class TensorWithTFOverrideVariable(TensorVariable):
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        if tx.output.torch_function_enabled:
+        tf_args = [self] + args
+        if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
-            if _is_attr_overidden(tx, self, name):
-                unimplemented(
-                    f"Calling overridden method {name} on a tensor"
-                    " subclass with a __torch_function__ override is not supported"
+            if _is_attr_overridden(tx, self, name):
+                unimplemented_v2(
+                    gb_type="Tensor subclass overridden method call",
+                    context=f"{name}",
+                    explanation="`torch.compile` currently can't trace this",
+                    hints=[
+                        f"Avoid calling {name} of tensor subclass in torch.compile region",
+                        f"Renaming method `{name}` of type {self.class_type}",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             # [Note: __torch_function__] Currently we only support methods that are defined on tensor
@@ -692,6 +692,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 source = None
                 value = getattr(torch.Tensor, name)
             func_var = VariableTracker.build(tx, value, source)
-            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
+            return dispatch_torch_function(tx, func_var, tf_args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)

@@ -34,7 +34,8 @@ enum class EventType : uint8_t {
   OutOfMemory,
   PyCall,
   PyCCall,
-  Kineto
+  Kineto,
+  PythonGC
 };
 
 // ============================================================================
@@ -192,6 +193,12 @@ struct ExtraFields<EventType::Backend> {
 };
 
 template <>
+struct ExtraFields<EventType::PythonGC> {
+  std::string phase;
+  int64_t duration_ns_;
+};
+
+template <>
 struct ExtraFields<EventType::Vulkan> {
   using raw_event_t = std::pair<c10::approx_time_t, vulkan_id_t>;
   std::string name_;
@@ -212,7 +219,9 @@ struct RawAllocation {
 };
 
 // For performance.
-static_assert(c10::is_pod_v<RawAllocation>, "Non-POD member of RawAllocation.");
+static_assert(
+    std::is_trivial_v<RawAllocation>,
+    "Non-Trivial member of RawAllocation.");
 
 template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
@@ -238,8 +247,8 @@ struct ExtraFields<EventType::OutOfMemory> {
 
 // For performance.
 static_assert(
-    c10::is_pod_v<ExtraFields<EventType::OutOfMemory>>,
-    "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
+    std::is_trivial_v<ExtraFields<EventType::OutOfMemory>>,
+    "Non-Trivial member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
   int line_no_;
@@ -413,13 +422,14 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
       ExtraFields<EventType::PyCCall>,
-      ExtraFields<EventType::Kineto>>
+      ExtraFields<EventType::Kineto>,
+      ExtraFields<EventType::PythonGC>>
       extra_fields_;
 
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
-
+  bool hidden_{false};
   const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
@@ -547,6 +557,11 @@ class TORCH_API ThreadLocalSubqueue {
     py_calls_.emplace_back(std::forward<Args>(args)...);
   }
 
+  template <class... Args>
+  void emplace_gc_call(Args&&... args) {
+    pythongc_.emplace_back(std::forward<Args>(args)...);
+  }
+
   uint64_t tid() const {
     return tid_;
   }
@@ -637,6 +652,9 @@ class TORCH_API ThreadLocalSubqueue {
       std::pair<python_tracer::TraceKey, c10::approx_time_t>,
       BlockSize>
       py_calls_;
+  // gc with_stack (Python)
+  AppendOnlyList<std::pair<std::string, c10::approx_time_t>, BlockSize>
+      pythongc_;
 };
 
 class TORCH_API RecordQueue {
@@ -644,6 +662,7 @@ class TORCH_API RecordQueue {
   RecordQueue(ProfilerConfig config, std::set<ActivityType> activities);
 
   bool tracePython() const;
+  bool getPythonGcEvents() const;
   ThreadLocalSubqueue* getSubqueue();
   void stop();
   void restart();

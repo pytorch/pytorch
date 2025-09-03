@@ -21,7 +21,7 @@
 namespace torch::jit {
 
 std::string typeString(py::handle h) {
-  return py::str(h.get_type().attr("__name__"));
+  return py::str(py::type::handle_of(h).attr("__name__"));
 }
 
 std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
@@ -381,7 +381,7 @@ SugaredValuePtr ModuleValue::getitem(
       << "ParameterList, and ParameterDict modules are subscriptable");
 }
 
-void checkInterface(
+static void checkInterface(
     const SourceRange& loc,
     GraphFunction& m,
     const std::shared_ptr<ModuleValue>& self,
@@ -582,7 +582,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
+static std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -595,7 +595,7 @@ std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
 }
 
 // helper function for instantiating a SugaredValue from an IValue
-std::shared_ptr<SugaredValue> toSugaredValue(
+static std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -1057,7 +1057,7 @@ TypePtr registerNamedTuple(
   return tt;
 }
 
-bool isEnumClass(py::object obj) {
+static bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
@@ -1068,7 +1068,7 @@ bool isEnumClass(py::object obj) {
   return ret == 1;
 }
 
-std::shared_ptr<SugaredValue> createSimpleEnumValue(
+static std::shared_ptr<SugaredValue> createSimpleEnumValue(
     const py::object& obj,
     GraphFunction& m,
     const SourceRange& loc) {
@@ -1222,8 +1222,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
     return SpecialFormValue::create(prim::isinstance);
+  } else if (obj.ptr() == py::module::import("torch").attr("_check").ptr()) {
+    return std::make_shared<TorchCheckValue>();
 #ifdef USE_RPC
-    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
+    // This is not defined on WINDOWS
   } else if (
       isRpcAvailable &&
       obj.ptr() ==
@@ -1236,7 +1238,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::rpc_sync);
   } else if (
       isRpcAvailable &&
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
     return SpecialFormValue::create(prim::rpc_remote);

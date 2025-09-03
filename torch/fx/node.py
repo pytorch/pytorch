@@ -4,8 +4,9 @@ import inspect
 import logging
 import operator
 import types
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, TypeAlias, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -14,6 +15,7 @@ from torch.fx.operator_schemas import (
     normalize_function,
     normalize_module,
 )
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
@@ -44,7 +46,7 @@ BaseArgumentTypes = Union[
 ]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
-Target = Union[Callable[..., Any], str]
+Target: TypeAlias = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
@@ -58,6 +60,8 @@ Argument = Optional[
     ]
 ]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _legal_ops = dict.fromkeys(
     [
@@ -74,7 +78,7 @@ _legal_ops = dict.fromkeys(
 # Dynamo is unable to trace global set[Callable].__contains__.
 # See https://github.com/pytorch/pytorch/issues/145761. Since we only have
 # a handful of ops so switch to list of callables.
-_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
+_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
@@ -82,7 +86,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
-_side_effectful_functions: set[Callable] = {
+_side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
@@ -95,14 +99,15 @@ _side_effectful_functions: set[Callable] = {
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
-} | set(_side_effectful_need_to_be_preserved_pre_dispatch)
+    *_side_effectful_need_to_be_preserved_pre_dispatch,
+}
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> Callable:
+def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     _side_effectful_functions.add(fn)
     return fn
 
@@ -241,7 +246,7 @@ class Node(_NodeBase):
     # should not be accessed directly.
     _input_nodes: dict["Node", None]
     # All of the nodes that use the value produced by this Node
-    # Note one user may correspond to several uses, e.g. the node fo ``x + x``
+    # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
     # Is a dict to act as an "ordered set". Keys are significant, value dont-care
     users: dict["Node", None]
@@ -375,7 +380,41 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
-        self._prepend(x)
+        assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
+        if self == x:
+            log.debug(
+                "Trying to prepend a node to itself. This behavior has no effect on the graph."
+            )
+            return
+        x._remove_from_list()
+        p = self._prev
+        p._next, x._prev = x, p
+        x._next, self._prev = self, x
+
+        # compute x._sort_key
+        psk = x._prev._sort_key
+        nsk = x._next._sort_key
+        if len(psk) > len(nsk):
+            idx: int
+            *prefix, idx = psk[: len(nsk) + 1]
+            x._sort_key = (*prefix, idx + 1)
+        elif len(psk) < len(nsk):
+            *prefix, idx = nsk[: len(psk) + 1]
+            x._sort_key = (*prefix, idx - 1)
+        else:  # same length, increase length by 1
+            x._sort_key = (*psk, 0)
+
+    def __gt__(self, other: "Node") -> bool:
+        return self._sort_key > other._sort_key
+
+    def __lt__(self, other: "Node") -> bool:
+        return self._sort_key < other._sort_key
+
+    def __ge__(self, other: "Node") -> bool:
+        return self > other or self == other
+
+    def __le__(self, other: "Node") -> bool:
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: "Node") -> None:
@@ -386,7 +425,11 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
         """
-        self._next._prepend(x)
+        self._next.prepend(x)
+
+    def _remove_from_list(self) -> None:
+        p, n = self._prev, self._next
+        p._next, n._prev = n, p
 
     @property
     def args(self) -> tuple[Argument, ...]:
@@ -473,9 +516,9 @@ class Node(_NodeBase):
             idx (int): The index of the element in ``self.args`` to be inserted before.
             arg (Argument): The new argument value to insert into ``args``
         """
-        assert (
-            0 <= idx <= len(self.args)
-        ), "insert_args index must be between 0 and len(self.args)"
+        assert 0 <= idx <= len(self.args), (
+            "insert_args index must be between 0 and len(self.args)"
+        )
         args_left = self.args[:idx]
         args_right = self.args[idx:]
 
@@ -555,6 +598,8 @@ class Node(_NodeBase):
         self,
         placeholder_names: Optional[list[str]] = None,
         maybe_return_typename: Optional[list[str]] = None,
+        *,
+        include_tensor_metadata: bool = False,
     ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
@@ -576,6 +621,7 @@ class Node(_NodeBase):
             maybe_return_typename: A single-element list that will store
                 a formatted string representing the output of the
                 generated ``forward`` function. Internal use only.
+            include_tensor_metadata: Whether to include tensor metadata
 
         Returns:
             str: If 1) we're using ``format_node`` as an internal helper
@@ -607,11 +653,36 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
-            maybe_typename = (
-                f"{_type_repr(self.type)} " if self.type is not None else ""
+
+            def stringify_shape(shape: Iterable) -> str:
+                return f"[{', '.join([str(x) for x in shape])}]"
+
+            meta_val = self.meta.get(
+                "val",
+                self.meta.get("tensor_meta", self.meta.get("example_value", None)),
             )
+            type_annotation = ""
+            if (
+                include_tensor_metadata
+                and isinstance(meta_val, torch.Tensor)
+                and meta_val.layout
+                not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                )
+            ):
+                stride_annotation = f"{stringify_shape(meta_val.stride())}"
+                device_annotation = f"{meta_val.device}"
+                type_annotation = (
+                    f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    f'{stride_annotation}{device_annotation}"'
+                )
+            else:
+                type_annotation = (
+                    f"{_type_repr(self.type)} " if self.type is not None else ""
+                )
             return (
-                f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = "
+                f"%{self.name} : {type_annotation}[num_users={len(self.users)}] = "
                 f"{self.op}[target={self._pretty_print_target(self.target)}]("
                 f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
             )
@@ -676,10 +747,13 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self) -> bool:
+    def is_impure(self, impure_random: bool = True) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
+
+        Args:
+            impure_random (bool): Whether to treat rand op as impure.
 
         Returns:
 
@@ -694,21 +768,45 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
+            if impure_random:
+                if getattr(self.target, "_nondeterministic_seeded", False):
+                    # impure since it mutates RNG state
+                    return True
+
+            # Handle Python random functions that don't have _nondeterministic_seeded
+            # but still affect global RNG state (issue #151524)
+            # These should be impure regardless of impure_random setting to maintain
+            # consistency between eager and compiled execution
+            _random_functions = {
+                torch.rand,
+                torch.randn,
+                torch.randint,
+                torch.randperm,
+                torch.rand_like,
+                torch.randn_like,
+                torch.randint_like,
+                torch.normal,
+                torch.poisson,
+                torch.bernoulli,
+                torch.multinomial,
+            }
+
+            if self.target in _random_functions:
+                # All random operations are impure to ensure consistent behavior
+                # between eager and compiled execution, regardless of generator usage
                 return True
 
             return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
-            assert (
-                self.graph.owning_module is not None
-            ), "self.graph.owning_module not set for purity check"
+            assert self.graph.owning_module is not None, (
+                "self.graph.owning_module not set for purity check"
+            )
             target_mod = self.graph.owning_module.get_submodule(self.target)
-            assert (
-                target_mod is not None
-            ), f"Did not find expected submodule target {self.target}"
+            assert target_mod is not None, (
+                f"Did not find expected submodule target {self.target}"
+            )
             return getattr(target_mod, "_is_impure", False)
 
         return False
@@ -751,10 +849,17 @@ class Node(_NodeBase):
                 self.kwargs,
                 arg_types,
                 kwarg_types,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
             )
         elif self.op == "call_module":
             assert isinstance(self.target, str)
-            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
+            return normalize_module(
+                root,
+                self.target,
+                self.args,  # type: ignore[arg-type]
+                self.kwargs,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
+            )
 
         return None
 

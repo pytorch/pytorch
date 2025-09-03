@@ -65,7 +65,7 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
-def _reduced_shape(shape, dim=None, keepdim=False):
+def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     """Computes the expected reduced shape given dim and keepdim
 
     Args:
@@ -77,7 +77,7 @@ def _reduced_shape(shape, dim=None, keepdim=False):
     Returns:
         The reduced shape
     """
-    if dim is None:
+    if dim is None or (empty_dim_as_none and dim == []):
         return [1] * len(shape) if keepdim else []
 
     # Wrap negative dims
@@ -105,7 +105,8 @@ class TestReductions(TestCase):
         t = make_tensor(shape, dtype=torch.float, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
-        expected_shape = _reduced_shape(shape, **dim_keepdim)
+        empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
+        expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
         self.assertEqual(result.shape, expected_shape, f"""
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
@@ -314,7 +315,7 @@ class TestReductions(TestCase):
         for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
-            self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
+            self.assertEqual(result.shape, _reduced_shape(t.shape, dim=dim))
 
     def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
         """Helper method to test noncontiguous input tensors."""
@@ -734,7 +735,7 @@ class TestReductions(TestCase):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
-    # TODO: kill this ane replace with common creation ops
+    # TODO: kill this and replace with common creation ops
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
                       use_complex=False) -> dict[str, list[torch.Tensor]]:
         float_types = [torch.double,
@@ -1628,7 +1629,7 @@ class TestReductions(TestCase):
                 RuntimeError, "only when boundaries tensor dimension is 1"):
             torch.searchsorted(boundaries, 1)
 
-        # incompatiable output tensor's dtype
+        # incompatible output tensor's dtype
         def test_output_dtype(dtype, is_int32):
             output = values_1d.to(dtype)
             with self.assertRaisesRegex(
@@ -1759,7 +1760,6 @@ class TestReductions(TestCase):
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
         # the exact dtype.
-        # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
         # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
         if IS_WINDOWS and is_integral(dtype):
             exact_dtype = False
@@ -1792,7 +1792,7 @@ class TestReductions(TestCase):
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
+        with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
             torch.nansum(x)
 
     @dtypes(*all_types_and(torch.half))
@@ -2018,7 +2018,7 @@ class TestReductions(TestCase):
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
-    # TODO: update this test to comapre against NumPy
+    # TODO: update this test to compare against NumPy
     @onlyCUDA
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -2513,7 +2513,7 @@ class TestReductions(TestCase):
             k = int((t.numel() - 1) / 2)
             self.assertEqual(res, t.view(-1).sort()[0][k])
             if t.numel() % 2 == 1:
-                # We can only test agains numpy for odd reductions because numpy
+                # We can only test against numpy for odd reductions because numpy
                 # returns the mean of the two medians and torch returns the lower
                 self.assertEqual(res.cpu().numpy(), np.median(t_numpy))
             for dim in range(t.ndim):
@@ -2524,7 +2524,7 @@ class TestReductions(TestCase):
                 self.assertEqual(res[0], (t.sort(dim)[0]).select(dim, k).unsqueeze_(dim))
                 self.assertEqual(res[0], t.gather(dim, res[1]))
                 if size % 2 == 1:
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True), exact_dtype=False)
 
@@ -2548,7 +2548,7 @@ class TestReductions(TestCase):
                     k = int((t.numel() - num_nan - 1) / 2)
                 self.assertEqual(res, t.view(-1).sort()[0][k])
                 if (t.numel() - num_nan) % 2 == 1:
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     self.assertEqual(res.item(), numpy_op(t.cpu().numpy()))
                 for dim in range(t.ndim):
@@ -2561,7 +2561,7 @@ class TestReductions(TestCase):
                         k = ((size - num_nan - 1) / 2).type(torch.long)
                     self.assertEqual(res[0], (t.sort(dim)[0]).gather(dim, k))
                     self.assertEqual(res[0], t.gather(dim, res[1]))
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     mask = (size - num_nan) % 2 == 1
                     res = res[0].masked_select(mask).cpu()
@@ -3526,7 +3526,7 @@ as the input tensor excluding its innermost dimension'):
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
     # test_tensot_compare_ops_empty because not specifying a `dim` parameter in the former tests does
     # not throw errors. Also, checking the return type of argmax requires supplying a different dtype
-    # argument than that for the input tensor. There is also variantion in numpy testing.
+    # argument than that for the input tensor. There is also variation in numpy testing.
     def test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)

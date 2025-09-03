@@ -154,7 +154,6 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
-@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -208,7 +207,7 @@ def _get_fqns(
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
-            # In some modeuls, _fqn_modifiers would not shown in the state_dict keys,
+            # In some modules, _fqn_modifiers would not shown in the state_dict keys,
             # skip them in the fqn to ensure load stat dict successfully for them.
             if hasattr(curr_obj, dsd_fqn_modifiers):
                 if removed_fqn := getattr(curr_obj, dsd_fqn_modifiers)().get(
@@ -531,10 +530,6 @@ def _get_model_state_dict(
             for fqn in fqns:
                 state_dict.pop(fqn)
 
-    for key, p in list(state_dict.items()):
-        if torch.is_tensor(p) and p.is_meta:
-            state_dict.pop(key)
-
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
@@ -596,8 +591,7 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        for fqn, local_state in local_state_dict.items():
-            state_dict[fqn] = local_state
+        state_dict.update(local_state_dict)
 
     with info.fsdp_context():
         return cast(
@@ -797,7 +791,7 @@ def _get_optim_state_dict(
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
             # There are no easy ways to do this conversion systematically.
-            # We can only use a string replacment without correctness check.
+            # We can only use a string replacement without correctness check.
             if not osd:
                 continue
             for k in list(osd[_STATE].keys()):
@@ -1289,6 +1283,10 @@ def set_optimizer_state_dict(
     The counterpart of ``get_optimizer_state_dict`` to set the state_dict to the
     optimizers. See ``set_state_dict`` for the detail usage.
 
+    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or after
+        ``step()`` is called on the optimizers. Otherwise, the optimizer states won't be
+        initialized correctly.
+
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
@@ -1333,6 +1331,10 @@ def set_state_dict(
     2) if a tensor is sharded, it must be either a ShardedTensor or DTensor,
     3) optimizer state_dict cannot contain the parameter IDs; the keys should be
     the canonical FQNs.
+
+    WARN: ``set_state_dict`` can only be called before ``backward()`` or after ``step()``
+        is called on the optimizers. Otherwise, the optimizer states won't be initialized
+        correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.

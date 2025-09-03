@@ -7,7 +7,7 @@
 
 namespace torch::jit {
 
-auto scalar_operators_source = at::jit::CodeTemplate(
+static auto scalar_operators_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def mul(a : ${Scalar}, b : Tensor) -> Tensor:
   return b * a
@@ -23,7 +23,7 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
+static auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def lt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b > a
@@ -35,19 +35,19 @@ def ge(a : ${Scalar}, b : Tensor) -> Tensor:
   return b <= a
 )SCRIPT");
 
-auto _ntuple_ops = at::jit::CodeTemplate(
+static auto _ntuple_ops = at::jit::CodeTemplate(
     R"SCRIPT(
 def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
-auto floordiv = at::jit::CodeTemplate(
+static auto floordiv = at::jit::CodeTemplate(
     R"SCRIPT(
 def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
-auto tensor_properties =
+static auto tensor_properties =
     R"SCRIPT(
 def ndim(a : Tensor) -> int:
   return a.dim()
@@ -67,7 +67,7 @@ def shape(a : Tensor) -> List[int]:
 // aten::_assert_int_or_pair op which was removed once we were able to compile
 // torch.nn.functional.assert_int_or_pair
 // list_with_default also needs to be here for BC
-auto aten_ops =
+static auto aten_ops =
     R"SCRIPT(
 def _assert_int_or_pair(vals: List[int], name: str, message: str):
   pass
@@ -103,10 +103,10 @@ struct BuiltinFunctionRegistry {
     // re-lock, the mutex without waiting), and report no loaded builtins during
     // init.
     std::lock_guard<std::recursive_mutex> guard(mutex);
-    if (state == INTIIALIZING) {
+    if (state == INITIALIZING) {
       return empty;
     } else if (state == UNINITIALIZED) {
-      state = INTIIALIZING;
+      state = INITIALIZING;
       loadBuiltinFunctions();
       state = INITIALIZED;
     }
@@ -168,10 +168,16 @@ struct BuiltinFunctionRegistry {
     loadSource(aten_ops_additional, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
-    // tensor property getters to correpsonding methods
+    // tensor property getters to corresponding methods
     loadSource(tensor_properties, "prim");
   }
-  enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
+  enum {
+    UNINITIALIZED = 0,
+    INITIALIZING = 1,
+    // typo in the original code, keeping for compatibility
+    INTIIALIZING = 1, // codespell:ignore
+    INITIALIZED = 2
+  } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
   std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name_;

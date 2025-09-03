@@ -105,44 +105,9 @@ def broadcast_shapes(*shapes):
     # This wrapper exists to support variadic args.
     # TODO Move this to C++ once the jit has better support for torch.Size.
     if not torch.jit.is_tracing():
-        max_len = 0
-        for shape in shapes:
-            if isinstance(shape, (int, torch.SymInt)):
-                if max_len < 1:
-                    max_len = 1
-            elif isinstance(shape, (tuple, list)):
-                s = len(shape)
-                if max_len < s:
-                    max_len = s
-        result = [1] * max_len
-
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        for shape in shapes:
-            if isinstance(shape, (int, torch.SymInt)):
-                shape = (shape,)
-            if isinstance(shape, (tuple, list)):
-                for i in range(-1, -1 - len(shape), -1):
-                    if shape[i] < 0:
-                        raise RuntimeError(
-                            f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})"
-                        )
-                    # NB: result is initialized to 1 so this is effectively an
-                    # equals one test
-                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
-                        shape[i] == result[i]
-                    ):
-                        continue
-                    if result[i] != 1:
-                        raise RuntimeError(
-                            "Shape mismatch: objects cannot be broadcast to a single shape"
-                        )
-                    result[i] = shape[i]
-            else:
-                raise RuntimeError(
-                    "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
-                    shape,
-                )
+        result = torch._refs._broadcast_shapes(*shapes)
+        if result is None:
+            return torch.Size([])
         return torch.Size(result)
     else:
         # with implementation above, torch.jit.trace hardcodes the sizes which makes subsequent replays fail
@@ -398,7 +363,7 @@ def einsum(*args: Any) -> Tensor:
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
-        # recurse incase operands contains value that has torch function
+        # recurse in case operands contains value that has torch function
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
@@ -1446,8 +1411,13 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
-        x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
-        x2 (Tensor): input tensor of shape :math:`B \times R \times M`.
+        x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1 \times D_2 \times \cdots \times D_n \times P \times M`,
+            where :math:`P` is the number of points and :math:`M` is the feature dimension.
+        x2 (Tensor): input tensor where the last two dimensions also represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1' \times D_2' \times \cdots \times D_m' \times R \times M`,
+            where :math:`R` is the number of points and :math:`M` is the feature dimension,
+            which should match the feature dimension of `x1`.
         p: p value for the p-norm distance to calculate between each vector pair
             :math:`\in [0, \infty]`.
         compute_mode:
@@ -1503,7 +1473,7 @@ def atleast_1d(*tensors):
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 1-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1524,6 +1494,8 @@ def atleast_1d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
+        >>> torch.atleast_1d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1539,7 +1511,7 @@ def atleast_2d(*tensors):
     Input tensors with two or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 2-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1562,6 +1534,8 @@ def atleast_2d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
+        >>> torch.atleast_2d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1577,7 +1551,7 @@ def atleast_3d(*tensors):
     Input tensors with three or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 3-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1608,6 +1582,8 @@ def atleast_3d(*tensors):
         >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
+        >>> torch.atleast_3d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1794,6 +1770,7 @@ def norm(  # noqa: F811
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
+        "xpu",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):
@@ -2098,7 +2075,8 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
-        pivot (bool, optional): controls whether pivoting is done. Default: ``True``
+        pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                                decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
                                     Default: ``False``
         out (tuple, optional): optional output tuple. If :attr:`get_infos` is ``True``,

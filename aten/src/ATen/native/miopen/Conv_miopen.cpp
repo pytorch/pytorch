@@ -724,8 +724,7 @@ void raw_miopen_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -763,7 +762,7 @@ Tensor miopen_convolution_forward(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor output_t = at::detail::empty_cuda(
@@ -833,8 +832,7 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -872,7 +870,7 @@ Tensor miopen_depthwise_convolution_forward(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor output_t = at::detail::empty_cuda(
@@ -989,8 +987,7 @@ void raw_miopen_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1034,8 +1031,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1074,7 +1070,7 @@ Tensor miopen_depthwise_convolution_backward_weight(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *grad_output)) {
-    memory_format = (input->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (input->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_output_contig_t = grad_output->contiguous(memory_format);
@@ -1127,7 +1123,7 @@ Tensor miopen_convolution_backward_weight(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *grad_output)) {
-    memory_format = (input->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (input->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_output_contig_t = grad_output->contiguous(memory_format);
@@ -1200,7 +1196,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1240,8 +1236,7 @@ void raw_miopen_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1281,7 +1276,7 @@ Tensor miopen_convolution_backward_input(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*grad_output, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_input_t = at::detail::empty_cuda(
@@ -1350,8 +1345,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1389,7 +1383,7 @@ Tensor miopen_depthwise_convolution_backward_input(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*grad_output, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_input_t = at::detail::empty_cuda(
@@ -1452,7 +1446,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {

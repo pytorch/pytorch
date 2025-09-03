@@ -5,7 +5,7 @@ from typing import Optional
 from dataclasses_json import DataClassJsonMixin
 
 
-_DATA_MODEL_VERSION = 1.0
+_DATA_MODEL_VERSION = 1.5
 
 
 # data model for test log usage
@@ -13,6 +13,7 @@ _DATA_MODEL_VERSION = 1.0
 class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
+    raw: Optional[list[float]] = None
 
 
 @dataclass
@@ -36,6 +37,9 @@ class GpuUsage(DataClassJsonMixin):
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
+    allocated_mem_percent: Optional[UtilizationStats] = None
+    allocated_mem_value: Optional[UtilizationStats] = None
+    total_mem_value: Optional[float] = None
 
 
 @dataclass
@@ -53,6 +57,7 @@ class UtilizationRecord(DataClassJsonMixin):
     cmd_names: Optional[list[str]] = None
     error: Optional[str] = None
     log_duration: Optional[str] = None
+    logs: Optional[list[str]] = None
 
 
 # the db schema related to this is:
@@ -87,7 +92,7 @@ class OssCiUtilizationMetadataV1:
 
 
 # this data model is for the time series data:
-# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
+# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_time_series_schema.sql
 @dataclass
 class OssCiUtilizationTimeSeriesV1:
     created_at: int

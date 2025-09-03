@@ -137,7 +137,7 @@ uint64_t _get_model_bytecode_version(
 
 /********************** Operator Version **********************/
 
-uint64_t _get_model_operator_version(
+static uint64_t _get_model_operator_version(
     PyTorchStreamReader& reader); // Forward Declare
 
 uint64_t _get_model_operator_version(std::istream& in) {
@@ -168,7 +168,7 @@ uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
 /********************** Operators and Info **********************/
 
 // Forward declare
-std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+static std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues);
 
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
@@ -393,7 +393,7 @@ ModelCompatCheckResult is_compatible(
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
       // If the runtime op has no schema information its a false alarm and isn't
-      // actually useable
+      // actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;

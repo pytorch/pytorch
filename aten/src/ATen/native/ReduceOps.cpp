@@ -71,6 +71,8 @@
 #include <ATen/ops/exp.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/gradient_native.h>
+#include <ATen/ops/hash_tensor.h>
+#include <ATen/ops/hash_tensor_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/isnan_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -218,6 +220,8 @@ static void check_argmax_argmin(
     const char* name,
     const Tensor& self,
     const std::optional<int64_t>& dim) {
+  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
+  TORCH_CHECK(!(self.scalar_type() == kBool), name, ": does not support bool input");
   if (dim.has_value()) {
     auto dim_ = maybe_wrap_dim(dim.value(), self.dim());
     native::zero_numel_check_dims(self, dim_, name);
@@ -398,6 +402,19 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
+TORCH_META_FUNC(hash_tensor)
+(const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
+  auto maybe_result = maybe_get_output();
+  if (maybe_result.defined()){
+    TORCH_CHECK(maybe_result.scalar_type() == at::kUInt64, "Expected result to be of dtype uint64, but got ", maybe_result.scalar_type());
+  }
+  if (self.sym_numel() == 0) {
+    native::zero_numel_check_dims(self, dim, "hash_tensor");
+  }
+  resize_reduction(*this, self, dim, keepdim, at::kUInt64);
+}
+
+
 } // namespace at::meta
 
 namespace at::native {
@@ -441,6 +458,7 @@ DEFINE_DISPATCH(argmin_stub);
 DEFINE_DISPATCH(cumsum_stub);
 DEFINE_DISPATCH(cumprod_stub);
 DEFINE_DISPATCH(logcumsumexp_stub);
+DEFINE_DISPATCH(xor_sum_stub);
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
@@ -472,7 +490,7 @@ Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
 }
 
 template <class Stub>
-void impl_func_cum_ops(
+static void impl_func_cum_ops(
     const Tensor& self,
     int64_t dim,
     const Tensor& result,
@@ -769,7 +787,7 @@ inline bool isnan_(T x) {
 }
 
 template<typename T1, typename T2, typename Operation>
-void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
+static void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
       T1 out = c10::load(self_data);
@@ -1182,7 +1200,7 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
-inline bool should_use_acc_buffer(at::TensorIterator& iter) {
+static inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   const auto ndim = iter.ndim();
   if (!iter.device().is_cpu() || iter.noutputs() != 1) {
     return false;
@@ -1244,7 +1262,7 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
   }
 
   // For integral types, use existing sum as
@@ -1451,7 +1469,7 @@ Tensor& nanmean_out(
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
-  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
+  at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
 }
 
@@ -1591,7 +1609,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::norm(self, p, IntArrayRef{}, false);
 }
 
-inline TensorIterator get_allany_iter(
+static inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1608,7 +1626,7 @@ inline TensorIterator get_allany_iter(
 }
 
 template <int identity, typename Stub>
-inline void allany_impl(
+static inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1653,7 +1671,7 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
 }
 
 template <bool is_all>
-Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+static Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
   // Default implementation in terms of all-reduce or single dim reduce
   if (!dim) {
     Tensor out;
@@ -1732,7 +1750,7 @@ TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, co
 }
 
 template <class Stub>
-void argmax_argmin_impl(
+static void argmax_argmin_impl(
     const Tensor& self,
     std::optional<int64_t> dim,
     bool keepdim,
@@ -2231,6 +2249,24 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor&
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
+}
+
+enum class HashMode { XOR_SUM = 0 };
+
+TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
+
+  auto iter = meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
+  switch (static_cast<HashMode>(mode)) {
+    case HashMode::XOR_SUM:
+      if (iter.numel() == 0) {
+          result.fill_(0);
+      } else {
+        xor_sum_stub(iter.device_type(), iter);
+      }
+      return;
+    default:
+      TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
+  }
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

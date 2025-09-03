@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import requires_cuda, skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -62,6 +62,50 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    @requires_cuda
+    def test_no_recompilations_with_efficient_attention(self):
+        def fn(q, k, v, attn_mask):
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            from torch.nn.functional import scaled_dot_product_attention
+
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                return scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, scale=1.0
+                )
+
+        def make_q_k_v_mask(batch, num_heads, head_dim, seq_len_kv):
+            from collections import namedtuple
+            from functools import partial
+
+            dtype = torch.float16
+            device = "cuda"
+            make_tensor = partial(
+                torch.rand, device=device, dtype=dtype, requires_grad=True
+            )
+            seq_len_q = 64
+            SdpaShape = namedtuple(
+                "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
+            )
+            query = make_tensor(SdpaShape(batch, num_heads, seq_len_q, head_dim))
+            kv_shape = SdpaShape(batch, num_heads, seq_len_kv, head_dim)
+            key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+            mask = torch.randn(
+                (batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype
+            )
+
+            return query, key, value, mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 15)
+        opt_fn(q, k, v, mask)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 16)
+        opt_fn(q, k, v, mask)
+
+        self.assertEqual(cnts.frame_count, 1)
+
     @unittest.expectedFailure  # array scalars decay to 0D arrays
     def test_builtin_max_min(self):
         # test unspecialized primitive max/min
@@ -88,6 +132,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(shape)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(shape)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -107,6 +154,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -132,6 +182,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -162,6 +215,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         opt_fn = torch.compile(fn, backend="eager")
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -188,6 +244,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(0)
         y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
         state_1 = random.getstate()
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(inp, random.Random(12))
         random.seed(0)
         y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
         state_2 = random.getstate()
@@ -222,7 +281,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
 
-    def test_random_object_overriden_methods(self):
+    def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
         def get_rng():
             rand1 = random.Random(1)
@@ -653,14 +712,41 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y1), fn(x, y1))
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
-            if i == 0:
-                # This is kind of quirky part of automatic dynamic,
-                # since it just uses source name + tx.f_code as the key
-                # subsequent recompilations will actually reuse the automatic
-                # dynamic choices.
-                self.assertEqual(cnt.frame_count, 2)
-            else:
-                self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_1(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for i, dtype in enumerate(dtypes):
+            x = torch.ones(3, 3, dtype=dtype)
+            self.assertEqual(f(x), x + x.sum().item())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_2(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.item() * x.item() * torch.ones((), dtype=torch.float64)
+
+        x = torch.tensor(1e20, dtype=torch.float32)
+        self.assertEqual(
+            f(x), x.item() * x.item() * torch.ones((), dtype=torch.float64)
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_3(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.item() * 101
+            return y * torch.tensor([1], dtype=torch.float32)
+
+        finfo_float16 = torch.finfo(torch.float16)
+        x = torch.tensor([finfo_float16.max], dtype=torch.float16)
+        self.assertEqual(f(x), x.item() * 101 * torch.tensor([1], dtype=torch.float32))
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
@@ -846,8 +932,10 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref.device, res.device)
 
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

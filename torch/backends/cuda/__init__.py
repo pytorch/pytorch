@@ -135,6 +135,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
         elif name == "allow_fp16_accumulation":
             return torch._C._get_cublas_allow_fp16_accumulation()
+        elif name == "fp32_precision":
+            return torch._C._get_fp32_precision_getter("cuda", "matmul")
         raise AttributeError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -146,6 +148,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         elif name == "allow_fp16_accumulation":
             return torch._C._set_cublas_allow_fp16_accumulation(value)
+        elif name == "fp32_precision":
+            return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
         raise AttributeError("Unknown attribute " + name)
 
 
@@ -158,7 +162,7 @@ _LinalgBackends_str = ", ".join(_LinalgBackends.keys())
 
 
 def preferred_linalg_library(
-    backend: Union[None, str, torch._C._LinalgBackend] = None
+    backend: Union[None, str, torch._C._LinalgBackend] = None,
 ) -> torch._C._LinalgBackend:
     r"""
     Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
@@ -206,7 +210,7 @@ def preferred_linalg_library(
     elif isinstance(backend, str):
         if backend not in _LinalgBackends:
             raise RuntimeError(
-                "Unknown input value. " f"Choose from: {_LinalgBackends_str}."
+                f"Unknown input value. Choose from: {_LinalgBackends_str}."
             )
         torch._C._set_linalg_preferred_backend(_LinalgBackends[backend])
     elif isinstance(backend, torch._C._LinalgBackend):
@@ -218,7 +222,9 @@ def preferred_linalg_library(
 
 
 _BlasBackends = {
+    "default": torch._C._BlasBackend.Default,
     "cublas": torch._C._BlasBackend.Cublas,
+    "hipblas": torch._C._BlasBackend.Cublas,  # alias
     "cublaslt": torch._C._BlasBackend.Cublaslt,
     "hipblaslt": torch._C._BlasBackend.Cublaslt,  # alias
     "ck": torch._C._BlasBackend.Ck,
@@ -227,7 +233,7 @@ _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
 
 def preferred_blas_library(
-    backend: Union[None, str, torch._C._BlasBackend] = None
+    backend: Union[None, str, torch._C._BlasBackend] = None,
 ) -> torch._C._BlasBackend:
     r"""
     Override the library PyTorch uses for BLAS operations. Choose between cuBLAS, cuBLASLt, and CK [ROCm-only].
@@ -241,6 +247,7 @@ def preferred_blas_library(
     * If `"cublas"` is set then cuBLAS will be used wherever possible.
     * If `"cublaslt"` is set then cuBLASLt will be used wherever possible.
     * If `"ck"` is set then CK will be used wherever possible.
+    * If `"default"` (the default) is set then heuristics will be used to pick between the other options.
     * When no input is given, this function returns the currently preferred library.
     * User may use the environment variable TORCH_BLAS_PREFER_CUBLASLT=1 to set the preferred library to cuBLASLt
       globally.
@@ -258,7 +265,7 @@ def preferred_blas_library(
     elif isinstance(backend, str):
         if backend not in _BlasBackends:
             raise RuntimeError(
-                "Unknown input value. " f"Choose from: {_BlasBackends_str}."
+                f"Unknown input value. Choose from: {_BlasBackends_str}."
             )
         torch._C._set_blas_preferred_backend(_BlasBackends[backend])
     elif isinstance(backend, torch._C._BlasBackend):
@@ -281,13 +288,13 @@ from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 
 def preferred_rocm_fa_library(
-    backend: Union[None, str, torch._C._ROCmFABackend] = None
+    backend: Union[None, str, torch._C._ROCmFABackend] = None,
 ) -> torch._C._ROCmFABackend:
     r"""
     [ROCm-only]
     Override the backend PyTorch uses in ROCm environments for Flash Attention. Choose between AOTriton and CK
 
-    .. warning:: This flag is experimeental and subject to change.
+    .. warning:: This flag is experimental and subject to change.
 
     When Flash Attention is enabled and desired, PyTorch defaults to using AOTriton as the backend.
     This flag (a :class:`str`) allows users to override this backend to use composable_kernel
@@ -309,13 +316,13 @@ def preferred_rocm_fa_library(
     elif isinstance(backend, str):
         if backend not in _ROCmFABackends:
             raise RuntimeError(
-                "Unknown input value. " f"Choose from: {_ROCmFABackends_str}."
+                f"Unknown input value. Choose from: {_ROCmFABackends_str}."
             )
         torch._C._set_rocm_fa_preferred_backend(_ROCmFABackends[backend])
     elif isinstance(backend, torch._C._ROCmFABackend):
         torch._C._set_rocm_fa_preferred_backend(backend)
     else:
-        raise ValueError("Unknown input value. " f"Choose from: {_ROCmFABackends_str}.")
+        raise ValueError(f"Unknown input value. Choose from: {_ROCmFABackends_str}.")
 
     return torch._C._get_rocm_fa_preferred_backend()
 

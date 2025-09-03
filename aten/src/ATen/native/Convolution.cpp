@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
@@ -28,6 +29,10 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -93,7 +98,7 @@ static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
-bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
+static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
   auto ch = at::symint::size<T>(input, 1);
   auto bs = at::symint::size<T>(input, 0);
@@ -216,7 +221,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
 
 // simplified version for cudnn 8.2 and above
 template <typename T>
-bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
+static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
   // 1D conv
   if(at::symint::size<T>(input, 2) == 1 && stride == 1){
     return true;
@@ -442,11 +447,6 @@ struct ConvParams {
       }
     }
     if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
-      // bypass dilation checks for channels_last convolution
-      if (deterministic && is_dilated()) {
-        // cudnn doesn't support deterministic dilated convolution fully yet
-        return false;
-      }
       if (is_dilated()) {
         return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
       }
@@ -463,39 +463,31 @@ struct ConvParams {
       // always use cudnn_depthwise for channels_last format
       return true;
     }
-    if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
-      long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-      if (cudnn_version >= 8200) {
-        bool kernel_cond =  (use_cudnn(input, weight) &&
-                             input.scalar_type() == kHalf && // only for FP16
-                             weight.scalar_type() == kHalf &&
-                             is_depthwise(input, weight) &&
-                             input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                             !is_dilated() && // no dilation supported
-                             (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
-                             at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
-        if (kernel_cond) {
-          return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
-        }
+    // native kernel doesn't support 64-bit non-splittable case
+    if (cudnn_enabled && !(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
+      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
+        TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
+                        " if the V8 API is not enabled or before cuDNN version 9.3+."
+                        " Upgrade cuDNN or enable the V8 API to use cuDNN for 64-bit depthwise convolutions.");
+        return false;
+      } else {
+        return true;
       }
-      // keep (7600 <= cudnn < 8200) code unchanged
-      bool kernel_cond =  (cudnn_version >= 7600 &&
-                           use_cudnn(input, weight) &&
+    }
+    if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
+      bool kernel_cond =  (use_cudnn(input, weight) &&
                            input.scalar_type() == kHalf && // only for FP16
                            weight.scalar_type() == kHalf &&
                            is_depthwise(input, weight) &&
                            input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                           at::symint::size<T>(weight, 2) == at::symint::size<T>(weight, 3) && // only square kernels
-                           at::symint::size<T>(input, 2) >= 7 && // min width/height 7
                            !is_dilated() && // no dilation supported
-                           stride[0] == stride[1] && // equal strides
-                           ((at::symint::size<T>(weight, 3) == 3) || (at::symint::size<T>(weight, 3) == 1)) &&
+                           (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
-        return check_cudnn_depthwise_workload<T>(input, stride[0]);
-      } else {
-        return false;
+        return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
+      return false;
     } else {
       return false;
     }
@@ -636,7 +628,7 @@ REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
 REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
+static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
   out << "ConvParams {"
       << "  stride = " << IntArrayRef{params.stride}
       << "  padding = " << ArrayRef<T>{params.padding}
@@ -1183,7 +1175,7 @@ at::Tensor convolution(
   bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN("conv"));
 }
 
 at::Tensor convolution_overrideable(
@@ -1199,7 +1191,7 @@ at::Tensor convolution_overrideable(
 // a bool indicating whether the bias is defined. This is done to save memory by
 // avoiding saving the full bias tensor for backward.
 template <typename T>
-ConvBackend _select_conv_backend(
+static ConvBackend _select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias,
@@ -1328,7 +1320,7 @@ ConvBackend select_conv_backend(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   auto input = input_r;
   auto weight = weight_r;
@@ -1413,7 +1405,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& input,
     const Tensor& weight,
     const ConvBackend backend) {
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
+  auto backend_memory_format = at::MemoryFormat::Contiguous;
 #if !defined(C10_MOBILE)
   auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
@@ -1430,7 +1422,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
       if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
         TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
             "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
     case ConvBackend::Mkldnn:
@@ -1449,6 +1441,16 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Overrideable:
       if (xpu_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Mps:
+      if (mps_conv_use_channels_last(input, weight)) {
+#ifdef USE_MPS
+        if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
+          break;
+        }
+#endif
+        backend_memory_format = (k == 5) ? MemoryFormat::ChannelsLast3d : MemoryFormat::ChannelsLast;
       }
       break;
     default:
@@ -1704,7 +1706,7 @@ at::Tensor _convolution(
   c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
+  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN("conv"));
 }
 
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
@@ -2002,7 +2004,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);

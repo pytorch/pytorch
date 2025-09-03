@@ -66,10 +66,12 @@ class Threshold(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Threshold.png
+
     Examples::
 
-        >>> m = nn.Threshold(0.1, 20)
-        >>> input = torch.randn(2)
+        >>> m = nn.Threshold(0, 0.5)
+        >>> input = torch.arange(-3, 3)
         >>> output = m(input)
     """
 
@@ -87,9 +89,15 @@ class Threshold(Module):
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"threshold={self.threshold}, value={self.value}{inplace_str}"
 
@@ -125,14 +133,20 @@ class ReLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -183,16 +197,22 @@ class RReLU(Module):
 
     def __init__(
         self, lower: float = 1.0 / 8, upper: float = 1.0 / 3, inplace: bool = False
-    ):
+    ) -> None:
         super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"lower={self.lower}, upper={self.upper}{inplace_str}"
 
@@ -266,9 +286,15 @@ class Hardtanh(Module):
         assert self.max_val > self.min_val
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"min_val={self.min_val}, max_val={self.max_val}{inplace_str}"
 
@@ -295,10 +321,13 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__(0.0, 6.0, inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -324,6 +353,9 @@ class Sigmoid(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return torch.sigmoid(input)
 
 
@@ -364,6 +396,9 @@ class Hardsigmoid(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardsigmoid(input, self.inplace)
 
 
@@ -389,6 +424,9 @@ class Tanh(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return torch.tanh(input)
 
 
@@ -424,14 +462,20 @@ class SiLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.silu(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -463,14 +507,20 @@ class Mish(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.mish(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -514,6 +564,9 @@ class Hardswish(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardswish(input, self.inplace)
 
 
@@ -558,9 +611,15 @@ class ELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"alpha={self.alpha}{inplace_str}"
 
@@ -603,9 +662,15 @@ class CELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"alpha={self.alpha}{inplace_str}"
 
@@ -653,9 +718,15 @@ class SELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.selu(input, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -674,6 +745,8 @@ class GLU(Module):
           dimensions
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
+    .. image:: ../scripts/activation_images/GLU.png
+
     Examples::
 
         >>> m = nn.GLU()
@@ -689,9 +762,15 @@ class GLU(Module):
         self.dim = dim
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.glu(input, self.dim)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -731,9 +810,15 @@ class GELU(Module):
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"approximate={repr(self.approximate)}"
 
 
@@ -774,9 +859,15 @@ class Hardshrink(Module):
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.hardshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.lambd}"
 
 
@@ -825,9 +916,15 @@ class LeakyReLU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"negative_slope={self.negative_slope}{inplace_str}"
 
@@ -852,6 +949,9 @@ class LogSigmoid(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.logsigmoid(input)
 
 
@@ -894,9 +994,15 @@ class Softplus(Module):
         self.threshold = threshold
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.softplus(input, self.beta, self.threshold)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"beta={self.beta}, threshold={self.threshold}"
 
 
@@ -935,9 +1041,15 @@ class Softshrink(Module):
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.softshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return str(self.lambd)
 
 
@@ -973,13 +1085,14 @@ def _is_make_fx_tracing():
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    Method described in the paper:
-    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    This MultiheadAttention layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Multi-Head Attention is defined as:
 
@@ -1072,9 +1185,9 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert (
-            self.head_dim * num_heads == self.embed_dim
-        ), "embed_dim must be divisible by num_heads"
+        assert self.head_dim * num_heads == self.embed_dim, (
+            "embed_dim must be divisible by num_heads"
+        )
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1113,7 +1226,7 @@ class MultiheadAttention(Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
         else:
@@ -1271,8 +1384,10 @@ class MultiheadAttention(Module):
         elif query.is_nested and (
             key_padding_mask is not None or attn_mask is not None
         ):
-            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
+            why_not_fast_path = (
+                "supplying both src_key_padding_mask and src_mask at the same time \
                                  is not supported with NestedTensor input"
+            )
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
@@ -1510,13 +1625,22 @@ class PReLU(Module):
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.prelu(input, self.weight)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"num_parameters={self.num_parameters}"
 
 
@@ -1540,6 +1664,9 @@ class Softsign(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softsign(input)
 
 
@@ -1563,6 +1690,9 @@ class Tanhshrink(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.tanhshrink(input)
 
 
@@ -1610,9 +1740,15 @@ class Softmin(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softmin(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -1669,9 +1805,15 @@ class Softmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -1698,6 +1840,9 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         if input.dim() not in (3, 4):
             raise ValueError(
                 f"Softmax2d: expected input to be 3D or 4D, got {input.dim()}D instead"
@@ -1745,7 +1890,13 @@ class LogSoftmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"

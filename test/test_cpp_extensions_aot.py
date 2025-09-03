@@ -2,11 +2,8 @@
 
 import os
 import re
-import subprocess
-import sys
 import unittest
 from itertools import repeat
-from pathlib import Path
 from typing import get_args, get_origin, Union
 
 import torch
@@ -16,7 +13,6 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
-    shell,
     skipIfTorchDynamo,
     TEST_XPU,
     xfailIfTorchDynamo,
@@ -152,7 +148,7 @@ class TestCppExtensionAOT(common.TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
     def test_no_python_abi_suffix_sets_the_correct_library_name(self):
-        # For this test, run_test.py will call `python setup.py install` in the
+        # For this test, run_test.py will call `python -m pip install .` in the
         # cpp_extensions/no_python_abi_suffix_test folder, where the
         # `BuildExtension` class has a `no_python_abi_suffix` option set to
         # `True`. This *should* mean that on Python 3, the produced shared
@@ -184,48 +180,6 @@ class TestCppExtensionAOT(common.TestCase):
         ref = a + b
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
-
-    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
-    @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
-    def test_python_agnostic(self):
-        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
-        # cpp_extensions/python_agnostic_extension folder, where the extension and
-        # setup calls specify py_limited_api to `True`. To approximate that the
-        # extension is indeed python agnostic, we test
-        #   a. The extension wheel name contains "cp39-abi3", meaning the wheel
-        # should be runnable for any Python 3 version after and including 3.9
-        #   b. The produced shared library does not have libtorch_python.so as a
-        # dependency from the output of "ldd _C.so"
-        #   c. The .so does not need any python related symbols. We approximate
-        # this by running "nm -u _C.so" and grepping that nothing starts with "Py"
-
-        dist_root = os.path.join("cpp_extensions", "python_agnostic_extension", "dist")
-        matches = list(Path(dist_root).glob("*.whl"))
-        self.assertEqual(len(matches), 1, msg=str(matches))
-        whl_file = matches[0]
-        self.assertRegex(str(whl_file), r".*python_agnostic-0\.0-cp39-abi3-.*\.whl")
-
-        build_root = os.path.join(
-            "cpp_extensions", "python_agnostic_extension", "build"
-        )
-        matches = list(Path(build_root).glob("**/*.so"))
-        self.assertEqual(len(matches), 1, msg=str(matches))
-        so_file = matches[0]
-        lddtree = subprocess.check_output(["ldd", so_file]).decode("utf-8")
-        self.assertFalse("torch_python" in lddtree)
-
-        missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
-        self.assertFalse("Py" in missing_symbols)
-
-        # finally, clean up the folder
-        cmd = [sys.executable, "setup.py", "clean"]
-        return_code = shell(
-            cmd,
-            cwd=os.path.join("cpp_extensions", "python_agnostic_extension"),
-            env=os.environ.copy(),
-        )
-        if return_code != 0:
-            return return_code
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -363,18 +317,50 @@ class TestMAIATensor(common.TestCase):
         weight = torch.empty(6, 4, 2, 2, device="maia", requires_grad=True)
         bias = torch.empty(6, device="maia")
 
-        # Make sure forward is overriden
+        # Make sure forward is overridden
         out = torch.nn.functional.conv2d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(maia_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])
 
-        # Make sure backward is overriden
+        # Make sure backward is overridden
         # Double backward is dispatched to _convolution_double_backward.
         # It is not tested here as it involves more computation/overrides.
         grad = torch.autograd.grad(out, input, out, create_graph=True)
         self.assertEqual(maia_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
+
+    def test_autocast_apis_for_maia_device(self):
+        # Default low-precision type in MAIA's autocast.
+        fast_dtype = torch.get_autocast_dtype("maia")
+        self.assertEqual(fast_dtype, torch.bfloat16)
+        self.assertTrue(torch._C._is_autocast_available("maia"))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_float16_precision(self):
+        # Ensure we can change low precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia", dtype=torch.float16):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.float16)
+            self.assertEqual(y.shape, (2, 2))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_default_precision(self):
+        # Use default lower precision dtype, bfloat16.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia"):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.bfloat16)
+            self.assertEqual(y.shape, (2, 2))
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

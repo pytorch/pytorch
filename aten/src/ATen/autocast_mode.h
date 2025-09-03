@@ -25,7 +25,7 @@ TORCH_API void set_autocast_cache_enabled(bool enabled);
 // deprecated CUDA-specific autocast APIs
 C10_DEPRECATED_MESSAGE(
     "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
-TORCH_API inline bool is_enabled() {
+inline bool is_enabled() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -34,7 +34,7 @@ TORCH_API inline bool is_enabled() {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::set_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
-TORCH_API inline void set_enabled(bool enabled) {
+inline void set_enabled(bool enabled) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -43,7 +43,7 @@ TORCH_API inline void set_enabled(bool enabled) {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
-TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
+inline at::ScalarType get_autocast_gpu_dtype() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -52,7 +52,7 @@ TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")
-TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
+inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -65,7 +65,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::is_" #name                                                                      \
       "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
       ") instead.")                                                                                  \
-  TORCH_API inline bool is_##name##_enabled() {                                                      \
+  inline bool is_##name##_enabled() {                                                                \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -78,7 +78,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_" #name                                                                     \
       "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
       ", enabled) instead.")                                                                         \
-  TORCH_API inline void set_##name##_enabled(bool enabled) {                                         \
+  inline void set_##name##_enabled(bool enabled) {                                                   \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -91,7 +91,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::get_autocast_" #name                                                            \
       "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
       ") instead.")                                                                                  \
-  TORCH_API inline at::ScalarType get_autocast_##name##_dtype() {                                    \
+  inline at::ScalarType get_autocast_##name##_dtype() {                                              \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -104,7 +104,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_autocast_" #name                                                            \
       "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
       ", dtype) instead.")                                                                           \
-  TORCH_API inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
+  inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                                    \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -123,12 +123,14 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   _(privateuseone, at::kPrivateUse1)
 
 // deprecated other backend specific autocast APIs
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 AT_FORALL_DEPRECATED_AUTOCAST_BACKENDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
-const std::array<at::DeviceType, 9> _AUTOCAST_SUPPORTED_DEVICES{
+const std::array<at::DeviceType, 10> _AUTOCAST_SUPPORTED_DEVICES{
     at::kCPU,
     at::kCUDA,
     at::kMTIA,
+    at::kMAIA,
     at::kXPU,
     at::kIPU,
     at::kHPU,
@@ -149,6 +151,8 @@ inline bool is_autocast_eligible(
           tensor.is_floating_point();
     case c10::DeviceType::MTIA:
       return tensor.is_mtia() && tensor.is_floating_point();
+    case c10::DeviceType::MAIA:
+      return tensor.is_maia() && tensor.is_floating_point();
     case c10::DeviceType::XPU:
       return tensor.is_xpu() && tensor.is_floating_point();
     case c10::DeviceType::IPU:
@@ -176,6 +180,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::AutocastCPU;
     case c10::DeviceType::MTIA:
       return DispatchKey::AutocastMTIA;
+    case c10::DeviceType::MAIA:
+      return DispatchKey::AutocastMAIA;
     case c10::DeviceType::XPU:
       return DispatchKey::AutocastXPU;
     case c10::DeviceType::IPU:
@@ -189,7 +195,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
     case c10::DeviceType::MPS:
       return DispatchKey::AutocastMPS;
     default:
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
   }
 }
@@ -210,7 +217,8 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
   if (is_autocast_available(device_type)) {
     return get_autocast_dtype(device_type);
   } else {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }
@@ -369,7 +377,7 @@ Keep it simple for now by assuming only one such flag is
 present in the argument list.  If I ever need a function
 with more than flag I'll figure out something else.
 The policy is:
-If the user has explicity specified a dtype, respect it.
+If the user has explicitly specified a dtype, respect it.
 Otherwise, set it to the autocast type.
 ********************************************************/
 
@@ -741,6 +749,24 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
     POLICY)                                         \
   KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(            \
       c10::DeviceType::MTIA,                        \
+      REDISPATCH_FUNC,                              \
+      REGISTER_NAME,                                \
+      REGISTER_SIGNATURE,                           \
+      REDISPATCH_SIGNATURE,                         \
+      POLICY)
+
+// KERNEL_MAIA/KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA
+// registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastMAIA
+#define KERNEL_MAIA(...) KERNEL(c10::DeviceType::MAIA, __VA_ARGS__)
+
+#define KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA( \
+    REDISPATCH_FUNC,                                \
+    REGISTER_NAME,                                  \
+    REGISTER_SIGNATURE,                             \
+    REDISPATCH_SIGNATURE,                           \
+    POLICY)                                         \
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(            \
+      c10::DeviceType::MAIA,                        \
       REDISPATCH_FUNC,                              \
       REGISTER_NAME,                                \
       REGISTER_SIGNATURE,                           \

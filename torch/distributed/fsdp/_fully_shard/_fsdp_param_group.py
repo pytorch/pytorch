@@ -15,10 +15,16 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    AllGather,
     AllGatherResult,
+    DefaultAllGather,
+    DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    ProcessGroupAllocAllGather,
+    ProcessGroupAllocReduceScatter,
+    ReduceScatter,
 )
 from ._fsdp_common import (
     compiled_autograd_enabled,
@@ -26,7 +32,7 @@ from ._fsdp_common import (
     HSDPMeshInfo,
     TrainingState,
 )
-from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -95,23 +101,23 @@ class FSDPCommContext:
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
-    event: torch.Event  # all-gather copy-out
+    event: Optional[torch.Event]  # all-gather copy-out
 
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event  # reduce-scatter event
+    event: Optional[torch.Event]  # reduce-scatter event
 
 
 class AllReduceState(NamedTuple):
     all_reduce_input: torch.Tensor
-    event: torch.Event  # all-reduce event
+    event: Optional[torch.Event]  # all-reduce event
 
 
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
-    _orig_dtype: torch.dtype
+    _orig_dtype: Optional[torch.dtype]
     _reduce_dtype: Optional[torch.dtype]
 
     def __init__(
@@ -159,6 +165,9 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
+        self._all_gather_comm: AllGather = DefaultAllGather()
+        self._all_gather_output = torch.empty(0, device=self.device)
+        self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
@@ -177,9 +186,12 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
-        # Optional custom reduce-scatter reduce op (e.g. to divide by a
-        # factor other than the shard world size)
-        self.reduce_scatter_reduce_op: Optional[dist.ReduceOp] = None
+        # Optional custom factor for the gradient reduction op (e.g. to divide
+        # by a factor other than the world size)
+        self.gradient_divide_factor: Optional[float] = None
+        # Whether reduce-scatter and all-reduce should be issued using only
+        # summations, potentially with separate pre-/post-scaling.
+        self.force_sum_reduction_for_comms: bool = False
         # `async_op` arg used for pre-forward/pre-backward unshard; can be
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
@@ -212,22 +224,27 @@ class FSDPParamGroup:
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_dtype_attrs(self.mp_policy)
-        orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
-        if len(orig_dtypes) != 1:
-            # This can be relaxed if we copy-out for the reduce-scatter
+        trainable_params: list[FSDPParam] = [
+            p for p in self.fsdp_params if p.sharded_param.requires_grad
+        ]
+        orig_dtypes = {p.orig_dtype for p in trainable_params}
+        reduce_dtypes = {p.reduce_dtype for p in trainable_params}
+        if len(trainable_params) > 0 and len(orig_dtypes) != 1:
+            # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes))
-        reduce_dtypes = {fsdp_param.reduce_dtype for fsdp_param in self.fsdp_params}
-        if len(reduce_dtypes) != 1:
+        self._orig_dtype = next(iter(orig_dtypes)) if len(trainable_params) else None
+        if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
             # reduce dtypes)
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = next(iter(reduce_dtypes))
+        self._reduce_dtype = (
+            next(iter(reduce_dtypes)) if len(trainable_params) else None
+        )
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -248,6 +265,36 @@ class FSDPParamGroup:
         self._init_mp_dtypes()
         self._register_state_dict_hooks()
 
+    def set_allocate_memory_from_process_group(self, enable: bool) -> None:
+        """
+        Whether to (try to) use the ProcessGroup's allocate_tensor method for
+        the staging buffers for collective comms.
+        """
+        assert isinstance(
+            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
+        ), (
+            "cannot call set_allocate_memory_from_process_group() "
+            f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
+        )
+        self._all_gather_comm = (
+            ProcessGroupAllocAllGather(self._all_gather_process_group)
+            if enable
+            else DefaultAllGather()
+        )
+
+        assert isinstance(
+            self._reduce_scatter_comm,
+            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
+        ), (
+            "cannot call set_allocate_memory_from_process_group() "
+            f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
+        )
+        self._reduce_scatter_comm = (
+            ProcessGroupAllocReduceScatter(self._reduce_scatter_process_group)
+            if enable
+            else DefaultReduceScatter()
+        )
+
     # Runtime #
     def unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
@@ -264,6 +311,22 @@ class FSDPParamGroup:
             # used in the all-gather streams
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
+
+        world_size = self._all_gather_process_group.size()
+        if world_size == 1:
+            # can't skip due to early return in wait_for_unshard if
+            # no self._all_gather_result
+            self._all_gather_result = AllGatherResult(
+                all_gather_output=self._all_gather_output,
+                all_gather_event=self.device_handle.Event().record(),
+                all_gather_work=None,
+                param_all_gather_input_dtypes=[],
+                param_all_gather_input_numels=[],
+                all_gather_input_split_sizes=[],
+            )
+
+            return
+
         with record_function(self._with_fqn("FSDP::all_gather")):
             self._all_gather_result = foreach_all_gather(
                 self.fsdp_params,
@@ -271,11 +334,12 @@ class FSDPParamGroup:
                 async_op,
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
+                self._all_gather_comm,
             )
 
     def wait_for_unshard(self):
         """
-        1. In forward with implict prefetching, to overlap the current copy-out
+        1. In forward with implicit prefetching, to overlap the current copy-out
         with the next all-gather, we save a reference to the current all-gather
         result to free after the next copy-out.
         2. Otherwise (explicit prefetching or in backward), we free the
@@ -289,18 +353,52 @@ class FSDPParamGroup:
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
-        with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-            foreach_all_gather_copy_out(
-                self._all_gather_result,
-                self.fsdp_params,
-                self._all_gather_process_group,
-            )
+        world_size = self._all_gather_process_group.size()
+        if world_size == 1:
+            # directly initialize unsharded parameters from sharded parameters
+
+            for fsdp_param in self.fsdp_params:
+                # Use all_gather_inputs which already handles conversion to param_dtype
+                # This is consistent with the world_size > 1 path
+                all_gather_input = fsdp_param.all_gather_inputs[0]
+
+                # Make sure the all_gather_outputs has proper storage size before using it
+                # First ensure we have at least one tensor in all_gather_outputs
+                fsdp_param.init_all_gather_outputs(
+                    [all_gather_input.numel()],
+                    [all_gather_input.dtype],
+                    world_size,
+                    self.device,
+                    force_recreate=False,
+                )
+
+                tensor = fsdp_param.all_gather_outputs[0]
+                alloc_storage(tensor)
+
+                # find alternative way to check if tensor.is_inference
+                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                    tensor.copy_(all_gather_input)
+
+        else:
+            with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
+                foreach_all_gather_copy_out(
+                    self._all_gather_result,
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                )
+
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
+
         self._to_unsharded()
         all_gather_copy_out_event = self.device_handle.Event()
         all_gather_copy_out_event.record()
-        if not async_op and self._training_state == TrainingState.FORWARD:
+
+        if (
+            not async_op
+            and self._training_state == TrainingState.FORWARD
+            and world_size > 1
+        ):
             # Defer free to allow for overlap of this copy-out with next
             # all-gather collective
             self.comm_ctx.all_gather_state = AllGatherState(
@@ -308,13 +406,14 @@ class FSDPParamGroup:
             )
         else:
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
-    def _wait_all_gather_streams_on_event(self, event: torch.Event):
+    def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]):
         # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
             self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream"):
+        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
@@ -414,11 +513,14 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            if self.comm_ctx.reduce_scatter_state is not None:
+            if (
+                self.comm_ctx.reduce_scatter_state is not None
+                and self.comm_ctx.reduce_scatter_state.event is not None
+            ):
                 self.device_handle.current_stream().wait_event(
                     self.comm_ctx.reduce_scatter_state.event
                 )
-                self.comm_ctx.reduce_scatter_state = None
+            self.comm_ctx.reduce_scatter_state = None
             all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
             all_reduce_stream: torch.cuda.Stream
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
@@ -444,21 +546,24 @@ class FSDPParamGroup:
                 unsharded_grads,
                 self._reduce_scatter_process_group,
                 self.comm_ctx.reduce_scatter_stream,
+                self._reduce_scatter_comm,
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self.reduce_scatter_reduce_op,
+                self.gradient_divide_factor,
                 self._all_reduce_process_group if self._is_hsdp else None,
                 all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
                 self._all_reduce_hook,
+                self.force_sum_reduction_for_comms,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
             )
             if all_reduce_input is not None:
-                assert all_reduce_event is not None
+                if self.device.type != "cpu":
+                    assert all_reduce_event is not None
                 self._all_reduce_state = AllReduceState(
                     all_reduce_input, all_reduce_event
                 )
@@ -484,9 +589,12 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if self._all_reduce_state is not None:
+        if (
+            self._all_reduce_state is not None
+            and self._all_reduce_state.event is not None
+        ):
             self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-            self._all_reduce_state = None
+        self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:

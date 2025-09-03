@@ -330,7 +330,7 @@ def _full_post_state_dict_hook(
             try:
                 state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 warnings.warn(
                     f"Failed to clone() tensor with name {fqn} on rank {fsdp_state.rank}. "
                     "This may mean that this state_dict entry could point to invalid "
@@ -699,7 +699,7 @@ def _post_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:
@@ -761,7 +761,7 @@ def _pre_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:
@@ -784,7 +784,7 @@ def _pre_state_dict_hook(
 
 @no_type_check
 def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
-    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # If device_mesh is passed in when initializing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedStateDictConfig().
     if getattr(fsdp_state, "_device_mesh", None):
         state_dict_type = fsdp_state._state_dict_type

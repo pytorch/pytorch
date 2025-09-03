@@ -7,6 +7,11 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
+from torch.utils._triton import (
+    has_triton_experimental_host_tma,
+    has_triton_tensor_descriptor_host_tma,
+)
 
 
 def _filter_instructions(instructions, opname):
@@ -77,7 +82,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
-    @unittest.expectedFailure
     def test_ConstDict_popitem_reconstruct(self):
         """
         If something is pop'ed from the dict, we reconstruct everything
@@ -299,6 +303,149 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             got = opt_fn(model, states, x)
             self.assertEqual(expected, got)
+
+    def test_graph_break_in_wrapped_user_function(self):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            assert torch.compiler.is_compiling()
+            assert not torch.is_grad_enabled()
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            x = torch.no_grad()(fn)(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_user_method(self):
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+            def fn(self, x):
+                x = x + self.a
+                torch._dynamo.graph_break()
+                assert torch.compiler.is_compiling()
+                assert not torch.is_grad_enabled()
+                return x + self.b
+
+        obj = Foo()
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            obj.fn = torch.no_grad()(obj.fn)
+            x = obj.fn(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_nested_function(self):
+        @torch.compile(backend="eager")
+        def gn(x):
+            a = 1
+            b = 2
+
+            @torch.no_grad()
+            def fn(x):
+                x = x + a
+                torch._dynamo.graph_break()
+                assert torch.compiler.is_compiling()
+                assert not torch.is_grad_enabled()
+                return x + b
+
+            x = fn(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_skipped_function(self):
+        from torch._dynamo import trace_rules
+        from torch._dynamo.testing import _skipped_function_for_test_reconstruct
+        from torch._dynamo.variables import SkipFunctionVariable
+
+        self.assertIs(
+            trace_rules.lookup(_skipped_function_for_test_reconstruct),
+            SkipFunctionVariable,
+        )
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            assert torch.compiler.is_compiling()
+            assert not torch.is_grad_enabled()
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    @requires_triton()
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "Test requires triton.tools.experimental_descriptor API",
+    )
+    def test_tma_experimental_reconstruct(self):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                tensor.data_ptr(),
+                tensor.size(0),
+                tensor.size(1),
+                32,
+                32,
+                tensor.element_size(),
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device=GPU_TYPE)
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref[1].desc, res[1].desc)
+
+    @requires_triton()
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "Test requires triton.tools.tensor_descriptor API",
+    )
+    def test_tma_stable_reconstruct(self):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
+                tensor,
+                [32, 32],
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device=GPU_TYPE)
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

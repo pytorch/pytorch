@@ -1,5 +1,3 @@
-# This module contains functions that *will be allowed* by dynamo
-
 """
 This module contains utility functions that are explicitly allowed to be called during
 TorchDynamo compilation. These functions are carefully vetted to ensure they work
@@ -187,3 +185,67 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used for torch._dynamo.disable(recursive=False)
+def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    # wrap function to get the right error message
+    # this function is in external_utils so that convert_frame doesn't skip it.
+    @functools.wraps(fn)
+    def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        return fn(*args, **kwargs)
+
+    return nonrecursive_disable_wrapper
+
+
+def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Apply self as a ctx manager around a call to func
+    """
+
+    @functools.wraps(func)
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self:
+            return func(*args, **kwargs)
+
+    return inner
+
+
+# Use only on ints marked dynamic via torch.empty(0, integer)
+# Currently only way to mark ints as dynamic: https://github.com/pytorch/pytorch/issues/129623
+def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
+    if isinstance(x, torch.Tensor):
+        # x.size() is expected to be [0, dynamic_int]
+        return x.size(1)
+    return x
+
+
+def call_accumulate_grad(
+    variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
+) -> None:
+    updated_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
+        [grad], variable, variable.grad, has_post_hooks
+    )
+    variable.grad = updated_grad[0]
+
+
+def wrap_inline_with_set_fullgraph(
+    fn: Callable[_P, _R], fullgraph: bool
+) -> Callable[_P, _R]:
+    # NB: need multiple definitions in order to prevent `fullgraph` from
+    # being a freevar of wrapper
+    if fullgraph:
+
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.set_fullgraph(True):
+                return fn(*args, **kwargs)
+
+    else:
+
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.set_fullgraph(False):
+                return fn(*args, **kwargs)
+
+    return wrapper

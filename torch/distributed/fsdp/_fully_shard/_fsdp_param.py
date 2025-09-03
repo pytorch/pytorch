@@ -42,7 +42,7 @@ FSDP considers the following tensors:
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
-We define these tensors to describe the general framework that can accomodate
+We define these tensors to describe the general framework that can accommodate
 extensions, where:
 - all-gather-inputs = pre-all-gather-transform(sharded-parameter)
 - unsharded-parameter = post-all-gather-transform(all-gather-outputs)
@@ -140,8 +140,7 @@ def copy__functionalize(tensor, data):
         torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
 
 
-if not torch._running_with_deploy():
-    torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):
@@ -292,21 +291,22 @@ class FSDPParam:
                 dp_global_mesh is None or tp_global_mesh is None
             ):
                 raise AssertionError(
-                    "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
-                    f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
+                    "FSDP requires the DP and model parallel TP/EP mesh to have the same parent mesh but got: \n"
+                    f"DP's global mesh: {dp_global_mesh}\nTP/EP's global mesh: {tp_global_mesh}"
                 )
             name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            if len(self._tp_spec.placements) != 1:
+            if len(self._tp_spec.placements) > 2:
                 raise NotImplementedError(
-                    f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
+                    f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
                 )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert 2 <= self._spmd_mesh.ndim <= 3, (
-                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            assert 2 <= self._spmd_mesh.ndim <= 4, (
+                "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
+                f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
@@ -315,11 +315,11 @@ class FSDPParam:
                     if split_factor > 1
                     else fsdp_placement
                 ),
-                self._tp_spec.placements[0],
+                *self._tp_spec.placements,
             )
-            if self._spmd_mesh.ndim == 2:
+            if dp_mesh.ndim == 1:  # FSDP
                 self._spmd_placements = dp_shard_tp_placement
-            else:
+            else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
             self._sharding_spec = DTensorSpec(
@@ -327,16 +327,6 @@ class FSDPParam:
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
             )
-            # TODO: Enable uneven sharding for FSDP+TP.
-            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
-                num_shards = self._sharding_spec.num_shards_map[0]
-                tensor_size_dim_0 = self._sharding_spec.shape[0]
-                if tensor_size_dim_0 % num_shards != 0:
-                    raise NotImplementedError(
-                        "FSDP+TP sharding does not support uneven sharding for now: "
-                        f"tensor dim 0 has size {tensor_size_dim_0} which cannot be "
-                        f"evenly sharded into {num_shards} shards."
-                    )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
@@ -386,9 +376,7 @@ class FSDPParam:
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory(
-                    device=self.device
-                )
+                padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
         length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
         sharded_param = padded_sharded_param.narrow(
@@ -706,6 +694,7 @@ class FSDPParam:
                 ), (
                     f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
                     "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
+                    "outer_size: torch.Size, outer_stride: tuple[int, ...], "
                     "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
                 )
                 if num_fn_params == 1:
@@ -858,7 +847,7 @@ class FSDPParam:
             local_tensor = padded_local_tensor
             updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
+            local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy

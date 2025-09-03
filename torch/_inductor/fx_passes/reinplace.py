@@ -3,10 +3,12 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Union
+from typing import Any, Callable, cast, Union
 
 import torch
+import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
@@ -21,7 +23,7 @@ from torch._inductor.lowering import (
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
-from torch.fx.immutable_collections import immutable_dict
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -176,7 +178,12 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
-    return any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops)  # type: ignore[union-attr]
+    view_ops = cast(Sequence[torch.fx.node.Argument], view_ops)
+    return any(
+        target in _ALWAYS_MUTATING_SCATTER_OPS
+        for view in view_ops
+        if isinstance(target := getattr(view, "target", None), torch._ops.OpOverload)
+    )
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -253,7 +260,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
-        node_to_view_base[node] = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
+        node_to_view_base[node] = node_to_view_base.get(inp, inp)  # type: ignore[arg-type, assignment]
         node_to_view_op[node] = [
             *node_to_view_op[inp],  # type: ignore[index]
             ViewOp(
@@ -267,6 +274,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         assert len(node.args) >= 2
         inp, src = node.args[:2]
 
+        assert isinstance(node.target, torch._ops.OpOverload)
         scatter_view_op = ViewOp(
             _SCATTER_OP_TO_VIEW[node.target],
             args=node.args[2:],
@@ -331,7 +339,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             handle_view_scatter(node)
 
 
-inplaceable_ops = {
+inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
     aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
     _generalized_scatter: InplaceableOp(
@@ -343,7 +351,7 @@ inplaceable_ops = {
 
 try:
     c10d_functional = torch.ops._c10d_functional
-    inplaceable_collective_ops = {
+    inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
             c10d_functional.all_reduce_.default, 0
         ),
@@ -720,6 +728,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
+            if "eager_input_vals" in node.meta:
+                # We changed the kwargs, so we need to update eager_input_vals
+                # to something sane.
+                args, kwargs = node.meta["eager_input_vals"]
+                new_kwargs = {**kwargs}
+                new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
+                new_kwargs = immutable_dict(new_kwargs)
+                node.meta["eager_input_vals"] = (args, new_kwargs)
         elif (
             inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
         ) is not None:
@@ -743,8 +759,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
-def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
+def reinplace_inplaceable_ops(
+    fake_tensor_updater: torch._inductor.fx_utils.FakeTensorUpdater,
+    graph: torch.fx.Graph,
+) -> None:
     with enable_python_dispatcher():
         canonicalize_view_scatter_ops(graph)
+        # canonicalize_view_scatter_ops adds new operations to the graph.
+        # We run fake_tensor_updater to update the alias information.
+        # Correct alias information is required for `reinplace_inplaceable_ops_core`.
+        fake_tensor_updater.incremental_update()
         reinplace_inplaceable_ops_core(graph)
         decompose_generalized_scatter(graph)

@@ -97,6 +97,7 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
+    test_build_separate=False,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -105,8 +106,12 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
+    new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(
+        cpp_wrapper=True,
+        cpp_wrapper_build_separate=test_build_separate,
+    )
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -123,6 +128,8 @@ def make_test_case(
                 # happen for tests validating build-dependent features (e.g. datatypes
                 # that are available on some platforms and not others).
                 if code:
+                    if test_build_separate:
+                        self.assertIn("kernel_src", code)
                     self.assertIn("CppWrapperCodeCache", code)
                     self.assertTrue(
                         all(
@@ -134,14 +141,14 @@ def make_test_case(
             tests.tearDown()
             tests.tearDownClass()
 
-    fn.__name__ = test_name
+    fn.__name__ = new_test_name
     import copy
 
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
             CppWrapperTemplate,
-            test_name,
+            new_test_name,
             fn,
         )
 
@@ -156,14 +163,18 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
+        test_build_separate: bool = False
 
     for item in [
         BaseTest("test_add_complex"),
+        BaseTest("test_add_complex", test_build_separate=True),
         BaseTest("test_add_complex4"),
+        BaseTest("test_add_complex4", test_build_separate=True),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
+        BaseTest("test_bmm1", test_build_separate=True),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest(
@@ -189,7 +200,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_unary",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
             condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
@@ -246,7 +257,8 @@ if RUN_CPU:
             for func in dir(test_cpu_repro.CPUReproTests())
             if func.startswith("test_lstm_packed_change_input_sizes")
         ],
-        BaseTest("test_max_pool2d6"),
+        BaseTest("test_max_pool2d6_dilation_1"),
+        BaseTest("test_max_pool2d6_dilation_2"),
         BaseTest(
             "test_mkl_linear", "", test_cpu_repro.CPUReproTests(), condition=TEST_MKL
         ),
@@ -256,7 +268,7 @@ if RUN_CPU:
             "test_multi_threading",
             condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
-            code_string_count={"py::gil_scoped_release release;": 2},
+            code_string_count={"py::gil_scoped_release_simple release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
@@ -296,7 +308,7 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
                 [
-                    "aoti_torch_cpu__qconv2d_pointwise_tensor",
+                    "aoti_torch_cpu__qconv_pointwise_tensor",
                     "torch.ops.quantized.max_pool2d",
                     "aoti_torch_cpu__qlinear_pointwise_tensor",
                 ]
@@ -358,7 +370,9 @@ if RUN_CPU:
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
         BaseTest(
-            "test_woq_int4", "cpu", test_mkldnn_pattern_matcher.TestPatternMatcher()
+            "test_woq_int4",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
         ),
     ]:
         make_test_case(
@@ -369,6 +383,7 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
+            item.test_build_separate,
         )
 
     test_torchinductor.copy_tests(

@@ -67,9 +67,9 @@ def get_fw_bw_graph(
     out = aot_function(
         f,
         fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
-        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell)
-        if requires_grad
-        else nop,
+        bw_compiler=(
+            partial(extract_graph, graph_cell=bw_graph_cell) if requires_grad else nop
+        ),
         partition_fn=partitioner,
         decompositions=default_decompositions,
         dynamic=dynamic,
@@ -328,7 +328,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return
 
             # Meta function of the custom op
-            @torch.library.impl_abstract(
+            @torch.library.register_fake(
                 "mylib::record_scalar_tensor",
                 lib=lib,
             )

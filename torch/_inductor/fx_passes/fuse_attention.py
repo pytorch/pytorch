@@ -18,7 +18,6 @@ from ..pattern_matcher import (
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
-
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
@@ -542,6 +541,188 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_20(query, key, value, attn_mask, dropout_p):
+    # for DistilBert with dropout transformers==4.44.2
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    bs = q.size(0)
+    k_len = k.size(-2)
+    q = q.div(math.sqrt(q.size(-1)))
+    scores = q @ k.transpose(-2, -1)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return (
+        torch.nn.functional.dropout(
+            torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1), dropout_p
+        )
+        @ v
+    )
+
+
+def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    bs = query.size(0)
+    n_head = query.size(2)
+    q_len = query.size(1)
+    k_len = key.size(1)
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / math.sqrt(query.size(-1)),
+    )
+
+
+def _sfdp_pattern_24(query, key, value, attention_mask):
+    """
+    this pattern is for MBartForCausalLM/PLBartForCausalLM.
+    attn_mask has a different dtype with QKV.
+    there is no scale in sdpa.
+    """
+    bs = query.size(0)
+    n_head = query.size(1)
+    seq_len = query.size(2)
+    head_size = query.size(3)
+    q = query.view(bs * n_head, -1, head_size)
+    k = key.reshape(bs * n_head, -1, head_size)
+    v = value.reshape(bs * n_head, -1, head_size)
+    attn_weights = torch.bmm(q, k.transpose(1, 2))
+    attn_weights = attn_weights.view(bs, n_head, seq_len, -1) + attention_mask
+    attn_weights = attn_weights.view(bs * n_head, seq_len, -1)
+    attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+    if query.dtype == torch.half:
+        attn_weights = attn_weights.to(torch.half)
+    attn_output = torch.bmm(attn_weights, v)
+    attn_output = attn_output.view(bs, n_head, seq_len, head_size)
+    return attn_output
+
+
+def _sfdp_replacement_24(query, key, value, attention_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask.to(dtype=query.dtype),
+        is_causal=False,
+        scale=1,
+    )
+
+
+def _sfdp_pattern_21(query, key, value, attn_mask):
+    # for T5 with inplace add
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    score = masked_score.type_as(query)
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value)
+
+
+def _sfdp_replacement_21(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        is_causal=False,
+        scale=1.0,
+    )
+
+
+def _sfdp_pattern_22(query, key, value, attn_mask):
+    # for T5 with inplace add and return key and value
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    masked_score = score + attn_mask
+    score = masked_score.type_as(query)
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+
+
+def _sfdp_replacement_22(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_pattern_23(query, key, value):
+    # for T5 with inplace add and
+    # return key and value and
+    # attn_mask is generated by atem.full(..., 0)
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    score = torch.matmul(query, key.permute(0, 1, 3, 2))
+    fp32_score = score.float()
+    score = fp32_score.type_as(query)
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+
+
+def _sfdp_replacement_23(query, key, value):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    return (
+        _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=None,
+            is_causal=False,
+            scale=1.0,
+        ),
+        key,
+        value,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -641,6 +822,8 @@ def _get_sfdp_patterns():
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    # need 2d attn_mask to generate patterns with view op
+    m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -670,6 +853,7 @@ def _get_sfdp_patterns():
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
+        m_2d = functools.partial(m_inp_2d, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
@@ -779,7 +963,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -801,7 +985,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -825,6 +1009,41 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m_2d()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_21,
+                _sfdp_replacement_21,
+                [g(), g(), g(), m_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_22,
+                _sfdp_replacement_22,
+                [g(), g(), g(), m_float()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_23,
+                _sfdp_replacement_23,
+                [g(), g(), g()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_24,
+                _sfdp_replacement_24,
+                [g(), g(), g(), b_float()],
+                {},
+                _sfdp_extra_check,
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -906,7 +1125,7 @@ def _get_sfdp_patterns():
             )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _sfdp_init():
     for key, register_replacement_kwargs in _get_sfdp_patterns():
         gen_register_replacement(key, **register_replacement_kwargs)

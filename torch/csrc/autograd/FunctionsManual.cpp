@@ -823,7 +823,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sym_sizes().size()));
+  dim = at::maybe_wrap_dim(dim, input.dim());
   if (!keepdim) {
     // `prod` reduces the dimension at `dim`,
     // so, unsqueeze `grad` and `result` at dim.
@@ -876,8 +876,8 @@ Tensor logsumexp_backward(
     IntArrayRef dim,
     bool keepdim) {
   if (!keepdim && self.dim() != 0) {
-    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
-    result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.dim());
+    result = unsqueeze_multiple(result, dim, self.dim());
   }
   return grad * (self - result).exp().conj();
 }
@@ -891,10 +891,11 @@ Tensor logcumsumexp_backward(
     return grad;
   }
 
-  // Reference: https://github.com/tensorflow/tensorflow/blob/
-  // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
+  // Reference:
+  // https://github.com/tensorflow/tensorflow/blob/2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
 
-  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
@@ -1077,7 +1078,7 @@ std::vector<Tensor> cat_tensors_backward(
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(shape[0].sym_eq(0))) {
         grad_inputs[i] = at::zeros({0}, grad_val.options());
         continue;
       }
@@ -1448,6 +1449,62 @@ Tensor mm_mat2_backward(
 
   // General fallback, should work for any layout
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
+}
+
+Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
+          mat1_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  auto mat1_dim = mat1_sizes.size();
+  if (mat1_strides[mat1_dim - 2] == 1 &&
+      mat1_strides[mat1_dim - 1] == mat1_sizes[mat1_dim - 2]) {
+    auto grad_inp =
+        (at::_grouped_mm(mat2, grad.transpose(-2, -1), offs)).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = (at::_grouped_mm(grad, mat2.transpose(-2, -1), offs));
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
+}
+
+Tensor _grouped_mm_mat2_backward(
+    const Tensor& grad,
+    const Tensor& mat1,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
+    c10::Layout mat2_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
+          mat2_layout == c10::kStrided,
+      "only strided layout supported for grouped mm");
+  // if input was column-major, return grad as column-order for efficiency
+  auto mat2_dim = mat2_sizes.size();
+  if (offs.has_value() && !offs->defined()) {
+    offs = std::nullopt;
+  }
+  if (mat2_strides[mat2_dim - 2] == 1 &&
+      mat2_strides[mat2_dim - 1] == mat2_sizes[mat2_dim - 2]) {
+    auto grad_inp =
+        at::_grouped_mm(grad.transpose(-2, -1), mat1, offs).transpose(-2, -1);
+    return maybe_multiply(grad_inp, alpha.conj());
+  } else {
+    auto grad_inp = at::_grouped_mm(mat1.transpose(-2, -1), grad, offs);
+    return maybe_multiply(grad_inp, alpha.conj());
+  }
 }
 
 Tensor mm_mat1_sparse_backward(
@@ -1832,7 +1889,7 @@ Tensor var_backward(
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.dim());
   }
   const c10::SymFloat rnumel(_safe_size(self.sym_sizes(), dim));
   return (c10::SymFloat(2.0) / (rnumel - correction)) * grad *
@@ -2848,7 +2905,7 @@ Tensor softplus_double_backward(
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
 // See NOTE [ Detecting Memory Overlap Within A Strided Tensor ] on how to
-// roughly detech overlapping memory.
+// roughly detect overlapping memory.
 
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 //
@@ -2938,7 +2995,7 @@ Tensor softplus_double_backward(
 //              Now that we established the above claim (***), we consider the
 //              view operation as first sorting the dimensions (i.e., blocks),
 //              apply the original view (since it only cares dimensions being
-//              consecutive and contiguous withtin each block), and then undo
+//              consecutive and contiguous within each block), and then undo
 //              the sort.
 //
 //              Consider a single block B in the output,
@@ -2990,7 +3047,7 @@ Tensor softplus_double_backward(
 //                  size'[i] <= floor(size[i] / k)
 //
 //              If size'[i] = 1, invariant is obviously satisfied as we are
-//              just removing a dimension (afte step (1)).
+//              just removing a dimension (after step (1)).
 //
 //              Assume size'[i] > 1.
 //
@@ -3395,8 +3452,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                   : at::matmul(at::matmul(U.mH(), dA), V);
+  // U^H (dA V) is O(km(n + k))
+  // (U^H dA) V is O(kn(m + k))
+  // So prefer U^H (dA V) if m < n
+  auto dP = m < n ? at::matmul(U.mH(), at::matmul(dA, V))
+                  : at::matmul(at::matmul(U.mH(), dA), V);
 
   auto dS =
       is_complex ? at::real(dP.diagonal(0, -2, -1)) : dP.diagonal(0, -2, -1);
@@ -4662,10 +4722,10 @@ static Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
 // reductions were done with keepdim=True
 static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
-  while (src_expanded.sizes().size() < target.sizes().size() - 1) {
+  while (src_expanded.dim() < target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
   }
-  if (src_expanded.sizes().size() == target.sizes().size() - 1) {
+  if (src_expanded.dim() == target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(0);
   }
   return src_expanded;
@@ -4676,7 +4736,7 @@ static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
 // do a straight expansion because it won't follow the broadcasting rules.
 static Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
-  while (src_expanded.sizes().size() < target.sizes().size() - 1) {
+  while (src_expanded.dim() < target.dim() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
   }
   return src_expanded.expand_as(target);
@@ -4966,6 +5026,103 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask) {
+  c10::MaybeOwned<at::Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  const auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int normalized_ndim = normalized_shape.size();
+  const int axis = input_ndim - normalized_ndim;
+
+  int64_t N_rms = 1;
+  for (int i = 0; i < normalized_ndim; ++i) {
+    N_rms *= input_shape[axis + i];
+  }
+
+  Tensor dX;
+  Tensor dgamma;
+
+  std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
+  for (int i = 0;
+       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
+       ++i) {
+    rstd_view_shape.push_back(1);
+  }
+  Tensor rstd_broadcast = rstd.view(rstd_view_shape);
+  Tensor rstd_pow3 = rstd_broadcast.pow(3);
+  Tensor grad_x_hat;
+
+  if (dY.defined()) {
+    if (weight.defined()) {
+      grad_x_hat = dY * weight;
+    } else {
+      grad_x_hat = dY;
+    }
+  }
+
+  if (grad_input_mask[0]) {
+    Tensor dX_from_dY_path;
+    Tensor dX_from_drstd_path;
+
+    std::vector<int64_t> inner_sum_dims;
+    inner_sum_dims.reserve(normalized_ndim);
+    for (int i = 0; i < normalized_ndim; ++i) {
+      inner_sum_dims.push_back(axis + i);
+    }
+
+    if (dY.defined() && grad_x_hat.defined()) {
+      Tensor sum_input_times_grad_x_hat =
+          sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
+      dX_from_dY_path = rstd_broadcast * grad_x_hat -
+          (input * rstd_pow3 / static_cast<double>(N_rms)) *
+              sum_input_times_grad_x_hat;
+    }
+
+    if (drstd.defined()) {
+      Tensor drstd_broadcast = drstd.view(rstd_view_shape);
+      dX_from_drstd_path =
+          -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
+    }
+
+    if (dX_from_dY_path.defined() && dX_from_drstd_path.defined()) {
+      dX = dX_from_dY_path + dX_from_drstd_path;
+    } else if (dX_from_dY_path.defined()) {
+      dX = dX_from_dY_path;
+    } else if (dX_from_drstd_path.defined()) {
+      dX = dX_from_drstd_path;
+    }
+  }
+
+  if (grad_input_mask[1] && weight.defined()) {
+    if (dY.defined()) {
+      Tensor x_hat = input * rstd_broadcast;
+      Tensor dgamma_full_shape = dY * x_hat;
+
+      if (axis > 0) {
+        std::vector<int64_t> outer_sum_dims;
+        outer_sum_dims.reserve(axis);
+        for (int i = 0; i < axis; ++i) {
+          outer_sum_dims.push_back(i);
+        }
+        dgamma = sum(dgamma_full_shape, outer_sum_dims, /*keepdim=*/false);
+      } else {
+        dgamma = dgamma_full_shape;
+      }
+    }
+  }
+
+  return std::make_tuple(dX, dgamma);
+}
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
@@ -5188,7 +5345,7 @@ bool any_variable_defined(const variable_list& variables) {
 // Derivations for the householder_product.backward method.
 //
 // Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1,
-// ..., tau_k, the torch.linalg.householder_product computes the firt n columns
+// ..., tau_k, the torch.linalg.householder_product computes the first n columns
 // of the following product: Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k
 // v_k^H). Let
 //     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1(sigma_1) ...
@@ -5592,7 +5749,7 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
       // left = false and transpose = true is very much similar with just
       // transposed arguments passed into householder_product_backward.
       // Ormqr computes B = H_1 * ... * H_k * A.
-      // The sensivity wrt H_i is given by (see notes in
+      // The sensitivity wrt H_i is given by (see notes in
       // householder_product_backward) Tr(H_i_plus B B_grad^H H_i_minus dH_i),
       // so, since householder_product_backward respects `for i in range(k)`, we
       // could reuse householder_product_backward with
@@ -6318,6 +6475,98 @@ Tensor layer_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       bias_t.defined() ? bias_t.view(view_size_affine) : bias_t);
+}
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+
+  Tensor result_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
+  } else {
+    result_t = input_t * rstd_p;
+    auto temp = input_p * rstd_t;
+    result_t += temp;
+  }
+
+  std::optional<Tensor> result_p = std::nullopt;
+  if (weight_p.defined()) {
+    result_p = std::optional<Tensor>(input_p * rstd_p);
+  }
+
+  return _affine_jvp(
+      result_p,
+      result_t,
+      weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
+      weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
+      Tensor());
+}
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+  return rstd_t;
 }
 
 Tensor group_norm_jvp(

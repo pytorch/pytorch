@@ -219,6 +219,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
 // backward. The dispatch function will only return the loss.
 template<typename scalar_t, ScalarType target_scalar_type>
 std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+  TORCH_CHECK(log_probs.numel() > 0, "log_probs tensor must not be empty");
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   CheckedFrom c = "ctc_loss_gpu";
@@ -643,7 +644,12 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
-  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads_ = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  int max_threads = max_threads_;
+  // Blackwell launch bounds
+  if (at::cuda::getCurrentDeviceProperties()->major >= 10) {
+    max_threads = 512;
+  }
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;

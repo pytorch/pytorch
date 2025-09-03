@@ -2,7 +2,7 @@
 # Now it only builds the Torch python bindings.
 
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -28,7 +28,6 @@ endif()
 
 set(LIBSHM_SRCDIR ${TORCH_SRC_DIR}/lib/${LIBSHM_SUBDIR})
 add_subdirectory(${LIBSHM_SRCDIR})
-
 
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
@@ -74,6 +73,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
+    ${TORCH_SRC_DIR}/standalone
     )
 
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
@@ -84,6 +84,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     opentelemetry::api
     httplib
     nlohmann
+    moodycamel
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -251,6 +252,8 @@ add_custom_command(
       "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
       "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      "${TORCH_ROOT}/torch/_torch_docs.py"
+      "${TORCH_ROOT}/torch/_tensor_docs.py"
       ${pyi_python}
       ${autograd_python}
       ${torchgen_python}
@@ -262,6 +265,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
+    ${CMAKE_COMMAND} -E env --modify PYTHONPATH=path_list_prepend:"${TORCH_ROOT}" --
     "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
@@ -269,32 +273,30 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
-if(USE_DISTRIBUTED)
-    if(WIN32)
-      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
-    else()
-      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-    endif()
-    # Disable certain warnings for GCC-9.X
-    if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-    endif()
-    # NCCL is a private dependency of libtorch, but libtorch_python includes
-    # some private headers of libtorch, which in turn include NCCL. As a hacky
-    # alternative to making NCCL a public dependency of libtorch, we make it
-    # a private dependency of libtorch_python as well.
-    if(USE_NCCL)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
-    endif()
-    # Same for MPI.
-    if(USE_MPI)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES MPI::MPI_CXX)
-    endif()
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 
+if(WIN32)
+  append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+else()
+  append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
 endif()
+# Disable certain warnings for GCC-9.X
+if(CMAKE_COMPILER_IS_GNUCXX)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+endif()
+# NCCL is a private dependency of libtorch, but libtorch_python includes
+# some private headers of libtorch, which in turn include NCCL. As a hacky
+# alternative to making NCCL a public dependency of libtorch, we make it
+# a private dependency of libtorch_python as well.
+if(USE_NCCL)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
+endif()
+# Same for MPI.
+if(USE_MPI)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES MPI::MPI_CXX)
+endif()
+list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 
 if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
@@ -360,10 +362,6 @@ if(BUILD_LIBTORCHLESS)
 
   if(USE_NCCL AND USE_C10D_NCCL)
     target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
-  endif()
-
-  if(USE_DISTRIBUTED)
-    target_compile_definitions(torch_python PRIVATE USE_DISTRIBUTED)
   endif()
 
   if(USE_MPI AND USE_C10D_MPI)
@@ -473,6 +471,11 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
+set(CUDA_VERSION "")
+if(CUDAToolkit_VERSION_MAJOR)
+  set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}")
+endif()
+
 add_custom_target(
   gen_torch_version ALL
   "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
@@ -496,10 +499,11 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           )
   # Pybind11 requires explicit linking of the torch_python library
   if(BUILD_LIBTORCHLESS)
-    target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB} torch_python pybind::pybind11)
+    target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB})
   else()
-    target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
+    target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
+  target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)

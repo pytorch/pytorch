@@ -34,6 +34,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
+#include <torch/csrc/autograd/function.h>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -58,6 +59,20 @@ PyObject* THPGradientEdgeClass = nullptr;
 
 // Anonymous namespace for helpful functions used in this file
 namespace {
+
+inline void check_legacy_fn_attr_access(
+    const std::shared_ptr<torch::autograd::Node>& cdata,
+    const char* attr) {
+  TORCH_CHECK(
+      cdata,
+      "Attribute '",
+      attr,
+      "' is invalid for this instance of _C._FunctionBase. "
+      "Accessing this attribute directly on an instance of autograd.Function "
+      "is a legacy access pattern that is no longer supported. For examples "
+      "on how to use new‑style autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+}
 
 // TODO: We shouldn't need to call this function because the engine
 // can already persist the errors for us. This still seems to be
@@ -185,9 +200,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return to_variable_list(r.get(), is_variable_input);
 }
 
-auto PyNode::defer_to_dynamo(
+auto PyNode::apply_with_saved_impl(
     const variable_list& inputs,
-    const std::optional<PyObject*>& compiler) -> variable_list {
+    const SwapSavedVariables& saved) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -235,24 +250,23 @@ auto PyNode::defer_to_dynamo(
   }
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
-  TORCH_INTERNAL_ASSERT(
-      _backward_idx.has_value(),
-      "indices should already be set by compiled_args, called before apply_with_saved");
+
+  auto [bwd_idx, maybe_bwd_state_idx] = saved.retrieve_pynode_objs(this);
+
   PyObject* backward_state_idx = Py_None;
-  if (_backward_state_idx.has_value()) {
-    backward_state_idx = THPUtils_packInt64(_backward_state_idx.value());
+  if (maybe_bwd_state_idx.has_value()) {
+    backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
   }
   THPObjectPtr r(PyObject_CallMethod(
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      compiler.value(),
+      saved.get_py_compiler(),
       "proxy_call_backward",
       "OOOiOO",
       pyInputs.get(),
       fwdInputMetadatas.get(),
       saved_tensors.get(),
-      *_backward_idx,
+      bwd_idx,
       obj,
       backward_state_idx));
 
@@ -301,7 +315,7 @@ bool PyNode::is_aot_backward() const {
   return py::hasattr(py::getattr(handle, "_forward_cls"), "_aot_id");
 }
 
-void PyNode::compiled_args(CompiledNodeArgs& args) {
+void PyNode::compiled_args(CompiledNodeArgs& args) const {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
@@ -346,14 +360,15 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->input_info);
 
   Py_INCREF(obj);
-  _backward_idx = args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
-
+  c10::SafePyObject backward_obj(obj, getPyInterpreter());
+  std::optional<c10::SafePyObject> backward_state_obj;
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
     Py_INCREF(bw_state);
-    _backward_state_idx = args.add_backward_state(
-        c10::SafePyObject(bw_state, getPyInterpreter()));
+    backward_state_obj = c10::SafePyObject(bw_state, getPyInterpreter());
   }
+  args.collect_pynode_objs(
+      this, std::move(backward_obj), std::move(backward_state_obj));
 }
 
 variable_list PyNode::apply_with_saved(
@@ -366,8 +381,7 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->materialize_non_diff_grads);
   saved.before(f->output_info);
   saved.before(f->input_info);
-  variable_list result =
-      defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
+  variable_list result = apply_with_saved_impl(variable_list(inputs), saved);
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
   saved.after(f->needs_input_grad);
@@ -779,14 +793,17 @@ static void _get_tensors_to_save(
         if (is_executable) {
           // TODO: We should really just ALWAYS throw an error here, but
           // doing so will break some internal tests. We should fix those.
-          throw torch::TypeError(
-              "save_for_backward can only save variables, but argument %ld is of "
-              "type %s",
-              i,
-              Py_TYPE(obj)->tp_name);
+          TORCH_CHECK_TYPE(
+              false,
+              fmt::format(
+                  "save_for_backward can only save variables, but argument {} is of "
+                  "type {}",
+                  i,
+                  Py_TYPE(obj)->tp_name));
         }
       }
     }
+    Py_CLEAR(self->to_save);
   }
 }
 // Save any variables that requested by to_save
@@ -794,7 +811,7 @@ static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
-  if (!self->to_save)
+  if (tensors_to_save.size() == 0)
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
@@ -807,8 +824,6 @@ static void _save_variables(
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
-  // Free .to_save
-  Py_CLEAR(self->to_save);
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per
@@ -1038,7 +1053,8 @@ void _trace_post_record(
       }
     }
   }
-  py::object onnx_globals = py::module::import("torch.onnx._globals");
+  py::object onnx_globals =
+      py::module::import("torch.onnx._internal.torchscript_exporter._globals");
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   py::bool_ is_autograd_inlining_enabled =
@@ -1141,13 +1157,7 @@ PyObject* process_outputs(
 PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto cdata = ((THPFunction*)self)->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'name' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "name");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
@@ -1155,6 +1165,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
 PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_sequence_nr");
   return THPUtils_packUInt64(cdata->sequence_nr());
   END_HANDLE_TH_ERRORS
 }
@@ -1162,6 +1173,7 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
 PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_set_sequence_nr");
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1170,6 +1182,7 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
 PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "_input_metadata");
   const auto num_inputs = cdata->num_inputs();
   THPObjectPtr list(PyTuple_New(num_inputs));
   if (!list) {
@@ -1387,13 +1400,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute '_register_hook_dict' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "_register_hook_dict");
   cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1403,13 +1410,7 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'register_hook' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "register_hook");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -1418,13 +1419,7 @@ PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'register_prehook' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "register_prehook");
   return torch::autograd::registerFunctionPreHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -1567,13 +1562,7 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
 PyObject* THPFunction_next_functions(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "Attribute 'next_functions' is invalid for this instance of _C._FunctionBase. "
-      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
-      "access pattern that is no longer supported. For examples on how to use new-style "
-      "autograd functions, see "
-      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  check_legacy_fn_attr_access(cdata, "next_functions");
   const auto num_outputs = cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
@@ -1624,7 +1613,7 @@ using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
-template <PyObject* THPFunction::*ptr>
+template <PyObject* THPFunction::* ptr>
 PyObject* getObject(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   PyObject* value = self->*ptr;
@@ -1635,7 +1624,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
   return value;
 }
 
-template <PyObject* THPFunction::*ptr>
+template <PyObject* THPFunction::* ptr>
 int setObject(PyObject* obj, PyObject* value, void* _unused) {
   auto self = (THPFunction*)obj;
   if (value == Py_None) {
@@ -1647,13 +1636,13 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   return 0;
 }
 
-template <typename M, M THPFunction::*ptr, PyObject* (*Convert)(long)>
+template <typename M, M THPFunction::* ptr, PyObject* (*Convert)(long)>
 PyObject* getMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->*ptr);
 }
 
-template <typename M, M autograd::Node::*ptr, PyObject* (*Convert)(long)>
+template <typename M, M autograd::Node::* ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

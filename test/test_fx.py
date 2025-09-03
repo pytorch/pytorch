@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 # ruff: noqa: F841
+# flake8: noqa: E221
 
 import builtins
 import collections
@@ -180,7 +181,7 @@ class Pair(NamedTuple):
 
 
 # for testing pytrees
-class Foo:  # noqa: B209
+class Foo:
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -708,26 +709,33 @@ class TestFX(JitTestCase):
             seen_names.add(node.name)
 
     def test_stack_traces(self):
+        def foo(a, b):
+            return a * b
+
         class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
             def forward(self, a, b):
-                return a + b
+                c = a + b
+                c = foo(a, c)
+                return c
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
 
         graph = tracer.trace(M())
         # saving the original list because we will insert new nodes as a part of a test
-        orig_graph_nodes = list(graph.nodes)
-        for node in orig_graph_nodes:
-            if node.op == "output":
-                continue
-            self.assertTrue(node.stack_trace is not None)
-            assert "test_fx.py" in node.stack_trace
-
-            # verify that copying the node does not lose the stack trace
-            new_node = graph.node_copy(node)
-            self.assertTrue(new_node.stack_trace is not None)
-            assert "test_fx.py" in new_node.stack_trace
+        stack_traces = "\n".join([node.meta.get("stack_trace", "") for node in graph.nodes])
+        FileCheck().check_count(
+            "c = a + b", 1, exactly=True
+        ).run(stack_traces.strip())
+        FileCheck().check_count(
+            "c = foo(a, c)", 1, exactly=True
+        ).run(stack_traces.strip())
+        FileCheck().check_count(
+            "return a * b", 1, exactly=True
+        ).run(stack_traces.strip())
 
     def test_stack_traces_with_transformer(self):
         class M(torch.nn.Module):
@@ -900,7 +908,7 @@ class TestFX(JitTestCase):
             wrapper = WrapperModule(interpreter)
 
             # Create a graph that: 1) Takes function arguments 2) Invokes the interpreter
-            # 3) Returns the speficied return value
+            # 3) Returns the specified return value
 
             # FIXME: The following code could be greatly simplified by symbolic_trace'ing
             # the wrapper with a Tracer that considers the Wrapper instance a root
@@ -946,7 +954,7 @@ class TestFX(JitTestCase):
         script_out = scripted_lowered(x)
         torch.testing.assert_close(script_out, ref_out)
 
-        # Test TorchScript ser/de
+        # Test TorchScript Ser/De
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
         torch.testing.assert_close(imported_out, ref_out)
@@ -1270,6 +1278,23 @@ class TestFX(JitTestCase):
         ).check("add").check("call_function").check("linear").check(
             "call_module"
         ).check("clamp").check("call_method").run(all_formatted)
+
+    def test_print_graph(self):
+        op: torch._ops.OpOverload = torch.ops.aten.relu.default
+        type_name: str = torch.typename(op)
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        a: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node("call_function", op, (a,), type_expr=type_name)
+        c: torch.fx.Node = graph.create_node("call_function", op, (b,), type_expr=type_name)
+        graph.output((b, c))
+
+        gm: torch.fx.GraphModule = torch.fx.GraphModule(
+            torch.nn.Module(), graph
+        )
+        gm.graph.lint()
+        text = gm.print_readable(False)
+        assert 2 == text.count("_torch__ops_aten_aten_relu_")
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
@@ -2200,8 +2225,8 @@ class TestFX(JitTestCase):
         foo_scripted = torch.jit.script(Foo())
         foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
-        fxed = symbolic_trace(Foo())
-        fxed_scripted = torch.jit.script(fxed)
+        fixed = symbolic_trace(Foo())
+        fxed_scripted = torch.jit.script(fixed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_fn_type_annotation_empty(self):
@@ -2324,9 +2349,7 @@ class TestFX(JitTestCase):
 
         copied_graph = copy.deepcopy(g)
 
-        val_map = {}
-        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
-            val_map[orig_node] = new_node
+        val_map = dict(zip(g.nodes, copied_graph.nodes))
 
         for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
             orig_users = set(orig_node.users.keys())
@@ -4637,7 +4660,6 @@ class TestFunctionalTracing(JitTestCase):
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
-        "pad": ARG_TYPE_MISMATCH,
         "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
@@ -4670,12 +4692,6 @@ class TestFunctionalTracing(JitTestCase):
         "max_unpool3d": PROXY_ITERATED,
         "fold": PROXY_ITERATED,
         "unfold": PROXY_ITERATED,
-        "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "layer_norm": ARG_TYPE_MISMATCH,
-        "rms_norm": ARG_TYPE_MISMATCH,
-        "lp_pool1d": ARG_TYPE_MISMATCH,
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,
         "batch_norm": CONTROL_FLOW,
@@ -4709,9 +4725,6 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
-        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,

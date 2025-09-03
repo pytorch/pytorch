@@ -14,7 +14,7 @@ TORCH_WORKER_SERVER_SOCKET = "TORCH_WORKER_SERVER_SOCKET"
 
 @contextmanager
 def _worker_server(socket_path: str) -> Generator[None, None, None]:
-    from torch._C._distributed_c10d import _WorkerServer
+    from torch.distributed._distributed_c10d import _WorkerServer
 
     server = _WorkerServer(socket_path)
     try:
@@ -23,8 +23,8 @@ def _worker_server(socket_path: str) -> Generator[None, None, None]:
         server.shutdown()
 
 
-@contextmanager
 @record
+@contextmanager
 def worker_main() -> Generator[None, None, None]:
     """
     This is a context manager that wraps your main entry function. This combines

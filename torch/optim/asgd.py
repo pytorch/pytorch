@@ -15,6 +15,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -46,17 +47,17 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            lambd=lambd,
-            alpha=alpha,
-            t0=t0,
-            weight_decay=weight_decay,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "lambd": lambd,
+            "alpha": alpha,
+            "t0": t0,
+            "weight_decay": weight_decay,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -101,7 +102,9 @@ class ASGD(Optimizer):
                     )
                     state["eta"] = (
                         torch.as_tensor(
-                            group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                            _to_scalar(group["lr"]),
+                            device=p.device,
+                            dtype=_get_scalar_dtype(),
                         )
                         .clone()
                         .detach()
@@ -186,7 +189,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
-        https://dl.acm.org/citation.cfm?id=131098
+        https://meyn.ece.ufl.edu/wp-content/uploads/sites/77/archive/spm_files/Courses/ECE555-2011/555media/poljud92.pdf
 
     """
 
@@ -209,6 +212,9 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -299,7 +305,11 @@ def _multi_tensor_asgd(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
+
+    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]

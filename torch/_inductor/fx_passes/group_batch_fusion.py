@@ -7,8 +7,8 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
-from torch._utils_internal import upload_graph
+from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._logging import trace_structured
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -18,6 +18,7 @@ from ..pattern_matcher import (
     get_arg_value,
     stable_topological_sort,
 )
+from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -574,10 +575,6 @@ class BatchLinearLHSFusion(BatchFusion):
         counters["inductor"]["batch_linear_lhs"] += 1
 
 
-def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    return node is None or "example_value" in node.meta or "val" in node.meta
-
-
 # Poor person's check for if a node in the graph mutates its input.
 # (the graph is torch IR, so we will see torch fns and python operators)
 def _is_mutable_node(tgt):
@@ -1055,7 +1052,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its uers have the same target
+            # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
             child = next(iter(node.users.keys()))
@@ -1355,7 +1352,30 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
                 log_to_scuba = True
     if log_to_scuba:
-        optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        # Force graph to re-compile otherwise the output python code may be broken
+        gm = graph._owning_module
+        if isinstance(gm, _LazyGraphModule):
+            _LazyGraphModule.recompile()
+        else:
+            assert isinstance(gm, torch.fx.GraphModule)
+            gm.recompile()
+        graph_str = gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+
+        name = f"optimus_{str(rule.__class__.__name__)}"
+        if "MTIA" in name:
+            name = f"cff_{str(rule.__class__.__name__)}"
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": name,
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph_str,
+        )
 
 
 def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
@@ -1383,7 +1403,10 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         fbgemm_fusion_keys = [
             x
             for x in config.post_grad_fusion_options
-            if config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            if (
+                x not in OPTIMUS_EXCLUDE_POST_GRAD
+                and config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            )
         ]
         fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]

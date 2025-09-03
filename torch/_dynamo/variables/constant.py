@@ -125,7 +125,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
-            raise NotImplementedError
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -133,7 +133,7 @@ its type to `common_constant_types`.
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -173,7 +173,14 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
         elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
-                return ConstantVariable.create(getattr(self.value, name)())
+                try:
+                    return ConstantVariable.create(getattr(self.value, name)())
+                except (OverflowError, ValueError) as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
             if (
                 hasattr(operator, name)
                 and len(args) == 1
@@ -190,22 +197,43 @@ its type to `common_constant_types`.
                     )
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
-                    return ConstantVariable.create(op(self.value, add_target))
+                    try:
+                        return ConstantVariable.create(op(self.value, add_target))
+                    except Exception as e:
+                        raise_observed_exception(
+                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                        )
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
+        elif type(self.value) is complex and name in complex.__dict__.keys():
+            method = getattr(self.value, name)
+            try:
+                return ConstantVariable.create(method(*const_args, **const_kwargs))
+            except Exception as e:
+                raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
-            return ConstantVariable.create(
-                round(self.value, args[0].as_python_constant())
-            )
+            try:
+                return ConstantVariable.create(
+                    round(self.value, args[0].as_python_constant())
+                )
+            except Exception as e:
+                raise_observed_exception(
+                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
-            result = search in self.value
-            return ConstantVariable.create(result)
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                )
         return super().call_method(tx, name, args, kwargs)
 
     def call_obj_hasattr(

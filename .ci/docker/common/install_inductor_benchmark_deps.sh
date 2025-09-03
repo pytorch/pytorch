@@ -5,28 +5,42 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 function install_huggingface() {
-  local version
-  commit=$(get_pinned_commit huggingface)
-  pip_install "git+https://github.com/huggingface/transformers@${commit}"
+  pip_install -r huggingface-requirements.txt
 }
 
 function install_timm() {
   local commit
   commit=$(get_pinned_commit timm)
 
-  # TODO (huydhn): There is no torchvision release on 3.13 when I write this, so
-  # I'm using nightly here instead. We just need to package to be able to install
-  # TIMM. Removing this once vision has a release on 3.13
-  if [[ "${ANACONDA_PYTHON_VERSION}" == "3.13" ]]; then
-    pip_install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu124
-  fi
-
   pip_install "git+https://github.com/huggingface/pytorch-image-models@${commit}"
-  # Clean up
-  conda_run pip uninstall -y cmake torch torchvision triton
+}
+
+function install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "$commit"
+
+  python install.py --continue_on_fail
+
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
+  popd
+
+  chown -R jenkins torchbench
+  chown -R jenkins /opt/conda
 }
 
 # Pango is needed for weasyprint which is needed for doctr
 conda_install pango
+
+# Stable packages are ok here, just to satisfy TorchBench check
+pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+install_torchbench
 install_huggingface
 install_timm
+
+# Clean up
+conda_run pip uninstall -y torch torchvision torchaudio triton torchao

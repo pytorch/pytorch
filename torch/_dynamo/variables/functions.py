@@ -27,33 +27,43 @@ import builtins
 import functools
 import inspect
 import itertools
+import logging
 import sys
+import traceback
 import types
 from collections.abc import Sequence
+from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
+from weakref import WeakKeyDictionary
 
 import torch
+from torch._dynamo.exc import get_stack_above_dynamo
 
-from .. import polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
-    IncorrectUsage,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
-    unimplemented,
     unimplemented_v2,
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ClosureSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    SkipGuardSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -65,7 +75,12 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 
 
@@ -76,6 +91,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._higher_order_ops.triton_kernel_wrap import (
         TritonGridType,
@@ -84,6 +100,139 @@ if TYPE_CHECKING:
 
 
 _F = TypeVar("_F", bound=Callable)
+CO_VARARGS = 0x04
+CO_VARKEYWORDS = 0x08
+
+
+# Module‐level cache keyed by the function object
+_spec_cache = WeakKeyDictionary()
+
+
+class FunctionSpec:
+    def __init__(self, func: FunctionType):
+        code = func.__code__
+        vn = code.co_varnames
+
+        self.posonly_count = code.co_posonlyargcount
+        self.arg_count = code.co_argcount
+        self.kwonly_count = code.co_kwonlyargcount
+
+        self.posonly_names = vn[: self.posonly_count]
+        self.pos_or_kw_names = vn[self.posonly_count : self.arg_count]
+        self.all_pos_names = self.posonly_names + self.pos_or_kw_names
+        self.kwonly_names = vn[self.arg_count : self.arg_count + self.kwonly_count]
+
+        off = self.arg_count + self.kwonly_count
+        self.varargs_name = vn[off] if code.co_flags & CO_VARARGS else None
+        off += 1 if self.varargs_name else 0
+        self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
+
+    def update_defaults(self, func: FunctionType):
+        # Defaults can change from function call to function call. So re-update
+        # them on every call.
+        self.defaults = func.__defaults__ or ()
+        self.kwdefaults = func.__kwdefaults__ or {}
+
+        # Map positional‐default names → their index in self.defaults
+        self.pos_default_map = dict(
+            zip(self.all_pos_names[-len(self.defaults) :], range(len(self.defaults)))
+        )
+
+
+def _get_spec(func: FunctionType) -> FunctionSpec:
+    spec = _spec_cache.get(func)
+    if spec is None:
+        spec = FunctionSpec(func)
+        _spec_cache[func] = spec
+    return spec
+
+
+def bind_args_cached(func, tx, fn_source, args, kwargs):
+    spec = _get_spec(func)
+    spec.update_defaults(func)
+    ba = {}
+    rem_kw = dict(kwargs)
+
+    # 1) Bind all positional (pos-only + pos-or-kw)
+    for i, name in enumerate(spec.all_pos_names):
+        if i < len(args):
+            ba[name] = wrap_bound_arg(tx, args[i])
+        elif name in rem_kw:
+            if name in spec.posonly_names:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(f"{name} is positional-only")],
+                )
+            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            default_source = None
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required positional argument: {name}"
+                    )
+                ],
+            )
+
+    # 2) *args
+    extra = args[len(spec.all_pos_names) :]
+    if spec.varargs_name:
+        ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
+    elif extra:
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(
+                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+                )
+            ],
+        )
+
+    # 3) Keyword-only
+    for name in spec.kwonly_names:
+        if name in rem_kw:
+            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
+        elif name in spec.kwdefaults:
+            kwdefault_source = None
+            if fn_source:
+                kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
+            ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
+        else:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required keyword-only argument: {name}"
+                    )
+                ],
+            )
+
+    # 4) **kwargs
+    if spec.varkw_name:
+        ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
+    elif rem_kw:
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+            ],
+        )
+
+    return ba
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -155,6 +304,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
@@ -226,9 +382,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        # TODO putting this here to avoid duplication, because we could hit this
+        # from several paths (e.g., SuperVariable or `var_getattr`s).
+        if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+            unimplemented_v2(
+                gb_type="can't handle functions not implemented in python ",
+                context=f"{fn}",
+                explanation="Dynamo can only handle functions defined in python",
+                hints=[
+                    "Move usage of this function out of `torch.compile` region",
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -259,52 +424,29 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
+    def get_source(self):
+        source = self.source
+
+        if source and isinstance(self, variables.UserMethodVariable):
+            source = self.source_fn
+        return source
+
     def bind_args(self, parent, args, kwargs) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
         this function, create new bindings for initial locals.
         """
         assert not self.is_constant
-        root_tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=root_tx)
 
         fn: types.FunctionType = self.fn
-        defaults = fn.__defaults__ or []
-        defaults_sources = [
-            None if self.source is None else DefaultsSource(self.source, idx)
-            for idx, _ in enumerate(defaults)
-        ]
-        fake_func = types.FunctionType(
-            fn.__code__,
-            fn.__globals__,
-            fn.__name__,
-            tuple(
-                [
-                    wrap(val=arg, source=source)
-                    for arg, source in zip(defaults, defaults_sources)
-                ]
-            ),
-            fn.__closure__,
-        )
-        if fn.__kwdefaults__:
-            kwdefaults_sources = {
-                k: (
-                    None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
-                )
-                for k in fn.__kwdefaults__
-            }
-            fake_func.__kwdefaults__ = {
-                k: wrap(val=v, source=kwdefaults_sources[k])
-                for k, v in fn.__kwdefaults__.items()
-            }
 
-        bound = inspect.signature(fake_func).bind(*args, **kwargs)
-        bound.apply_defaults()
-        result = dict(bound.arguments.items())
+        if not isinstance(fn, FunctionType):
+            raise TypeError("Only supports regular Python functions.")
+        root_tx = parent.output.root_tx
 
-        wrap_args_kwargs(root_tx, result)
+        source = self.get_source()
+        result = bind_args_cached(fn, root_tx, source, args, kwargs)
+
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -316,10 +458,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if cell in side_effects:
                 cell_var = side_effects[cell]
 
-            elif self.source:
-                closure_cell = GetItemSource(
-                    AttrSource(self.source, "__closure__"), idx
-                )
+            elif source:
+                closure_cell = GetItemSource(ClosureSource(source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -349,7 +489,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
-        return fn_var_getattr(tx, self.fn, self.source, name)
+        source = self.get_source()
+        return fn_var_getattr(tx, self.fn, source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -363,22 +504,61 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle patch_dynamo_config call
+        if self.fn is torch._dynamo.patch_dynamo_config:
+            try:
+                args_const = [arg.as_python_constant() for arg in args]
+                kwargs_const = {
+                    key: val.as_python_constant() for key, val in kwargs.items()
+                }
+                changes = torch._dynamo.patch_dynamo_config(
+                    *args_const, **kwargs_const
+                ).changes
+                return variables.DynamoConfigPatchVariable(changes)
+            except AsPythonConstantNotImplementedError as e:
+                raise RuntimeError(
+                    "Cannot convert patch_dynamo_config args/kwargs to constants. "
+                    "Please fix your call to patch_dynamo_config by using simpler inputs. "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
+        elif self.fn is torch._dynamo.set_fullgraph:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                fullgraph = bound.arguments["fullgraph"].as_python_constant()
+                assert isinstance(fullgraph, bool)
+                return variables.SetFullgraphVariable(fullgraph)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
-        if self.fn is torch._dynamo.nonstrict_trace:
+        elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
                 typ = fn_var.python_type()
-                unimplemented(
-                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                msg = f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                unimplemented_v2(
+                    gb_type="TypeError from user code",
+                    context=f"call_function({self.value}, {args}, {kwargs})",
+                    explanation=msg,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                unimplemented(
-                    f"""
-Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                unimplemented_v2(
+                    gb_type="Limitation of `nonstrict_trace",
+                    context=f"{self}",
+                    explanation=msg,
+                    hints=[
+                        f"make sure definition of {fn_name} is outside ",
+                        "`torch.compile` region",
+                    ],
                 )
 
             fn = fn_var.fn
@@ -388,6 +568,17 @@ Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` c
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
         if (
             tx.output.current_tracer.under_activation_checkpoint
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
@@ -471,7 +662,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
@@ -521,7 +712,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            tracer.generator_exhausted = True
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -532,6 +723,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def has_unpack_var_sequence(self, tx):
         return False
 
@@ -540,19 +736,21 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
+        self.force_apply_to_var_sequence(tx, result.append)
+        return result
+
+    def force_apply_to_var_sequence(self, tx, fn) -> None:
         while True:
             try:
-                result.append(self.next_variable(tx))
+                fn(self.next_variable(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
-        return result
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -664,19 +862,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # * If the generator function does not catch the passed-in exception,
             # or raises a different exception, then that exception propagates to the caller.
 
-            if len(args) > 1:
-                raise IncorrectUsage(
-                    "the (type, exc, tb) signature of throw() is deprecated, "
-                    "use the single-arg signature instead."
-                )
-
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
             try:
-                self._setup_exception(tx, args[0])
-            except ObservedException:
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
             retval = self.next_variable(tx)
@@ -749,9 +944,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
@@ -812,7 +1004,17 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
+        if not is_generator(self.vt.get_code()):
+            unimplemented_v2(
+                gb_type="non-generator contextlib.contextmanager",
+                context=str(self.vt.get_code()),
+                explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
+                ", i.e. does not use `yield`",
+                hints=[
+                    "Use `yield` in the function body instead of `return`.",
+                    "Remove the `@contextlib.contextmanager` decorator.",
+                ],
+            )
 
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
@@ -860,9 +1062,24 @@ class FunctionDecoratedByContextlibContextManagerVariable(
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs) -> None:
+    def __init__(self, fn, obj, source_fn=None, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
+        self.source_fn = source_fn
+        # Note on source and source_fn
+        # Be careful with `source` when delegating to UserFunctionVariable
+        # (base-class) methods. In this __init__, `source` is a *bound method*
+        # object, but the base class expects the underlying *function* object.
+        # One way is to simplly use `__func__` to unwrap it.
+        #
+        # For recursive dict-tag optimizations, it can be faster to fetch the
+        # function directly from `cls.__dict__`; that’s why we pass on
+        # `source_fn`. Whenever it is possible to access the function from
+        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
+        # operates on the unbound function, most guards should target
+        # `source_fn` rather than the original `source`.
+        if source_fn is None and kwargs.get("source") is not None:
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -938,11 +1155,13 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
         if name == "__self__":
             return self.obj
         if name == "__func__":
-            return VariableTracker.build(tx, self.fn, source)
+            # We might have a better way to access the function object, this
+            # information is stored in self.source_fn, use that to construct the
+            # variable tracker.
+            return VariableTracker.build(tx, self.fn, self.source_fn)
         return super().var_getattr(tx, name)
 
 
@@ -965,11 +1184,15 @@ class WrappedUserMethodVariable(UserMethodVariable):
         self.context.exit(tx)
         return result
 
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
-        kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
@@ -984,6 +1207,11 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
@@ -1022,6 +1250,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         wrapped_fn=None,
         **kwargs,
     ) -> None:
+        if kwargs.get("mutation_type") is None:
+            kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -1068,8 +1298,27 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        tx.output.side_effects.store_attr(self, name_var.value, val)
+        return ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
+
     def has_closure(self):
         return self.closure is not None
+
+    def const_getattr(self, tx, name):
+        if name == "__name__":
+            return self.fn_name.as_python_constant()
+        return super().const_getattr(tx, name)
 
     def has_self(self):
         return False
@@ -1101,7 +1350,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -1146,6 +1395,59 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
+        # codegen attributes
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if tx.output.side_effects.has_pending_mutation(self):
+            for name, value in tx.output.side_effects.store_attr_mutations[
+                self
+            ].items():
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+
+
+class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("fn_name", None)
+        kwargs.pop("code", None)
+        kwargs.pop("f_globals", None)
+        kwargs.pop("defaults", None)
+        kwargs.pop("kwdefaults", None)
+        kwargs.pop("annotations", None)
+        kwargs.pop("closure", None)
+        kwargs.pop("wrapped_fn", None)
+        super().__init__(
+            wrapped.fn_name,
+            wrapped.code,
+            wrapped.f_globals,
+            wrapped.defaults,
+            wrapped.kwdefaults,
+            wrapped.annotations,
+            wrapped.closure,
+            wrapped.wrapped_fn,
+        )
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -1164,11 +1466,27 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        # Use closure match guard (i.e. guard on __code__ object instead of
+        # function id) to avoid guarding on nested functions.
+        if inspect.getattr_static(value, "_torchdynamo_disable", False):
+            # For torch._dynamo.disable function, ensure that the original
+            # function is guarded. Otherwise, the else branch will guard on the
+            # _dynamo.disable.__code__
+            guard_on_source = source
+            guard_on_value = value
+
+            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+                guard_on_value = guard_on_value._torchdynamo_orig_callable
+                guard_on_source = AttrSource(
+                    guard_on_source, "_torchdynamo_orig_callable"
+                )
+
+            guard_on_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
-            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
     def call_function(
@@ -1178,10 +1496,12 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented_v2(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
                 context=str(self.value),
-                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                explanation=f"Skip calling function `{self.value}` since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],
@@ -1198,16 +1518,25 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
-        elif isinstance(self.value, types.WrapperDescriptorType):
-            msg = (
-                f"Graph break due to unsupported wrapper descriptor {self.value}. "
-                f"Please file an issue on GitHub "
-                f"so the PyTorch team can add support for it. "
+        elif self.value is torch._dynamo.skip_frame:
+            skip_frame_msg = kwargs.get("msg", None)
+            if skip_frame_msg:
+                skip_frame_msg = skip_frame_msg.as_python_constant()
+            raise SkipFrame(
+                f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
             )
-            torch._dynamo.utils.warn_once(msg)
-            unimplemented(msg)
         else:
+            if config.dont_skip_tracing:
+                from .builder import SourcelessBuilder
+
+                # re-build the function, attempting to not skip
+                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # if we still get SkipFunctionVariable, then we *really* should skip this function
+                if not isinstance(rebuilt_fn, SkipFunctionVariable):
+                    return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
+            module_or = getattr(self.value, "__module__", None)
+            module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1222,18 +1551,17 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{qualname}` or the file `{path}` "
-                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                        "attempting to trace into the function.",
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
-                        # TODO suggest mark_force_inline when implemented
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
-                if self.value.__module__ in known_python_builtin_modules:
+                if module_or in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{qualname}`."
+                        f"`{module_name}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1241,11 +1569,8 @@ class SkipFunctionVariable(VariableTracker):
                         "Please file an issue on GitHub "
                         "so the PyTorch team can add support for it. ",
                     ]
-                elif (
-                    self.value.__module__ is not None
-                    and self.value.__module__.startswith("optree")
-                ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                elif module_or is not None and module_or.startswith("optree"):
+                    explanation = f"Dynamo cannot trace optree C/C++ function {module_name}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1254,7 +1579,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
+                        f"Dynamo does not know how to trace the builtin `{module_name}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1279,7 +1604,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
@@ -1292,6 +1617,31 @@ class SkipFunctionVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
 
         return fn_var_getattr(tx, self.value, self.source, name)
+
+
+class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs) -> None:
+        kwargs.pop("value", None)
+        kwargs.pop("reason", None)
+        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen(self.context))
+        codegen(self.wrapped)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class WrapperUserFunctionVariable(VariableTracker):
@@ -1315,17 +1665,63 @@ class WrapperUserFunctionVariable(VariableTracker):
 
         return super().var_getattr(tx, name)
 
+    def self_args(self):
+        return []
+
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if hasattr(self.wrapper_obj, "cache_info"):
+            target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
+            module_name = getattr(target_fn, "__module__", "") or ""
+
+            if module_name.split(".", maxsplit=1)[0] != "torch":
+                msg = (
+                    "Dynamo detected a call to a `functools.lru_cache`-wrapped "
+                    "function. Dynamo ignores the cache wrapper and directly "
+                    "traces the wrapped function. Silent incorrectness is only "
+                    "a *potential* risk, not something we have observed. "
+                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                )
+
+                torch._dynamo.utils.warn_once(msg)
+
+                dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
+                if dynamo_logger.isEnabledFor(logging.DEBUG):
+                    user_stack = torch._guards.TracingContext.extract_stack()
+                    user_stack = get_stack_above_dynamo() + user_stack
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace += str(user_stack_formatted)
+                    dynamo_logger.debug(user_stack_trace)
+
+        all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
-            tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
+            tx,
+            [self, variables.ConstantVariable(self.attr_to_trace), *all_args],
+            kwargs,
         )
+
+
+class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+    """
+    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
+    saving the vt for `self` object of the method which is then used by
+    WrapperUserFunctionVariable in `call_function` method.
+    """
+
+    def __init__(self, wrapper_obj, attr_to_trace, self_obj, **kwargs) -> None:
+        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
+        self.obj = self_obj
+
+    def self_args(self):
+        return [self.obj]
 
 
 def _traceable_collective_remaps():
@@ -1404,8 +1800,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         args = ()
 
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
-            unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+            unimplemented_v2(
+                gb_type="async_op=True for distributed collectives",
+                context=f"{self.fn}, {args=}, {kwargs=}",
+                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if self.fn in (
@@ -1439,7 +1840,14 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
                     return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
+                unimplemented_v2(
+                    gb_type="functools.wraps",
+                    context=f"{fn}",
+                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             return variables.LambdaVariable(wraps)
 
@@ -1458,14 +1866,28 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         if constant_args:
-            value = self.fn(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+            try:
+                value = self.fn(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except TypeError as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
-        unimplemented("namedtuple with non constant args")
+        unimplemented_v2(
+            gb_type="namedtuple construction",
+            context=f"{args=}, {kwargs=}",
+            explanation="`torch.compile` only support certain input types for namedtuple",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -1483,7 +1905,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def python_type(self):
         return functools.partial
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
@@ -1529,6 +1951,8 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
@@ -1556,7 +1980,7 @@ class PolyfilledFunctionVariable(VariableTracker):
     }
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _get_polyfill_handlers(cls) -> dict[Callable[..., Any], types.FunctionType]:
         return {}
 
@@ -1710,13 +2134,13 @@ class SysFunctionVariable(VariableTracker):
     def call_function(self, tx, args, kwargs):
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        elif self.value is sys.exception:
-            return self.exception(tx)
-        else:
-            unimplemented(f"sys.{self.value.__name__}")
+        assert self.value is sys.exception
+        return self.exception(tx)
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -1740,7 +2164,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
         if isinstance(grid, BaseListVariable):
             return grid.as_proxy()
         else:
-            unimplemented(f"grid for the triton kernel is {type(grid)}")
+            unimplemented_v2(
+                gb_type="unsupported grid type for triton hop check_grid",
+                context=f"grid type = {type(grid)}",
+                explanation="`torch.compile` only supports list-like grid for check_grid",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def call_grid(self, grid, meta, tx):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
@@ -1805,16 +2236,19 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
-        # here we replace TMA descriptors (TMADescriptorVariable
+        # here we replace TMA descriptors
+        # (TMADescriptorExperimentalVariable and TMADescriptorStableVariable
         # instances) with the underlying tensors, while moving the
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
         for k in list(combined_args_raw.keys()):
             v = combined_args_raw[k]
-            if isinstance(v, TMADescriptorVariable):
+            if isinstance(
+                v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
+            ):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.data_ptr.from_tensor
+                combined_args_raw[k] = v.get_tensor()
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -1916,7 +2350,7 @@ class TritonKernelVariable(VariableTracker):
         return arg
 
 
-class TMADescriptorVariable(VariableTracker):
+class TMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -1933,13 +2367,13 @@ class TMADescriptorVariable(VariableTracker):
         self.element_size = element_size
 
     def to_metadata(self):
-        return (
+        return create_tma_experimental_metadata(
             [dim.as_proxy() for dim in self.dims],
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "triton.tools.experimental_descriptor",
@@ -1951,8 +2385,44 @@ class TMADescriptorVariable(VariableTracker):
         codegen.foreach(args)
         codegen.call_function(len(args) + 1, False)
 
+    def get_tensor(self):
+        return self.data_ptr.from_tensor
 
-class CreateTMADescriptorVariable(VariableTracker):
+
+class TMADescriptorStableVariable(VariableTracker):
+    def __init__(
+        self,
+        tensor: "variables.TensorVariable",
+        block_shape: "variables.ListVariable",
+        **kwargs,
+    ):
+        assert isinstance(tensor, variables.TensorVariable)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.block_shape = block_shape
+
+    def to_metadata(self):
+        return create_tma_stable_metadata(
+            self.block_shape.as_proxy(),
+        )
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.tensor_descriptor",
+                "TensorDescriptor",
+            )
+        )
+        codegen.load_method("from_tensor")
+        self.tensor.reconstruct(codegen)
+        codegen(self.block_shape)
+        codegen.call_method(2)
+
+    def get_tensor(self) -> "variables.TensorVariable":
+        return self.tensor
+
+
+class CreateTMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         rank: int,
@@ -1997,9 +2467,25 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
-        return TMADescriptorVariable(
+        return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
             element_size=element_size,
+        )
+
+
+class CreateTMADescriptorStableVariable(VariableTracker):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+
+        return TMADescriptorStableVariable(
+            tensor=tensor,
+            block_shape=block_shape,
         )

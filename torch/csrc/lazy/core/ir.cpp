@@ -6,7 +6,6 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 // Enables caching on for dynamic shapes (aka disable hash on shapes)
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 // clang-format off
 C10_DEFINE_bool(
     ltc_enable_dynamic_shapes,

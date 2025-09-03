@@ -164,6 +164,9 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
+
+    import sympy
+
     if not isinstance(module, torch.fx.GraphModule):
         mod_traced = torch.fx.symbolic_trace(module)
     else:
@@ -192,6 +195,10 @@ def split_const_subgraphs(
 
         # Skip folding side-effectful functions
         if node.is_impure():
+            continue
+
+        # Skip folding nodes that have symbolic fill_value
+        if isinstance(node.kwargs.get("fill_value", None), sympy.Expr):
             continue
 
         # Must be a constant foldable node at this point.
@@ -252,13 +259,20 @@ def split_const_subgraphs(
     #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
     #    return add
     root_const_gm = torch.fx.GraphModule(split, const_gm.graph)
+
+    # The order of placeholders in the const_gm graph should match the order of
+    # args in the outer module, so we can simply use an index for the
+    # placeholder mapping
+    ph_idx = 0
     for node in root_const_gm.graph.nodes:
         if node.op == "output":
             multiple_outputs = isinstance(node.args[0], tuple)
             continue
         if node.op != "placeholder":
             continue
-        in_node = next(n for n in call_const_gm_args if n.name == node.target)
+        assert ph_idx < len(call_const_gm_args)
+        in_node = call_const_gm_args[ph_idx]
+        ph_idx += 1
         assert in_node.op == "get_attr"
         with root_const_gm.graph.inserting_before(node):
             new_node = root_const_gm.graph.get_attr(in_node.target)

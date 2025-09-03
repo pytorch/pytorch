@@ -7,11 +7,12 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     parametrize,
 )
 
@@ -21,10 +22,13 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
+        self._unittest_old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_faithful_generator_behavior = self._old
+        torch._dynamo.config.enable_trace_unittest = self._unittest_old
 
     def _compile_check(self, fn, args=None, fullgraph=True):
         eager = EagerAndRecordGraphs()
@@ -351,7 +355,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo()
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -370,7 +374,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo(t)
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -391,7 +395,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -409,7 +413,8 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported,
+            "Detected a method call to a user-defined generator object.",
         ):
             fn(t, ctx)
 
@@ -861,6 +866,61 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + sum(range(6)))
 
+    def test_list_extend(self):
+        def f(x):
+            y = [1]
+            y.extend(y[-1] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
+    def test_deque_extendleft(self):
+        import collections
+
+        def f(x):
+            y = collections.deque([1])
+            y.extendleft(y[0] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
+    @make_dynamo_test
+    def test_generator___contains__(self):
+        def whoo():
+            yield 1
+            yield 2
+
+        g = whoo()
+        self.assertTrue(1 in g)
+        self.assertTrue(2 in g)
+        self.assertRaises(StopIteration, next, g)
+        self.assertFalse(3 in whoo())
+
+    @make_dynamo_test
+    def test_generator___contains___side_effects(self):
+        n = 0
+
+        def whoo():
+            nonlocal n
+            n = 1
+            yield 1
+            n = 2
+            yield 2
+
+        g = whoo()
+        self.assertTrue(1 in g)
+        self.assertEqual(n, 1)
+        self.assertTrue(2 in g)
+        self.assertEqual(n, 2)
+        self.assertRaises(StopIteration, next, g)
+        self.assertFalse(3 in whoo())
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
@@ -1069,6 +1129,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(L, [1, -123, -1, 456])
 
     @parametrize("exc", [RuntimeError, AttributeError])
+    @make_dynamo_test
     def test_close_capture_and_reraise_exc(self, exc):
         def whoo(t):
             try:
@@ -1079,7 +1140,6 @@ class TestGeneratorClose(GeneratorTestsBase):
             finally:
                 pass
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             i = next(gen)
@@ -1087,8 +1147,14 @@ class TestGeneratorClose(GeneratorTestsBase):
             return i
 
         t = torch.randn(2)
-        with self.assertRaises(exc):
+
+        z = 0
+        try:
             fn(t)
+        except exc:
+            z = 1
+        finally:
+            assert z == 1
 
     def test_close_with_subgen(self):
         L = []
@@ -1239,7 +1305,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_with_finally(self):
         z = 0
 
@@ -1295,24 +1360,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
         self.assertEqual(z, 101)
-
-    def test_throw_three_arguments(self):
-        def whoo(t):
-            try:
-                yield t.sin()
-            except ValueError:
-                yield t.cos()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = whoo(t)
-            a = next(gen)
-            b = gen.throw(ValueError, "Error", None)
-            return a + b
-
-        t = torch.randn(2)
-        with self.assertRaises(InternalTorchDynamoError):
-            fn(t)
 
     def test_throw_no_yield_after_throw(self):
         z = 0
@@ -1420,7 +1467,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_try_except_finally(self):
         z = 0
 
@@ -1469,330 +1515,72 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         self._compile_check(fn)
 
-
-class GeneratorCloseCPythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    def test_close_no_return_value(self):
-        def f():
-            yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_return_value(self):
-        def f():
+    def test_return_const_value_in_except_and_finally(self):
+        def whoo():
             try:
-                yield
-                # close() raises GeneratorExit here, which is caught
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() == 0
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_not_catching_exit(self):
-        def f():
-            yield
-            # close() raises GeneratorExit here, which isn't caught and
-            # therefore propagates -- no return value
-            return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_not_started(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_exhausted(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            next(gen)
-            z = 0
-            try:
-                next(gen)  # -> StopIteration
-            except StopIteration:
-                z = 1
-            except Exception as e:
-                # anything other than StopIteration should fail
-                raise AssertionError from e
-            assert z == 1
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_closed(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() == 0
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_raises(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                pass
-            raise RuntimeError
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            z = 0
-            try:
-                gen.close()  # -> RuntimeError
-            except RuntimeError:
-                z = 1
-            except Exception as e:
-                raise AssertionError from e
-            assert z == 1
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-
-class GeneratorThrowCpythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    @unittest.expectedFailure
-    def test_exception_context_with_yield(self):
-        def f():
-            try:
-                raise KeyError("a")
-            except Exception:
-                yield
-
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            try:
-                gen.throw(ValueError)
-            except ValueError as e:
-                context = e.__context__
-                assert (type(context), context.args) == (KeyError, ("a",))
-            except Exception as e:
-                raise AssertionError from e
-            return t.sin()
-
-        self._compile_check(fn)
-
-    @unittest.expectedFailure
-    def test_exception_context_with_yield_inside_generator(self):
-        # Check that the context is also available from inside the generator
-        # with yield, as opposed to outside.
-        def f():
-            z = 0
-            try:
-                raise KeyError("a")
-            except Exception:
-                try:
-                    yield
-                except Exception as exc:
-                    z = 1
-                    assert type(exc) == ValueError
-                    context = exc.__context__
-                    assert (type(context), context.args) == (KeyError, ("a",))
-                    yield "b"
-                finally:
-                    assert z == 1
-
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            actual = gen.throw(ValueError)
-            # This ensures that the assertions inside were executed.
-            assert actual == "b"
-            return t.sin()
-
-        self._compile_check(fn)
-
-    @unittest.expectedFailure
-    def test_exception_context_with_yield_from(self):
-        def f():
-            yield
-
-        def g():
-            try:
-                raise KeyError("a")
-            except Exception:
-                yield from f()
-
-        def fn(t):
-            gen = g()
-            gen.send(None)
-            try:
-                gen.throw(ValueError)
-            except ValueError as e:
-                context = e.__context__
-                assert (type(context), context.args) == (KeyError, ("a",))
-            except Exception as e:
-                raise AssertionError from e
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_exception_context_with_yield_from_with_context_cycle(self):
-        # Check trying to create an exception context cycle:
-        # https://bugs.python.org/issue40696
-        has_cycle = None
-
-        def f():
-            yield
-
-        def g(exc):
-            nonlocal has_cycle
-            try:
-                raise exc
-            except Exception:
-                try:
-                    yield from f()
-                except Exception as exc:
-                    has_cycle = exc is exc.__context__
-            yield
-
-        def fn(t):
-            exc = KeyError("a")
-            gen = g(exc)
-            gen.send(None)
-            gen.throw(exc)
-            # This also distinguishes from the initial has_cycle=None.
-            assert has_cycle is False
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_throw_after_none_exc_type(self):
-        def g():
-            try:
-                raise KeyError
-            except KeyError:
-                pass
-
-            try:
-                yield
-            except Exception:
-                raise RuntimeError  # noqa: B904
-
-        def fn(t):
-            gen = g()
-            gen.send(None)
-            z = 0
-            try:
-                gen.throw(ValueError)
-            except RuntimeError:
-                z += 1
-            except Exception:
-                raise AssertionError  # noqa: B904
-            assert z == 1
-            return t.sin()
-
-        self._compile_check(fn)
-
-
-class GeneratorCPythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    def test_send_non_none_to_new_gen(self):
-        def f():
-            yield 1
-
-        def fn(t):
-            g = f()
-            z = 0
-            try:
-                g.send(0)
-            except TypeError:
-                z += 1
-            except Exception as e:
-                raise AssertionError from e
-            assert z == 1
-            assert next(g) == 1
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_issue103488(self):
-        def gen_raises():
-            yield 1
-            raise ValueError
-
-        def loop():
-            try:
-                for _ in gen_raises():
-                    if True is False:  # noqa: PLR0133
-                        return
+                yield 1
             except ValueError:
-                pass
+                return 2  # noqa: B901
+            finally:
+                return 3  # noqa: B012, SIM107, B901
 
         def fn(t):
-            # This should not raise
-            loop()
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert e.args[0] == 3
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_value_in_except_and_finally(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return Foo(2)  # noqa: B901
+            finally:
+                return Foo(3)  # noqa: B012, SIM107, B901
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert e.args[0].x == 3
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_None_in_except_and_finally(self):
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return 2  # noqa: B901
+            finally:
+                return  # noqa: B012, SIM107
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert len(e.args) == 0
+            except Exception as e:
+                raise AssertionError from e
             return t.sin()
 
         self._compile_check(fn)

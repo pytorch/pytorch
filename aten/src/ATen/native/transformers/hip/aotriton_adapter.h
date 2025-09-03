@@ -9,28 +9,6 @@
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                            \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(TENSOR.is_contiguous());
-
-#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                        \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(                                                         \
-      TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
-
-#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(                         \
-      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
-
-#define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
-  {                                                                    \
-    A = B;                                                             \
-    TORCH_CHECK(                                                    \
-        B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
-  }
-
 namespace sdp {
 
 namespace aotriton_adapter {
@@ -104,7 +82,7 @@ aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, std::string_view ten
 {
   const auto strides = q.strides();
   int real_rank = strides.size();
-  if (real_rank != Rank) {  // Lazy convertion of tensor_name
+  if (real_rank != Rank) {  // Lazy conversion of tensor_name
     TORCH_CHECK(false,
                 std::string(tensor_name) + "'s rank should be " + std::to_string(Rank)
                 + " but is " + std::to_string(real_rank));

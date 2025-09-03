@@ -13,14 +13,17 @@ if TYPE_CHECKING:
 
 # See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
+    "_collections",
     "builtins",
     "functools",
     "itertools",
     "operator",
     "os",
     "pytree",
+    "struct",
     "sys",
     "fx",
+    "tensor",
 )
 POLYFILLED_MODULES: tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)

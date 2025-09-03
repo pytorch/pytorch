@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Union
 
 import sympy
 
@@ -87,31 +88,43 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
-    def generate_kernel_call(
+    def generate_extern_kernel_alloc(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_alloc(*args, **kwargs)
+
+    def generate_extern_kernel_out(self, *args, **kwargs):
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_extern_kernel_out(*args, **kwargs)
+
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        # Disable stack allocation for extern kernels.
+        self.allow_stack_allocation = False
+        super().generate_fallback_kernel(node)
+
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
-        grid=None,
-        device_index=None,
-        gpu=False,
-        triton=False,
+        *,
+        device=None,
+        triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
-        grid_fn: str = "grid",
         triton_meta=None,
-        autotune_configs=None,
-        grid_extra_kwargs="",
+        graph_name="",
+        original_fxnode_name=None,
     ):
         """
         Generates kernel call code.
-
-        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        assert not gpu, (
+        assert not triton, (
             "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
         )
         assert arg_types is not None and len(call_args) == len(arg_types), (
@@ -195,17 +208,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
-                run_impl_proto += """
+                run_impl_proto = """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -294,7 +297,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                         # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("py::gil_scoped_release release;")
+                        self.prefix.splice("py::gil_scoped_release_simple release;")
 
                     self.prefix.splice(
                         f"""
@@ -354,7 +357,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     else:
                         self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def generate_return(self, output_refs: list[str]):
@@ -406,6 +409,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -561,10 +565,18 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buffer.get_size(),
             buffer.get_stride(),
             buffer if self.can_stack_allocate_buffer(buffer) else None,
+            buffer.get_is_pinned(),
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        buffer_if_can_stack_allocate=None,
+        is_pinned=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
@@ -611,8 +623,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
         )
 
         return f"RAIIAtenTensorHandle {name}({name}_handle);"
@@ -725,7 +738,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
         # tensor prematurely deallocated, thus the temporary array trick here.
         indices_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle",
@@ -747,59 +760,18 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
+        get_args: Callable[[], Sequence[str]],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
+        super().generate_fallback_kernel_with_runtime_lookup(
+            buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
+        )
 
-        def extract_output_name(out):
-            if out is None:
-                return None
-            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
-                return out.get_name()
-            elif isinstance(out, (list, tuple)):
-                return type(out)(extract_output_name(o) for o in out)
-            else:
-                raise AssertionError(f"Unexpected output: {type(out)}")
-
-        # output_args has the same pytree structure as outputs
-        output_args = None
-        if outputs is None:
-            # outputs is not specified, the default is to write to buf_name
-            output_args = [buf_name]
-        else:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
-
-        if V.graph.aot_mode:
-            assert op_overload is not None
-            assert raw_args is not None
-            assert outputs is not None
-
-            return self.generate_fallback_kernel_with_runtime_lookup_aot(
-                op_overload,
-                raw_args,
-                output_args,
-                outputs,
-            )
-        else:
-            return self.generate_fallback_kernel_with_runtime_lookup_jit(
-                buf_name,
-                python_kernel_name,
-                cpp_kernel_name,
-                codegen_args,
-                op_overload,
-                raw_args,
-                output_args,
-                outputs,
-            )
-
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
         # so disable stack allocation here
@@ -849,16 +821,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if (name := data.get_name()) in self.stack_allocated_buffers:
                 return name, []
 
-            # TODO (benjaminglass1): uncomment this and remove  create_reinterpret_view
-            # after the AOTI forwards compatibility window has passed.
-            #
-            # tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
-            # tmp_call_strs = [
-            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
-            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            # ]
-            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
-            return create_reinterpret_call(), []
+            tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
+            tmp_call_strs = [
+                f"AtenTensorHandle {tmp_AtenTensorHandle};",
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            ]
+            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         if (
             size == data.layout.size
