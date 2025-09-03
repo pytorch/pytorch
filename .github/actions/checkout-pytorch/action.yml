@@ -58,14 +58,17 @@ runs:
         show-progress: false
 
     - name: Clean submodules post checkout
+      id: clean-submodules
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
         cd "${GITHUB_WORKSPACE}"
-        if [ -n "${NO_SUDO}" ]; then
-          # Clean stale submodule dirs
+        # Clean stale submodule dirs
+        if [ -z "${NO_SUDO}" ]; then
+          sudo git submodule foreach --recursive git clean -ffdx
+        else
           git submodule foreach --recursive git clean -ffdx
         fi
 
