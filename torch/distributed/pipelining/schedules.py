@@ -9,6 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
 
 import torch
@@ -1761,7 +1762,7 @@ class _PipelineContext:
         self.schedule_kwargs = schedule_kwargs
 
 
-class CustomFunctionProtocol(Protocol):
+class _CustomFunctionProtocol(Protocol):
     def __call__(self, action: _Action, ctx: _PipelineContext) -> None: ...
 
 
@@ -1781,7 +1782,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def register_custom_function(
         self,
         computation_type: _ComputationType,
-        custom_function: CustomFunctionProtocol,
+        custom_function: _CustomFunctionProtocol,
     ) -> None:
         """
         Register a custom function to be executed for a specific computation type.
@@ -1971,53 +1972,57 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     action,
                 )
 
-                # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
-                # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
-                # safe to use instead.
-                # However, I was wondering if I should avoid calling batched operators at all in the case that there is
-                # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
-                if comp_type == SEND_F:
-                    send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
-                elif comp_type == SEND_B:
-                    send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
-                elif comp_type == RECV_F:
-                    assert (
-                        stage_idx,
-                        mb_index,
-                    ) not in fwd_recv_ops, (
-                        "Recv twice for {stage_idx=} {mb_index=} without executing forward"
-                    )
-                    fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_fwd_recv_ops(mb_index)
-                    )
-                elif comp_type == RECV_B:
-                    assert (
-                        stage_idx,
-                        mb_index,
-                    ) not in bwd_recv_ops, (
-                        "Recv twice for {stage_idx=} {mb_index=} without executing backward"
-                    )
-                    bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_bwd_recv_ops(mb_index)
-                    )
-                elif comp_type == UNSHARD:
-                    if stage_uses_fsdp:
+                @lru_cache
+                def _get_profiler_function_name(action: _Action) -> str:
+                    return f"PP:{str(action)}"
+
+                with record_function(_get_profiler_function_name(action)):
+                    # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
+                    # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
+                    # safe to use instead.
+                    # However, I was wondering if I should avoid calling batched operators at all in the case that there is
+                    # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
+                    if comp_type == SEND_F:
+                        send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                    elif comp_type == SEND_B:
+                        send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                    elif comp_type == RECV_F:
                         assert (
-                            stage_idx not in unsharded_stages
-                            and stage_idx not in unshard_ops
-                        ), f"Unsharding the same {stage_idx=} twice"
-                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
-                elif comp_type == RESHARD:
-                    if stage_uses_fsdp:
-                        assert stage_idx in unsharded_stages, (
-                            f"Resharding {stage_idx=} without unsharding"
+                            stage_idx,
+                            mb_index,
+                        ) not in fwd_recv_ops, (
+                            "Recv twice for {stage_idx=} {mb_index=} without executing forward"
                         )
-                        assert stage_idx not in unshard_ops, (
-                            f"Resharding {stage_idx=} before finishing unshard"
+                        fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                            stage.get_fwd_recv_ops(mb_index)
                         )
-                        stage.submod.reshard()  # type: ignore[operator]
-                elif comp_type == FORWARD:
-                    with record_function(f"PP::Stage{stage_idx}-Forward{mb_index}"):
+                    elif comp_type == RECV_B:
+                        assert (
+                            stage_idx,
+                            mb_index,
+                        ) not in bwd_recv_ops, (
+                            "Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                        )
+                        bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                            stage.get_bwd_recv_ops(mb_index)
+                        )
+                    elif comp_type == UNSHARD:
+                        if stage_uses_fsdp:
+                            assert (
+                                stage_idx not in unsharded_stages
+                                and stage_idx not in unshard_ops
+                            ), f"Unsharding the same {stage_idx=} twice"
+                            unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
+                    elif comp_type == RESHARD:
+                        if stage_uses_fsdp:
+                            assert stage_idx in unsharded_stages, (
+                                f"Resharding {stage_idx=} without unsharding"
+                            )
+                            assert stage_idx not in unshard_ops, (
+                                f"Resharding {stage_idx=} before finishing unshard"
+                            )
+                            stage.submod.reshard()  # type: ignore[operator]
+                    elif comp_type == FORWARD:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
 
@@ -2048,10 +2053,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                                 output, mb_index
                             )
 
-                elif comp_type == FULL_BACKWARD:
-                    with record_function(
-                        f"PP::Stage{stage_idx}-FullBackward{mb_index}"
-                    ):
+                    elif comp_type == FULL_BACKWARD:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
 
@@ -2089,10 +2091,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
                                 stage.get_local_bwd_output(mb_index), mb_index
                             )
-                elif comp_type == BACKWARD_INPUT:
-                    with record_function(
-                        f"PP::Stage{stage_idx}-BackwardInput{mb_index}"
-                    ):
+                    elif comp_type == BACKWARD_INPUT:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
 
@@ -2117,10 +2116,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
                                 stage.get_local_bwd_output(mb_index), mb_index
                             )
-                elif comp_type == BACKWARD_WEIGHT:
-                    with record_function(
-                        f"PP::Stage{stage_idx}-BackwardWeight{mb_index}"
-                    ):
+                    elif comp_type == BACKWARD_WEIGHT:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
                         backward_counter[stage_idx] += 1
@@ -2129,8 +2125,8 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             last_backward=backward_counter[stage_idx]
                             == self._n_microbatches,
                         )
-                else:
-                    raise ValueError(f"{action=} is unknown or unsupported")
+                    else:
+                        raise ValueError(f"{action=} is unknown or unsupported")
             except Exception as e:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
