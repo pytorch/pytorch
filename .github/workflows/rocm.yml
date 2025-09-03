@@ -2,9 +2,9 @@ name: rocm
 
 on:
   push:
-  #   branches:
+    branches:
   #     - main
-  #     - release/*
+      - release/*
     tags:
       - ciflow/rocm/*
   workflow_dispatch:
