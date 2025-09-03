@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-import sympy
-
 import torch
 
 from ..ir import get_free_symbols
 from ..kernel_inputs import KernelInputs, MMKernelInputs
-from ..utils import get_k_splits
-from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
 
