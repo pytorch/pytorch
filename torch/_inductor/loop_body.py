@@ -245,16 +245,30 @@ class LoopBody:
             prefix="t",  # type: ignore[arg-type]
         )
 
+        output_node = old_body.root_block.graph.output_node()
+
+        if (
+            isinstance(output_node.args[0], torch.fx.Node)
+            and output_node.args[0].target == "store"
+        ):
+            # ops.masked requires a non-None output but store node is a None output.
+            # So we return value_node instead. Note that store_node still exists
+            # in loop body so it will be codegened correctly.
+            store_node = output_node.args[0]
+            _, _, _, value_node, _ = store_node.args
+            output_node.args = (value_node,)
+
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
             index = [*itertools.chain.from_iterable(indices)]
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
 
-            new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = iter_idx[dimension] % original_range
-
-            return old_body(new_iter_idx, reduce_idx)
+            mask = ops.lt(
+                ops.index_expr(iter_idx[dimension], torch.int64),
+                ops.index_expr(original_range, torch.int64),
+            )
+            return ops.masked(mask, lambda: old_body(iter_idx, reduce_idx), 0)
 
         loop_body = LoopBody(
             new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
