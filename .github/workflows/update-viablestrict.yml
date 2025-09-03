@@ -4,7 +4,6 @@ on:
   schedule:
     - cron: 17,47 * * * *
   workflow_dispatch:
-  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}
@@ -25,7 +24,7 @@ jobs:
           repository: pytorch/pytorch
           stable-branch: viable/strict
           requires: '[\"pull\", \"trunk\", \"lint\", \"^(?!.*rocm).*linux-binary.*\", \"linux-aarch64\"]'
-          secret-bot-token: ${{ secrets.GITHUB_TOKEN }}
+          secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
           clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
