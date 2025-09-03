@@ -302,12 +302,6 @@ def _has_attr(model: torch.nn.Module, attr_name: str):
     return hasattr(t, field)
 
 
-def _set_attr(model: torch.nn.Module, attr_name: str, value):
-    attr_names = attr_name.split(".")
-    t = _get_attr_via_attr_list(model, attr_names[:-1])
-    setattr(t, attr_names[-1], value)
-
-
 def _print_readable(
     module,
     module_name,
