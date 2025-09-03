@@ -3311,8 +3311,12 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
     assert imag.dtype.is_floating_point
-    out_shape = _broadcast_shapes(real.shape, imag.shape)
-    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+    result = elementwise_meta(
+        real.to(corresponding_complex_dtype(real.dtype)),
+        imag.to(corresponding_complex_dtype(imag.dtype)),
+        type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    return result
 
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
@@ -4187,6 +4191,18 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
+
+
+@register_meta(
+    [
+        aten.add.Scalar,
+        aten.sub.Scalar,
+    ],
+)
+def meta_binop_alpha(self, other, alpha=1):
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 @register_meta([aten.round.default, aten.round.decimals])
@@ -7637,6 +7653,20 @@ def _constant_pad_nd_meta(input, pad, value=0):
         f"dimensions of the input. Pad length is {len(pad)} while the input has "
         f"{l_inp} dimensions.",
     )
+
+    if all(isinstance(p, utils.IntWithoutSymInt) and p <= 0 for p in pad):
+        c_input = input
+        for i in range(l_diff, l_inp):
+            pad_idx = 2 * (l_inp - i - 1)
+            if pad[pad_idx] < 0:
+                c_input = c_input.narrow(
+                    i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx]
+                )
+
+            if pad[pad_idx + 1] < 0:
+                c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
+
+        return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
     for i in range(l_pad):

@@ -7,6 +7,8 @@ using namespace c10d::symmetric_memory;
 // Alloc functor for MemPool
 void* cuda_symm_alloc(size_t size, int device, void* stream) {
   static auto allocator = get_allocator(c10::DeviceType::CUDA);
+  TORCH_CHECK(
+      allocator->name() == "NVSHMEM", "Only NVSHMEM backend is supported");
   // Note: this alloc functor works for the NVSHMEM and NCCL backends only,
   // because only these backends takes `nullopt` for the `group` argument which
   // is not given by MemPool's invocation (actually these two backends requires
@@ -17,6 +19,8 @@ void* cuda_symm_alloc(size_t size, int device, void* stream) {
 // Free functor for MemPool
 void cuda_symm_free(void* ptr, size_t size, int device, void* stream) {
   static auto allocator = get_allocator(c10::DeviceType::CUDA);
+  TORCH_CHECK(
+      allocator->name() == "NVSHMEM", "Only NVSHMEM backend is supported");
   allocator->free(ptr);
 }
 

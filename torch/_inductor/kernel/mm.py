@@ -24,8 +24,8 @@ from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..ir import Buffer, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     add_layout_constraint,
@@ -41,7 +41,6 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
-    get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
@@ -283,16 +282,20 @@ persistent_tma_mm_template = TritonTemplate(
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     {%- else %}
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[K, 1] if A_ROW_MAJOR else [M, 1],
+        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=B,
         shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[N, 1] if B_ROW_MAJOR else [K, 1],
+        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
     {%- endif %}
@@ -319,13 +322,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc,
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc,
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -461,16 +464,18 @@ device_tma = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     {%- else %}
+    stride_am = {{stride("A", 0)}}
+    stride_bn = {{stride("B", 1)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K],
-        strides=[K, 1],
+        strides=[stride_am, 1],
         block_shape=[BLOCK_M, BLOCK_K],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=B,
         shape=[N, K],
-        strides=[K, 1],
+        strides=[stride_bn, 1],
         block_shape=[BLOCK_N, BLOCK_K],
     )
     {%- endif %}
@@ -562,18 +567,21 @@ def lazy_register_extern_choice(fn):
     return ExternKernelChoice(fn)
 
 
-aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
+aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 
 aten_addmm = ExternKernelChoice(
-    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
 )
 
-aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm_out")
+aten__int_mm = ExternKernelChoice(
+    torch._int_mm, "at::_int_mm_out", op_overload=aten._int_mm.out
+)
 
 aten__sparse_semi_structured_mm = ExternKernelChoice(
     torch._sparse_semi_structured_mm,
     "at::_sparse_semi_structured_mm",
     has_out_variant=False,
+    op_overload=aten._sparse_semi_structured_mm.default,
 )
 
 aten__fp8_mm = ExternKernelChoice(
@@ -649,6 +657,44 @@ def decomposeK(a, b, k_splits):
     return reduced_buf.to(a.dtype)
 
 
+class DecomposeKSugraphTemplate(SubgraphTemplate):
+    def __init__(self):
+        super().__init__(
+            name="decompose_k",
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        k_split: int,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        name = f"decompose_k_mm_{k_split}_split"
+        description = f"{k_split=}"
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                functools.partial(decomposeK, k_splits=k_split),
+                decompositions,
+            )
+
+            return super().generate(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=description,
+            )
+
+
+decompose_k_subgraph_template = DecomposeKSugraphTemplate()
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     """
@@ -716,46 +762,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **kwargs,
                 )
 
-        from torch._inductor.ir import get_free_symbols
-
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        # and if there aren't any unbacked symbols
-        unbacked_symbols = any(
-            len(get_free_symbols(itr, unbacked_only=True)) > 0
-            for itr in (
-                mat1.get_size(),
-                mat1.get_stride(),
-                mat2.get_size(),
-                mat2.get_stride(),
-            )
-        )
-        if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            from torch._dispatch.python import enable_python_dispatcher
-
-            from ..decomposition import select_decomp_table
-
-            k_splits = get_k_splits(m, n, k)
-            for k_split in k_splits:
-                if not V.graph.sizevars.statically_known_true(
-                    sympy.Eq(sympy.Mod(k, k_split), 0)
-                ):
-                    continue
-
-                with enable_python_dispatcher():
-                    decompositions = select_decomp_table()
-
-                    decompose_k_subgraph_template = SubgraphTemplate(
-                        name=f"decompose_k_mm_{k_split}_split",
-                        make_fx_graph=make_fx(
-                            functools.partial(decomposeK, k_splits=k_split),
-                            decompositions,
-                        ),
-                    )
-
+        if use_decompose_k_choice(m, n, k):
+            for kwargs in V.choices.get_mm_configs(
+                kernel_inputs, layout, decompose_k_subgraph_template.name, "mm"
+            ):
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
-                    input_nodes=(mat1, mat2),
+                    input_nodes=kernel_inputs.nodes(),
                     layout=layout,
+                    **kwargs,
                 )
 
     if (
