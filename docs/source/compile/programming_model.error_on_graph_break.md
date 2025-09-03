@@ -20,7 +20,7 @@ torch._logging.set_logs(graph_breaks=True)
 
 **Summary:**
 
-- When `fullgraph=False`, we can use `torch._dynamo.error_on_graph_break()` for more flexibility in
+- When `fullgraph=False`, we can use `torch.compiler.error_on_graph_break()` for more flexibility in
   dealing with graph breaks.
 
 So far, we have introduced two ways in dealing with graph breaks in `torch.compile`:
@@ -28,14 +28,14 @@ So far, we have introduced two ways in dealing with graph breaks in `torch.compi
 2. `fullgraph=False` continues tracing even when encountering graph breaks.
 
 What if we want to disallow graph breaks for most of the code, but there are a few problematic functions where the graph breaks are hard to remove,
-and we are okay with having those graph breaks? We can use `torch._dynamo.error_on_graph_break()` to achieve this.
+and we are okay with having those graph breaks? We can use `torch.compiler.error_on_graph_break()` to achieve this.
 
 `torch.compile` has an `error_on_graph_break` setting (initially set to `False`).
 If a graph break or compiler error occurs in code while `error_on_graph_break` is set to `False`, then `torch.compile` will attempt to continue compilation after the graph break/error.
 If `error_on_graph_break` is set to `True`, then `torch.compile` will abort compilation and propagate the error to user code.
 
 A significant difference between `error_on_graph_break=True` and `fullgraph=True` is that the former **does not guarantee that a single graph will be captured**.
-`error_on_graph_break` **can be arbitrarily toggled during compile time** by using the `torch._dynamo.error_on_graph_break()` context manager/decorator.
+`error_on_graph_break` **can be arbitrarily toggled during compile time** by using the `torch.compiler.error_on_graph_break()` context manager/decorator.
 In comparison, once `fullgraph` is set to `True`, it cannot be set back to `False`.
 Finally, `error_on_graph_break` has lower precedence than `fullgraph` - `error_on_graph_break` only takes effect when `fullgraph=False`.
 
@@ -43,7 +43,7 @@ Finally, `error_on_graph_break` has lower precedence than `fullgraph` - `error_o
 ## `error_on_graph_break(False)` example
 
 ```{code-cell}
-@torch._dynamo.error_on_graph_break(False)
+@torch.compiler.error_on_graph_break(False)
 def code_with_a_difficult_graph_break(x):
     x = x + 1
     torch._dynamo.graph_break()
@@ -53,7 +53,7 @@ def inner(x):
     return code_with_a_difficult_graph_break(x)
 
 # NOTE: fullgraph=False
-@torch._dynamo.error_on_graph_break(True)
+@torch.compiler.error_on_graph_break(True)
 @torch.compile
 def fn(x):
     return inner(x)
@@ -69,11 +69,11 @@ but there are some sections of code with non-performance-critical graph breaks t
 
 ```{code-cell}
 # NOTE: fullgraph=False
-@torch._dynamo.error_on_graph_break(True)
+@torch.compiler.error_on_graph_break(True)
 @torch.compile
 def fn(x):
     x = x + 1
-    with torch._dynamo.error_on_graph_break(False):
+    with torch.compiler.error_on_graph_break(False):
         torch._dynamo.graph_break()  # no error
     return x + 2
 
@@ -91,9 +91,9 @@ class ThirdPartyModule(torch.nn.Module):
         return x + 2
 
 tp_mod = ThirdPartyModule()
-tp_mod.forward = torch._dynamo.error_on_graph_break(False)(tp_mod.forward)
+tp_mod.forward = torch.compiler.error_on_graph_break(False)(tp_mod.forward)
 
-@torch._dynamo.error_on_graph_break(True)
+@torch.compiler.error_on_graph_break(True)
 @torch.compile
 def fn(x):
     return tp_mod.forward(x)
@@ -105,7 +105,7 @@ fn(torch.randn(3))
 ## `error_on_graph_break(True)` example
 
 ```{code-cell}
-@torch._dynamo.error_on_graph_break(True)
+@torch.compiler.error_on_graph_break(True)
 def inner2(x):
     x = x + 1
     torch._dynamo.graph_break()  # error
@@ -132,7 +132,7 @@ but there are some sections of the code that are performance-critical and we wan
 
 ## `error_on_graph_break` nesting behavior
 
-`torch._dynamo.error_on_graph_break()` affects the `error_on_graph_break` setting of nested calls as well:
+`torch.compiler.error_on_graph_break()` affects the `error_on_graph_break` setting of nested calls as well:
 
 ```{code-cell}
 def inner(x):
@@ -141,10 +141,10 @@ def inner(x):
     return x + 2
 
 def inner2(x):
-    with torch._dynamo.error_on_graph_break(False):
+    with torch.compiler.error_on_graph_break(False):
         return inner(x)
 
-@torch._dynamo.error_on_graph_break(True)
+@torch.compiler.error_on_graph_break(True)
 @torch.compile
 def fn(x):
     return inner2(x)
@@ -153,17 +153,17 @@ def fn(x):
 fn(torch.randn(3))
 ```
 
-`torch._dynamo.error_on_graph_break()` can be used under another `torch._dynamo.error_on_graph_break()` region:
+`torch.compiler.error_on_graph_break()` can be used under another `torch.compiler.error_on_graph_break()` region:
 
 ```{code-cell}
 def inner(x):
     x = x + 1
-    with torch._dynamo.error_on_graph_break(False):
+    with torch.compiler.error_on_graph_break(False):
         torch._dynamo.graph_break()
     return x + 2
 
 def inner2(x):
-    with torch._dynamo.error_on_graph_break(True):
+    with torch.compiler.error_on_graph_break(True):
         return inner(x)
 
 @torch.compile
@@ -180,7 +180,7 @@ fn(torch.randn(3))
 
 
 ```{code-cell}
-@torch._dynamo.error_on_graph_break(False)
+@torch.compiler.error_on_graph_break(False)
 def inner(x):
     x = x + 1
     torch._dynamo.graph_break()

@@ -36,6 +36,7 @@ __all__ = [
     "keep_tensor_guards_unsafe",
     "skip_guard_on_globals_unsafe",
     "nested_compile_region",
+    "error_on_graph_break",
 ]
 
 
@@ -661,3 +662,42 @@ def load_compiled_function(file: io.IOBase):
 
     data = file.read()
     return CompileArtifacts.deserialize(data).compiled_function()
+
+
+def error_on_graph_break(error_on_graph_break: bool):
+    """
+    Context manager/decorator to toggle torch.compile's `error_on_graph_break` setting at compile time.
+
+    If `fullgraph` is set, then `error_on_graph_break` does nothing
+    (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
+    `error_on_graph_break` determines whether `torch.compile` throws an error upon
+    encountering a graph break, or attempts to continue tracing.
+
+    `error_on_graph_break` can be toggled during compile time with this decorator to allow graph breaks in some
+    compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
+    does NOT guarantee that a single graph is captured from the compiled function.
+
+    The default value of torch.compile's `error_on_graph_break` setting is False.
+
+    >>> @torch.compiler.error_on_graph_break(False)
+    >>> def inner(x):
+    >>>     x = x + 1
+    >>>     torch._dynamo.graph_break()
+    >>>     return x + 2
+    >>>
+    >>> @torch.compiler.error_on_graph_break(True)
+    >>> @torch.compile  # NOTE: fullgraph=False
+    >>> def outer(x):
+    >>>     x = x + 4
+    >>>     with torch.compiler.error_on_graph_break(False):
+    >>>         torch._dynamo.graph_break()  # no error
+    >>>     x = inner(x)  # no error
+    >>>     torch._dynamo.graph_break()  # error
+    >>>     return x + 8
+
+    See https://docs.pytorch.org/docs/main/compile/programming_model.error_on_graph_break.html for more details
+    and examples.
+    """
+    import torch._dynamo
+
+    return torch._dynamo.error_on_graph_break(error_on_graph_break)
