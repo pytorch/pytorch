@@ -204,6 +204,7 @@ class LayerNorm(Module):
         self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
+
         if self.elementwise_affine:
             self.weight = Parameter(
                 torch.empty(self.normalized_shape, **factory_kwargs)
@@ -236,6 +237,48 @@ class LayerNorm(Module):
             "{normalized_shape}, eps={eps}, "
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
+
+
+class LazyLayerNorm(LazyModuleMixin, LayerNorm):
+    cls_to_become: LayerNorm  # type: ignore[assignment]
+    # weight: UninitializedParameter  # type: ignore[assignment]
+    # bias: UninitializedParameter  # type: ignore[assignment]
+
+    def __init__(
+        self,
+        dim: Union[int, tuple[int, ...]],
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        # normalized_shape  set to zero as place holder gets overwritten by materialization
+        # elementwise_affine and bias are hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
+        super().__init__(0, eps, False, False)
+
+        self.dim = dim
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        self.bias = bias
+
+        if self.elementwise_affine:
+            self.weight = Parameter(
+                torch.empty(self.normalized_shape, **factory_kwargs)
+            )
+            if bias:
+                self.bias = Parameter(
+                    torch.empty(self.normalized_shape, **factory_kwargs)
+                )
+            else:
+                self.register_parameter("bias", None)
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
 
 
 class GroupNorm(Module):
