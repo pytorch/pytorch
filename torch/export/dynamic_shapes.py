@@ -85,15 +85,19 @@ class _DimHint:
 
 class Dim:
     """
-    The `Dim` class allows users to specify dynamism in their exported programs. By marking a dimension with a `Dim`,
-    the compiler associates the dimension with a symbolic integer containing a dynamic range.
+    The ``Dim`` class allows users to specify dynamism in their exported
+    programs. By marking a dimension with a ``Dim``, the compiler associates the
+    dimension with a symbolic integer containing a dynamic range.
 
-    The API can be used in 2 ways: Dim hints (i.e. automatic dynamic shapes: `Dim.AUTO`, `Dim.DYNAMIC`, `Dim.STATIC`),
-    or named Dims (i.e. `Dim("name", min=1, max=2)`).
+    The API can be used in 2 ways: Dim hints (i.e. automatic dynamic shapes:
+    ``Dim.AUTO``, ``Dim.DYNAMIC``, ``Dim.STATIC``), or named Dims (i.e.
+    ``Dim("name", min=1, max=2)``).
 
-    Dim hints provide the lowest barrier to exportability, with the user only needing to specify if a dimension
-    if dynamic, static, or left for the compiler to decide (`Dim.AUTO`). The export process will automatically
-    infer the remaining constraints on min/max ranges and relationships between dimensions.
+    Dim hints provide the lowest barrier to exportability, with the user only
+    needing to specify if a dimension if dynamic, static, or left for the
+    compiler to decide (``Dim.AUTO``). The export process will automatically
+    infer the remaining constraints on min/max ranges and relationships between
+    dimensions.
 
     Example::
 
@@ -112,19 +116,19 @@ class Dim:
         }
         ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
 
-    Here, export would raise an exception if we replaced all uses of `Dim.AUTO` with `Dim.DYNAMIC`,
-    as x.shape[0] is constrained to be static by the model.
+    Here, export would raise an exception if we replaced all uses of ``Dim.AUTO`` with ``Dim.DYNAMIC``,
+    as ``x.shape[0]`` is constrained to be static by the model.
 
     More complex relations between dimensions may also be codegened as runtime assertion nodes by the compiler,
-    e.g. (x.shape[0] + y.shape[1]) % 4 == 0, to be raised if runtime inputs do not satisfy such constraints.
+    e.g. ``(x.shape[0] + y.shape[1]) % 4 == 0``, to be raised if runtime inputs do not satisfy such constraints.
 
-    You may also specify min-max bounds for Dim hints, e.g. `Dim.AUTO(min=16, max=32)`, `Dim.DYNAMIC(max=64)`,
+    You may also specify min-max bounds for Dim hints, e.g. ``Dim.AUTO(min=16, max=32)``, ``Dim.DYNAMIC(max=64)``,
     with the compiler inferring the remaining constraints within the ranges. An exception will be raised if
     the valid range is entirely outside the user-specified range.
 
     Named Dims provide a stricter way of specifying dynamism, where exceptions are raised if the compiler
     infers constraints that do not match the user specification. For example, exporting the previous
-    model, the user would need the following `dynamic_shapes` argument::
+    model, the user would need the following ``dynamic_shapes`` argument::
 
         s0 = Dim("s0")
         s1 = Dim("s1", min=16)
@@ -134,8 +138,9 @@ class Dim:
         }
         ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
 
-    Named Dims also allow specification of relationships between dimensions, up to univariate linear relations.
-    For example, the following indicates one dimension is a multiple of another plus 4::
+    Named Dims also allow specification of relationships between dimensions, up
+    to univariate linear relations.  For example, the following indicates one
+    dimension is a multiple of another plus 4::
 
         s0 = Dim("s0")
         s1 = 3 * s0 + 4

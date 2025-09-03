@@ -395,7 +395,7 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
 
 bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
   // Check that all tensors are on the GPU device
-  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // This should be handled by the stub dispatch, but we call can_use_*_attention
   // directly from python we need to ensure that the tensors are on cuda
   if (params.query.device().type() != at::DeviceType::CUDA) {
     if (debug) {
@@ -431,7 +431,12 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
-  // TODO(eqy): add head dim >= 256 cases once support is finalized
+  if (cudnn_version >= 91000) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (dprops->major == 9 && !dprops->minor) {
+      head_dim_limit = 256;
+    }
+  }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
       TORCH_WARN("head_dim should be no more than ", head_dim_limit);

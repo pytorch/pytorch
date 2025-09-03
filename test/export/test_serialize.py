@@ -22,6 +22,7 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _dict_to_dataclass,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -279,6 +280,25 @@ def forward(self, x):
         exp_out = ep.module()(*inp)
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
+
+    def test_serialize_param_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.ones(4, 4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.parameter.div_(2)
+                return x + self.parameter
+
+        foo = Foo()
+        ep = torch.export.export(foo, (torch.rand(4, 4),)).run_decompositions()
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+        val = loaded_ep.graph_signature.parameters_to_mutate
+        self.assertEqual({"div": "parameter"}, val)
 
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
@@ -616,6 +636,79 @@ def forward(self, x):
             if "aten.sum.dim_IntList" in node.target:
                 self.assertEqual(node.inputs[1].arg.type, "as_ints")
 
+    def test_preserve_aliasing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(8, 8)
+                self.linear2 = self.linear1  # alias of linear1
+                self.register_buffer("buffer1", torch.randn(8, 8))
+                self.register_buffer("buffer2", torch.randn(8, 8), persistent=False)
+                self.const1 = torch.ones(8, 8)
+                self.const2 = self.const1.diagonal()  # a partial view of const1
+
+            def forward(self, x):
+                return (
+                    self.linear1(x)
+                    + self.linear2(x)
+                    + self.buffer1
+                    + self.buffer2
+                    + self.const1
+                    + self.const2
+                )
+
+        m = M()
+        sample_inputs = (torch.randn(1, 8),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        eager_out = m(*sample_inputs)
+        epm = loaded_ep.module()
+        ep_out = epm(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+
+        # loaded_ep should preserve the aliasing info
+        self.assertEqual(
+            loaded_ep.state_dict["linear1.weight"].untyped_storage(),
+            loaded_ep.state_dict["linear2.weight"].untyped_storage(),
+        )
+        self.assertEqual(
+            loaded_ep.state_dict["linear1.bias"].untyped_storage(),
+            loaded_ep.state_dict["linear2.bias"].untyped_storage(),
+        )
+        self.assertEqual(
+            loaded_ep.constants["const1"].untyped_storage(),
+            loaded_ep.constants["const2"].untyped_storage(),
+        )
+        # verify const1 and const2 share the same storage
+        loaded_ep.constants["const1"][0][0] = 123
+        self.assertEqual(loaded_ep.constants["const2"][0], 123)
+        loaded_ep.constants["const2"][-1] = 321
+        self.assertEqual(loaded_ep.constants["const1"][-1][-1], 321)
+
+        # unlifted module should also preserve the aliasing info
+        epm = loaded_ep.module()
+        epm_state_dict = epm.state_dict()
+        self.assertEqual(
+            epm_state_dict["linear1.weight"].untyped_storage(),
+            epm_state_dict["linear2.weight"].untyped_storage(),
+        )
+        self.assertEqual(
+            epm_state_dict["linear1.bias"].untyped_storage(),
+            epm_state_dict["linear2.bias"].untyped_storage(),
+        )
+        self.assertEqual(
+            epm.const1.untyped_storage(),
+            epm.const2.untyped_storage(),
+        )
+        # verify const1 and const2 share the same storage
+        epm.const1[0][0] = 123
+        self.assertEqual(epm.const2[0], 123)
+        epm.const2[-1] = 321
+        self.assertEqual(epm.const1[-1][-1], 321)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -795,7 +888,7 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo")
+            @torch.library.register_fake("mylib::foo")
             def foo_impl(a, b, c):
                 res2 = None
                 if c is not None:
@@ -884,21 +977,21 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo1", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo1")
+            @torch.library.register_fake("mylib::foo1")
             def foo1_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return n + n
 
             @torch.library.impl("mylib::foo2", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo2")
+            @torch.library.register_fake("mylib::foo2")
             def foo2_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
             @torch.library.impl("mylib::foo3", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo3")
+            @torch.library.register_fake("mylib::foo3")
             def foo3_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
@@ -1441,6 +1534,20 @@ def forward(self, x):
             inputs = (torch.ones(2, 3),)
             self.check_graph(m, inputs, strict=False)
 
+    def test_forward_compatibility(self):
+        self.assertEqual(
+            schema.TensorArgument(
+                name="x",
+            ),
+            _dict_to_dataclass(
+                schema.TensorArgument,
+                {
+                    "shiny_new_field": "hello world",
+                    "name": "x",
+                },
+            ),
+        )
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -1573,12 +1680,21 @@ class TestSaveLoad(TestCase):
                 f.seek(0)
                 file_prefix = f.name.split("/")[2].split(".")[0]
 
-                # Modify the version
-                with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
+                # Create a new file and copy things over, but modify the
+                # archive version
+                with tempfile.NamedTemporaryFile(suffix=".pt2") as fnew:
+                    with zipfile.ZipFile(f, "r") as zin:
+                        with zipfile.ZipFile(fnew, "w") as zout:
+                            for item in zin.infolist():
+                                if (
+                                    item.filename
+                                    != f"{file_prefix}/{ARCHIVE_VERSION_PATH}"
+                                ):
+                                    zout.writestr(item, zin.read(item.filename))
+                            zout.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
 
-                f.seek(0)
-                load(f.name)
+                    f.seek(0)
+                    load(fnew.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
@@ -1815,6 +1931,60 @@ def forward(self, x):
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertEqual(counter, 1)
+
+    def test_unbacked_range_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._check_is_size(n, max=y.size(0) - 1)
+                return torch.empty(n), y[n]
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.tensor([5]), torch.randn(10)),
+            dynamic_shapes={
+                "x": None,
+                "y": (Dim.DYNAMIC,),
+            },
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        # pre-serialize ep
+        pre_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in ep.graph.nodes]
+        ).shape_env
+        post_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        self.assertEqual(pre_shape_env.var_to_range, post_shape_env.var_to_range)
+
+    def test_backed_size_oblivious_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z.item()
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = torch.export.export(
+                Foo(),
+                (torch.randn(1), torch.randn(1), torch.tensor([5])),
+                dynamic_shapes={
+                    "x": (Dim.DYNAMIC,),
+                    "y": (Dim.DYNAMIC,),
+                    "z": None,
+                },
+            )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
+        self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
 
 
 if __name__ == "__main__":

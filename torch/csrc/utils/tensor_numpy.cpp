@@ -493,9 +493,13 @@ at::Tensor tensor_from_cuda_array_interface(
     // ref:
     // https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html#cuda-array-interface-version-3
     if (data_ptr != nullptr) {
-      // if device_opt is provided and not nullopt, use it, otherwise infer from
-      // cudaPointerGetAttributes later in from_blob
-      return device_opt;
+      if (device_opt.has_value() && device_opt->has_index()) {
+        // if device_opt is provided with explicit device index, use it
+        return device_opt;
+      } else {
+        // otherwise infer from cudaPointerGetAttributes later in from_blob
+        return std::nullopt;
+      }
     } else {
       const auto current_device = at::detail::getCUDAHooks().getCurrentDevice();
       return Device(

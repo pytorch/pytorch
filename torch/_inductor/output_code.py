@@ -48,6 +48,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -580,8 +581,28 @@ class CompiledFxGraph(OutputCode):
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
+
+        if (
+            torch._inductor.debug.RECORD_GRAPH_EXECUTION
+            and torch._inductor.debug.GRAPH_EXECUTION_ORDER is not None
+        ):
+            graph_id = self.fx_kwargs.get("graph_id")
+            compile_id = (
+                torch._inductor.debug.GRAPH_COMPILE_IDS.get(graph_id)
+                if graph_id is not None
+                and torch._inductor.debug.GRAPH_COMPILE_IDS is not None
+                else None
+            )
+            torch._inductor.debug.GRAPH_EXECUTION_ORDER.append(
+                {
+                    "compile_id": compile_id,
+                }
+            )
         try:
-            return self.current_callable(inputs)
+            with record_function(
+                f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+            ):
+                return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
@@ -719,7 +740,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[Union[str, Weights]]]
+    filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

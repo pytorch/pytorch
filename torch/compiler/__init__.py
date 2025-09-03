@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -39,6 +39,8 @@ __all__ = [
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+FuncType = Callable[..., Any]
+F = TypeVar("F", bound=FuncType)
 
 
 def compile(*args, **kwargs):
@@ -252,7 +254,10 @@ def disable(fn=None, recursive=True, *, reason=None):
 
 
 def set_stance(
-    stance: str = "default", *, skip_guard_eval_unsafe=False, force_backend=None
+    stance: str = "default",
+    *,
+    skip_guard_eval_unsafe: bool = False,
+    force_backend: Union[str, Callable[..., Any], None] = None,
 ):
     """
     Set the current stance of the compiler.
@@ -355,7 +360,7 @@ def set_enable_guard_collectives(enabled: bool):
     from torch._dynamo.eval_frame import guard_collectives_hook
 
     if enabled:
-        return set_guard_complete_hook(guard_collectives_hook) is not None
+        return set_guard_complete_hook(guard_collectives_hook) is not None  # type: ignore[arg-type]
     else:
         return set_guard_complete_hook(None) is not None
 

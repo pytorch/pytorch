@@ -1,0 +1,80 @@
+# .github/workflows/build-external.yml
+name: Build External packages
+
+description: build external packages for PyTorch
+
+inputs:
+  cuda-arch-list:
+    description: TORCH_CUDA_ARCH_LIST (e.g., "8.0;8.9;9.0")
+    type: string
+    required: true
+    default: ""
+  docker-image:
+    description: Base image to use
+    type: string
+    required: true
+  build-targets:
+    description: Build targets
+    type: string
+    required: true
+  torch-wheel-dir:
+    description: Directory to built torch wheel
+    type: string
+    required: false
+    default: dist
+  output-dir:
+    description: Directory to store build artifact
+    default: external
+    type: string
+    required: false
+
+outputs:
+  build_time:
+    description: "Total build time in seconds"
+    value: ${{ steps.build-external.outputs.build_time }}
+  output_dir:
+    description: "Directory where build artifact is stored"
+    value: ${{ steps.build-external.outputs.output_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build external packages in sequence
+      id: build-external
+      env:
+        SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
+        TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+        BASE_IMAGE: ${{ inputs.docker-image }}
+        BUILD_TARGETS: ${{ inputs.build-targets }}
+        PARENT_OUTPUT_DIR: ${{ inputs.output-dir}}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 --version
+        docker images
+        START_TIME=$(date +%s)
+        (
+          cd .ci/lumen_cli
+          python3 -m pip install -e .
+        )
+        MAX_JOBS="$(nproc --ignore=6)"
+        export MAX_JOBS
+
+        # Split the comma-separated list and build each target
+        IFS=',' read -ra TARGETS <<< "$BUILD_TARGETS"
+        for target in "${TARGETS[@]}"; do
+          OUTPUT_DIR="$PARENT_OUTPUT_DIR/$target"
+          export OUTPUT_DIR
+          echo "Building external package: $target in directory $OUTPUT_DIR"
+          python3 -m cli.run build external "$target"
+
+        done
+
+        END_TIME=$(date +%s)
+        {
+          echo "build_time=$((END_TIME - START_TIME))"
+          if [ -d "$PARENT_OUTPUT_DIR" ]; then
+            echo "output_dir=$PARENT_OUTPUT_DIR"
+          fi
+        } >> "$GITHUB_OUTPUT"

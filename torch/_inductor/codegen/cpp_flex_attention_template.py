@@ -814,7 +814,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         from ..loop_body import LoopBody
         from ..utils import sympy_index_symbol_with_prefix, SymT
         from ..virtualized import V
-        from .cpp import CppKernelProxy, KernelGroup
+        from .cpp import CppKernelProxy, KernelGroup, ParallelDepth
 
         kernel_group = KernelGroup()
         kernel_input_args = {
@@ -883,7 +883,15 @@ class CppFlexAttentionTemplate(CppTemplate):
         var_sizes_list.append((var_sizes, ()))
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         output_code = kernel_group.loops_code.getvalue()
 
         var_q_symbol, var_kv_symbol = self.block_vars

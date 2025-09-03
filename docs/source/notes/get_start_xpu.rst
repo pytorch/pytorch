@@ -107,7 +107,7 @@ If you are migrating code from ``cuda``, you would change references from ``cuda
 The following points outline the support and limitations for PyTorch with Intel GPU:
 
 #. Both training and inference workflows are supported.
-#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to Use Inductor on Windows with CPU/XPU <https://pytorch.org/tutorials/prototype/inductor_windows.html>`_.
+#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to use torch.compile on Windows CPU/XPU <https://pytorch.org/tutorials/unstable/inductor_windows.html>`_.
 #. Data types such as FP32, BF16, FP16, and Automatic Mixed Precision (AMP) are all supported.
 
 Examples

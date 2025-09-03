@@ -266,6 +266,28 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
+
+static std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
+    _mempool_allocators;
+
+void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator) {
+  _mempool_allocators[device_type] = std::move(allocator);
+}
+
+// Get allocator for MemPool given device
+std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
+  auto it = _mempool_allocators.find(device.type());
+  if (it == _mempool_allocators.end()) {
+    TORCH_CHECK(
+        false,
+        "SymmetricMemory MemPool did not find backend for device type ",
+        device.type());
+  }
+  return it->second;
+}
+
 } // namespace c10d::symmetric_memory
 
 namespace {
@@ -342,7 +364,9 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
   m.def(
-      "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name, int? major_align=None) -> Tensor(a!)");
+      "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
+  m.def(
+      "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

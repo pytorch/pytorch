@@ -513,7 +513,9 @@ def _slice(
         if is_none_value(list_or_value) and default_value is not None:
             list_or_value = [default_value]
 
-        if isinstance(list_or_value, (list, torch.Tensor)):
+        if isinstance(list_or_value, torch.Tensor):
+            return g.op("Constant", value_t=list_or_value.clone().detach())
+        elif isinstance(list_or_value, list):
             return g.op("Constant", value_t=torch.tensor(list_or_value))
 
         rank = symbolic_helper._get_tensor_rank(list_or_value)

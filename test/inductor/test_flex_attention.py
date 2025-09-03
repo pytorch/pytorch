@@ -5,6 +5,7 @@ import functools
 import random
 import string
 import unittest
+import warnings
 from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -122,12 +123,13 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
+        kernel_options=kernel_options,
     )
 
 
@@ -670,6 +672,7 @@ class TestFlexAttention(InductorTestCase):
         dtype: torch.dtype,
         device: str,
         block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -705,6 +708,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         else:
             return_lse = False
@@ -717,6 +721,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -1470,9 +1475,13 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
+        kernel_options = {"USE_TMA": True}
+
         block_mask = _create_empty_block_mask(q, k)
         score_mod = _generate_alibi_bias(8)
-        sdpa_partial = create_attention(score_mod=score_mod, block_mask=block_mask)
+        sdpa_partial = create_attention(
+            score_mod=score_mod, block_mask=block_mask, kernel_options=kernel_options
+        )
         compiled_sdpa = torch.compile(sdpa_partial, fullgraph=True)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
@@ -1515,7 +1524,7 @@ class TestFlexAttention(InductorTestCase):
         # test paged attention which does not support backward
         q.requires_grad, k.requires_grad, v.requires_grad = False, False, False
         paged_compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, device=device
+            score_mod, q, k, v, dtype, device=device, kernel_options=kernel_options
         )
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
@@ -1879,6 +1888,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return qk + scale[b].sum(dim=-1)
 
         self.run_test(score_mod_scale, dtype, device=device)
+
+    @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @skip_on_cpu
+    def test_dynamic_divisibility_guards(self, device, dtype):
+        """Test guards for divisible/non-divisible shape transitions"""
+        if device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
+
+        def score_mod(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def test_shape(S, backend):
+            """Test a single shape configuration"""
+            block_mask = create_block_mask(noop_mask, 1, 1, S, S, device=device)
+            sdpa_partial = create_attention(score_mod, block_mask=block_mask)
+
+            tensors = [
+                torch.randn(
+                    2, 4, S, 64, dtype=dtype, device=device, requires_grad=False
+                )
+                for _ in range(3)
+            ]
+
+            compiled_sdpa = torch.compile(sdpa_partial, backend=backend)
+            out, code = run_and_get_code(compiled_sdpa, *tensors)
+
+            # Check divisibility flag
+            is_divisible = S % 128 == 0
+            expected_flag = f"IS_DIVISIBLE : tl.constexpr = {is_divisible}"
+            self.assertIn(
+                expected_flag, str(code), f"S={S} should have {expected_flag}"
+            )
+
+            self.assertEqual(out.shape, (2, 4, S, 64))
+            return out, code
+
+        torch._dynamo.reset()
+        backend = CompileCounterWithBackend("inductor")
+
+        # Test divisible and non-divisible shapes
+        test_shapes = [256, 255, 383, 384]
+        _ = [test_shape(S, backend) for S in test_shapes]
 
     @supported_platform
     def test_multiple_score_mod_calls(self, device):
@@ -2871,6 +2924,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
+
+        if torch.version.hip and mode == "paged_attention":
+            raise self.skipTest(
+                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
+            )
 
         dtype = torch.float32
         # Setup
@@ -4234,6 +4292,52 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(query.grad.shape, query.shape)
         self.assertEqual(key.grad.shape, key.shape)
         self.assertEqual(value.grad.shape, value.shape)
+
+    @supported_platform
+    def test_debug_flag_disables_internal_compilation(self, device):
+        """Test that _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG flag bypasses internal compilation."""
+        import torch.nn.attention.flex_attention as fa
+
+        original_flag = fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        original_warnings_shown = fa._WARNINGS_SHOWN.copy()
+
+        try:
+            B, H, S, D = 1, 1, 128, 64
+            query = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            key = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            value = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+
+            def simple_score_mod(score, b, h, q_idx, kv_idx):
+                return score
+
+            # Test with debug flag False - should warn
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+            fa._WARNINGS_SHOWN.clear()
+
+            with self.assertWarns(UserWarning) as cm:
+                out_compiled = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+
+            self.assertIn(
+                "flex_attention called without torch.compile", str(cm.warning)
+            )
+
+            # Test with debug flag True - should NOT warn
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+
+            # Should not error
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                out_debug = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+
+            torch.testing.assert_close(out_compiled, out_debug, rtol=1e-4, atol=1e-4)
+
+        finally:
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
+            fa._WARNINGS_SHOWN = original_warnings_shown
 
 
 class TestBlockMask(InductorTestCase):
@@ -5897,6 +6001,56 @@ class TestLearnableBiases(InductorTestCase):
                 "grad_bias2",
             ],
         )
+
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+    )
+    @torch.compile
+    def test_learnable_bias_global_compiled(self, device, params):
+        batch_size = 1
+        num_heads = 1
+        seq_len = 128
+        head_dim = 16
+        d_model = num_heads * head_dim
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+
+        out_proj = nn.Linear(d_model, d_model, device=device)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        bias = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+            requires_grad=True,
+        )
+
+        def bias_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, q_idx, kv_idx]
+
+        out = flex_attention(
+            query=query,
+            key=key,
+            value=value,
+            score_mod=bias_mod,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+
+        attn_output = out_proj(out)
+        random_target = torch.randn(batch_size, seq_len, d_model, device=device)
+        loss = torch.nn.functional.mse_loss(attn_output, random_target)
+        loss.backward()
+
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
 
     @skip_on_cpu
     @common_utils.parametrize(

@@ -32,6 +32,8 @@ class TestFXNodeSource(TestCase):
             dummy_source_dict,
         )
 
+        self.assertEqual(node_source, NodeSource._from_dict(node_source.to_dict()))
+
         # Dummy node
         node = torch.fx.Node(
             graph=torch.fx.Graph(),
@@ -179,14 +181,28 @@ class TestFXNodeSource(TestCase):
                     if node_name_1 in same_ancestor_nodes
                     else None,
                 }:
-                    self.assertTrue(
-                        node_name_to_from_node[node_name_1]
-                        == node_name_to_from_node[node_name_2]
+                    self.assertEqual(
+                        node_name_to_from_node[node_name_1],
+                        node_name_to_from_node[node_name_2],
+                    )
+                    self.assertEqual(
+                        [
+                            NodeSource._from_dict(ns.to_dict())
+                            for ns in node_name_to_from_node[node_name_1]
+                        ],
+                        node_name_to_from_node[node_name_2],
                     )
                 else:
-                    self.assertTrue(
-                        node_name_to_from_node[node_name_1]
-                        != node_name_to_from_node[node_name_2]
+                    self.assertNotEqual(
+                        node_name_to_from_node[node_name_1],
+                        node_name_to_from_node[node_name_2],
+                    )
+                    self.assertNotEqual(
+                        [
+                            NodeSource._from_dict(ns.to_dict())
+                            for ns in node_name_to_from_node[node_name_1]
+                        ],
+                        node_name_to_from_node[node_name_2],
                     )
 
         gm = ep.module()

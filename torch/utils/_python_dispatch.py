@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import warnings
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, overload, Protocol, Union
+from typing import Optional, overload, Protocol, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -67,6 +68,12 @@ class TorchDispatchMode:
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+
+    # - When False, custom torch dispatch mode will error out explicitly when a hop
+    # is called under the mode.
+    # - When True, custom torch dispatch mode's __torch_dispatch__ will be triggered.
+    # Mode authors can implement how the mode interacts with higher order operators.
+    supports_higher_order_operators = False
 
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
@@ -296,14 +303,12 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 
 # Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
 class TensorWithFlatten(Protocol):
-    def __tensor_flatten__(self) -> tuple[Sequence[str], object]:
-        ...
+    def __tensor_flatten__(self) -> tuple[Sequence[str], object]: ...
 
     @staticmethod
     def __tensor_unflatten__(
         inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     # It would be really nice to be able to say that the return of
     # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
@@ -312,26 +317,20 @@ class TensorWithFlatten(Protocol):
     shape: torch._C.Size
 
     @overload
-    def stride(self, dim: None = None) -> tuple[int, ...]:
-        ...
+    def stride(self, dim: None = None) -> tuple[int, ...]: ...
 
     @overload
-    def stride(self, dim: int) -> int:
-        ...
+    def stride(self, dim: int) -> int: ...
 
     @overload
-    def size(self, dim: None = None) -> tuple[int, ...]:
-        ...
+    def size(self, dim: None = None) -> tuple[int, ...]: ...
 
     @overload
-    def size(self, dim: int) -> int:
-        ...
+    def size(self, dim: int) -> int: ...
 
-    def storage_offset(self) -> int:
-        ...
+    def storage_offset(self) -> int: ...
 
-    def dim(self) -> int:
-        ...
+    def dim(self) -> int: ...
 
     @overload
     def to(
@@ -341,8 +340,7 @@ class TensorWithFlatten(Protocol):
         copy: bool = False,
         *,
         memory_format: Optional[torch.memory_format] = None,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     @overload
     def to(
@@ -353,8 +351,7 @@ class TensorWithFlatten(Protocol):
         copy: bool = False,
         *,
         memory_format: Optional[torch.memory_format] = None,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     @overload
     def to(
@@ -364,8 +361,7 @@ class TensorWithFlatten(Protocol):
         copy: bool = False,
         *,
         memory_format: Optional[torch.memory_format] = None,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
@@ -504,17 +500,15 @@ and output of type {type(ret)}. But expected types to match."""
             assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
-    def is_read_only_alias_match(arg, ret):
-        shared_aliases = arg.alias_set & ret.alias_set
-        return len(shared_aliases) > 0 and not arg.is_write
-
     num_args = len(func._schema.arguments)
     num_returns = len(func._schema.returns)
     for arg_idx in range(num_args):
         for return_idx in range(num_returns):
-            if is_read_only_alias_match(
-                schema_info.args[arg_idx], schema_info.outs[return_idx]
-            ):
+            schema_arg = schema_info.args[arg_idx]
+            is_read_only_alias_match = (
+                schema_arg.alias_set & schema_info.outs[return_idx].alias_set
+            ) and not schema_arg.is_write
+            if is_read_only_alias_match:
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
@@ -534,15 +528,10 @@ class SchemaInfo:
     outs: list[AliasInfo]
 
 
-# Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: dict[Any, SchemaInfo] = {}
-
-
 # Given an OpOverload, returns schema information on it.
 # This is cached for efficiency, since it can involve running torchgen
+@functools.cache
 def get_alias_info(func) -> SchemaInfo:
-    if func in parsed_schema_map:
-        return parsed_schema_map[func]
     # For ATen ops: use torchgen (since torchscript parser doesn't handle alias annotations
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
@@ -605,7 +594,6 @@ def get_alias_info(func) -> SchemaInfo:
             for a in func._schema.returns
         ]
     schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
-    parsed_schema_map[func] = schema_info
     return schema_info
 
 
@@ -692,30 +680,26 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
+    # Compute write aliases once instead of repeatedly.
+    schema_info_outs_write_aliases = [get_write_alias(r) for r in schema_info.outs]
     # simple case: none of our outputs have mutable aliases, so we can return the output as-is
-    if not any(get_write_alias(r) is not None for r in schema_info.outs):
+    if not any(x is not None for x in schema_info_outs_write_aliases):
         return out
 
     # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
-    if not all(get_write_alias(r) is not None for r in schema_info.outs):
+    if not all(x is not None for x in schema_info_outs_write_aliases):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
-    if len(func._schema.returns) == 1:
+    if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
-            get_write_alias(schema_info.outs[0]), schema_info, args, kwargs
+            schema_info_outs_write_aliases[0], schema_info, args, kwargs
         )
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
     outs_to_return = type(out)(
         [
-            (
-                get_arg_from_alias(
-                    get_write_alias(schema_info.outs[i]), schema_info, args, kwargs
-                )
-                if get_write_alias(r) is not None
-                else o
-            )
-            for ((i, r), o) in zip(enumerate(schema_info.outs), out)
+            (get_arg_from_alias(write_alias, schema_info, args, kwargs))
+            for write_alias in schema_info_outs_write_aliases
         ]
     )
     return outs_to_return

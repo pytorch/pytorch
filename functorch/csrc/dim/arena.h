@@ -8,7 +8,7 @@
 #include <ATen/ATen.h>
 #include "minpybind.h"
 
-#ifdef _WIN32
+#if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
 // https://stackoverflow.com/questions/355967/how-to-use-msvc-intrinsics-to-get-the-equivalent-of-this-gcc-code
 inline unsigned int __builtin_clz(unsigned int x) {

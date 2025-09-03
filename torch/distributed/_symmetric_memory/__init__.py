@@ -47,10 +47,11 @@ def enable_symm_mem_for_group(group_name: str) -> None:
 
 
 _is_test_mode: bool = False
+_mocked_group_names: Optional[set[str]] = None
 
 
 @contextmanager
-def _test_mode() -> Generator[None, None, None]:
+def _test_mode(group_names: Optional[set[str]] = None) -> Generator[None, None, None]:
     """
     Forces ``is_symm_mem_enabled_for_group()`` to return ``True`` and the ops
     defined in the ``symm_mem`` namespace to use fallback implementations.
@@ -58,12 +59,16 @@ def _test_mode() -> Generator[None, None, None]:
     The context manager is not thread safe.
     """
     global _is_test_mode
+    global _mocked_group_names
     prev = _is_test_mode
+    prev_group_names = _mocked_group_names
     try:
         _is_test_mode = True
+        _mocked_group_names = group_names
         yield
     finally:
         _is_test_mode = prev
+        _mocked_group_names = prev_group_names
 
 
 def is_symm_mem_enabled_for_group(group_name: str) -> bool:
@@ -73,7 +78,9 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     Args:
         group_name (str): the name of the process group.
     """
-    return _is_test_mode or group_name in _group_name_to_store
+    if _is_test_mode:
+        return _mocked_group_names is None or group_name in _mocked_group_names
+    return group_name in _group_name_to_store
 
 
 _group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
@@ -1263,6 +1270,11 @@ def _fused_scaled_matmul_reduce_scatter_impl(
             .flatten(0, -2)
         )
         A_scale_shards = list(A_scale.chunk(group.size()))
+        # cuBLAS's row-wise kernel requires scales to be aligned to 16 bytes.
+        # When we slice them we might break this and need to reallocate them.
+        A_scale_shards = [
+            t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
+        ]
     else:
         raise ValueError("A_scale cannot be none for scaled_mm")
 
@@ -1602,6 +1614,29 @@ def _low_contention_reduce_scatter(
         )
 
 
+@torch.library.impl(lib, "all_to_all_vdev_2d", "Meta")
+def _all_to_all_vdev_2d_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+    major_align: Optional[int] = None,
+) -> None:
+    return None
+
+
+@torch.library.impl(lib, "all_to_all_vdev_2d_offset", "Meta")
+def _all_to_all_vdev_2d_offset_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits_offsets: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+) -> None:
+    return None
+
+
 # =============================================================================
 # User-facing APIs
 # =============================================================================
@@ -1744,6 +1779,16 @@ def get_backend(device: _device) -> Optional[str]:
         backend.
     """
     return _SymmetricMemory.get_backend(torch.device(device))
+
+
+def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
+    r"""
+    Get the MemPool allocator for symmetric memory for a given device.
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        MemPool allocator.
+    """
+    return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
 __all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
