@@ -505,8 +505,7 @@ class RangeVariable(BaseListVariable):
                 )
 
             if pt is not range:
-                # The correct behavior is to return NotImplemented
-                return ConstantVariable.create(False)
+                return ConstantVariable.create(NotImplemented)
 
             cmp = self.range_equals(other)
 
