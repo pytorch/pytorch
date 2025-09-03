@@ -12,7 +12,7 @@ if torch.backends.mps.is_available():
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: Optional[str] = None,
+        device_type: str = "mps",
         xfail_exclusion: Optional[list[str]] = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
@@ -38,6 +38,7 @@ if torch.backends.mps.is_available():
             "as_strided_copy",
             "as_strided_scatter",
             "asin",
+            "asinh",
             "acos",
             "atan",
             "broadcast_tensors",
@@ -312,13 +313,11 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
-            "igamma": None,
-            "igammac": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
             "index_reduceamin": None,
-            "kthvalue": None,
+            # "kthvalue": None,
             "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
@@ -447,35 +446,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "deg2rad": None,
-            "erf": None,
-            "expm1": None,
-            "floor": None,
-            "frac": None,
-            "isneginf": None,
-            "isposinf": None,
-            "log1p": None,
-            "nan_to_num": None,
-            "neg": None,
-            "rad2deg": None,
-            "round": None,
-            "sgn": None,
-            "sign": None,
-            "signbit": None,
-            "sin": None,
-            "sinh": None,
-            "sqrt": None,
-            "tan": None,
-            "tanh": None,
-            "asinh": None,
-            "asin": None,
-            "isnan": None,
-            "isinf": None,
-            "atan": None,
-            "atanh": None,
-            "ceil": None,
-            "relu": None,
-            "nn.functional.relu": None,
         }
 
         if MACOS_VERSION < 15.0:
@@ -629,17 +599,10 @@ if torch.backends.mps.is_available():
             # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
-        SKIPLIST_SPARSE = {
-            # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
-            # and does basically a no-op op(positive), which leads to unexpected success
-            "positive": [torch.complex128],
-        }
 
-        def addDecorator(
-            op: OpInfo, d: DecorateInfo, _device_type: Optional[str] = device_type
-        ) -> None:
-            if _device_type is not None:
-                d.device_type = _device_type
+        def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
+            if device_type is not None:
+                d.device_type = device_type
 
             op.decorators = op.decorators + (d,)
 
@@ -654,9 +617,10 @@ if torch.backends.mps.is_available():
                         torch.cdouble,
                     ],
                 ),
-                _device_type="mps",
             )
-            if sparse and op.name in SKIPLIST_SPARSE:
+            if sparse:
+                # Skipped due to test_sparse_zero_dims test in test_sparse.py which allocates empty tensor
+                # which leads to unexpected success with it
                 addDecorator(
                     op,
                     DecorateInfo(
@@ -689,7 +653,6 @@ if torch.backends.mps.is_available():
                     addDecorator(
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
-                        _device_type="mps",
                     )
 
             if (
@@ -731,6 +694,8 @@ if torch.backends.mps.is_available():
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
+            "igamma": None,  # currently not supported for any device
+            "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
                 torch.float16,
@@ -879,7 +844,7 @@ else:
 
     def mps_ops_modifier(
         ops: Sequence[OpInfo],
-        device_type: Optional[str] = None,
+        device_type: str = "mps",
         xfail_exclusion: Optional[list[str]] = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
