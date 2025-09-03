@@ -53,7 +53,7 @@ def build_deps():
         ".",
         "--target",
         "install",
-        "--config",
+        "--config",  # For multi-config generators
         "Release",
         "--",
     ]
@@ -103,6 +103,7 @@ def main():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
+            "-fno-strict-aliasing",
         ]
 
     ext_modules = [
