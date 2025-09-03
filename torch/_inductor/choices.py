@@ -136,9 +136,9 @@ class InductorChoices:
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
         """
-        choices = []
+        choices: list[KernelTemplateChoice] = []
         for choice_gen in template_choices.values():
-            choices += list(choice_gen)
+            choices.extend(choice_gen)
         return choices
 
     def get_mm_configs(
