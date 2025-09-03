@@ -470,10 +470,10 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
         "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
         "aot_inductor.presets": DEFAULT,  # Typing
-        "cuda.arch": DEFAULT,  # Out of Scope
-        "cuda.version": DEFAULT,  # Out of Scope
+        "cutlass.arch": DEFAULT,  # Out of Scope
+        "cutlass.version": DEFAULT,  # Out of Scope
         "cutlass.cutlass_dir": DEFAULT,  # Out of Scope
-        "cuda.cuda_cxx": DEFAULT,  # Out of Scope
+        "cutlass.cuda_cxx": DEFAULT,  # Out of Scope
         "rocm.arch": DEFAULT,  # Out of Scope
         "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
         "rocm.ck_dir": DEFAULT,  # Out of Scope
