@@ -11,9 +11,7 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
-#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
 
@@ -455,7 +453,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     // @lint-ignore CLANGTIDY
     const SaveNcclMetaConfig& config) {
   std::unordered_map<std::string, std::string> map;
-#ifdef USE_DISTRIBUTED
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
 
@@ -565,7 +562,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       }
     }
   }
-#endif // USE_DISTRIBUTED
   return map;
 }
 

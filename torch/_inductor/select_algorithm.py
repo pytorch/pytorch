@@ -263,7 +263,7 @@ class SubgraphInfo:
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
-    numels = None  # type: ignore[var-annotated]
+    numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("range_trees", "numels")

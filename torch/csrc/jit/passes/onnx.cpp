@@ -261,9 +261,10 @@ void NodeToONNX(
     py::dict& env,
     py::set& values_in_env) {
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_globals = py::module::import("torch.onnx._globals");
-  py::object onnx_registration =
-      py::module::import("torch.onnx._internal.registration");
+  py::object onnx_globals =
+      py::module::import("torch.onnx._internal.torchscript_exporter._globals");
+  py::object onnx_registration = py::module::import(
+      "torch.onnx._internal.torchscript_exporter.registration");
 
   // Setup all the lambda helper functions.
 
