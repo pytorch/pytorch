@@ -1325,7 +1325,7 @@ class TestFP8Matmul(TestCase):
             )
             return out
 
-        if torch.cuda.get_device_capability() == (9, 0):
+        if torch.cuda.get_device_capability() == (9, 0) and torch.version.cuda and torch.version.cuda >= "12.9":
             out = e5m2()
             self.assertEqual(out, torch.ones_like(out) * 128.)
         else:
