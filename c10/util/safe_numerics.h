@@ -8,8 +8,8 @@
 #if defined(_MSC_VER) && !defined(__SYCL_DEVICE_ONLY__)
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
 #include <intrin.h>
-#include <limits>
 #include <cmath>
+#include <limits>
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
