@@ -86,12 +86,13 @@ else:
     test_dtypes_fast = [torch.float32]
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
+        kernel_options=kernel_options,
     )
 
 
