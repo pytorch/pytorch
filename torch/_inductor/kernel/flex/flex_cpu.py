@@ -72,6 +72,10 @@ def lower_cpu(
         raise NotImplementedError(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
         )
+    if kernel_options.get("OUTPUT_MAX", False):
+        raise NotImplementedError(
+            "torch.compile on CPU does not support returning max scores yet."
+        )
     if not check_cpu_supported():
         raise NotImplementedError(
             "torch.compile on current platform is not supported for CPU."
