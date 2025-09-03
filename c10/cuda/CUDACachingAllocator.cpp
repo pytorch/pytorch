@@ -1756,9 +1756,8 @@ class DeviceCachingAllocator {
     auto get_parents =
         [&](cudaGraphNode_t node) -> std::vector<cudaGraphNode_t> {
       size_t count = 0;
-
-      std::vector<cudaGraphNode_t> out(count);
       get_dependencies(node, nullptr, &count);
+      std::vector<cudaGraphNode_t> out(count);
       if (count) {
         get_dependencies(node, out.data(), &count);
         out.resize(count);
