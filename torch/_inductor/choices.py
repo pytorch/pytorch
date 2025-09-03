@@ -13,7 +13,8 @@ from .kernel_inputs import KernelInputs  # noqa: TC001
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .template_heuristics import (
+from .template_heuristics import get_template_heuristic
+from .template_heuristics.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
@@ -21,7 +22,6 @@ from .template_heuristics import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
-from .template_registry import get_template_heuristic
 from .virtualized import V
 
 
@@ -195,18 +195,6 @@ class InductorChoices:
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
-
-    @staticmethod
-    def want_no_x_dim(features: SIMDKernelFeatures) -> bool:
-        """
-        Heuristic to decide if we should drop the X dimension from a persistent reduction kernel.
-        So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
-        Strangely this is faster than a [1, RBLOCK] block in some cases.
-        """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
 
     @staticmethod
     def reduction_split_factor(

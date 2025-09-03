@@ -373,6 +373,42 @@ print(t.is_pinned())
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_memory_stats(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.reset_accumulated_memory_stats()
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertEqual(prev_allocated, prev_max_allocated)
+        self.assertEqual(prev_reserved, prev_max_reserved)
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device="cuda")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
     def test_check_error(self):
         # Assert this call doesn't raise.
         torch.cuda.check_error(0)
@@ -3631,6 +3667,35 @@ exit(2)
         graph.replay()
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    )
+    @parametrize("keep_graph", [True, False])
+    def test_cuda_graph_raw_graph_exec(self, keep_graph):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        if keep_graph:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"You cannot access the raw (cuda|hip)GraphExec_t instance until instantiate\(\) has been called",
+            ):
+                graph.raw_cuda_graph_exec()
+
+            graph.instantiate()
+        raw_pointer = graph.raw_cuda_graph_exec()
+
+        cudart_cuda_graph_exec = cudart.cudaGraphExec_t(init_value=raw_pointer)
+        cuda_python_error_check(cudart.cudaGraphExecGetFlags(cudart_cuda_graph_exec))
+
+        graph.replay()
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_raw_graph_reset_and_recapture(self):
@@ -5332,6 +5397,7 @@ class TestMemPool(TestCase):
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertTrue(len(segments) > 0, "expected more than one segment")
 
+    @serialTest()
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -5547,6 +5613,149 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_2_streams(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+
+        s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+
+            # A sink node allocated up-front so it doesn't steal data1's block later.
+            sink1 = torch.empty(8, device="cuda")
+
+            # Source tensor on s1; this block is the reuse candidate.
+            data1 = torch.empty(8, device="cuda")
+            data1_ptr = data1.data_ptr()
+
+            # Fork: do real work on s2 that READS data1 and writes to its own buffer.
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                buf2 = torch.empty_like(data1)
+                torch.add(data1, 2.0, out=buf2)
+                data1.record_stream(s2)
+
+            del data1
+
+            # BEFORE JOIN: must NOT reuse
+            data2 = torch.empty(8, device="cuda")
+            data2_ptr = data2.data_ptr()
+
+            # Join s2 -> s1 and add a sink node on s1.
+            s1.wait_stream(s2)
+            sink1.fill_(1.0)
+
+            # AFTER JOIN: now reuse is allowed
+            data3 = torch.empty(8, device="cuda")
+            data3_ptr = data3.data_ptr()
+
+            g.capture_end()
+
+        torch.cuda.synchronize()
+
+        # No reuse before join; reuse after join.
+        self.assertNotEqual(data1_ptr, data2_ptr)
+        self.assertEqual(data1_ptr, data3_ptr)
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:False"
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_4_streams(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+
+        torch.cuda.empty_cache()
+        s1, s2, s3, s4 = (
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+            torch.cuda.Stream(),
+        )
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+
+            # Source tensor allocated on s1. This block is the candidate for reuse.
+            data1 = torch.ones(8, device="cuda")
+            data1_ptr = data1.data_ptr()
+            sink1 = torch.empty_like(data1)
+            sink3 = torch.empty_like(data1)
+
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                buf2 = torch.empty_like(data1)
+                torch.add(data1, 2.0, out=buf2)
+                data1.record_stream(s2)
+
+            s3.wait_stream(s1)
+            with torch.cuda.stream(s3):
+                buf3 = torch.empty_like(data1)
+                torch.add(data1, 3.0, out=buf3)
+                data1.record_stream(s3)
+
+            s4.wait_stream(s1)
+            with torch.cuda.stream(s4):
+                buf4 = torch.empty_like(data1)
+                torch.add(data1, 4.0, out=buf4)
+                data1.record_stream(s4)
+
+            # Free data1 inside capture; allocator may reuse later when it's safe.
+            del data1
+
+            # PARTIAL JOINS: should NOT allow reuse yet
+            # Join s2 -> s1 and add a sink node on s1.
+            s1.wait_stream(s2)
+            sink1.fill_(1.0)
+
+            # Join s4 -> s3 and add a sink node on s3.
+            s3.wait_stream(s4)
+            with torch.cuda.stream(s3):
+                sink3.fill_(3.0)
+                sink3.record_stream(s3)
+
+            # At this point, s1 and s3 subgraphs are NOT yet joined together.
+            # Allocating data2 here must NOT reuse data1's block.
+            data2 = torch.empty(8, device="cuda")
+            data2_ptr = data2.data_ptr()
+
+            # FINAL JOIN: now reuse is allowed
+            # Join s3 -> s1 and add a sink node on s1.
+            s1.wait_stream(s3)
+            sink1.add_(sink3)
+
+            # Now allocator should safely reuse data1's block.
+            data3 = torch.empty(8, device="cuda")
+            data3_ptr = data3.data_ptr()
+
+            g.capture_end()
+
+        torch.cuda.synchronize()
+
+        # No reuse before full join; reuse after full join.
+        self.assertNotEqual(data1_ptr, data2_ptr)
+        self.assertEqual(data1_ptr, data3_ptr)
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:False"
+        )
+
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
@@ -5561,6 +5770,7 @@ class TestMemPool(TestCase):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+    @serialTest()
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
@@ -6480,6 +6690,7 @@ class TestCudaAutocast(TestAutocast):
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
 
+    @serialTest()
     def test_autocast_cache_leak(self):
         # Reported at https://github.com/pytorch/pytorch/issues/48049
         # Test is used to check, if autocast recaches the same parameters
@@ -6494,7 +6705,7 @@ class TestCudaAutocast(TestAutocast):
                 first_iter_mem = torch.cuda.memory_allocated()
                 for _ in range(3):
                     out = linear(data)
-                self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+                self.assertEqual(first_iter_mem, torch.cuda.memory_allocated())
 
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(

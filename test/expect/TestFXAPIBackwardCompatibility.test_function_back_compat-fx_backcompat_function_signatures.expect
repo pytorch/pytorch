@@ -52,7 +52,7 @@ torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
 torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
 torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None) -> Optional[str]
+torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None, include_tensor_metadata: bool = False) -> Optional[str]
 torch.fx.node.Node.insert_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
 torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Callable[[Node], bool] = <function <lambda>>, propagate_meta: bool = False) -> List[Node]

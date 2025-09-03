@@ -9,9 +9,9 @@ namespace torch::nativert {
 struct ExecutorConfig {
   bool validateInputs = false;
   bool debugNan = false;
-  bool enableStaticCPUKernels = false;
+  bool enableStaticCPUKernels = true;
   bool runConstFolding = false;
-  bool doExecutionFrameCleanup = false;
+  bool doExecutionFrameCleanup = true;
   bool tryFreeUnmanagedValuesAfterUse = true;
   // allows up to max number of concurrent threads.
   int64_t maxNumConcurrentThreads = 8;

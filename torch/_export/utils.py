@@ -19,6 +19,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -211,6 +212,29 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     return params_buffers_to_node_meta
 
 
+def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch._C._is_torch_function_mode_enabled():
+        return None
+
+    torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+
+    pre_dispatch_tf_modes = [
+        mode
+        for mode in torch_function_mode_stack
+        if isinstance(mode, PreDispatchTorchFunctionMode)
+    ]
+
+    assert len(pre_dispatch_tf_modes) <= 1, (
+        f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+    )
+
+    if len(pre_dispatch_tf_modes) == 0:
+        return None
+
+    mode = pre_dispatch_tf_modes[0]
+    return mode
+
+
 def _populate_param_buffer_metadata_to_new_gm(
     params_buffers_to_node_meta: dict[str, Any],
     gm: torch.fx.GraphModule,
@@ -307,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -662,7 +686,10 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                         gm,
                         functools.partial(
                             _node_metadata_hook,
-                            stack_trace=node.meta.get("stack_trace"),
+                            metadata={
+                                "stack_trace": node.meta.get("stack_trace"),
+                                "nn_module_stack": node.meta.get("nn_module_stack"),
+                            },
                         ),
                     ),
                 ):
@@ -690,7 +717,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
             "in insert_deferred_runtime_asserts"
         )
         with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            gm,
+            functools.partial(
+                _node_metadata_hook, metadata={"stack_trace": stack_trace}
+            ),
         ):
             shape_env = _get_shape_env_from_gm(gm)
             if shape_env:

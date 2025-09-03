@@ -53,6 +53,7 @@ void binary_op_kernel(const std::string func_name,
                   .add_input(input)
                   .add_input(other)
                   .check_all_same_dtype(false)
+                  .promote_inputs_to_common_dtype(true)
                   .build();
 
   lib.exec_binary_kernel(iter, func_name, alpha);

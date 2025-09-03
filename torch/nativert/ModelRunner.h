@@ -4,6 +4,7 @@
 
 #include <c10/macros/Export.h>
 #include <torch/csrc/utils/generated_serialization_types.h>
+#include <torch/nativert/ModelRunnerHandle.h>
 #include <torch/nativert/detail/ITree.h>
 #include <torch/nativert/executor/Executor.h>
 #include <torch/nativert/executor/Placement.h>

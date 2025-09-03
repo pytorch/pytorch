@@ -298,6 +298,8 @@ class Backend:
         def _timeout(self) -> timedelta: ...
         @_timeout.setter
         def _timeout(self, val: timedelta) -> None: ...
+        global_ranks_in_group: list[int]
+        group_name: str
 
     def __init__(
         self,
@@ -315,6 +317,7 @@ class Backend:
     def options(self) -> Options: ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
+    def name(self) -> str: ...
     def abort(self) -> None: ...
     def shutdown(self) -> None: ...
     def eager_connect_single_device(self, device: torch.device | None) -> None: ...
@@ -607,8 +610,6 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self): ...
 
@@ -643,14 +644,13 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
         config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -769,6 +769,8 @@ class _SymmetricMemory:
     def set_backend(name: str) -> None: ...
     @staticmethod
     def get_backend(device: torch.device) -> Optional[str]: ...
+    @staticmethod
+    def get_mempool_allocator(device: torch.device) -> Any: ...
     @property
     def rank(self) -> int: ...
     @property
@@ -804,6 +806,12 @@ class _SymmetricMemory:
         channel: int = 0,
         timeout_ms: int = 0,
     ) -> None: ...
+    def get_remote_tensor(
+        self,
+        peer: int,
+        sizes: torch.types._size,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -828,12 +836,18 @@ class _SymmetricMemory:
     def signal_pad_size(self) -> int: ...
 
 class ProcessGroupXCCL(Backend):
+    class Options(Backend.Options):
+        def __init__(self): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-    ): ...
+        options: Options,
+    ) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
