@@ -165,14 +165,12 @@ class CPythonTestCase(TestCase):
         self,
         fn: Callable[..., Any],
         backend: Union[str, Callable[..., Any]],
-        error_on_graph_break: bool,
+        nopython: bool,
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(
-            backend, error_on_graph_break=error_on_graph_break
-        )(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
         setattr(self, self._testMethodName, method)
         return fn
 
