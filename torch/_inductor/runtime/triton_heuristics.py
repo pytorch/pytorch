@@ -2901,12 +2901,18 @@ def _persistent_reduction_configs(
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
+    max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
+        inductor_meta.get("max_autotune")
+        or inductor_meta.get("max_autotune_pointwise")
+    )
+
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
-            or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
+            or (max_autotune_enabled or rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL)
+            and xblock <= xnumel)
         ]
     else:
         configs = []
@@ -2929,18 +2935,27 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
-        configs = configs[:1]
-    elif reduction_hint == ReductionHint.OUTER:
-        configs = configs[-1:]
+    if not max_autotune_enabled:  # Do not filter configs when tuning
+        elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            configs = configs[:1]
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+    
+    tiny_config = [
+        triton_config_reduction(
+            size_hints,
+            2 * (256 // rnumel) if rnumel <= 256 else 1,
+            rnumel,
+        )
+    ]
+
+    if max_autotune_enabled:
+        for conf in tiny_configs:
+            if conf not in configs:
+                configs.append(conf)
     elif reduction_hint == ReductionHint.OUTER_TINY:
-        configs = [
-            triton_config_reduction(
-                size_hints,
-                2 * (256 // rnumel) if rnumel <= 256 else 1,
-                rnumel,
-            )
-        ]
+        configs = tiny_config
+
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
