@@ -13,7 +13,8 @@ from .kernel_inputs import KernelInputs  # noqa: TC001
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .template_heuristics import (
+from .template_heuristics import get_template_heuristic
+from .template_heuristics.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
@@ -21,7 +22,6 @@ from .template_heuristics import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
-from .template_registry import get_template_heuristic
 from .virtualized import V
 
 
@@ -106,7 +106,8 @@ class InductorChoices:
         layout: Any,
         template_name: str,
         op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
+        kwarg_overrides: Optional[dict[str, Any]] = None,
+    ) -> Generator[tuple[dict[str, Any], dict[str, Any]], None, None]:
         """
         Get generator of template parameters for MM templates using template-specific heuristics.
 
@@ -115,7 +116,8 @@ class InductorChoices:
             layout: Output layout
             template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
-
+            kwarg_overrides: Optional dict of kwargs to override for the template heuristic
+                             these only override the per config kwargs, not the extra kwargs
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
         """
@@ -129,7 +131,20 @@ class InductorChoices:
         # Get the appropriate template-specific heuristic
         heuristic = get_template_heuristic(template_name, device_type, op_name)
 
-        yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        cs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+        # We also return the layout and the input_nodes as part of the extra_kwargs
+        extra_kwargs["layout"] = layout
+        # adjust the kernel inputs to the template-specific heuristic, if needed
+        # default here is to just return the kernel_inputs as is
+        extra_kwargs["input_nodes"] = heuristic.adjust_kernel_inputs(
+            kernel_inputs, op_name
+        ).nodes()
+        overrides = kwarg_overrides if kwarg_overrides is not None else {}
+        for c in cs:
+            # yield in a comprehensive package what the extra kwargs are
+            # fixed for template/op combo, and the config kwargs (c)
+            yield {**c, **overrides}, extra_kwargs
 
     def triton_kernel_kwargs(
         self,

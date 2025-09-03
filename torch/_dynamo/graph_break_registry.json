@@ -2690,5 +2690,33 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
+  ],
+  "GB0269": [
+    {
+      "Gb_type": "Forced graph break on leaf function",
+      "Context": "",
+      "Explanation": "Forced graph break for nested graph break testing purposes",
+      "Hints": [
+        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
+      ]
+    }
+  ],
+  "GB0270": [
+    {
+      "Gb_type": "unimplemented builtin op vars() with no arguments",
+      "Context": "vars: {self} {args}",
+      "Explanation": "Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0271": [
+    {
+      "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
+      "Context": "str(self.value)",
+      "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+      "Hints": []
+    }
   ]
 }
