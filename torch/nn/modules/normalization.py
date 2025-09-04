@@ -320,6 +320,8 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
                         self.bias.materialize(self.normalized_shape)
             self.reset_parameters()
 
+        delattr(self, "start_dim")
+
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
