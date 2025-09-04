@@ -1396,12 +1396,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     at::Tensor v_t = value.transpose(1, 2);
     at::Tensor output_t = res.transpose(1, 2);
     bool is_causal;
-    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-      is_causal = true;
-    } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
+    if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
       is_causal = false;
     } else {
-      TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+      is_causal = true;
+#if AOTRITON_V3_API == 0
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) != custom_mask_type) {
+        TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+      }
+#endif
     }
 
     at::Tensor atomic_counter;
@@ -1426,7 +1429,51 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     hipError_t err; // TODO: Error handling
-    if (seqstart_q.has_value()) {
+    if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
+#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
+      using aotriton::v3::flash::CausalType;
+      using aotriton::v3::flash::VarlenType;
+      using aotriton::v3::flash::WindowValue;
+      aotriton::v3::flash::attn_fwd_params params;
+      params.Q = mk_aotensor(q_t, "q");
+      params.K = mk_aotensor(k_t, "k");
+      params.V = mk_aotensor(v_t, "v");
+      params.Sm_scale = softmax_scale;
+      params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
+      params.Out = mk_aotensor(output_t, "Out");
+      params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
+      params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+      params.dropout_p = dropout_p;
+      params.philox_seed_ptr = seed;
+      params.philox_offset1 = offset1;
+      params.philox_offset2 = offset2;
+      params.philox_seed_output = seed_output;
+      params.philox_offset_output = offset_output;
+      params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+      params.persistent_atomic_counter = persistent_counter;
+      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+        params.window_left = WindowValue::TopLeftAligned;
+        params.window_right = WindowValue::TopLeftAligned;
+      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.window_left = WindowValue::BottomRightAligned;
+        params.window_right = WindowValue::BottomRightAligned;
+      }
+      if (bias.has_value()) {
+        params.B = mk_aotensor(bias.value(), "bias");
+      }
+      if (seqstart_q.has_value()) {
+        params.varlen_type = VarlenType::CompactVarlen;
+        params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
+        params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
+      } else {
+        params.varlen_type = VarlenType::None;
+      }
+      err = aotriton::v3::flash::attn_fwd(params,
+                                          aotriton::v3::flash::attn_fwd_params::kVersion,
+                                          stream);
+#endif  // AOTRITON_V3_API
+    } else if (seqstart_q.has_value()) {
       // varlen aka nested tensor
       err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
                                     mk_aotensor(k_t, "k"),

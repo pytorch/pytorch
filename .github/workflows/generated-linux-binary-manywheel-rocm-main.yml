@@ -10,9 +10,7 @@ on:
     branches:
       - main
     tags:
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_wheel/*'
-      - 'ciflow/rocm/*'
+      - 'ciflow/rocm-mi300/*'
   workflow_dispatch:
 
 permissions:
@@ -54,7 +52,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -69,7 +67,7 @@ jobs:
     needs:
       - manywheel-py3_9-rocm6_4-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -77,7 +75,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
