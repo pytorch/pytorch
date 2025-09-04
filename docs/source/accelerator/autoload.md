@@ -3,7 +3,21 @@
 The **Autoload** mechanism in PyTorch simplifies the integration of custom backends by enabling automatic discovery and initialization at runtime. This eliminates the need for explicit imports or manual initialization, allowing developers to seamlessly integrate new accelerators or backends into PyTorch.
 
 This tutorial will guide you through the steps to enable and use the Autoload mechanism for a custom backend.
+# Autoload Mechanism
 
+## Background
+
+## Design
+
+## Implementation
+
+### Entry Point Setup 
+
+### Backend Setup
+
+## result
+
+Please use `sphinx_design cards` to display the before-and-after differences. For more information, see this [link](https://studynotes.readthedocs.io/zh/main/struct/extend/design/design-index.html).
 ### Hook Initialization
 
 The first step is to define an initialization hook for your backend. This hook will be automatically invoked by PyTorch during startup.
