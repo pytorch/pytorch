@@ -210,7 +210,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir"
+python setup.py bdist_wheel --plat-name=macosx-11.1-arm64 -d "$whl_tmp_dir"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
