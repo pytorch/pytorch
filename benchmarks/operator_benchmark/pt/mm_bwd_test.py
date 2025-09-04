@@ -1,7 +1,6 @@
 import operator_benchmark as op_bench
 
 import torch
-import torch.nn as nn
 
 
 """Microbenchmarks for torch.mm."""
@@ -36,13 +35,11 @@ mm_long_configs = op_bench.cross_product_configs(
 class MmOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_one": nn.Parameter(
-                torch.randn(M, N, device=device, dtype=dtype),
-                requires_grad=self.auto_set()
+            "input_one": torch.randn(
+                M, N, device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
-            "input_two": nn.Parameter(
-                torch.randn(N, K, device=device, dtype=dtype),
-                requires_grad=self.auto_set()
+            "input_two": torch.randn(
+                N, K, device=device, dtype=dtype, requires_grad=self.auto_set()
             ),
         }
         self.op_func = op_func

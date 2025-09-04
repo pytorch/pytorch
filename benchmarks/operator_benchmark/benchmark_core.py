@@ -193,7 +193,9 @@ class BenchmarkRunner:
         self.use_jit = args.use_jit
         self.use_compile = args.use_compile
         if self.use_jit and self.use_compile:
-            raise ValueError("use_jit and use_compile are mutually exclusive, please specify one.")
+            raise ValueError(
+                "use_jit and use_compile are mutually exclusive, please specify one."
+            )
         self.num_runs = args.num_runs
         self.print_per_iter = False
         self.output_csv = args.output_csv
@@ -244,7 +246,9 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            print(f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}")
+            print(
+                f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}"
+            )
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -394,7 +398,9 @@ class BenchmarkRunner:
                 mode = (
                     "JIT"
                     if self.use_jit
-                    else "Compile" if self.use_compile else "Eager"
+                    else "Compile"
+                    if self.use_compile
+                    else "Eager"
                 )
                 test_name = "_".join(
                     [test_case.framework, test_case.test_config.test_name, mode]
