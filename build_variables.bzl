@@ -1088,6 +1088,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/DeviceAccelerator.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
+    "aten/src/ATen/DTensorState.cpp",
     "aten/src/ATen/EmptyTensor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/CachedTensorUtils.cpp",
