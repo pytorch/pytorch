@@ -1064,7 +1064,10 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        return tensor.to(self.device_type)
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
+        else:
+            return tensor
 
     @with_comms
     def test_split_tensor_1D(self) -> None:

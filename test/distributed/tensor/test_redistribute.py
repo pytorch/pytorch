@@ -539,7 +539,7 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                if  torch.accelerator.is_available():
+                if torch.accelerator.is_available():
                     self.assertEqual(
                         comm_mode.get_comm_counts()[
                             torch.ops._dtensor.shard_dim_alltoall
@@ -681,10 +681,8 @@ instantiate_parametrized_tests(RedistributeTest)
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        device_count = torch.accelerator.device_count() if torch.accelerator.is_available() else 8
-        return min(8, device_count)
+        return 8
 
-    @skip_if_lt_x_gpu(8)
     @with_comms
     def test_multi_dim_mesh(self):
         devices = torch.arange(self.world_size)
@@ -734,7 +732,6 @@ class MultiDimRedistributeTest(DTensorTestBase):
                         expected = num_sums * full_tensor
                         self.assertEqual(local_full, expected)
 
-    @skip_if_lt_x_gpu(8)
     @with_comms
     def test_redistribute_shard_dim_multi_dim_mesh(self):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
