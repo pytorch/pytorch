@@ -9662,7 +9662,7 @@ graph():
         inputs = {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
         self.assertEqual(ep.module()(**inputs), m(**inputs))
 
-    @testing.expectedFailureStrictV2  # AssertionError: RuntimeError not raised
+    # @testing.expectedFailureStrictV2  # AssertionError: RuntimeError not raised
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:

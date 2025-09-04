@@ -273,6 +273,11 @@ def _dynamo_graph_capture_for_export(
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+
+        if isinstance(mod, torch.fx.GraphModule):
+            for hook in mod._forward_pre_hooks.values():
+                hook(mod, args, kwargs)
+
         module_to_trace = ModuleToTrace(mod, in_spec)
 
         signature = inspect.signature(module_to_trace.forward)
