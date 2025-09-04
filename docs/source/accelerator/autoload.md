@@ -8,10 +8,7 @@ This tutorial will guide you through the steps to enable and use the Autoload me
 
 The first step is to define an initialization hook for your backend. This hook will be automatically invoked by PyTorch during startup.
 
-::::{tab-set}
-
-:::{tab-item} Python
-
+::::{tab-set-code}
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/__init__.py
     :language: python
