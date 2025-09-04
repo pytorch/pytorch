@@ -224,6 +224,11 @@ class IteratorVariable(VariableTracker):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
 
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__next__":
+            return self.next_variable(tx)
+        return super().call_method(tx, name, args, kwargs)
+
     # NOTE: only call when unpacking this iterator safely done eagerly!
     # Normally, iterators are accessed lazily.
     # Example of safe eager unpacking: list(map(f, seq))
