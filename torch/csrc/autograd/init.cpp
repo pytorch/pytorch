@@ -309,9 +309,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden
-      .def("is_hidden_event", [](const KinetoEvent& e) {
-        return e.isHiddenEvent();
-      })
+      .def(
+        "is_hidden_event", 
+      [](const KinetoEvent& e) {return e.isHiddenEvent();})
       // KinetoEvent metadata
       .def("metadata_json", [](const KinetoEvent& e) {
         return e.metadataJson();

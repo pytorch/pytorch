@@ -1069,8 +1069,12 @@ void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
 
 std::string KinetoEvent::metadataJson() const {
   return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::TorchOp>& op) -> std::string { return op.metadata_json_; },
-      [](const ExtraFields<EventType::Kineto>& op) -> std::string { return op.metadata_json_; },
+      [](const ExtraFields<EventType::TorchOp>& op) -> std::string {
+        return op.metadata_json_;
+      },
+      [](const ExtraFields<EventType::Kineto>& op) -> std::string {
+        return op.metadata_json_;
+      },
       [](const auto&) -> std::string { return std::string(""); }));
 }
 
