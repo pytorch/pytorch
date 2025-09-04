@@ -475,16 +475,17 @@ class MathTests(__TestCase):
         #self.assertEqual(math.ceil(NINF), NINF)
         #self.assertTrue(math.isnan(math.ceil(NAN)))
 
-        class TestCeil:
-            def __ceil__(self):
-                return 42
-        class FloatCeil(float):
-            def __ceil__(self):
-                return 42
-        class TestNoCeil:
-            pass
-        class TestBadCeil:
-            __ceil__ = BadDescr()
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class TestCeil:
+                def __ceil__(self):
+                    return 42
+            class FloatCeil(float):
+                def __ceil__(self):
+                    return 42
+            class TestNoCeil:
+                pass
+            class TestBadCeil:
+                __ceil__ = BadDescr()
         self.assertEqual(math.ceil(TestCeil()), 42)
         self.assertEqual(math.ceil(FloatCeil()), 42)
         self.assertEqual(math.ceil(FloatLike(42.5)), 43)
@@ -632,16 +633,17 @@ class MathTests(__TestCase):
         #self.assertEqual(math.ceil(NINF), NINF)
         #self.assertTrue(math.isnan(math.floor(NAN)))
 
-        class TestFloor:
-            def __floor__(self):
-                return 42
-        class FloatFloor(float):
-            def __floor__(self):
-                return 42
-        class TestNoFloor:
-            pass
-        class TestBadFloor:
-            __floor__ = BadDescr()
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class TestFloor:
+                def __floor__(self):
+                    return 42
+            class FloatFloor(float):
+                def __floor__(self):
+                    return 42
+            class TestNoFloor:
+                pass
+            class TestBadFloor:
+                __floor__ = BadDescr()
         self.assertEqual(math.floor(TestFloor()), 42)
         self.assertEqual(math.floor(FloatFloor()), 42)
         self.assertEqual(math.floor(FloatLike(41.9)), 41)
@@ -1054,8 +1056,9 @@ class MathTests(__TestCase):
         )
 
         # Verify tuple subclasses are allowed
-        class T(tuple):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class T(tuple):
+                pass
         self.assertEqual(dist(T((1, 2, 3)), ((4, 2, -1))), 5.0)
 
         # Test handling of bad arguments
@@ -1087,8 +1090,9 @@ class MathTests(__TestCase):
         with self.assertRaises(TypeError):
             dist([1], 2)
 
-        class BadFloat:
-            __float__ = BadDescr()
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadFloat:
+                __float__ = BadDescr()
 
         with self.assertRaises(ValueError):
             dist([1], [BadFloat()])
@@ -1161,12 +1165,13 @@ class MathTests(__TestCase):
         self.assertIs(type(s), int)
         self.assertEqual(s, 0)
 
-        class IntegerLike(object):
-            def __init__(self, value):
-                self.value = value
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class IntegerLike(object):
+                def __init__(self, value):
+                    self.value = value
 
-            def __index__(self):
-                return self.value
+                def __index__(self):
+                    return self.value
 
         s = math.isqrt(IntegerLike(1729))
         self.assertIs(type(s), int)
@@ -1394,11 +1399,12 @@ class MathTests(__TestCase):
         self.assertEqual(sumprod([1], BasicIterClass(1)), 0)
 
         # Error in multiplication
-        class BadMultiply:
-            def __mul__(self, other):
-                raise RuntimeError
-            def __rmul__(self, other):
-                raise RuntimeError
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadMultiply:
+                def __mul__(self, other):
+                    raise RuntimeError
+                def __rmul__(self, other):
+                    raise RuntimeError
         with self.assertRaises(RuntimeError):
             sumprod([10, BadMultiply(), 30], [1, 2, 3])
         with self.assertRaises(RuntimeError):
@@ -1443,25 +1449,26 @@ class MathTests(__TestCase):
         Decimal = decimal.Decimal
         Fraction = fractions.Fraction
 
-        class Int(int):
-            def __add__(self, other):
-                return Int(int(self) + int(other))
-            def __mul__(self, other):
-                return Int(int(self) * int(other))
-            __radd__ = __add__
-            __rmul__ = __mul__
-            def __repr__(self):
-                return f'Int({int(self)})'
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Int(int):
+                def __add__(self, other):
+                    return Int(int(self) + int(other))
+                def __mul__(self, other):
+                    return Int(int(self) * int(other))
+                __radd__ = __add__
+                __rmul__ = __mul__
+                def __repr__(self):
+                    return f'Int({int(self)})'
 
-        class Flt(float):
-            def __add__(self, other):
-                return Int(int(self) + int(other))
-            def __mul__(self, other):
-                return Int(int(self) * int(other))
-            __radd__ = __add__
-            __rmul__ = __mul__
-            def __repr__(self):
-                return f'Flt({int(self)})'
+            class Flt(float):
+                def __add__(self, other):
+                    return Int(int(self) + int(other))
+                def __mul__(self, other):
+                    return Int(int(self) * int(other))
+                __radd__ = __add__
+                __rmul__ = __mul__
+                def __repr__(self):
+                    return f'Flt({int(self)})'
 
         def baseline_sumprod(p, q):
             """This defines the target behavior including exceptions and special values.
@@ -1981,16 +1988,17 @@ class MathTests(__TestCase):
         self.assertEqual(math.trunc(-0.999999), -0)
         self.assertEqual(math.trunc(-100.999), -100)
 
-        class TestTrunc:
-            def __trunc__(self):
-                return 23
-        class FloatTrunc(float):
-            def __trunc__(self):
-                return 23
-        class TestNoTrunc:
-            pass
-        class TestBadTrunc:
-            __trunc__ = BadDescr()
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class TestTrunc:
+                def __trunc__(self):
+                    return 23
+            class FloatTrunc(float):
+                def __trunc__(self):
+                    return 23
+            class TestNoTrunc:
+                pass
+            class TestBadTrunc:
+                __trunc__ = BadDescr()
 
         self.assertEqual(math.trunc(TestTrunc()), 23)
         self.assertEqual(math.trunc(FloatTrunc()), 23)
@@ -2223,9 +2231,10 @@ class MathTests(__TestCase):
         self.assertEqual(prod([1., F(3, 2)]), 1.5)
 
         # Error in multiplication
-        class BadMultiply:
-            def __rmul__(self, other):
-                raise RuntimeError
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadMultiply:
+                def __rmul__(self, other):
+                    raise RuntimeError
         with self.assertRaises(RuntimeError):
             prod([10., BadMultiply()])
 
@@ -2531,10 +2540,11 @@ class MathTests(__TestCase):
     def test_issue39871(self):
         # A SystemError should not be raised if the first arg to atan2(),
         # copysign(), or remainder() cannot be converted to a float.
-        class F:
-            def __float__(self):
-                self.converted = True
-                1/0
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class F:
+                def __float__(self):
+                    self.converted = True
+                    1/0
         for func in math.atan2, math.copysign, math.remainder:
             y = F()
             with self.assertRaises(TypeError):

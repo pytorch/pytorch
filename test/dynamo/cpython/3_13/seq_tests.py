@@ -169,13 +169,14 @@ class CommonTest(__TestCase):
         uu2 = self.type2test(u2)
 
         v = self.type2test(tuple(u))
-        class OtherSeq:
-            def __init__(self, initseq):
-                self.__data = initseq
-            def __len__(self):
-                return len(self.__data)
-            def __getitem__(self, i):
-                return self.__data[i]
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class OtherSeq:
+                def __init__(self, initseq):
+                    self.__data = initseq
+                def __len__(self):
+                    return len(self.__data)
+                def __getitem__(self, i):
+                    return self.__data[i]
         s = OtherSeq(u0)
         v0 = self.type2test(s)
         self.assertEqual(len(v0), len(s))
@@ -293,11 +294,12 @@ class CommonTest(__TestCase):
         # Sequences must test in-order.  If a rich comparison has side
         # effects, these will be visible to tests against later members.
         # In this test, the "side effect" is a short-circuiting raise.
-        class DoNotTestEq(Exception):
-            pass
-        class StopCompares:
-            def __eq__(self, other):
-                raise DoNotTestEq
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class DoNotTestEq(Exception):
+                pass
+            class StopCompares:
+                def __eq__(self, other):
+                    raise DoNotTestEq
 
         checkfirst = self.type2test([1, StopCompares()])
         self.assertIn(1, checkfirst)
@@ -337,8 +339,9 @@ class CommonTest(__TestCase):
         self.assertEqual(u2+u2+u2, u2*3)
         self.assertEqual(u2+u2+u2, 3*u2)
 
-        class subclass(self.type2test):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass(self.type2test):
+                pass
         u3 = subclass([0, 1])
         self.assertEqual(u3, u3*1)
         self.assertIsNot(u3, u3*1)
@@ -365,9 +368,10 @@ class CommonTest(__TestCase):
 
     def test_getitemoverwriteiter(self):
         # Verify that __getitem__ overrides are not recognized by __iter__
-        class T(self.type2test):
-            def __getitem__(self, key):
-                return str(key) + '!!!'
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class T(self.type2test):
+                def __getitem__(self, key):
+                    return str(key) + '!!!'
         self.assertEqual(next(iter(T((1,2)))), 1)
 
     def test_repeat(self):
@@ -415,14 +419,15 @@ class CommonTest(__TestCase):
 
         self.assertRaises(TypeError, a.count)
 
-        class BadExc(Exception):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadExc(Exception):
+                pass
 
-        class BadCmp:
-            def __eq__(self, other):
-                if other == 2:
-                    raise BadExc()
-                return False
+            class BadCmp:
+                def __eq__(self, other):
+                    if other == 2:
+                        raise BadExc()
+                    return False
 
         self.assertRaises(BadExc, a.count, BadCmp())
 
@@ -448,14 +453,15 @@ class CommonTest(__TestCase):
 
         self.assertRaises(TypeError, u.index)
 
-        class BadExc(Exception):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadExc(Exception):
+                pass
 
-        class BadCmp:
-            def __eq__(self, other):
-                if other == 2:
-                    raise BadExc()
-                return False
+            class BadCmp:
+                def __eq__(self, other):
+                    if other == 2:
+                        raise BadExc()
+                    return False
 
         a = self.type2test([0, 1, 2, 3])
         self.assertRaises(BadExc, a.index, BadCmp())

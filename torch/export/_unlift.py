@@ -447,7 +447,11 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
         (
             out_spec.target
             if out_spec.kind
-            in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
+            in (
+                OutputKind.BUFFER_MUTATION,
+                OutputKind.USER_INPUT_MUTATION,
+                OutputKind.PARAMETER_MUTATION,
+            )
             else None
         )
         for out_spec in ep.graph_signature.output_specs

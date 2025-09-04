@@ -861,7 +861,7 @@ def forward(self, x_1):
         s2 = create_symint(shape_env, 5, duck=False)
         bool(s0 * (s1 // s0) == s2)
 
-    def test_non_overlapping_and_dense(self):
+    def test_non_overlapping_and_dense_backed(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
         r = torch.empty_strided((a0, 7), (1, a0), device="meta")
@@ -891,6 +891,64 @@ def forward(self, x_1):
                 torch.empty_strided(
                     (2, 3, 1, u0),
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+
+    def test_prims_non_overlapping_and_dense(self):
+        shape_env = ShapeEnv()
+        cf = torch._prims_common.is_non_overlapping_and_dense
+
+        # backed case
+        a0 = create_symint(shape_env, 5)
+        self.assertTrue(cf(torch.empty_strided((a0, 7), (1, a0), device="meta")))
+
+        # unbacked
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((1,), (u0,), device="meta")))
+
+        Max = torch.sym_max
+        self.assertTrue(
+            cf(
+                torch.empty_strided(
+                    (2, 3, 1, u0),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+        self.assertFalse(
+            cf(
+                torch.empty_strided(
+                    (2, 3, 1, u0),
+                    (Max(1, u0), Max(1, u0), 1, 3 * Max(1, u0)),
+                    device="meta",
+                )
+            )
+        )
+
+        # return False on arbitrary strides
+        u1 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u1)
+        self.assertFalse(
+            cf(
+                torch.empty_strided(
+                    (2 * u0, u0, 1),
+                    (u1, u0, u0 + u1),
+                    device="meta",
+                )
+            )
+        )
+        self.assertFalse(
+            cf(
+                torch.empty_strided(
+                    (2, 3, u0),
+                    (u1, 3, 1),
                     device="meta",
                 )
             )
@@ -3615,6 +3673,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_unbacked_select_index_cpp_wrapper(self):
         self.test_unbacked_select_index()
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select2(self):
+        def f(idx, x):
+            x = x.select(0, idx.item())
+            return x @ x
+
+        x = torch.randn(3, 3, 3)
+        idx = torch.tensor(1, dtype=torch.int64)
+        out = torch.compile(f)(idx, x)
+        self.assertEqual(out, f(idx, x))
 
 
 instantiate_parametrized_tests(TestUnbacked)
