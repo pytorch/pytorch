@@ -14445,6 +14445,7 @@ if RUN_GPU:
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
+        @config.patch(expand_dimension_for_pointwise_nodes=True)
         def test_rope_fusion(self):
             batch_size, seq_length, hidden_dim = 8, 16, 128
             num_q_heads, num_kv_heads = 32, 8

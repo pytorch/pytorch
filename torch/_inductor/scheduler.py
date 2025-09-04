@@ -4122,7 +4122,7 @@ class Scheduler:
         ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
-        if shared_data_score < config.score_fusion_memory_threshold and (
+        if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis

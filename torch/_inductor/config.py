@@ -930,6 +930,9 @@ pad_dynamic_shapes = False
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
 
+# Control if we will expand the dimension of pointwise nodes to fuse
+expand_dimension_for_pointwise_nodes = False
+
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
 padding_alignment_bytes = 128
