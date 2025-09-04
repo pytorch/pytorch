@@ -295,10 +295,7 @@ def _check_capability():
                 )
                 matched_arches = ""
                 for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        cur_arch_major >= arch_info["min"]
-                        and cur_arch_major <= arch_info["max"]
-                    ):
+                    if arch_info["min"] <= cur_arch_major <= arch_info["max"]:
                         matched_arches += f" {arch}"
                 if matched_arches != "":
                     warnings.warn(matched_cuda_warn.format(matched_arches))
