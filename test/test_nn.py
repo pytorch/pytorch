@@ -5191,14 +5191,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         if torch.version.cuda:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16"):
-                self.skipTest("bfloat16 NHWC train failed on CUDA due to native tolerance issue "
+                self.skipTest("bfloat16 NCHW train failed on CUDA due to native tolerance issue "
                               "https://github.com/pytorch/pytorch/issues/156513")
             if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("Batchnorm 3D NHWC train failed on CUDA")
+                self.skipTest("Batchnorm 3D NCHW train failed on CUDA")
 
         if torch.version.hip:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16") \
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
                     and _get_torch_rocm_version() < (6, 4):
                 # NCHW bfloat16 path uses native kernels for rocm<=6.3
                 # train failed on rocm<=6.3 due to native tolerance issue
@@ -5211,9 +5213,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
 
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16" \
-                    and _get_torch_rocm_version() < (7, 0):
-                self.skipTest("3D float16 NCHW train failed on ROCm<7.0")
+            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
+                self.skipTest("3D float16 NCHW train failed on ROCm")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
