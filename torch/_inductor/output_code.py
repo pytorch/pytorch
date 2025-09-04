@@ -632,6 +632,7 @@ class CompiledFxGraph(OutputCode):
             # Mechanically apply user-specified cudagraph wrappers without modification
             assert self.recursively_apply_fns is not None
             self.recursively_apply_fns(config.triton.customized_cudagraph_wrappers)
+            return
 
         set_tracing_context_output_strides(example_inputs, self)
         assert graph_kwargs["cudagraphs"] is not None
