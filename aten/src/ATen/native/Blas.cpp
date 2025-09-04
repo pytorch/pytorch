@@ -26,6 +26,7 @@
 #include <ATen/ops/dot.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/_grouped_mm.h>
 #include <ATen/ops/mul_cpu_dispatch.h>
 #include <ATen/ops/mv_native.h>
 #include <ATen/ops/scalar_tensor_native.h>
@@ -332,14 +333,6 @@ _scaled_mm_cpu(const Tensor& mat_a, const Tensor& mat_b,
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cpu(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
-
-// TODO(vasiliy, future PR): figure out why we need to declare this function, when
-// other functions that live in ATen/native/*.cpp without declarations
-// or headers work just fine.
-Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
-const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype);
 
 Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
