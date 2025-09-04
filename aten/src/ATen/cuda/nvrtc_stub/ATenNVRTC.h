@@ -117,8 +117,6 @@ namespace at::cuda {
   _(nvrtcGetPTXSize)                              \
   _(nvrtcGetPTX)                                  \
   _(cuModuleLoadData)                             \
-  _(cuModuleLoad)                                 \
-  _(cuGetErrorString)                             \
   _(cuModuleGetFunction)                          \
   _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
   _(nvrtcGetErrorString)                          \

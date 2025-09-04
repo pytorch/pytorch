@@ -11,7 +11,6 @@ enum class OpKernelKind : uint8_t {
   // static dispatch kernels that don't reuse
   // out TensorImpl
   kNativeStaticDispatchKernel,
-  kTritonKernel,
 };
 
 } // namespace torch::nativert
