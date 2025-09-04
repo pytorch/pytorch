@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import copy
 import types
 import unittest
 from typing import Dict, List, Tuple
@@ -350,6 +351,62 @@ def forward(self, x):
         p.model.forward = orig_forward
         res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
         self.assertTrue(torch.allclose(res, res2))
+
+    def test_export_add_in_out_info(self):
+        class Foo(torch.nn.Module):
+            def forward(self, dct, lst, bleh):
+                x = dct["a"] * lst[1][0]
+                y = dct["b"] * lst[0]
+                out_dict = {}
+                # Mutate and get a new entry in there
+                lst_copy = lst.copy()
+                lst_copy.append(lst[0])
+                out_dict["a"] = x
+                out_dict["b"] = y
+                return (
+                    dct["a"],
+                    out_dict["b"],
+                    bleh,
+                    lst_copy[-1],
+                    out_dict["a"],
+                    [5, 6],
+                )
+
+        dct = {"a": torch.randn(2, 3), "b": torch.randn(2, 3)}
+        lst = [torch.randn(2, 3), [torch.randn(2, 3), torch.randn(2, 3)]]
+
+        export_inputs = ((dct, lst, 56), {})
+        eager_inputs = copy.deepcopy(export_inputs)
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
+            *export_inputs[0], **export_inputs[1]
+        )
+
+        res_export = graph_module(*export_inputs[0], **export_inputs[1])
+        res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
+
+        self.assertEqual(res_export, res_eager)
+
+    def test_export_leaf(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        export_inputs = ((torch.randn(4, 4),), {})
+        eager_inputs = copy.deepcopy(export_inputs)
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
+            *export_inputs[0], **export_inputs[1]
+        )
+
+        res_export = graph_module(*export_inputs[0], **export_inputs[1])
+        res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
+
+        self.assertEqual(res_export, res_eager)
 
 
 if __name__ == "__main__":
