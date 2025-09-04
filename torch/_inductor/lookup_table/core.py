@@ -102,7 +102,10 @@ def make_lookup_key(kernel_inputs: KernelInputs, op_name: str) -> Optional[str]:
 
 
 def lookup_template_configs(
-    kernel_inputs: KernelInputs, op_name: str, template_uids: list[str]
+    kernel_inputs: KernelInputs,
+    op_name: str,
+    template_uids: list[str],
+    template_hash_map: Optional[dict[str, Optional[str]]] = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """
     Unified function to look up template configurations for multiple templates.
@@ -111,6 +114,7 @@ def lookup_template_configs(
         kernel_inputs: KernelInputs object containing input nodes and scalars
         op_name: Operation name (e.g., "mm", "addmm")
         template_uids: List of template identifiers (e.g., ["mm", "tma", "decompose_k"])
+        template_hash_map: Optional mapping from template_uid to src_hash for validation
 
     Returns:
         {}: No lookup table in use, or no matches found for any template
@@ -145,7 +149,7 @@ def lookup_template_configs(
                 configs_by_template[template_id] = []
             configs_by_template[template_id].append(config)
 
-    # Filter out TF32 configs and clean up template_id field
+    # Filter out TF32 configs, check template hashes, and clean up template_id field
     result = {}
     for template_id, matching_configs in configs_by_template.items():
         filtered_configs = []
@@ -161,11 +165,54 @@ def lookup_template_configs(
                     config,
                 )
                 continue
+
+            # Check template hash if enabled
+            if (
+                inductor_config.template_config_lookup_table.check_src_hash
+                and template_hash_map
+            ):
+                template_hash = template_hash_map.get(template_id)
+                config_hash = config.get("template_hash")
+
+                if template_hash is not None and config_hash is not None:
+                    if config_hash != template_hash:
+                        log.warning(
+                            "Filtering out config for template_id %s because template_hash %s does not match %s. Config: %s",
+                            template_id,
+                            config_hash,
+                            template_hash,
+                            config,
+                        )
+                        continue
+                    else:
+                        log.debug(
+                            "Config for template_id %s has matching template_hash %s. Config: %s",
+                            template_id,
+                            template_hash,
+                            config,
+                        )
+                elif config_hash is None:
+                    log.debug(
+                        "Config for template_id %s has no template_hash, keeping it. Template hash: %s. Config: %s",
+                        template_id,
+                        template_hash,
+                        config,
+                    )
+                else:
+                    log.debug(
+                        "Template %s has no src_hash, keeping config with template_hash %s. Config: %s",
+                        template_id,
+                        config_hash,
+                        config,
+                    )
+
             # Return a copy of the config, as we don't want to modify the original
             cconfig = copy.deepcopy(config)
             # Lastly, we have to throw out the template_id, as it's not a valid kwarg
             # and just used to identify which template the entry belongs to
             del cconfig["template_id"]
+            # Similarly, the template_hash is not a valid kwarg
+            cconfig.pop("template_hash", None)
             filtered_configs.append(cconfig)
 
         if filtered_configs:

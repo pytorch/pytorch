@@ -33,11 +33,19 @@ class LookupTableChoices(InductorChoices):
         max_autotune: bool = False,
     ) -> list[KernelTemplateChoice]:
         """Check lookup table for hits, use those if found, otherwise fall back to parent."""
-        # 1. Single batch lookup for all templates
+        # 1. Collect template src_hashes for validation
         template_uids = [template.uid for template in templates]
-        lookup_results = lookup_template_configs(kernel_inputs, op_name, template_uids)
+        template_hash_map = {}
+        for template in templates:
+            src_hash = getattr(template, "src_hash", None)
+            template_hash_map[template.uid] = src_hash
 
-        # 2. Early exit if no lookup table or no matches
+        # 2. Single batch lookup for all templates
+        lookup_results = lookup_template_configs(
+            kernel_inputs, op_name, template_uids, template_hash_map
+        )
+
+        # 3. Early exit if no lookup table or no matches
         if not lookup_results:  # Empty dict
             return self._fallback(
                 template_choices,
@@ -49,7 +57,7 @@ class LookupTableChoices(InductorChoices):
                 max_autotune,
             )
 
-        # 3. Create KTCs only for templates with lookup entries
+        # 4. Create KTCs only for templates with lookup entries
         return self._create_lookup_choices(
             lookup_results, templates, kernel_inputs, layout, op_name
         )
