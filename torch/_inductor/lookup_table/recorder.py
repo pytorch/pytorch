@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Union
 
 from torch._inductor.ir import ChoiceCaller
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..kernel_template_choice import KernelTemplateChoice
@@ -88,40 +89,17 @@ class RecordBackend(ABC):
         pass
 
 
-# Registry for decorated backends with their initialization arguments
-_emit_backend_registry: list[tuple[type[EmitBackend], dict[str, Any]]] = []
-_record_backend_registry: list[tuple[type[RecordBackend], dict[str, Any]]] = []
+# Track registered backends to avoid double registration
+_registered_backends: OrderedSet[tuple[type, frozenset[Any]]] = OrderedSet()
 
 
-def emit_backend(
-    should_register: bool = True, **kwargs: Any
-) -> Callable[[type[EmitBackend]], type[EmitBackend]]:
-    """Decorator to register an emit backend class with optional arguments"""
-
-    def decorator(cls: type[EmitBackend]) -> type[EmitBackend]:
-        if should_register:
-            _emit_backend_registry.append((cls, kwargs))
-        return cls
-
-    return decorator
+def _backend_key(
+    backend_class: type, kwargs: dict[str, Any]
+) -> tuple[type, frozenset[Any]]:
+    """Create a unique key for backend class + kwargs"""
+    return (backend_class, frozenset(kwargs.items()) if kwargs else frozenset())
 
 
-def record_backend(
-    should_register: bool = True, **kwargs: Any
-) -> Callable[[type[RecordBackend]], type[RecordBackend]]:
-    """Decorator to register a record backend class with optional arguments"""
-
-    def decorator(cls: type[RecordBackend]) -> type[RecordBackend]:
-        if should_register:
-            _record_backend_registry.append((cls, kwargs))
-        return cls
-
-    return decorator
-
-
-@emit_backend(
-    should_register=inductor_config.template_config_lookup_table.recorder_emit
-)
 class LogEmitBackend(EmitBackend):
     """Default emit backend that logs entries"""
 
@@ -129,12 +107,6 @@ class LogEmitBackend(EmitBackend):
         log.debug("LookupTable: %r -> %r", entry.key, entry.value)
 
 
-@record_backend(
-    should_register=bool(
-        inductor_config.template_config_lookup_table.recorder_record_dir
-    ),
-    directory=inductor_config.template_config_lookup_table.recorder_record_dir,
-)
 class DirectoryRecordBackend(RecordBackend):
     """Default record backend that saves to timestamped files in a directory"""
 
@@ -208,7 +180,8 @@ def get_lookup_table_recorder() -> LookupTableRecorder:
     global _lookup_table_recorder
     if _lookup_table_recorder is None:
         _lookup_table_recorder = LookupTableRecorder()
-        _register_backends(_lookup_table_recorder)
+    # Always register any pending backends
+    _register_pending_backends(_lookup_table_recorder)
     return _lookup_table_recorder
 
 
@@ -219,15 +192,30 @@ def add_backend(backend: Union[EmitBackend, RecordBackend]) -> None:
         recorder.add_backend(backend)
 
 
-def _register_backends(recorder: LookupTableRecorder) -> None:
-    """Register all decorated backends"""
-    # Register all decorated emit backends
-    for backend_cls, init_kwargs in _emit_backend_registry + _record_backend_registry:
-        instance = backend_cls(**init_kwargs)
-        try:
-            recorder.add_backend(instance)
-        except Exception as e:
-            log.warning("Skipping backend %r - error: %r", backend_cls.__name__, e)
+def _register_pending_backends(recorder: LookupTableRecorder) -> None:
+    """Register built-in backends based on current config"""
+    global _registered_backends
+
+    # Add built-in LogEmitBackend if enabled and not already registered
+    if inductor_config.template_config_lookup_table.recorder_emit:
+        emit_key = _backend_key(LogEmitBackend, {})
+        if emit_key not in _registered_backends:
+            try:
+                recorder.add_backend(LogEmitBackend())
+                _registered_backends.add(emit_key)
+            except Exception as e:
+                log.warning("Skipping LogEmitBackend - error: %r", e)
+
+    # Add built-in DirectoryRecordBackend if enabled and not already registered
+    record_dir = inductor_config.template_config_lookup_table.recorder_record_dir
+    if record_dir:
+        record_key = _backend_key(DirectoryRecordBackend, {"directory": record_dir})
+        if record_key not in _registered_backends:
+            try:
+                recorder.add_backend(DirectoryRecordBackend(record_dir))
+                _registered_backends.add(record_key)
+            except Exception as e:
+                log.warning("Skipping DirectoryRecordBackend - error: %r", e)
 
 
 def record_topk_choices(
@@ -321,9 +309,12 @@ def dump() -> None:
 
 def clear() -> None:
     """Clear the global lookup table recorder"""
+    global _registered_backends
     recorder = get_lookup_table_recorder()
     if recorder is not None:
         recorder.clear()
+    # Also clear the registered backends so they can be registered again
+    _registered_backends.clear()
 
 
 # Auto-register the feedback function when the module is imported
