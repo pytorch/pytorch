@@ -6,7 +6,8 @@
 #include <utility>
 
 #include <Python.h>
-#include <pybind11/gil_simple.h>
+#define PYBIND11_SIMPLE_GIL_MANAGEMENT
+#include <pybind11/gil.h>
 
 // Include some often-used cpp_wrapper headers, for precompiling.
 #include <c10/util/BFloat16.h>

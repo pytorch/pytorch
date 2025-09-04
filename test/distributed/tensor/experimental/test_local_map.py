@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+from functools import partial
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -49,7 +50,8 @@ def mm_allreduce_forward(device_mesh, A, B):
     return funcol.all_reduce(partial_sum_tensor, "sum", device_mesh).wait()
 
 
-@local_map(
+@partial(
+    local_map,
     out_placements=replicate,
     in_placements=(None, col_wise, row_wise),
 )

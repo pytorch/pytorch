@@ -187,5 +187,4 @@ aten_shimified_ops: dict[str, dict[str, list[str]]] = {
     "aten.narrow.default": {},
     "aten.amax.default": {},
     "aten.new_empty.default": {},
-    "aten.new_zeros.default": {},
 }

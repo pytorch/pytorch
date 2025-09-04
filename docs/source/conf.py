@@ -1221,6 +1221,9 @@ coverage_ignore_functions = [
     "reduce_typed_storage_child",
     "storage_from_cache",
     # torch.multiprocessing.spawn
+    # Added docstring for this but I think we need to go through
+    # and add the entire torch.multiprocessing.spawn module to a .rst...
+    "should_use_parallel_start",
     "start_processes",
     # torch.nn.functional
     "adaptive_max_pool1d_with_indices",  # documented as adaptive_max_pool1d
