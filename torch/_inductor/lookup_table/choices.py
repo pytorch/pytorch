@@ -89,6 +89,7 @@ class LookupTableChoices(InductorChoices):
         """Create KernelTemplateChoice objects from lookup results."""
         templates_by_uid = {template.uid: template for template in templates}
         device_type = kernel_inputs.device_type
+        assert device_type is not None, "get_mm_configs requires a valid device type"
         lookup_choices: list[KernelTemplateChoice] = []
 
         for template_uid, configs in lookup_results.items():
