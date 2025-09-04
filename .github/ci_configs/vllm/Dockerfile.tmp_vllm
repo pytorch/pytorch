@@ -6,7 +6,7 @@ ARG PYTHON_VERSION=3.12
 
 # BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
 # by default, it uses the torch-nightly-base stage from this docker image
-ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
+ARG BUILD_BASE_IMAGE=torch-nightly-base
 
 # FINAL_BASE_IMAGE: used to set up vllm-instaled environment and build flashinfer,
 # by default, it uses devel-ubuntu22.04 official image.
@@ -16,18 +16,13 @@ ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
 
-#################### BASE BUILD IMAGE ####################
-# A base image for building vLLM with torch nightly or torch wheels
-# prepare basic build environment
-FROM ${BUILD_BASE_IMAGE} AS base
-USER root
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+# A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
-
-# TODO (huydhn): Only work with PyTorch manylinux builder
-ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # Install Python and other dependencies
 RUN if command -v apt-get >/dev/null; then \
@@ -61,6 +56,30 @@ RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
         fi \
     fi \
     && gcc --version && g++ --version
+
+# install uv for faster pip installs
+RUN --mount=type=cache,target=/root/.cache/uv \	
+    python3 -m pip install uv==0.8.4
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
+
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+
+
+#################### BASE BUILD IMAGE ####################
+# A base image for building vLLM with torch nightly or torch wheels
+# prepare basic build environment
+FROM ${BUILD_BASE_IMAGE} AS base
+USER root
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+
+# TODO (huydhn): Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -356,6 +375,11 @@ RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm
 
 #################### UNITTEST IMAGE #############################
 FROM vllm-base as test
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts	
+ENV UV_LINK_MODE=copy
 
 COPY tests/ tests/
 COPY examples examples
