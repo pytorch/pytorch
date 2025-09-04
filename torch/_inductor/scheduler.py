@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 import sympy
-from triton.testing import do_bench
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -992,6 +991,8 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     from .utils import snode_args_kwargs
 
     args, kwargs = args_kwargs_fn()
+    from triton.testing import do_bench
+
     ms = do_bench(lambda: bench_fn(*args, **kwargs))
 
     cache.set_value(cache_key, value=ms)
