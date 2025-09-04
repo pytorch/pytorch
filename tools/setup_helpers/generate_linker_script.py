@@ -5,9 +5,9 @@ from pathlib import Path
 
 
 def gen_linker_script(
-    file_in: str = "cmake/prioritized_text.txt", file_out: str = "linker_script.ld"
+    filein: str = "cmake/prioritized_text.txt", fileout: str = "linker_script.ld"
 ) -> None:
-    with open(file_in) as f:
+    with open(filein) as f:
         prioritized_text = f.readlines()
         prioritized_text = [
             line.replace("\n", "") for line in prioritized_text if line != "\n"
@@ -31,10 +31,10 @@ def gen_linker_script(
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing
-    file_out = Path(file_out)
-    file_out.parent.mkdir(parents=True, exist_ok=True)
+    fileout = Path(fileout)
+    fileout.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(file_out, "w") as f:
+    with open(fileout, "w") as f:
         for lineid, line in enumerate(linker_script_lines):
             if lineid == text_line_start + 2:
                 f.write("    *(\n")
@@ -49,12 +49,12 @@ if __name__ == "__main__":
         description="Generate linker file based on prioritized symbols. Used for link-time optimization.",
     )
     parser.add_argument(
-        "--file-in",
+        "--filein",
         help="Path to prioritized_text.txt input file",
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--file-out", help="Output path for linker ld file", default=argparse.SUPPRESS
+        "--fileout", help="Output path for linker ld file", default=argparse.SUPPRESS
     )
     # convert args to a dict to pass to gen_linker_script
     kwargs = vars(parser.parse_args())

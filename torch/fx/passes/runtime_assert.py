@@ -337,12 +337,13 @@ def insert_deferred_runtime_asserts(
                 torch._check,
                 torch.ops.aten._assert_scalar.default,
             ):
+                cond = node.args[0] if node.args else node.kwargs.get("cond")
                 if (
-                    node.args[0] == True  # noqa: E712
-                    or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
+                    cond == True  # noqa: E712
+                    or (assert_expr := _get_sym_val(cond)) in expr_to_proxy
                     and assert_expr in added_asserts
                 ):
-                    arg = node.args[0]
+                    arg = cond
                     gm.graph.erase_node(node)
                     if isinstance(arg, fx.Node) and not arg.users:
                         gm.graph.erase_node(arg)

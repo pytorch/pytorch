@@ -1006,7 +1006,8 @@ If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device the
 tensor is constructed using :func:`torch.from_numpy`.
 
 If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
-specifically overwritten by :attr:`device` or a default device.
+specifically overwritten by :attr:`device` or a default device. The device of the CuPy array is inferred from the
+pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided with an explicit device index.
 
 .. seealso::
 
@@ -4741,7 +4742,8 @@ Keyword args:
     edge_order (``int``, optional): 1 or 2, for `first-order
         <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ or
         `second-order <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_
-        estimation of the boundary ("edge") values, respectively.
+        estimation of the boundary ("edge") values, respectively. Note that when :attr:`edge_order` is specified, each
+        dimension size of :attr:`input` should be at least edge_order+1
 
 Examples::
 
@@ -6578,6 +6580,18 @@ max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
+
 Args:
     {input}
 
@@ -6716,8 +6730,12 @@ dimension(s) :attr:`dim`.
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices.
 
-    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
     when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
 
 {keepdim_details}
 
@@ -7108,7 +7126,7 @@ Args:
     {opt_keepdim}
 
 Keyword arguments:
-    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7195,6 +7213,18 @@ add_docstr(
 min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
+
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
 
 Args:
     {input}
@@ -7324,8 +7354,12 @@ dimension(s) :attr:`dim`.
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices.
 
-    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
     when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
 
 {keepdim_details}
 
@@ -7536,17 +7570,17 @@ The behavior depends on the dimensionality of the tensors as follows:
   N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
   argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
   batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
-  1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
-  The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
-  must be broadcastable).  For example, if :attr:`input` is a
-  :math:`(j \times 1 \times n \times n)` tensor and :attr:`other` is a :math:`(k \times n \times n)`
-  tensor, :attr:`out` will be a :math:`(j \times k \times n \times n)` tensor.
+  1 is appended to its dimension for the purpose of the batched matrix multiply and removed after.
 
-  Note that the broadcasting logic only looks at the batch dimensions when determining if the inputs
-  are broadcastable, and not the matrix dimensions. For example, if :attr:`input` is a
+  The first N-2 dimensions of each argument, the batch dimensions, are
+  :ref:`broadcast <broadcasting-semantics>` (and thus must be broadcastable).
+  The last 2, the matrix dimensions, are handled as in the matrix-matrix product.
+
+  For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
-  tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
-  matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
+  tensor, the batch dimensions are :math:`(j \times 1)` and :math:`(k)`,
+  and the matrix dimensions are :math:`(n \times m)` and :math:`(m \times p)`.
+  :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
 matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
@@ -9953,7 +9987,7 @@ Example::
 add_docstr(
     torch.sort,
     r"""
-sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, *, stable=False, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -9974,10 +10008,10 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
-    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
-       of equivalent elements is preserved.
 
 Keyword args:
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+        of equivalent elements is preserved.
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
         be optionally given to be used as output buffers
 
@@ -12556,8 +12590,8 @@ Returns:
 add_docstr(
     torch.hamming_window,
     """
-hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, *, dtype=None, \
-layout=torch.strided, device=None, requires_grad=False) -> Tensor
+hamming_window(window_length, *, dtype=None, layout=None, device=None, pin_memory=False, \
+requires_grad=False) -> Tensor
 """
     + r"""
 Hamming window function.
@@ -12585,16 +12619,82 @@ above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
     + r"""
 Arguments:
     window_length (int): the size of returned window
-    periodic (bool, optional): If True, returns a window to be used as periodic
-        function. If False, return a symmetric window.
-    alpha (float, optional): The coefficient :math:`\alpha` in the equation above
-    beta (float, optional): The coefficient :math:`\beta` in the equation above
 
 Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
     {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, *, dtype=None, layout=None, device=None, \
+    pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, float alpha, *, dtype=None, layout=None, device=None, \
+    pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic and alpha specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    alpha (float): The coefficient :math:`\alpha` in the equation above
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, float alpha, float beta, *, dtype=None, layout=None, \
+    device=None, pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic, alpha and beta specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    alpha (float): The coefficient :math:`\alpha` in the equation above
+    beta (float): The coefficient :math:`\beta` in the equation above
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
     {requires_grad}
 
 Returns:

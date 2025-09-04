@@ -79,6 +79,7 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
     user_context_fns = kwargs.pop("context_fn", None)
     determinism_check = kwargs.pop("determinism_check", _DEFAULT_DETERMINISM_MODE)
     debug = kwargs.pop("debug", False)
+    early_stop = kwargs.pop("early_stop", True)
 
     if kwargs:
         raise ValueError(
@@ -103,6 +104,7 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 context_fns,
                 determinism_check,
                 debug,
+                early_stop,
                 *args,
                 **kwargs,
             )

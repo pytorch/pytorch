@@ -15,12 +15,10 @@ struct simd_type {
 template <typename T>
 using simd_type_t = typename simd_type<T>::t;
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct simd_type<bfloat> {
   using t = float;
 };
-#endif
 } // namespace detail
 
 template <typename T>
