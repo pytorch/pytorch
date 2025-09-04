@@ -87,6 +87,7 @@ aot_eager_graph = aot_autograd(
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
+
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super(
