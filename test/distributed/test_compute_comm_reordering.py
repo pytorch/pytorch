@@ -261,11 +261,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     )
     @patch.object(
         torch._inductor.config,
-        "runtime_estimations_use_nccl_lib_estimations",
-        False,
-    )
-    @patch.object(
-        torch._inductor.config,
         "runtime_estimations_mms_benchmark",
         False,
     )
