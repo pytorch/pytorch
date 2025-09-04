@@ -1,11 +1,17 @@
+import os
+import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from datetime import timedelta
+from typing import Any, cast, Optional, Union
 from typing_extensions import deprecated, Protocol, runtime_checkable
 
 import torch
+import torch.distributed as dist
+from torch.distributed import ProcessGroup
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed.checkpoint._pg_transport import PGTransport
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
@@ -315,3 +321,146 @@ class BlockingAsyncStager(AsyncStager):
 
     def close(self) -> None:
         pass
+
+
+class _ReplicationStager(AsyncStager):
+    """
+    An AsyncStager implementation that replicates state_dict across training ranks
+    using PGTransport.
+
+    Args:
+        pg: ProcessGroup for distributed communication
+        timeout: Timeout for communication operations
+        device: Device to use for tensor operations
+        storage_dir: Directory to store persisted state_dicts
+
+    Warning: This is experimental and subject to change.
+    """
+
+    _synchronize_after_execute: bool = False
+
+    def __init__(
+        self,
+        pg: ProcessGroup,
+        timeout: timedelta = timedelta(minutes=30),
+        device: torch.device = torch.device("cpu"),
+        storage_dir: Optional[str] = None,
+    ):
+        self._pg = pg
+        self._timeout = timeout
+        self._device = device
+        self._transport = PGTransport(pg, timeout, device, None)
+
+        # Set up storage directory for persisting exchanged state_dicts
+        if storage_dir is None:
+            self._storage_dir = tempfile.mkdtemp(prefix="replication_stager_")
+        else:
+            self._storage_dir = storage_dir
+        os.makedirs(self._storage_dir, exist_ok=True)
+
+    def stage(
+        self, state_dict: STATE_DICT_TYPE
+    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+        """
+        Stage the state_dict by replicating it across ranks. Returns a state_dict representing
+        the received replica.
+
+        Perform the actual replication logic. Creates bidirectional pairs where each rank exchanges
+        state_dict with its partner at (rank + world_size//2) % world_size.
+        Uses simple rank-based ordering to prevent deadlocks.
+
+        Assumes world_size is always even.
+        """
+        if not dist.is_initialized():
+            return state_dict
+
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Calculate partner rank using half-world offset
+        # creates bidirectional pairs for replication.
+        offset = world_size // 2
+        partner_rank = (current_rank + offset) % world_size
+
+        # Use simple rank-based ordering to prevent deadlocks.
+        # Lower-numbered rank sends first, higher-numbered rank receives first.
+        if current_rank < partner_rank:
+            # Send first, then receive
+            self._transport.send_checkpoint([partner_rank], state_dict)
+            received_state_dict = self._transport.recv_checkpoint(partner_rank)
+        else:
+            # Receive first, then send
+            received_state_dict = self._transport.recv_checkpoint(partner_rank)
+            self._transport.send_checkpoint([partner_rank], state_dict)
+
+        # Persist the received state_dict for future discoverability
+        received_state_dict = cast(STATE_DICT_TYPE, received_state_dict)
+        self._persist_state_dict(received_state_dict, current_rank, partner_rank)
+
+        return received_state_dict
+
+    def _persist_state_dict(
+        self, state_dict: STATE_DICT_TYPE, current_rank: int, partner_rank: int
+    ) -> None:
+        """
+        Persist the received state_dict to disk for future discoverability.
+        Only keeps one replica per rank, overwriting any previous replica.
+        Uses atomic write pattern (temp file + rename).
+
+        Args:
+            state_dict: The state_dict received from partner rank
+            current_rank: Current rank that received the state_dict
+            partner_rank: Rank that sent the state_dict
+        """
+        final_path = self._get_persisted_path(current_rank, partner_rank)
+        temp_path = final_path + ".tmp"
+
+        try:
+            # Ensure parent directory exists and is writable
+            os.makedirs(os.path.dirname(final_path), exist_ok=True)
+
+            # Write to temporary file with explicit flushing
+            with open(temp_path, "wb") as f:
+                torch.save(state_dict, f)
+                # Flush application buffers to OS buffers
+                f.flush()
+                # Force OS buffers to disk for durability
+                os.fsync(f.fileno())
+
+            # Atomic rename to final location
+            os.rename(temp_path, final_path)
+        except Exception as e:
+            # Clean up temp file if it exists
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass  # Ignore cleanup errors
+            # Re-raise the original exception with more context
+            raise RuntimeError(
+                f"Failed to persist state_dict from rank {partner_rank} to rank {current_rank}: {e}"
+            ) from e
+
+    def _get_persisted_path(self, current_rank: int, partner_rank: int) -> str:
+        """
+        Get the file path where a state_dict would be persisted.
+
+        Args:
+            current_rank: Current rank
+
+        Returns:
+            File path for the persisted state_dict
+        """
+        filename = f"rank_{current_rank}_replica_partner_{partner_rank}.pt"
+        return os.path.join(self._storage_dir, filename)
+
+    def synchronize_staging(self) -> None:
+        """
+        No-op function, since staging is blocking.
+        """
+
+    def close(self) -> None:
+        """
+        Clean up resources. Persisted files are intentionally left for future discovery.
+        """

@@ -2,6 +2,7 @@
 # The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
 
 import copy
+import ctypes
 import errno
 import functools
 import json
@@ -18,7 +19,7 @@ import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
-from ctypes import cdll
+from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -28,7 +29,6 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import aoti_model_name_from_config
 from torch.torch_version import TorchVersion
 
 
@@ -142,11 +142,201 @@ def check_compiler_exist_windows(compiler: str) -> None:
         pass
 
 
+class WinPeFileVersionInfo:
+    def __init__(self, file_path: str) -> None:
+        self.file_path = file_path
+        self.version_dll = ctypes.WinDLL("version.dll")  # type: ignore[attr-defined]
+        self._setup_functions()
+        self._get_version_info()
+
+    def _setup_functions(self) -> None:
+        self.version_dll.GetFileVersionInfoSizeW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPDWORD,
+        ]
+        self.version_dll.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+
+        self.version_dll.GetFileVersionInfoW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+        ]
+        self.version_dll.GetFileVersionInfoW.restype = wintypes.BOOL
+
+        self.version_dll.VerQueryValueW.argtypes = [
+            wintypes.LPCVOID,
+            wintypes.LPCWSTR,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        self.version_dll.VerQueryValueW.restype = wintypes.BOOL
+
+    def _get_version_info(self) -> None:
+        dummy = wintypes.DWORD()
+        size = self.version_dll.GetFileVersionInfoSizeW(
+            self.file_path, ctypes.byref(dummy)
+        )
+
+        if size == 0:
+            raise RuntimeError(f"Can't get version info size of {self.file_path}.")
+
+        self.version_info = ctypes.create_string_buffer(size)
+        success = self.version_dll.GetFileVersionInfoW(
+            self.file_path, 0, size, self.version_info
+        )
+
+        if not success:
+            raise RuntimeError(f"Can't get version info of {self.file_path}.")
+
+    def get_language_id(self) -> int:
+        lp_buffer = ctypes.c_void_p()
+        u_len = wintypes.UINT()
+
+        success = self.version_dll.VerQueryValueW(
+            self.version_info,
+            r"\VarFileInfo\Translation",
+            ctypes.byref(lp_buffer),
+            ctypes.byref(u_len),
+        )
+
+        if not success or u_len.value == 0:
+            return 0
+
+        translations = []
+        lang_id: int = 0
+        if lp_buffer.value is not None:
+            for i in range(u_len.value // 4):
+                offset = i * 4
+                data = ctypes.string_at(lp_buffer.value + offset, 4)
+                lang_id = int.from_bytes(data[:2], "little")
+                code_page = int.from_bytes(data[2:4], "little")
+                translations.append((lang_id, code_page))
+        else:
+            # Handle the case where lp_buffer.value is None
+            print("Buffer is None")
+
+        return lang_id
+
+
+@functools.cache
+def check_msvc_cl_language_id(compiler: str) -> None:
+    """
+    Torch.compile() is only work on MSVC with English language pack well.
+    Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
+    """
+
+    def get_msvc_cl_path() -> tuple[bool, str]:
+        """
+        Finds the path to cl.exe using vswhere.exe.
+        """
+        vswhere_path = os.path.join(
+            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            "Microsoft Visual Studio",
+            "Installer",
+            "vswhere.exe",
+        )
+        if not os.path.exists(vswhere_path):
+            vswhere_path = os.path.join(
+                os.environ.get("ProgramFiles", "C:\\Program Files"),
+                "Microsoft Visual Studio",
+                "Installer",
+                "vswhere.exe",
+            )
+            if not os.path.exists(vswhere_path):
+                return False, ""  # vswhere.exe not found
+
+        try:
+            # Get the Visual Studio installation path
+            cmd = [
+                vswhere_path,
+                "-latest",
+                "-prerelease",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ]
+            vs_install_path = subprocess.check_output(
+                cmd, text=True, encoding="utf-8"
+            ).strip()
+
+            if not vs_install_path:
+                return False, ""
+
+            # Find the latest MSVC toolset version within the installation
+            msvc_tools_path = os.path.join(vs_install_path, "VC", "Tools", "MSVC")
+            if not os.path.exists(msvc_tools_path):
+                return False, ""
+
+            # Get the latest toolset version directory
+            toolset_versions = [
+                d
+                for d in os.listdir(msvc_tools_path)
+                if os.path.isdir(os.path.join(msvc_tools_path, d))
+            ]
+            if not toolset_versions:
+                return False, ""
+            latest_toolset_version = sorted(toolset_versions, reverse=True)[0]
+
+            # Construct the full cl.exe path
+            cl_path = os.path.join(
+                msvc_tools_path,
+                latest_toolset_version,
+                "bin",
+                "HostX64",
+                "x64",
+                "cl.exe",
+            )
+            if os.path.exists(cl_path):
+                return True, cl_path
+            else:
+                # Fallback for older versions or different architectures if needed
+                cl_path = os.path.join(
+                    msvc_tools_path,
+                    latest_toolset_version,
+                    "bin",
+                    "HostX86",
+                    "x86",
+                    "cl.exe",
+                )
+                if os.path.exists(cl_path):
+                    return True, cl_path
+
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False, ""
+
+        return False, ""
+
+    if not _is_msvc_cl(compiler):
+        return
+
+    if os.path.exists(compiler):
+        # Passed compiler with path.
+        cl_exe_path = compiler
+    else:
+        b_ret, cl_exe_path = get_msvc_cl_path()
+        if b_ret is False:
+            return
+
+    version_info = WinPeFileVersionInfo(cl_exe_path)
+    lang_id = version_info.get_language_id()
+    if lang_id != 1033:
+        # MSVC English language id is 0x0409, and the DEC value is 1033.
+        raise RuntimeError(
+            "Torch.compile() is only support MSVC with English language pack,"
+            "Please reinstall its language pack to English."
+        )
+
+
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
+        check_msvc_cl_language_id(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc
@@ -564,6 +754,11 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "wd4067",
             "wd4068",
             "EHsc",
+            # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+            "Zc:__cplusplus",
+            # Enable max compatible to msvc for oneAPI headers.
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
+            "permissive-",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
@@ -581,45 +776,93 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_ffast_math_flags() -> list[str]:
-    # ffast-math is equivalent to these flags as in
-    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
-    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
-    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
-    # are added by linking in crtfastmath.o. This is done by the spec file which
-    # only does globbing for -ffast-math.
-    flags = [
-        "fno-trapping-math",
-        "funsafe-math-optimizations",
-        "ffinite-math-only",
-        "fno-signed-zeros",
-        "fno-math-errno",
-    ]
+def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
+    os_definitions: list[str] = []
+    if _IS_WINDOWS:
+        # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
+        # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
+        os_definitions.append("NOMINMAX")
+    else:
+        pass
+    return os_definitions
 
-    if is_gcc():
-        flags.append("fexcess-precision=fast")
+
+def _get_ffast_math_flags() -> list[str]:
+    if _IS_WINDOWS:
+        flags = []
+    else:
+        # ffast-math is equivalent to these flags as in
+        # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+        # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+        # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+        # are added by linking in crtfastmath.o. This is done by the spec file which
+        # only does globbing for -ffast-math.
+        flags = [
+            "fno-trapping-math",
+            "funsafe-math-optimizations",
+            "ffinite-math-only",
+            "fno-signed-zeros",
+            "fno-math-errno",
+        ]
+
+        flags.append("fno-finite-math-only")
+        if not config.cpp.enable_unsafe_math_opt_flag:
+            flags.append("fno-unsafe-math-optimizations")
+        flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+
+        if is_gcc():
+            flags.append("fexcess-precision=fast")
 
     return flags
 
 
+def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+    """
+    When we turn on generate debug symbol.
+    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+    On Linux, it should create some debug sections in binary file.
+    """
+    cflags: list[str] = []
+    ldflags: list[str] = []
+
+    if _IS_WINDOWS:
+        cflags = ["ZI", "_DEBUG"]
+        ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
+    else:
+        cflags.append("g")
+
+    return cflags, ldflags
+
+
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
-) -> list[str]:
-    if _IS_WINDOWS:
-        return ["O1" if min_optimize else "O2"]
-    else:
-        wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
-        cflags = (
-            ["O0", "g"]
-            if config.aot_inductor.debug_compile
-            else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
-        )
-        cflags += _get_ffast_math_flags()
-        cflags.append("fno-finite-math-only")
-        if not config.cpp.enable_unsafe_math_opt_flag:
-            cflags.append("fno-unsafe-math-optimizations")
-        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+) -> tuple[list[str], list[str]]:
+    cflags: list[str] = []
+    ldflags: list[str] = []
 
+    b_debug_build = (
+        config.aot_inductor.debug_compile
+        or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+    )
+    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
+
+    if b_debug_build:
+        cflags, ldflags = _get_inductor_debug_symbol_cflags()
+        if _IS_WINDOWS:
+            cflags += ["Od", "Ob0", "Oy-"]
+        else:
+            cflags.append("O0")
+    else:
+        if _IS_WINDOWS:
+            cflags = ["O1" if min_optimize else "O2"]
+        else:
+            cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
+
+    cflags += _get_ffast_math_flags()
+
+    if _IS_WINDOWS:
+        pass
+    else:
         if sys.platform != "darwin":
             # on macos, unknown argument: '-fno-tree-loop-vectorize'
             if _is_gcc(cpp_compiler):
@@ -635,10 +878,10 @@ def _get_optimization_cflags(
         if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
             cflags.append("flto=thin")
 
-        return cflags
+    return cflags, ldflags
 
 
-def _get_shared_cflag(do_link: bool) -> list[str]:
+def _get_shared_cflags(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -668,13 +911,17 @@ def get_cpp_options(
     libraries: list[str] = []
     passthrough_args: list[str] = []
 
+    opt_cflags, opt_ldflags = _get_optimization_cflags(cpp_compiler, min_optimize)
+
     cflags = (
-        _get_shared_cflag(do_link)
-        + _get_optimization_cflags(cpp_compiler, min_optimize)
+        opt_cflags
+        + _get_shared_cflags(do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    definitions += _get_os_related_cpp_definitions(cpp_compiler)
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
         ldflags.append("fuse-ld=lld")
@@ -686,7 +933,7 @@ def get_cpp_options(
         definitions,
         include_dirs,
         cflags,
-        ldflags,
+        ldflags + opt_ldflags,
         libraries_dirs,
         libraries,
         passthrough_args,
@@ -1337,14 +1584,24 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definitions.append(" USE_XPU")
-        # Suppress multi-line comment warnings in sycl headers
-        cflags += ["Wno-comment"]
-        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-        if not find_library("ze_loader"):
-            raise OSError(
-                "Intel GPU driver is not properly installed, please follow the instruction "
-                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
-            )
+        xpu_error_string = (
+            "Intel GPU driver is not properly installed, please follow the instruction "
+            "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+        )
+        if _IS_WINDOWS:
+            ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
+            if ze_root is None:
+                raise OSError(xpu_error_string)
+            include_dirs += [os.path.join(ze_root, "include")]
+            libraries_dirs += [os.path.join(ze_root, "lib")]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        else:
+            # Suppress multi-line comment warnings in sycl headers
+            cflags += ["Wno-comment"]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+
+            if not find_library("ze_loader"):
+                raise OSError(xpu_error_string)
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
@@ -1545,7 +1802,9 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
-        self._target_name = aoti_model_name_from_config()
+        self._target_name = (
+            config.aot_inductor.model_name_for_generated_files or "aoti_model"
+        )
 
         # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
@@ -1598,7 +1857,8 @@ class CppBuilder:
         if isinstance(sources, str):
             sources = [sources]
 
-        if config.is_fbcode() and (not self._aot_mode or self._use_relative_path):
+        # Use relative paths only when requested (typically for remote builds)
+        if config.is_fbcode() and self._use_relative_path:
             # Will create another temp directory for building, so do NOT use the
             # absolute path.
             self._orig_source_paths = list(sources)
@@ -1781,22 +2041,54 @@ class CppBuilder:
             project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
+            # Set a library target
             add_library({self._target_name} {target_library_type})
-
-            # Add macro definitions
-            target_compile_definitions({self._target_name} PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )
+
+        if (
+            not config.aot_inductor.compile_standalone
+            or config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, the generated cpp project should
+            # not use Torch. But for unit testing purpose, we need to use Torch here.
+            contents += textwrap.dedent(
+                """
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
+
+                """
+            )
+            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
+            # will make the generated CMake file more portable and won't really hurt performance.
+            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
+            # be still needed.
+            contents += textwrap.dedent(
+                f"""
+                # Add macro definitions
+                target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+                # Backend-specific flags
+                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+                """
+            )
+        else:
+            # When compile_standalone is True, use TorchStandalone instead of Torch
+            contents += textwrap.dedent(
+                f"""
+                find_package(TorchStandalone REQUIRED)
+                # Set up include directories to find headers at the correct paths
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}})
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}}/standalone)
+
+                """
+            )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
@@ -1804,7 +2096,11 @@ class CppBuilder:
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
+                set(CMAKE_CUDA_STANDARD 17)
                 find_package(CUDAToolkit REQUIRED)
+                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
+                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
+                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1833,7 +2129,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_80,code=compute_80
+                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
                                 -gencode arch=compute_{current_arch},code=sm_{current_arch}
                         DEPENDS ${{PTX_FILE}}
                     )
@@ -1882,12 +2178,20 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
-            f.write(
-                f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
-            )
+            if asm_files:
+                f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
+                f.write(
+                    f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
+                )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        if (
+            config.aot_inductor.compile_standalone
+            and not config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, do not link with libtorch
+            return
+
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(

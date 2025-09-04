@@ -50,6 +50,10 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual size_t get_buffer_size() = 0;
   virtual size_t get_signal_pad_size() = 0;
 
+  virtual size_t get_offset() {
+    TORCH_CHECK(false, "NYI");
+  }
+
   virtual bool has_multicast_support() = 0;
   virtual void* get_multicast_ptr() = 0;
 
@@ -183,5 +187,12 @@ TORCH_API bool has_multicast_support(
 TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
+
+C10_EXPORT void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator);
+
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device);
 
 } // namespace c10d::symmetric_memory

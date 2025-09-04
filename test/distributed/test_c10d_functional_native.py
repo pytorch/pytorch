@@ -827,9 +827,12 @@ class CompileTest(TestCase):
 
         with torch._inductor.config.patch({"cpp_wrapper": True}):
             code = run_and_get_triton_code(compiled, arg)
-            # Check the return tensor from wait_tensor is not used anywhere by
-            # checking if it is explicitly deleted by calling aoti_torch_delete_tensor_object
-            FileCheck().check_count("aoti_torch_delete_tensor_object(buf", 2).run(code)
+            # Check the return tensors from all_reduce and wait_tensor are not used anywhere by
+            # checking if they are explicitly deleted by calling aoti_torch_delete_tensor_object
+            FileCheck().check_not(
+                # all_reduce must have been rewritten into all_reduce_
+                "aoti_torch_cpu__c10d_functional_all_reduce(buf"
+            ).check_count("aoti_torch_delete_tensor_object(buf", 4).run(code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
