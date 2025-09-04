@@ -36,7 +36,7 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
 inline at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
 const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
-std::optional<c10::ScalarType> out_dtype
+c10::ScalarType out_dtype
 ) {
   c10::SmallVector<int64_t, 3> out_size;
   const bool a_is_2d = mat_a.dim() == 2;
@@ -59,15 +59,11 @@ std::optional<c10::ScalarType> out_dtype
     }
   }
 
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
-  // TODO(future PR): enable float32 output dtype for bfloat16 and float16 inputs
-  TORCH_CHECK(out_dtype_ == mat_a.dtype(), "Grouped gemm output dtype must match `mat_a` dtype");
-
   #ifndef USE_ROCM
   // For TMA transfers, strides of output tensor have to be either
   // 1, or aligned to 16 bytes.
   const auto last_dim = out_size.size() - 1;
-  const auto alignment = 16 / c10::elementSize(out_dtype_);
+  const auto alignment = 16 / c10::elementSize(out_dtype);
   const int64_t size_padded = (out_size[last_dim] + alignment - 1) / alignment * alignment;
   std::vector<int64_t> out_stride;
   if (a_is_2d != b_is_2d) {
@@ -75,9 +71,9 @@ std::optional<c10::ScalarType> out_dtype
   } else {
     out_stride = {out_size[1] * size_padded, size_padded, 1};
   }
-  return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
+  return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
   #else
-  return at::empty(out_size, mat_a.options().dtype(out_dtype_));
+  return at::empty(out_size, mat_a.options().dtype(out_dtype));
   #endif
 }
 
@@ -105,6 +101,14 @@ std::optional<c10::ScalarType> out_dtype) {
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+}
+
+inline c10::ScalarType _resolve_grouped_mm_out_dtype(const Tensor& mat_a, const Tensor& mat_b,
+std::optional<c10::ScalarType> out_dtype) {
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  // TODO(future PR): enable float32 output dtype for bfloat16 and float16 inputs
+  TORCH_CHECK(out_dtype_ == mat_a.dtype(), "Grouped gemm output dtype must match `mat_a` dtype");
+  return out_dtype_;
 }
 
 
