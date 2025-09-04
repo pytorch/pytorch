@@ -54,7 +54,7 @@ void check_maxpool2d_params(
 Tensor adaptive_avg_pool2d_quantized_cuda(
     const at::Tensor& input,
     IntArrayRef output_size) {
-// TODO: renable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
+// TODO: re-enable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
 #ifdef USE_CUDA
 // #if AT_CUDNN_ENABLED()
     // TODO: limit this to per tensor quantized tensors for now, though should be easy to adapt
@@ -76,7 +76,7 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
 // any 3D tensors to 4D prior to using cudnn
 // This implementation currently uses the v7 cudnn APIs as v8 cudnn APIs are not yet available for
 // pooling operations.
-// Consult https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnPoolingForward for
+// Consult https://docs.nvidia.com/deeplearning/cudnn/backend/latest/api/cudnn-ops-library.html#cudnnpoolingforward for
 // documentation on the APIs
 // Currently, it appears there is no cudnn support for dilated pooling -- we will
 // submit a feature request for this with cudnn

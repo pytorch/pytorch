@@ -156,11 +156,11 @@ void setTensorExprFuserEnabled(bool val) {
 }
 
 bool tensorExprFuserEnabled() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
-  if (!enable_c_str) {
+  static const auto enable_opt = c10::utils::get_env("PYTORCH_TENSOREXPR");
+  if (!enable_opt.has_value()) {
     return texpr_fuser_enabled_;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
@@ -196,11 +196,20 @@ static void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
         input_tensor_type = it->input()->type()->expect<TensorType>();
       } else {
-        input_tensor_type = it->input()
-                                ->type()
-                                ->expectRef<OptionalType>()
-                                .getElementType()
-                                ->expect<TensorType>();
+        auto element_type = it->input()
+                              ->type();
+        if (element_type->cast<OptionalType>()) {
+          input_tensor_type = element_type->expectRef<OptionalType>()
+                                          .getElementType()
+                                          ->expect<TensorType>();
+        } else {
+          // This handles the following scenario:
+          // 1. profiling nodes are inserted
+          // 2. optimizations simplify a Tensor? -> None type
+          // 3. Now the input to the prim::profile() is actually a None type.
+          element_type->expect<NoneType>();
+        }
+
         input_is_optional = true;
       }
 
@@ -396,7 +405,7 @@ void insertTypeGuard(
 
 namespace {
 bool has_unsupported_pin_memory(const Node* node) {
-  // cant support non-constant pin_memory or pin_memory = True
+  // can't support non-constant pin_memory or pin_memory = True
   if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
     int index = *maybe_index;
     auto inp = node->input(index);
@@ -1294,10 +1303,10 @@ class TensorExprFuser {
   // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
   // aten::clamp, aten::mul and aten::add.
   void parseTENotFuseOption() {
-    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    const auto option = c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_FUSE");
     std::stringstream in_ss;
-    if (option) {
-      in_ss << option;
+    if (option.has_value()) {
+      in_ss << option.value();
     }
 
     std::string line;

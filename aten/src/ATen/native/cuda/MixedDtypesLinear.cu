@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAUtils.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 // Doesn't work on ROCm or Windows yet
 // TODO: Add compiler warning? Add PyTorch config flag?
 #else
@@ -20,7 +20,7 @@
 #include <ATen/native/cuda/cutlass_extensions/gemm/threadblock/default_mma.h>
 #endif
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 // Doesn't work on ROCm or Windows yet
 #else
 #define CUTLASS_STATUS_CHECK(status)                                      \
@@ -32,7 +32,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 // Doesn't work on ROCm or Windows yet or old compiler
 #else
 template<typename ElementInputA, typename ElementInputB, typename EpilogueTag>
@@ -198,7 +198,7 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
                      const std::optional<Tensor>& bias_opt,
                      const std::optional<std::string_view> activation_opt) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, "_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};
 #else

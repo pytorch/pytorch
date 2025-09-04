@@ -98,7 +98,7 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
 
 
 def _keep_float(
-    f: Callable[[Unpack[_Ts]], _T]
+    f: Callable[[Unpack[_Ts]], _T],
 ) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
@@ -342,9 +342,9 @@ class ModularIndexing(sympy.Function):
                         and isinstance(term.args[0], sympy.Integer)
                         and term.args[0] < 0
                     ):
-                        # workaround for https://github.com/openai/triton/issues/619,
+                        # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
                         all_positive = False
                         break
@@ -362,10 +362,6 @@ class ModularIndexing(sympy.Function):
     def _eval_is_nonnegative(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
-
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):
@@ -459,6 +455,12 @@ class PythonMod(sympy.Function):
     def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
+    def _ccode(self, printer):
+        p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
+        return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
+
 
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
@@ -534,6 +536,10 @@ class CeilToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
+
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
 
 
 class FloorToInt(sympy.Function):
@@ -920,10 +926,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
-        i.is_antihermitian for i in s.args  # noqa: E731
+        i.is_antihermitian
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_commutative = lambda s: _torf(  # noqa: E731
-        i.is_commutative for i in s.args  # noqa: E731
+        i.is_commutative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
     _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
@@ -937,10 +945,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
     _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
     _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
-        i.is_nonnegative for i in s.args  # noqa: E731
+        i.is_nonnegative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
-        i.is_nonpositive for i in s.args  # noqa: E731
+        i.is_nonpositive
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
     _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
@@ -950,10 +960,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
     _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
     _eval_is_extended_real = lambda s: _torf(  # noqa: E731
-        i.is_extended_real for i in s.args  # noqa: E731
+        i.is_extended_real
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_transcendental = lambda s: _torf(  # noqa: E731
-        i.is_transcendental for i in s.args  # noqa: E731
+        i.is_transcendental
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
@@ -1055,7 +1067,7 @@ class PowByNatural(sympy.Function):
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
-# occuring
+# occurring
 class FloatPow(sympy.Function):
     is_real = True
 
@@ -1126,6 +1138,11 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
@@ -1295,6 +1312,12 @@ class Identity(sympy.Function):
         # Removes the identity op.
         return self.args[0]
 
+    def __int__(self) -> int:
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        return float(self.args[0])
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
@@ -1304,11 +1327,12 @@ def make_opaque_unary_fn(name):
         constant propagation.  This helps avoid performing transformations
         that are valid for real numbers but are invalid for floating point;
         in particular, while we are willing to make optimizations that change
-        numerics for Tensor compute, we are NOT willing to make optimziations
+        numerics for Tensor compute, we are NOT willing to make optimizations
         that change numerics for size compute.
         """
 
         _torch_handler_name = name
+        _torch_unpickler = make_opaque_unary_fn
 
         @classmethod
         def eval(cls, a):
@@ -1369,6 +1393,9 @@ def make_opaque_bitwise_fn(name, real_op_name):
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
         precedence: int = prec
+        _torch_unpickler = functools.partial(
+            make_opaque_bitwise_fn, real_op_name=real_op_name
+        )
 
         @classmethod
         def eval(cls, a, b):

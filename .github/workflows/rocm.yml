@@ -3,13 +3,19 @@ name: rocm
 on:
   push:
     branches:
-      - main
+  #     - main
       - release/*
     tags:
       - ciflow/rocm/*
   workflow_dispatch:
   schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
+    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
+    # Also run less frequently on weekends.
+    - cron: 45 0,8,16 * * 1-5
+    - cron: 45 4 * * 0,6
+    - cron: 45 4,12,20 * * 1-5
+    - cron: 45 12 * * 0,6
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -26,13 +32,13 @@ jobs:
       id-token: write
       contents: read
 
-  linux-focal-rocm-py3_10-build:
+  linux-jammy-rocm-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-focal-rocm-py3.10
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
@@ -45,17 +51,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-test:
+  linux-jammy-rocm-py3_10-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm-py3.10
+    name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm-py3_10-build
+      - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit

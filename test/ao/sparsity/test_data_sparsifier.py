@@ -2,7 +2,6 @@
 
 import copy
 import itertools
-import logging
 import math
 
 import torch
@@ -15,12 +14,7 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
     post_training_sparse_quantize,
 )
 from torch.nn.utils.parametrize import is_parametrized
-from torch.testing._internal.common_utils import TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class ImplementedSparsifier(BaseDataSparsifier):
@@ -271,7 +265,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
     This inherits the TestBaseDataSparsifierRuner wherein some functions are
-    over-ridden to take accomodate the specific sparsifier.
+    over-ridden to take accommodate the specific sparsifier.
     TODO: Change the structure by creating a separate test case class for each
           member function
     """
@@ -500,9 +494,7 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -633,9 +625,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -780,7 +770,7 @@ class TestQuantizationUtils(TestCase):
 
         # higher threshold as quantization occurs before sparsity
         threshold = (
-            1  # zero points seem to have higher magnitude with sparsity occuring after
+            1  # zero points seem to have higher magnitude with sparsity occurring after
         )
 
         sl_emb1 = (torch.abs(dequant_emb1) < threshold).float().mean()
@@ -792,3 +782,7 @@ class TestQuantizationUtils(TestCase):
         assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_emb_seq_0 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_emb_seq_1 - 0.80) <= 0.05  # +- 5% leeway
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

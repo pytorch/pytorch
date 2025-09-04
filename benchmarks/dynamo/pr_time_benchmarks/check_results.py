@@ -132,10 +132,10 @@ def main():
             )
 
         new_entry = copy.deepcopy(entry)
-        # only change if abs(ratio) > entry.noise_margin /3.
+        # only change if abs(ratio) > entry.noise_margin /5.
         new_entry.expected_value = (
             replace_with_zeros(result)
-            if abs(ratio) > entry.noise_margin * 100 / 3
+            if abs(ratio) > entry.noise_margin * 100 / 5
             else entry.expected_value
         )
         new_expected[key] = new_entry
@@ -159,7 +159,7 @@ def main():
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin * 100:.2f}% "
-                f"please update the expected results. \n"
+                f"please OPEN THE TEST RESULTS update ALL BENCHMARKS RESULT with the new printed expected results. ALL ALL ALL\n"
             )
             print(
                 "please update all results that changed significantly, and not only the failed ones"

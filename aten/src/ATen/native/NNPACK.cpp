@@ -25,8 +25,7 @@ at::Tensor _nnpack_spatial_convolution(
     const Tensor& weight, const std::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
-  throw std::runtime_error(
-      "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
+  TORCH_CHECK(false, "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
 
 bool _nnpack_available() {
@@ -143,51 +142,51 @@ Tensor _nnpack_spatial_convolution(
       input.options());
 
   // Our input Tensor must be in the form N,C,H,W
-  if (input.ndimension() != 4) {
-    throw std::runtime_error(
-        "NNPack convolutionOutput expects 4D input Tensor N,C,H,W");
-  }
+  TORCH_CHECK(
+      input.ndimension() == 4,
+      "NNPack convolutionOutput expects 4D input Tensor N,C,H,W");
+
   // Our weight Tensor must be in the form oC,iC,kH,kW
-  if (weight.ndimension() != 4) {
-    throw std::runtime_error(
-        "NNPack convolutionOutput expects 4D weight Tensor oC,iC,kH,kW");
-  }
+  TORCH_CHECK(
+      weight.ndimension() == 4,
+      "NNPack convolutionOutput expects 4D weight Tensor oC,iC,kH,kW");
+
   // Our output Tensor must be in the form N,oC,oH,oW
-  if (output.ndimension() != 4) {
-    throw std::runtime_error(
-        "NNPack convolutionOutput expects 4D output Tensor N,oC,oH,oW");
-  }
+  TORCH_CHECK(
+      output.ndimension() == 4,
+      "NNPack convolutionOutput expects 4D output Tensor N,oC,oH,oW");
 
   // Some basic shape checking, not comprehensive
-  if (input.size(1) != weight.size(1)) {
-    std::stringstream err;
-    err << "Mismatch between number of input channels in input Tensor ("
-        << input.size(1) << ") and weight Tensor (" << weight.size(1)
-        << ") in NNPack convolutionOutput";
-    throw std::runtime_error(err.str());
-  }
-  if (weight.size(0) != output.size(1)) {
-    std::stringstream err;
-    err << "Mismatch between number of output channels in weight Tensor ("
-        << weight.size(0) << ") and output Tensor (" << output.size(1)
-        << ") in NNPack convolutionOutput";
-    throw std::runtime_error(err.str());
-  }
-  if (input.size(0) != output.size(0)) {
-    std::stringstream err;
-    err << "Mismatch between batch size in input Tensor (" << input.size(0)
-        << ") and output Tensor (" << output.size(0)
-        << ") in NNPack convolutionOutput";
-    throw std::runtime_error(err.str());
-  }
+  TORCH_CHECK(
+      input.size(1) == weight.size(1),
+      "Mismatch between number of input channels in input Tensor (",
+      input.size(1),
+      ") and weight Tensor (",
+      weight.size(1),
+      ") in NNPack convolutionOutput");
+
+  TORCH_CHECK(
+      weight.size(0) == output.size(1),
+      "Mismatch between number of output channels in weight Tensor (",
+      weight.size(0),
+      ") and output Tensor (",
+      output.size(1),
+      ") in NNPack convolutionOutput");
+
+  TORCH_CHECK(
+      input.size(0) == output.size(0),
+      "Mismatch between batch size in input Tensor (",
+      input.size(0),
+      ") and output Tensor (",
+      output.size(0),
+      ") in NNPack convolutionOutput");
 
   // All Tensors must be float Tensors
   if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
       weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
       output.device().type() != kCPU || output.scalar_type() != kFloat ||
       (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
-    throw std::runtime_error(
-        "Mismatched Tensor types in NNPack convolutionOutput");
+    TORCH_CHECK(false, "Mismatched Tensor types in NNPack convolutionOutput");
   }
 
   const auto algorithm = nnp_convolution_algorithm_auto;
@@ -281,9 +280,9 @@ Tensor _nnpack_spatial_convolution(
   auto size_and_allocate_ws = [&]() {
     // Run a single pass to get the size of memory workspace buffer
     const auto status = compute(batch_size);
-    if (status != nnp_status_success) {
-      throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
-    }
+    TORCH_CHECK(
+        status == nnp_status_success,
+        "NNPACK SpatialConvolution_updateOutput failed");
     workspace.allocate();
   };
 
@@ -304,9 +303,9 @@ Tensor _nnpack_spatial_convolution(
     status = compute(batch_size);
   }
 
-  if (status != nnp_status_success) {
-    throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
-  }
+  TORCH_CHECK(
+      status == nnp_status_success,
+      "NNPACK SpatialConvolution_updateOutput failed");
 
   return output;
 }

@@ -57,9 +57,10 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(
                 resp.data,
-                b"""<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-""",
+                b"<h1>torch.distributed.WorkerServer</h1>\n"
+                b'<a href="'
+                b"/handler/"
+                b'">Handler names</a>\n',
             )
 
             resp = pool.request("POST", "/handler/ping")
@@ -70,9 +71,9 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertIn("ping", json.loads(resp.data))
 
-            resp = pool.request("POST", "/handler/nonexistant")
+            resp = pool.request("POST", "/handler/nonexistent")
             self.assertEqual(resp.status, 404)
-            self.assertIn(b"Handler nonexistant not found:", resp.data)
+            self.assertIn(b"Handler nonexistent not found:", resp.data)
 
     @requires_cuda
     def test_dump_nccl_trace_pickle(self) -> None:
@@ -206,8 +207,8 @@ class WorkerServerTest(TestCase):
     def test_get_handler_nonexistant(self) -> None:
         from torch._C._distributed_c10d import _get_handler
 
-        with self.assertRaisesRegex(ValueError, "Failed to find handler nonexistant"):
-            _get_handler("nonexistant")
+        with self.assertRaisesRegex(ValueError, "Failed to find handler nonexistent"):
+            _get_handler("nonexistent")
 
     def test_get_handler_names(self) -> None:
         from torch._C._distributed_c10d import _get_handler_names

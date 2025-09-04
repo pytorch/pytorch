@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -8,8 +9,10 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
-import typing
+import tempfile
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -23,7 +26,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import TypeVar
+from typing_extensions import Self, TypeVar
 
 import sympy
 
@@ -31,6 +34,7 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
@@ -40,6 +44,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
 from ..ops_handler import BasicMathOpsMixin, DefaultHandler
+from ..shape_propagation import ShapePropagationOpsHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -60,9 +65,13 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping, Sequence
 
+    from torch.fx import GraphModule
+
+    from ..custom_graph_pass import CustomGraphModulePass
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
+    from ..shape_propagation import BlockShapeType
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
@@ -81,6 +90,38 @@ log = logging.getLogger(__name__)
 def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
+
+
+@dataclasses.dataclass
+class FileBackedGraphModule:
+    """
+    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
+    map back to a GraphModule instead of Python source.
+    """
+
+    gm: GraphModule
+    compiled_fn: Callable[..., Any]
+
+    def __post_init__(self) -> None:
+        # Write the code to a file for compatibility with debugging utilities.
+        # The file is deleted upon program termination.
+        self.tempfile = tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".py", delete=False
+        )
+        atexit.register(os.remove, self.tempfile.name)
+        with self.tempfile as f:
+            f.write(self.value)
+
+    @property
+    def __file__(self) -> str:
+        return self.tempfile.name
+
+    def call(self, args: list[Any]) -> Any:
+        return self.compiled_fn(*args)
+
+    @property
+    def value(self) -> str:
+        return self.gm.code
 
 
 class WorkspaceZeroMode(enum.Enum):
@@ -103,8 +144,22 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
+class CodegenSymbol(ABC):
+    """
+    An IR object possibly corresponding to a variable in the wrapper code.
+    """
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        pass
+
+
 @ir_dataclass(frozen=True)
-class WorkspaceArg:
+class WorkspaceArg(CodegenSymbol):
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -167,6 +222,9 @@ class WorkspaceArg:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.get_layout().get_example()
+
     def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
@@ -185,6 +243,9 @@ class WorkspaceArg:
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
 
+    def get_offset(self) -> sympy.Expr:
+        return sympy.S.Zero
+
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
 
@@ -194,8 +255,20 @@ class WorkspaceArg:
     def get_name(self) -> str:
         return self.outer_name
 
+    def get_is_pinned(self) -> bool:
+        return False
+
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
+
+
+class TritonScratchWorkspace:
+    def __init__(self, size: int, generate_dtype_str: Callable[..., str]):
+        self.size = size
+        self._generate_dtype_str = generate_dtype_str
+
+    def generate_dtype_str(self) -> str:
+        return self._generate_dtype_str()
 
 
 @dataclasses.dataclass
@@ -225,6 +298,9 @@ class ConstexprArg:
 @dataclasses.dataclass
 class TMADescriptorArg:
     name: str
+    api_type: str  # "experimental" or "stable"
+    block_shape: Optional[list[sympy.Expr]]  # only needed for "stable"
+    dtype: Optional[torch.dtype]  # only needed for "stable"
 
 
 @dataclasses.dataclass
@@ -288,12 +364,16 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+    def cpp_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
+    ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
+custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
+custom_backend_codegen_configs: dict[str, Optional[ConfigModule]] = {}
 
 
 # The code generated by Inductor consists of two main parts: kernel code and wrapper code.
@@ -322,10 +402,21 @@ def register_backend_for_device(
     device_scheduling: SchedulingConstructor,
     device_wrapper_codegen: WrapperConstructor,
     device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_custom_pass: Optional[CustomGraphModulePass] = None,
+    device_custom_config: Optional[ConfigModule] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
     )
+    custom_backend_passes[device] = device_custom_pass
+    if device_custom_config:
+        assert (
+            isinstance(device_custom_config, ConfigModule)
+            and device_custom_config is not config
+        ), (
+            f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
+        )
+    custom_backend_codegen_configs[device] = device_custom_config
 
 
 class BackendFeature(Enum):
@@ -350,7 +441,7 @@ def get_backend_features(
     if isinstance(device, torch.device):
         device_type = device.type
     else:
-        assert isinstance(device, str)
+        assert isinstance(device, str), type(device)
         device_type = device
         device = torch.device(device_type)
     scheduling_ctor = get_scheduling_for_device(device_type)
@@ -372,27 +463,48 @@ def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
 
 
 def get_wrapper_codegen_for_device(
-    device: str, cpp_wrapper: bool = False
+    device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
 ) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
-        return (
-            wrapper_codegen_obj.cpp_wrapper_codegen
-            if cpp_wrapper
-            else wrapper_codegen_obj.wrapper_codegen
-        )
+        if fx_wrapper:
+            from .wrapper_fxir import WrapperFxCodegen
+
+            return WrapperFxCodegen
+        elif cpp_wrapper:
+            return wrapper_codegen_obj.cpp_wrapper_codegen
+        else:
+            return wrapper_codegen_obj.wrapper_codegen
     return None
 
 
-@functools.lru_cache(None)
+def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
+    return custom_backend_passes[device] if device in custom_backend_passes else None
+
+
+def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
+    return (
+        custom_backend_codegen_configs[device]
+        if device in custom_backend_codegen_configs
+        else None
+    )
+
+
+@functools.cache
 def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
+    from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -437,6 +549,14 @@ def init_backend_registration() -> None:
             "mps",
             MetalScheduling,
             PythonWrapperCodegen,
+            CppWrapperMps,
+        )
+
+    if get_scheduling_for_device("mtia") is None:
+        register_backend_for_device(
+            "mtia",
+            TritonScheduling,
+            PythonWrapperMtia,
             CppWrapperGpu,
         )
 
@@ -480,11 +600,12 @@ def register_device_op_overrides(
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
-    assert isinstance(device, str)
+    assert isinstance(device, str), type(device)
 
     if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     return device_op_overrides_dict[device]
@@ -563,7 +684,7 @@ def check_dtype(
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
-        assert isinstance(var, CppCSEVariable)
+        assert isinstance(var, CppCSEVariable), type(var)
         if dtype == torch.bool:
             if var.is_vec:
                 is_same_dt = f"IsVecMaskType<decltype({var})>::value"
@@ -624,9 +745,11 @@ class DataTypePropagation:
             return None
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
+            node_arg = node.args[0]
+            assert isinstance(node_arg, torch.fx.Node), type(node_arg)
+            return self.deduce_node_dtype(node_arg)
 
-        assert isinstance(node.target, str)
+        assert isinstance(node.target, str), type(node.target)
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -672,8 +795,8 @@ class DataTypePropagation:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
-        assert isinstance(node, SchedulerNode)
-        assert isinstance(node._body, LoopBody)
+        assert isinstance(node, SchedulerNode), type(node)
+        assert isinstance(node._body, LoopBody), type(node._body)
         return DataTypePropagation.propagate_loopbody(node._body)
 
 
@@ -806,35 +929,6 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
         return repr(value)
-
-    @staticmethod
-    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
-        one = ops.constant(1, torch.int32)
-        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def libdevice_abs(x: OpVarT) -> OpVarT:
-        return ops.abs(x)
-
-    @staticmethod
-    def libdevice_sqrt(x: OpVarT) -> OpVarT:
-        return ops.sqrt(x)
-
-    @staticmethod
-    def libdevice_cos(x: OpVarT) -> OpVarT:
-        return ops.cos(x)
-
-    @staticmethod
-    def libdevice_sin(x: OpVarT) -> OpVarT:
-        return ops.sin(x)
-
-    @staticmethod
-    def libdevice_log(x: OpVarT) -> OpVarT:
-        return ops.log(x)
-
-    @staticmethod
-    def libdevice_exp(x: OpVarT) -> OpVarT:
-        return ops.exp(x)
 
     @staticmethod
     def bitwise_not(x: OpVarT) -> OpVarT:
@@ -1399,7 +1493,7 @@ class KernelArgs:
     def make_inplace(self, input_name: str, output_name: str) -> None:
         if input_name in V.graph.unaligned_buffers:
             V.graph.unaligned_buffers.add(output_name)
-        assert output_name not in self.inplace_buffers
+        assert output_name not in self.inplace_buffers, output_name
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
             assert not isinstance(buf, RemovedArg)
@@ -1461,7 +1555,7 @@ class KernelArgs:
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
-            )
+            ), existing_arg
         self.workspace_args.append(arg)
         return arg.inner_name, 0
 
@@ -1489,7 +1583,7 @@ class KernelArgs:
         )
         for existing_arg in self.workspace_args:
             if existing_arg.inner_name == arg.inner_name:
-                assert arg == existing_arg
+                assert arg == existing_arg, (arg, existing_arg)
         self.workspace_args.append(arg)
         return arg.inner_name
 
@@ -1509,7 +1603,7 @@ class KernelArgs:
     def size(self, name: sympy.Symbol) -> str:
         assert isinstance(name, sympy.Symbol), (type(name), name)
         if name.name == "seed":
-            self.sizevars[name] = "seed"  # dont' mange the name of seeds
+            self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
@@ -1536,8 +1630,15 @@ class KernelArgs:
     def wrap_size_arg(self, size: SymbolLike) -> str:
         return str(size)
 
-    def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
-        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
+    def cpp_argdefs(
+        self, dtype_to_cpp_type: Optional[dict[torch.dtype, str]] = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        from .cpp_utils import INDEX_TYPE
+
+        if dtype_to_cpp_type is None:
+            from .cpp_utils import DTYPE_TO_CPP
+
+            dtype_to_cpp_type = DTYPE_TO_CPP
 
         call_args = []
         arg_defs = []
@@ -1548,7 +1649,7 @@ class KernelArgs:
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1556,7 +1657,7 @@ class KernelArgs:
             if outer in self.inplace_buffers:
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
@@ -1564,7 +1665,7 @@ class KernelArgs:
             if outer in self.inplace_buffers or isinstance(maybe_inner, RemovedArg):
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1582,7 +1683,7 @@ class KernelArgs:
     ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
-        arg_types: list[torch.dtype] = []
+        arg_types: list[Any] = []
         precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
@@ -1615,7 +1716,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(ArgName(inner))
             call_args.append(outer)
-            arg_types.append(type(outer))  # type: ignore[arg-type]
+            arg_types.append(type(outer))
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1650,7 +1751,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self) -> OrderedSet[str]:
-        live_outs = OrderedSet()  # type: ignore[var-annotated]
+        live_outs: OrderedSet[str] = OrderedSet()
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
                 continue
@@ -1674,13 +1775,15 @@ class CSEVariable:
         name: str,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ):
         super().__init__()
-        assert isinstance(bounds, ValueRanges)
+        assert isinstance(bounds, ValueRanges), type(bounds)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
+        self.shape = shape
 
     def __str__(self) -> str:
         return self.name
@@ -1746,7 +1849,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         else:
             self._cache = {}
 
-    def clone(self) -> typing.Self:
+    def clone(self) -> Self:
         return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
@@ -1757,7 +1860,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             reduction_cache=self.reduction_cache,
         )
 
-    def scoped_copy(self) -> typing.Self:
+    def scoped_copy(self) -> Self:
         """Return a copy of using ScopedDict so changes to *_cache aren't visible in self"""
         new_cse = self.clone()
         new_cse._cache = ScopedDict(self._cache)
@@ -1790,6 +1893,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         write: bool = True,
         assignment: bool = True,
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1810,8 +1914,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             assert isinstance(expr, str)
             cache_key = expr
         var = self.try_get(cache_key)
+        if shape is None and not assignment:
+            # since there's no assignment to a variable, use any shape here
+            # other than None to avoid the unknown shape failures
+            shape = ()
         if not var:
-            var = self.newvar(bounds, dtype)
+            var = self.newvar(bounds, dtype, shape)
             self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
@@ -1835,7 +1943,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
 
-                    # cpp backend cannot determin is_vec at this point
+                    # cpp backend cannot determine is_vec at this point
                     if (
                         assignment
                         and (
@@ -1857,9 +1965,10 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
         self.varname_map[var_name] = var
         return var
 
@@ -1868,11 +1977,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype)
+        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
         self.varname_map[name] = var
         return var
 
@@ -1882,7 +1992,7 @@ class CodeGen:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
-    def __enter__(self) -> typing.Self:
+    def __enter__(self) -> Self:
         self.exit_stack.__enter__()
         return self
 
@@ -1910,16 +2020,16 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = OrderedSet[str]()
-        self.store_buffer_names = OrderedSet[str]()
+        self.must_keep_buffers: OrderedSet[str] = OrderedSet()
+        self.store_buffer_names: OrderedSet[str] = OrderedSet()
         self._load_mask: Optional[str] = None
         self._load_other: Union[None, int, float] = None
         # OrderedSet in set_current_node
         self.current_node: Optional[SchedulerNode] = None
         self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = OrderedSet[str]()
-        self.inplaced_to_remove = OrderedSet[str]()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -2048,12 +2158,12 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
-        assert isinstance(var, str)
+        assert isinstance(var, str), type(var)
         assert lower is None or isinstance(lower, str)
         assert upper is None or isinstance(upper, str)
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
+            # It'd be less error-prone to use and/or/not, which is supported by triton
             cond = f"({lower} <= {var}) & ({var} < {upper})"
             cond_print = f"{lower} <= {var} < {upper}"
         elif lower:
@@ -2077,7 +2187,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
 
-    def __enter__(self) -> typing.Self:
+    def __enter__(self) -> Self:
         super().__enter__()
         assert self.overrides
         self.exit_stack.enter_context(
@@ -2106,7 +2216,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
-        names_to_remove = OrderedSet[str]()
+        names_to_remove: OrderedSet[str] = OrderedSet()
         for name in self.store_buffer_names:
             if (
                 name not in self.must_keep_buffers
@@ -2148,7 +2258,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
+            return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
@@ -2185,7 +2295,7 @@ class OptimizationContext:
     ops_name: str = ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def jinja2_env() -> Any:
     try:
         import jinja2
@@ -2326,21 +2436,29 @@ class CSEProxy(DefaultHandler):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         bounds = self._bound_variable(name, *args, **kwargs)
 
-        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        value = getattr(self.parent_handler, name)(*args, **kwargs)
         dtype_handler = DtypePropagationOpsHandler()
+        shape_handler = ShapePropagationOpsHandler()
 
         backend = get_current_backend()
 
+        shape_op = getattr(shape_handler, name)
         output_dtype = None
+        output_shape = None
+
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
+            output_shape = value.shape
         elif name == "masked" and backend == "cpp":
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
-        elif backend in ("triton", "cpp"):
+            # TODO: fix me
+            output_shape = None
+        elif backend in ("triton", "cpp", "mps"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
+            output_shape = shape_op(*args, **kwargs)
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
@@ -2348,25 +2466,36 @@ class CSEProxy(DefaultHandler):
 
         output_idx = 0
 
-        def do_cse(v: str) -> CSEVariable:
+        def do_cse(v: Union[str, CSEVariable]) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
-            var_dtype: torch.dtype = (
-                output_dtype[output_idx]  # type: ignore[assignment]
+            var_dtype: Optional[torch.dtype] = (
+                output_dtype[output_idx]
                 if isinstance(output_dtype, (list, tuple))
                 else output_dtype
+            )
+            var_shape: BlockShapeType = (
+                output_shape[output_idx]  # type: ignore[assignment]
+                if isinstance(output_shape, (list, tuple))
+                and len(output_shape) > 0
+                and isinstance(output_shape[0], (list, tuple))
+                else output_shape
             )
             output_idx += 1
 
             # some cpp op implementations don't set the dtype
-            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
-                v.dtype = var_dtype
+            if isinstance(v, CSEVariable):
+                if backend == "cpp" and v.dtype is None:
+                    v.dtype = var_dtype
+                if v.shape is None:
+                    v.shape = var_shape
 
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
                 v,
                 bounds=bounds,
                 dtype=output_dtype,
+                shape=output_shape,
             )
 
             csevar.update_on_args(name, args, kwargs)
@@ -2375,6 +2504,7 @@ class CSEProxy(DefaultHandler):
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
             ):
+                assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
@@ -2387,13 +2517,19 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
+        from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
+        if isinstance(V.kernel, CUDATemplateKernel):
+            return ValueRanges.unknown()
+
         fx_node = V.interpreter.current_node
         if fx_node.target == name and self.kernel.node_to_bounds is not None:
-            assert isinstance(self.kernel.node_to_bounds, dict)
+            assert isinstance(self.kernel.node_to_bounds, dict), type(
+                self.kernel.node_to_bounds
+            )
             return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
         elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
             # These create lots of inner strings. We would need to compute the bounds at the ops
@@ -2428,14 +2564,14 @@ class CSEProxy(DefaultHandler):
     ) -> sympy.Symbol:
         if isinstance(size, int):
             size = sympy.Integer(size)
-        assert isinstance(size, sympy.Expr), size
+        assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
 
-        if var.bounds.lower < 0:  # type: ignore[operator]
+        if var.bounds.lower < 0:
             if wrap_neg:
                 stm = ops.add(var, ops.index_expr(size, torch.long))
                 # Mixed negative and non-negative
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:
                     lt = ops.lt(var, 0)
                     stm = ops.where(lt, stm, var)
             else:
@@ -2452,11 +2588,17 @@ class CSEProxy(DefaultHandler):
                     neg_bounds.lower + size, neg_bounds.upper + size
                 )
                 # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
-            var = self.kernel.cse.generate(self.kernel.compute, stm, bounds=new_bounds)
+            var = self.kernel.cse.generate(
+                self.kernel.compute,
+                stm,
+                bounds=new_bounds,
+                dtype=var.dtype,
+                shape=var.shape,
+            )
 
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):
@@ -2504,8 +2646,7 @@ class CSEProxy(DefaultHandler):
         if mode is None:
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
-            return self.kernel.store(name, index, value, mode=mode)
-        return None  # type: ignore[return-value]
+            self.kernel.store(name, index, value, mode=mode)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)

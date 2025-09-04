@@ -152,8 +152,6 @@ static void reduction_out_mps(const Tensor& input_t,
                               const Tensor& output_t,
                               MPSReductionType reduction_type,
                               const std::string& func_name) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
   // NS: TODO: get rid of all those shenanigans and just call reduction_op with view tensor
   bool canSqueezeLastDim = true;
   IntArrayRef input_shape = input_t.sizes();
@@ -225,7 +223,7 @@ static void reduction_out_mps(const Tensor& input_t,
   @autoreleasepool {
     std::string dtype_str = dtype.has_value() ? getMPSTypeString(dtype.value()) : "";
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
-    string key = func_name + ":" + string([ns_key UTF8String]) + ":" + getTensorsStringKey(input_t) + ":" +
+    std::string key = func_name + ":" + std::string([ns_key UTF8String]) + ":" + getTensorsStringKey(input_t) + ":" +
         std::to_string(keepdim) + ":" + std::to_string(reduction_type) + ":" + getTensorsStringKey(output_t) + ":" +
         dtype_str;
     using CachedGraph = MPSUnaryCachedGraph;
@@ -236,12 +234,10 @@ static void reduction_out_mps(const Tensor& input_t,
       MPSGraphTensor* castInputTensor = inputTensor;
       MPSDataType inputCastType = MPSDataTypeInvalid;
       if (dtype.has_value() &&
-          (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt ||
-           (dtype.value() == kLong && macOS13_3_plus))) {
+          (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt || dtype.value() == kLong)) {
         inputCastType = getMPSDataType(dtype.value());
       } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
-                 (inputScalarType != kLong || !macOS13_3_plus)) {
+                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf && inputScalarType != kLong) {
         inputCastType = getMPSDataType(kFloat);
       }
 
@@ -365,10 +361,10 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
   auto stream = getCurrentMPSStream();
   @autoreleasepool {
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
-    string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
-    string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
-    string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + std::to_string(p) + ":" +
-        keepdim_info + ":" + toString(in_dtype);
+    std::string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
+    std::string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
+    std::string key = std::string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + std::to_string(p) +
+        ":" + keepdim_info + ":" + toString(in_dtype);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
@@ -456,11 +452,11 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   IntArrayRef dim_value = use_dim ? dim.value() : NULL;
 
   if (use_dim) {
-    string errMessage = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
+    std::string errMessage = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
     errMessage += ": reduction dim must be in the range of input shape";
     for (const auto dim : dim_value) {
       auto wrap_dim = maybe_wrap_dim(dim, num_input_dims);
-      TORCH_CHECK(wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size()), errMessage.c_str())
+      TORCH_CHECK(wrap_dim < (num_input_dims ? num_input_dims : 1), errMessage.c_str())
     }
   }
 
@@ -493,7 +489,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     // Reduction axes
     axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
     axes[0] = @0;
-  } else if (!keepdim && use_dim && dim_value.size() > 0) {
+  } else if (!keepdim && use_dim && !dim_value.empty()) {
     int64_t num_reduce_dims = dim_value.size();
     num_output_dims = num_input_dims;
 
@@ -528,7 +524,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
       correction_n *= input_shape[wrap_dim];
     }
     // (3, 4, 5) --> (3, 5)
-  } else if ((keepdim && !use_dim) || (keepdim && use_dim && dim_value.size() <= 0)) {
+  } else if ((keepdim && !use_dim) || (keepdim && use_dim && dim_value.empty())) {
     num_output_dims = 0;
     int64_t num_reduce_dims = 0;
     set_axes(axes, num_reduce_dims, dim_value, input_shape.size());
@@ -540,7 +536,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
       correction_n *= input_shape[i];
     }
     // scalar --> vector case [[1.0034567]]
-  } else if (keepdim && use_dim && dim_value.size() > 0) {
+  } else if (keepdim && use_dim && !dim_value.empty()) {
     int64_t num_reduce_dims = dim_value.size();
     num_output_dims = num_input_dims;
 
@@ -576,13 +572,13 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string op_key = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
+    std::string op_key = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
-    string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
-    string use_dim_info = (use_dim) ? "use_dim=1:" + std::to_string(dim_value.size()) : "use_dim=0";
-    string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
-    string key = op_key + ":" + getTensorsStringKey(input_t) + ":" + use_dim_info + ":" + keepdim_info + ":" +
-        string([ns_key UTF8String]) + ":" + bessel_corrected + ":" + std::to_string(correction_value);
+    std::string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
+    std::string use_dim_info = (use_dim) ? "use_dim=1:" + std::to_string(dim_value.size()) : "use_dim=0";
+    std::string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
+    std::string key = op_key + ":" + getTensorsStringKey(input_t) + ":" + use_dim_info + ":" + keepdim_info + ":" +
+        std::string([ns_key UTF8String]) + ":" + bessel_corrected + ":" + std::to_string(correction_value);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
@@ -615,9 +611,6 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 }
 
 static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, nanmedian ? "nanmedian" : "median");
-
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
@@ -634,8 +627,7 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   auto medianCachedGraph =
       LookUpOrCreateCachedGraph<MedianCachedGraph>(medianKey, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-        MPSGraphTensor* castInputTensor =
-            castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+        MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
         MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
 
@@ -693,9 +685,6 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
 }
 
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max");
-
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -708,13 +697,12 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
   }
 
   @autoreleasepool {
-    string key = func_name + getTensorsStringKey(input_t);
+    std::string key = func_name + getTensorsStringKey(input_t);
     CachedGraph* cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
       MPSGraphTensor* castOutputTensor = nil;
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       NSArray<NSNumber*>* axes = getTensorAxes(input_t);
       if (reduction_type == MPSReductionType::MAX) {
@@ -749,9 +737,6 @@ static void min_max_out_mps(const Tensor& input_t,
                             const Tensor& indices_t,
                             MPSReductionType reduction_type,
                             const std::string& func_name) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max_out");
-
   if (output_t.numel() == 0) {
     return;
   }
@@ -785,12 +770,11 @@ static void min_max_out_mps(const Tensor& input_t,
   auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + std::to_string(dim_);
+    std::string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
       MPSGraphTensor* outputTensor = nil;
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       if (reduction_type == MPSReductionType::MAX) {
         outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
@@ -896,9 +880,6 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
                                   const std::string& func_name) {
   using CachedGraph = MPSUnaryCachedGraph;
 
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "argmax_argmin_out");
-
   int64_t dim_ = -1;
 
   if (dim.has_value()) {
@@ -943,8 +924,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 
   @autoreleasepool {
     NSString* ns_key = [[apparent_in_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    string key =
-        func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + string([ns_key UTF8String]);
+    std::string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
+        std::string([ns_key UTF8String]);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputScalarType = input_t.scalar_type();
       MPSGraphTensor* inputTensor =
@@ -953,7 +934,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 
       MPSGraphTensor* castInputTensor = inputTensor;
       if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-          (inputScalarType != kLong || !macOS13_3_plus)) {
+          inputScalarType != kLong) {
         castInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
       }
       if (reduction_type == MPSReductionType::MAX) {
@@ -1003,7 +984,7 @@ Tensor& nansum_out_mps(const Tensor& self,
                        bool keepdim,
                        std::optional<ScalarType> opt_dtype,
                        Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on MPS does not support complex inputs");
   if (c10::isIntegralType(self.scalar_type(), true)) {
     return at::sum_out(result, self, dim, keepdim, opt_dtype);
   }
@@ -1282,9 +1263,6 @@ static void all_any_common_impl_mps(const Tensor& input_t,
     return;
   }
 
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, op_name);
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, op_name.c_str());
 
@@ -1299,11 +1277,11 @@ static void all_any_common_impl_mps(const Tensor& input_t,
   }
 
   @autoreleasepool {
-    string key = op_name + "_out_mps:" + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
+    std::string key = op_name + "_out_mps:" + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
-      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
       // reductionOrWithTensor:axis: will throw an internal assert if number of dimentions is more than 4
       // See https://github.com/pytorch/pytorch/issues/95538
       MPSGraphTensor* outputTensor = nil;
@@ -1369,14 +1347,11 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
     return;
   }
 
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "any_all_out");
-
   @autoreleasepool {
-    string key = string("any_all_out_mps:") + getTensorsStringKey(input_t);
+    std::string key = std::string("any_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
       // reductionOrWithTensor:axes: will throw an internal assert if number of dimentions is more than 4
       // See https://github.com/pytorch/pytorch/issues/95538
       if (input_t.dim() > 4) {
@@ -1420,14 +1395,11 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
     return;
   }
 
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "all_all_out");
-
   @autoreleasepool {
-    string key = string("all_all_out_mps:") + getTensorsStringKey(input_t);
+    std::string key = std::string("all_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
       // reductionAndWithTensor:axes: will throw an internal assert if number of dimentions is more than 4
       // See https://github.com/pytorch/pytorch/issues/95538
       if (input_t.ndimension() > 4) {
@@ -1512,9 +1484,6 @@ static void median_out_mps_common(const Tensor& input_t,
                                   Tensor& indices,
                                   const std::string& func_name,
                                   bool nanmedian) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "median_out");
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, "max()");
 
@@ -1581,12 +1550,11 @@ static void median_out_mps_common(const Tensor& input_t,
   auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
+    std::string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
         getTensorsStringKey(indices);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       MPSGraphTensor* effectiveLengthTensor = nil;
       if (nanmedian) {

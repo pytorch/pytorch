@@ -14,6 +14,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
@@ -139,6 +140,47 @@ void test_aoti_package_loader(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+void test_aoti_package_loader_multi_gpu(
+    const std::string& device,
+    bool use_runtime_constant_folding) {
+  torch::NoGradGuard no_grad;
+  // Ensure that this test will reset the default CUDA device on exit.
+  torch::DeviceGuard device_guard(c10::Device("cuda"));
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
+  std::string path_attr = "pt2_package_path_" + suffix;
+  std::string inputs_attr = "inputs_" + suffix;
+  std::string outputs_attr = "outputs_" + suffix;
+  const auto& pt2_package_path =
+      data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  // For all available CUDA devices: Load PT2 package on this device, run
+  // inference, and validate results
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  for (int i = 0; i < torch::cuda::device_count(); i++) {
+    auto options = torch::TensorOptions().device(torch::kCUDA, i);
+    torch::inductor::AOTIModelPackageLoader runner(
+        pt2_package_path, "model", false, 1, i);
+    std::vector<torch::Tensor> input_tensors_on_device;
+    for (auto input_tensor : input_tensors) {
+      input_tensors_on_device.push_back(input_tensor.clone().to(options));
+    }
+    // Run loaded PT2 package on device
+    auto actual_output_tensors = runner.run(input_tensors_on_device);
+    ASSERT_TRUE(torch::allclose(
+        ref_output_tensors[0].cpu(), actual_output_tensors[0].cpu()));
+  }
+}
+
 void test_aoti_constants_update(
     const std::string& device,
     bool use_runtime_constant_folding) {
@@ -202,14 +244,6 @@ void test_aoti_constants_update(
   // Update random weight to buffer #1.
   runner->update_constant_buffer(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
-  if (use_runtime_constant_folding) {
-    // At this moment, this update is applied on the original weight.
-    // The weight being consumed is "folded", so will have no affect.
-    ASSERT_TRUE(
-        torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
-    runner->run_const_fold(/* use_inactive = */ false);
-    actual_output_tensors = runner->run(input_tensors);
-  }
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
@@ -821,6 +855,45 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
 }
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
+void test_cuda_alloc_test() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "cuda_alloc_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchActive = stats.active_bytes[0].current;
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+  size_t torchActive = stats.active_bytes[0].current;
+
+  ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
+
+  auto actual_output_tensors =
+      runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+#endif
+
 class ThreadPool {
  private:
   struct Task {
@@ -996,6 +1069,10 @@ TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
   test_aoti_package_loader("cuda", false);
 }
 
+TEST(AotInductorTest, BasicPackageLoaderTestMultiGpuCuda) {
+  test_aoti_package_loader_multi_gpu("cuda", false);
+}
+
 TEST(AotInductorTest, UpdateUserManagedConstantsCuda) {
   test_aoti_user_managed_buffer();
 }
@@ -1034,6 +1111,11 @@ TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
 
 TEST(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
+}
+
+// TODO: ENABLE CUDACachingAllocator Test
+TEST(DISABLED_AotInductorTest, CudaAllocTestCuda) {
+  test_cuda_alloc_test();
 }
 #endif
 

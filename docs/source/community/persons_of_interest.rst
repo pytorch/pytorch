@@ -1,3 +1,5 @@
+:orphan:
+
 PyTorch Governance | Maintainers
 =========================================
 
@@ -129,11 +131,12 @@ Distributed
 -  Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
 -  Chien-Chin Huang (`fegin <https://github.com/fegin>`__)
 -  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
+-  Junjie Wang (`fduwjj <https://github.com/fduwjj>`__)
+-  Wei Feng (`weifengpy <https://github.com/weifengpy>`__)
 -  (emeritus) Shen Li (`mrshenli <https://github.com/mrshenli>`__)
 -  (emeritus) Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 -  (emeritus) Yanli Zhao (`zhaojuanmao <https://github.com/zhaojuanmao>`__)
 -  (emeritus) Rohan Varma (`rohan-varma <https://github.com/rohan-varma>`__)
--  (emeritus) Junjie Wang (`fduwjj <https://github.com/fduwjj>`__)
 -  (emeritus) Alisson Azzolini (`aazzolini <https://github.com/aazzolini>`__)
 -  (emeritus) James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
 -  (emeritus) Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
@@ -347,9 +350,9 @@ XLA
 TorchServe
 ~~~~~~~~~~
 
--  Li Ning (`lxning <https://github.com/lxning>`__)
--  Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
--  Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
+-  (emeritus) Li Ning (`lxning <https://github.com/lxning>`__)
+-  (emeritus) Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
+-  (emeritus) Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
 -  (emeritus) Mark Saroufim (`msaroufIm <https://github.com/msaroufIm>`__)
 -  (emeritus) Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
 -  (emeritus) Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)

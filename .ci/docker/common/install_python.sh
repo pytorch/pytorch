@@ -13,6 +13,3 @@ source /var/lib/jenkins/ci_env/bin/activate
 
 python -mpip install --upgrade pip
 python -mpip install -r /opt/requirements-ci.txt
-if [ -n "${PIP_CMAKE}" ]; then
-  python -mpip install cmake==3.31.6
-fi

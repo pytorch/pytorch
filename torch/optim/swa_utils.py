@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
+
 import itertools
 import math
 import warnings
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, cast, Literal, Optional, Union
 
 import torch
 from torch import Tensor
@@ -68,7 +69,9 @@ def get_swa_multi_avg_fn():
             averaged_param_list[0]
         ):
             torch._foreach_lerp_(
-                averaged_param_list, current_param_list, 1 / (num_averaged + 1)
+                averaged_param_list,
+                current_param_list,
+                cast(float, 1 / (num_averaged + 1)),
             )
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)
@@ -225,9 +228,9 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert (
-            avg_fn is None or multi_avg_fn is None
-        ), "Only one of avg_fn and multi_avg_fn should be provided"
+        assert avg_fn is None or multi_avg_fn is None, (
+            "Only one of avg_fn and multi_avg_fn should be provided"
+        )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -256,11 +259,12 @@ class AveragedModel(Module):
         )
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
+        copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
-            if self.n_averaged == 0:
+            if copy_param:
                 p_averaged.detach().copy_(p_model_)
 
         if self.n_averaged > 0:
@@ -274,7 +278,9 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
+                            self_params,  # type: ignore[arg-type]
+                            model_params,  # type: ignore[arg-type]
+                            self.n_averaged.to(device),
                         )
                     elif (
                         device is not None

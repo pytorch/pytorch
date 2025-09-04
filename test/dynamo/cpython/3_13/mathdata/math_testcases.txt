@@ -1,0 +1,633 @@
+-- Testcases for functions in math.
+--
+-- Each line takes the form:
+--
+-- <testid> <function> <input_value> -> <output_value> <flags>
+--
+-- where:
+--
+--   <testid> is a short name identifying the test,
+--
+--   <function> is the function to be tested (exp, cos, asinh, ...),
+--
+--   <input_value> is a string representing a floating-point value
+--
+--   <output_value> is the expected (ideal) output value, again
+--     represented as a string.
+--
+--   <flags> is a list of the floating-point flags required by C99
+--
+-- The possible flags are:
+--
+--   divide-by-zero : raised when a finite input gives a
+--     mathematically infinite result.
+--
+--   overflow : raised when a finite input gives a finite result that
+--     is too large to fit in the usual range of an IEEE 754 double.
+--
+--   invalid : raised for invalid inputs (e.g., sqrt(-1))
+--
+--   ignore-sign : indicates that the sign of the result is
+--     unspecified; e.g., if the result is given as inf,
+--     then both -inf and inf should be accepted as correct.
+--
+-- Flags may appear in any order.
+--
+-- Lines beginning with '--' (like this one) start a comment, and are
+-- ignored.  Blank lines, or lines containing only whitespace, are also
+-- ignored.
+
+-- Many of the values below were computed with the help of
+-- version 2.4 of the MPFR library for multiple-precision
+-- floating-point computations with correct rounding.  All output
+-- values in this file are (modulo yet-to-be-discovered bugs)
+-- correctly rounded, provided that each input and output decimal
+-- floating-point value below is interpreted as a representation of
+-- the corresponding nearest IEEE 754 double-precision value.  See the
+-- MPFR homepage at http://www.mpfr.org for more information about the
+-- MPFR project.
+
+
+-------------------------
+-- erf: error function --
+-------------------------
+
+erf0000 erf 0.0 -> 0.0
+erf0001 erf -0.0 -> -0.0
+erf0002 erf inf -> 1.0
+erf0003 erf -inf -> -1.0
+erf0004 erf nan -> nan
+
+-- tiny values
+erf0010 erf 1e-308 -> 1.1283791670955125e-308
+erf0011 erf 5e-324 -> 4.9406564584124654e-324
+erf0012 erf 1e-10 -> 1.1283791670955126e-10
+
+-- small integers
+erf0020 erf 1 -> 0.84270079294971489
+erf0021 erf 2 -> 0.99532226501895271
+erf0022 erf 3 -> 0.99997790950300136
+erf0023 erf 4 -> 0.99999998458274209
+erf0024 erf 5 -> 0.99999999999846256
+erf0025 erf 6 -> 1.0
+
+erf0030 erf -1 -> -0.84270079294971489
+erf0031 erf -2 -> -0.99532226501895271
+erf0032 erf -3 -> -0.99997790950300136
+erf0033 erf -4 -> -0.99999998458274209
+erf0034 erf -5 -> -0.99999999999846256
+erf0035 erf -6 -> -1.0
+
+-- huge values should all go to +/-1, depending on sign
+erf0040 erf -40 -> -1.0
+erf0041 erf 1e16 -> 1.0
+erf0042 erf -1e150 -> -1.0
+erf0043 erf 1.7e308 -> 1.0
+
+-- Issue 8986: inputs x with exp(-x*x) near the underflow threshold
+-- incorrectly signalled overflow on some platforms.
+erf0100 erf 26.2 -> 1.0
+erf0101 erf 26.4 -> 1.0
+erf0102 erf 26.6 -> 1.0
+erf0103 erf 26.8 -> 1.0
+erf0104 erf 27.0 -> 1.0
+erf0105 erf 27.2 -> 1.0
+erf0106 erf 27.4 -> 1.0
+erf0107 erf 27.6 -> 1.0
+
+erf0110 erf -26.2 -> -1.0
+erf0111 erf -26.4 -> -1.0
+erf0112 erf -26.6 -> -1.0
+erf0113 erf -26.8 -> -1.0
+erf0114 erf -27.0 -> -1.0
+erf0115 erf -27.2 -> -1.0
+erf0116 erf -27.4 -> -1.0
+erf0117 erf -27.6 -> -1.0
+
+----------------------------------------
+-- erfc: complementary error function --
+----------------------------------------
+
+erfc0000 erfc 0.0 -> 1.0
+erfc0001 erfc -0.0 -> 1.0
+erfc0002 erfc inf -> 0.0
+erfc0003 erfc -inf -> 2.0
+erfc0004 erfc nan -> nan
+
+-- tiny values
+erfc0010 erfc 1e-308 -> 1.0
+erfc0011 erfc 5e-324 -> 1.0
+erfc0012 erfc 1e-10 -> 0.99999999988716204
+
+-- small integers
+erfc0020 erfc 1 -> 0.15729920705028513
+erfc0021 erfc 2 -> 0.0046777349810472662
+erfc0022 erfc 3 -> 2.2090496998585441e-05
+erfc0023 erfc 4 -> 1.541725790028002e-08
+erfc0024 erfc 5 -> 1.5374597944280349e-12
+erfc0025 erfc 6 -> 2.1519736712498913e-17
+
+erfc0030 erfc -1 -> 1.8427007929497148
+erfc0031 erfc -2 -> 1.9953222650189528
+erfc0032 erfc -3 -> 1.9999779095030015
+erfc0033 erfc -4 -> 1.9999999845827421
+erfc0034 erfc -5 -> 1.9999999999984626
+erfc0035 erfc -6 -> 2.0
+
+-- as x -> infinity, erfc(x) behaves like exp(-x*x)/x/sqrt(pi)
+erfc0040 erfc 20 -> 5.3958656116079012e-176
+erfc0041 erfc 25 -> 8.3001725711965228e-274
+erfc0042 erfc 27 -> 5.2370464393526292e-319
+erfc0043 erfc 28 -> 0.0
+
+-- huge values
+erfc0050 erfc -40 -> 2.0
+erfc0051 erfc 1e16 -> 0.0
+erfc0052 erfc -1e150 -> 2.0
+erfc0053 erfc 1.7e308 -> 0.0
+
+-- Issue 8986: inputs x with exp(-x*x) near the underflow threshold
+-- incorrectly signalled overflow on some platforms.
+erfc0100 erfc 26.2 -> 1.6432507924389461e-300
+erfc0101 erfc 26.4 -> 4.4017768588035426e-305
+erfc0102 erfc 26.6 -> 1.0885125885442269e-309
+erfc0103 erfc 26.8 -> 2.4849621571966629e-314
+erfc0104 erfc 27.0 -> 5.2370464393526292e-319
+erfc0105 erfc 27.2 -> 9.8813129168249309e-324
+erfc0106 erfc 27.4 -> 0.0
+erfc0107 erfc 27.6 -> 0.0
+
+erfc0110 erfc -26.2 -> 2.0
+erfc0111 erfc -26.4 -> 2.0
+erfc0112 erfc -26.6 -> 2.0
+erfc0113 erfc -26.8 -> 2.0
+erfc0114 erfc -27.0 -> 2.0
+erfc0115 erfc -27.2 -> 2.0
+erfc0116 erfc -27.4 -> 2.0
+erfc0117 erfc -27.6 -> 2.0
+
+---------------------------------------------------------
+-- lgamma: log of absolute value of the gamma function --
+---------------------------------------------------------
+
+-- special values
+lgam0000 lgamma 0.0 -> inf      divide-by-zero
+lgam0001 lgamma -0.0 -> inf     divide-by-zero
+lgam0002 lgamma inf -> inf
+lgam0003 lgamma -inf -> inf
+lgam0004 lgamma nan -> nan
+
+-- negative integers
+lgam0010 lgamma -1 -> inf       divide-by-zero
+lgam0011 lgamma -2 -> inf       divide-by-zero
+lgam0012 lgamma -1e16 -> inf    divide-by-zero
+lgam0013 lgamma -1e300 -> inf   divide-by-zero
+lgam0014 lgamma -1.79e308 -> inf divide-by-zero
+
+-- small positive integers give factorials
+lgam0020 lgamma 1 -> 0.0
+lgam0021 lgamma 2 -> 0.0
+lgam0022 lgamma 3 -> 0.69314718055994529
+lgam0023 lgamma 4 -> 1.791759469228055
+lgam0024 lgamma 5 -> 3.1780538303479458
+lgam0025 lgamma 6 -> 4.7874917427820458
+
+-- half integers
+lgam0030 lgamma 0.5 -> 0.57236494292470008
+lgam0031 lgamma 1.5 -> -0.12078223763524522
+lgam0032 lgamma 2.5 -> 0.28468287047291918
+lgam0033 lgamma 3.5 -> 1.2009736023470743
+lgam0034 lgamma -0.5 -> 1.2655121234846454
+lgam0035 lgamma -1.5 -> 0.86004701537648098
+lgam0036 lgamma -2.5 -> -0.056243716497674054
+lgam0037 lgamma -3.5 -> -1.309006684993042
+
+-- values near 0
+lgam0040 lgamma 0.1 -> 2.252712651734206
+lgam0041 lgamma 0.01 -> 4.5994798780420219
+lgam0042 lgamma 1e-8 -> 18.420680738180209
+lgam0043 lgamma 1e-16 -> 36.841361487904734
+lgam0044 lgamma 1e-30 -> 69.077552789821368
+lgam0045 lgamma 1e-160 -> 368.41361487904732
+lgam0046 lgamma 1e-308 -> 709.19620864216608
+lgam0047 lgamma 5.6e-309 -> 709.77602713741896
+lgam0048 lgamma 5.5e-309 -> 709.79404564292167
+lgam0049 lgamma 1e-309 -> 711.49879373516012
+lgam0050 lgamma 1e-323 -> 743.74692474082133
+lgam0051 lgamma 5e-324 -> 744.44007192138122
+lgam0060 lgamma -0.1 -> 2.3689613327287886
+lgam0061 lgamma -0.01 -> 4.6110249927528013
+lgam0062 lgamma -1e-8 -> 18.420680749724522
+lgam0063 lgamma -1e-16 -> 36.841361487904734
+lgam0064 lgamma -1e-30 -> 69.077552789821368
+lgam0065 lgamma -1e-160 -> 368.41361487904732
+lgam0066 lgamma -1e-308 -> 709.19620864216608
+lgam0067 lgamma -5.6e-309 -> 709.77602713741896
+lgam0068 lgamma -5.5e-309 -> 709.79404564292167
+lgam0069 lgamma -1e-309 -> 711.49879373516012
+lgam0070 lgamma -1e-323 -> 743.74692474082133
+lgam0071 lgamma -5e-324 -> 744.44007192138122
+
+-- values near negative integers
+lgam0080 lgamma -0.99999999999999989 -> 36.736800569677101
+lgam0081 lgamma -1.0000000000000002 -> 36.043653389117154
+lgam0082 lgamma -1.9999999999999998 -> 35.350506208557213
+lgam0083 lgamma -2.0000000000000004 -> 34.657359027997266
+lgam0084 lgamma -100.00000000000001 -> -331.85460524980607
+lgam0085 lgamma -99.999999999999986 -> -331.85460524980596
+
+-- large inputs
+lgam0100 lgamma 170 -> 701.43726380873704
+lgam0101 lgamma 171 -> 706.57306224578736
+lgam0102 lgamma 171.624 -> 709.78077443669895
+lgam0103 lgamma 171.625 -> 709.78591682948365
+lgam0104 lgamma 172 -> 711.71472580228999
+lgam0105 lgamma 2000 -> 13198.923448054265
+lgam0106 lgamma 2.55998332785163e305 -> 1.7976931348623099e+308
+lgam0107 lgamma 2.55998332785164e305 -> inf overflow
+lgam0108 lgamma 1.7e308 -> inf overflow
+
+-- inputs for which gamma(x) is tiny
+lgam0120 lgamma -100.5 -> -364.90096830942736
+lgam0121 lgamma -160.5 -> -656.88005261126432
+lgam0122 lgamma -170.5 -> -707.99843314507882
+lgam0123 lgamma -171.5 -> -713.14301641168481
+lgam0124 lgamma -176.5 -> -738.95247590846486
+lgam0125 lgamma -177.5 -> -744.13144651738037
+lgam0126 lgamma -178.5 -> -749.3160351186001
+
+lgam0130 lgamma -1000.5 -> -5914.4377011168517
+lgam0131 lgamma -30000.5 -> -279278.6629959144
+lgam0132 lgamma -4503599627370495.5 -> -1.5782258434492883e+17
+
+-- results close to 0:  positive argument ...
+lgam0150 lgamma 0.99999999999999989 -> 6.4083812134800075e-17
+lgam0151 lgamma 1.0000000000000002 -> -1.2816762426960008e-16
+lgam0152 lgamma 1.9999999999999998 -> -9.3876980655431170e-17
+lgam0153 lgamma 2.0000000000000004 -> 1.8775396131086244e-16
+
+-- ... and negative argument
+lgam0160 lgamma -2.7476826467 -> -5.2477408147689136e-11
+lgam0161 lgamma -2.457024738 -> 3.3464637541912932e-10
+
+
+---------------------------
+-- gamma: Gamma function --
+---------------------------
+
+-- special values
+gam0000 gamma 0.0 -> inf        divide-by-zero
+gam0001 gamma -0.0 -> -inf      divide-by-zero
+gam0002 gamma inf -> inf
+gam0003 gamma -inf -> nan       invalid
+gam0004 gamma nan -> nan
+
+-- negative integers inputs are invalid
+gam0010 gamma -1 -> nan         invalid
+gam0011 gamma -2 -> nan         invalid
+gam0012 gamma -1e16 -> nan      invalid
+gam0013 gamma -1e300 -> nan     invalid
+
+-- small positive integers give factorials
+gam0020 gamma 1 -> 1
+gam0021 gamma 2 -> 1
+gam0022 gamma 3 -> 2
+gam0023 gamma 4 -> 6
+gam0024 gamma 5 -> 24
+gam0025 gamma 6 -> 120
+
+-- half integers
+gam0030 gamma 0.5 -> 1.7724538509055161
+gam0031 gamma 1.5 -> 0.88622692545275805
+gam0032 gamma 2.5 -> 1.3293403881791370
+gam0033 gamma 3.5 -> 3.3233509704478426
+gam0034 gamma -0.5 -> -3.5449077018110322
+gam0035 gamma -1.5 -> 2.3632718012073548
+gam0036 gamma -2.5 -> -0.94530872048294190
+gam0037 gamma -3.5 -> 0.27008820585226911
+
+-- values near 0
+gam0040 gamma 0.1 -> 9.5135076986687306
+gam0041 gamma 0.01 -> 99.432585119150602
+gam0042 gamma 1e-8 -> 99999999.422784343
+gam0043 gamma 1e-16 -> 10000000000000000
+gam0044 gamma 1e-30 -> 9.9999999999999988e+29
+gam0045 gamma 1e-160 -> 1.0000000000000000e+160
+gam0046 gamma 1e-308 -> 1.0000000000000000e+308
+gam0047 gamma 5.6e-309 -> 1.7857142857142848e+308
+gam0048 gamma 5.5e-309 -> inf   overflow
+gam0049 gamma 1e-309 -> inf     overflow
+gam0050 gamma 1e-323 -> inf     overflow
+gam0051 gamma 5e-324 -> inf     overflow
+gam0060 gamma -0.1 -> -10.686287021193193
+gam0061 gamma -0.01 -> -100.58719796441078
+gam0062 gamma -1e-8 -> -100000000.57721567
+gam0063 gamma -1e-16 -> -10000000000000000
+gam0064 gamma -1e-30 -> -9.9999999999999988e+29
+gam0065 gamma -1e-160 -> -1.0000000000000000e+160
+gam0066 gamma -1e-308 -> -1.0000000000000000e+308
+gam0067 gamma -5.6e-309 -> -1.7857142857142848e+308
+gam0068 gamma -5.5e-309 -> -inf overflow
+gam0069 gamma -1e-309 -> -inf   overflow
+gam0070 gamma -1e-323 -> -inf   overflow
+gam0071 gamma -5e-324 -> -inf   overflow
+
+-- values near negative integers
+gam0080 gamma -0.99999999999999989 -> -9007199254740992.0
+gam0081 gamma -1.0000000000000002 -> 4503599627370495.5
+gam0082 gamma -1.9999999999999998 -> 2251799813685248.5
+gam0083 gamma -2.0000000000000004 -> -1125899906842623.5
+gam0084 gamma -100.00000000000001 -> -7.5400833348831090e-145
+gam0085 gamma -99.999999999999986 -> 7.5400833348840962e-145
+
+-- large inputs
+gam0100 gamma 170 -> 4.2690680090047051e+304
+gam0101 gamma 171 -> 7.2574156153079990e+306
+gam0102 gamma 171.624 -> 1.7942117599248104e+308
+gam0103 gamma 171.625 -> inf    overflow
+gam0104 gamma 172 -> inf        overflow
+gam0105 gamma 2000 -> inf       overflow
+gam0106 gamma 1.7e308 -> inf    overflow
+
+-- inputs for which gamma(x) is tiny
+gam0120 gamma -100.5 -> -3.3536908198076787e-159
+gam0121 gamma -160.5 -> -5.2555464470078293e-286
+gam0122 gamma -170.5 -> -3.3127395215386074e-308
+gam0123 gamma -171.5 -> 1.9316265431711902e-310
+gam0124 gamma -176.5 -> -1.1956388629358166e-321
+gam0125 gamma -177.5 -> 4.9406564584124654e-324
+gam0126 gamma -178.5 -> -0.0
+gam0127 gamma -179.5 -> 0.0
+gam0128 gamma -201.0001 -> 0.0
+gam0129 gamma -202.9999 -> -0.0
+gam0130 gamma -1000.5 -> -0.0
+gam0131 gamma -1000000000.3 -> -0.0
+gam0132 gamma -4503599627370495.5 -> 0.0
+
+-- inputs that cause problems for the standard reflection formula,
+-- thanks to loss of accuracy in 1-x
+gam0140 gamma -63.349078729022985 -> 4.1777971677761880e-88
+gam0141 gamma -127.45117632943295 -> 1.1831110896236810e-214
+
+
+-----------------------------------------------------------
+-- log1p: log(1 + x), without precision loss for small x --
+-----------------------------------------------------------
+
+-- special values
+log1p0000 log1p 0.0 -> 0.0
+log1p0001 log1p -0.0 -> -0.0
+log1p0002 log1p inf -> inf
+log1p0003 log1p -inf -> nan             invalid
+log1p0004 log1p nan -> nan
+
+-- singularity at -1.0
+log1p0010 log1p -1.0 -> -inf            divide-by-zero
+log1p0011 log1p -0.9999999999999999 -> -36.736800569677101
+
+-- finite values < 1.0 are invalid
+log1p0020 log1p -1.0000000000000002 -> nan invalid
+log1p0021 log1p -1.1 -> nan invalid
+log1p0022 log1p -2.0 -> nan invalid
+log1p0023 log1p -1e300 -> nan invalid
+
+-- tiny x: log1p(x) ~ x
+log1p0110 log1p 5e-324 -> 5e-324
+log1p0111 log1p 1e-320 -> 1e-320
+log1p0112 log1p 1e-300 -> 1e-300
+log1p0113 log1p 1e-150 -> 1e-150
+log1p0114 log1p 1e-20 -> 1e-20
+
+log1p0120 log1p -5e-324 -> -5e-324
+log1p0121 log1p -1e-320 -> -1e-320
+log1p0122 log1p -1e-300 -> -1e-300
+log1p0123 log1p -1e-150 -> -1e-150
+log1p0124 log1p -1e-20 -> -1e-20
+
+-- some (mostly) random small and moderate-sized values
+log1p0200 log1p -0.89156889782277482 -> -2.2216403106762863
+log1p0201 log1p -0.23858496047770464 -> -0.27257668276980057
+log1p0202 log1p -0.011641726191307515 -> -0.011710021654495657
+log1p0203 log1p -0.0090126398571693817 -> -0.0090534993825007650
+log1p0204 log1p -0.00023442805985712781 -> -0.00023445554240995693
+log1p0205 log1p -1.5672870980936349e-5 -> -1.5672993801662046e-5
+log1p0206 log1p -7.9650013274825295e-6 -> -7.9650330482740401e-6
+log1p0207 log1p -2.5202948343227410e-7 -> -2.5202951519170971e-7
+log1p0208 log1p -8.2446372820745855e-11 -> -8.2446372824144559e-11
+log1p0209 log1p -8.1663670046490789e-12 -> -8.1663670046824230e-12
+log1p0210 log1p 7.0351735084656292e-18 -> 7.0351735084656292e-18
+log1p0211 log1p 5.2732161907375226e-12 -> 5.2732161907236188e-12
+log1p0212 log1p 1.0000000000000000e-10 -> 9.9999999995000007e-11
+log1p0213 log1p 2.1401273266000197e-9 -> 2.1401273243099470e-9
+log1p0214 log1p 1.2668914653979560e-8 -> 1.2668914573728861e-8
+log1p0215 log1p 1.6250007816299069e-6 -> 1.6249994613175672e-6
+log1p0216 log1p 8.3740495645839399e-6 -> 8.3740145024266269e-6
+log1p0217 log1p 3.0000000000000001e-5 -> 2.9999550008999799e-5
+log1p0218 log1p 0.0070000000000000001 -> 0.0069756137364252423
+log1p0219 log1p 0.013026235315053002 -> 0.012942123564008787
+log1p0220 log1p 0.013497160797236184 -> 0.013406885521915038
+log1p0221 log1p 0.027625599078135284 -> 0.027250897463483054
+log1p0222 log1p 0.14179687245544870 -> 0.13260322540908789
+
+-- large values
+log1p0300 log1p 1.7976931348623157e+308 -> 709.78271289338397
+log1p0301 log1p 1.0000000000000001e+300 -> 690.77552789821368
+log1p0302 log1p 1.0000000000000001e+70 -> 161.18095650958321
+log1p0303 log1p 10000000000.000000 -> 23.025850930040455
+
+-- other values transferred from testLog1p in test_math
+log1p0400 log1p -0.63212055882855767 -> -1.0000000000000000
+log1p0401 log1p 1.7182818284590451 -> 1.0000000000000000
+log1p0402 log1p 1.0000000000000000 -> 0.69314718055994529
+log1p0403 log1p 1.2379400392853803e+27 -> 62.383246250395075
+
+
+-----------------------------------------------------------
+-- expm1: exp(x) - 1, without precision loss for small x --
+-----------------------------------------------------------
+
+-- special values
+expm10000 expm1 0.0 -> 0.0
+expm10001 expm1 -0.0 -> -0.0
+expm10002 expm1 inf -> inf
+expm10003 expm1 -inf -> -1.0
+expm10004 expm1 nan -> nan
+
+-- expm1(x) ~ x for tiny x
+expm10010 expm1 5e-324 -> 5e-324
+expm10011 expm1 1e-320 -> 1e-320
+expm10012 expm1 1e-300 -> 1e-300
+expm10013 expm1 1e-150 -> 1e-150
+expm10014 expm1 1e-20 -> 1e-20
+
+expm10020 expm1 -5e-324 -> -5e-324
+expm10021 expm1 -1e-320 -> -1e-320
+expm10022 expm1 -1e-300 -> -1e-300
+expm10023 expm1 -1e-150 -> -1e-150
+expm10024 expm1 -1e-20 -> -1e-20
+
+-- moderate sized values, where direct evaluation runs into trouble
+expm10100 expm1 1e-10 -> 1.0000000000500000e-10
+expm10101 expm1 -9.9999999999999995e-08 -> -9.9999995000000163e-8
+expm10102 expm1 3.0000000000000001e-05 -> 3.0000450004500034e-5
+expm10103 expm1 -0.0070000000000000001 -> -0.0069755570667648951
+expm10104 expm1 -0.071499208740094633 -> -0.069002985744820250
+expm10105 expm1 -0.063296004180116799 -> -0.061334416373633009
+expm10106 expm1 0.02390954035597756 -> 0.024197665143819942
+expm10107 expm1 0.085637352649044901 -> 0.089411184580357767
+expm10108 expm1 0.5966174947411006 -> 0.81596588596501485
+expm10109 expm1 0.30247206212075139 -> 0.35319987035848677
+expm10110 expm1 0.74574727375889516 -> 1.1080161116737459
+expm10111 expm1 0.97767512926555711 -> 1.6582689207372185
+expm10112 expm1 0.8450154566787712 -> 1.3280137976535897
+expm10113 expm1 -0.13979260323125264 -> -0.13046144381396060
+expm10114 expm1 -0.52899322039643271 -> -0.41080213643695923
+expm10115 expm1 -0.74083261478900631 -> -0.52328317124797097
+expm10116 expm1 -0.93847766984546055 -> -0.60877704724085946
+expm10117 expm1 10.0 -> 22025.465794806718
+expm10118 expm1 27.0 -> 532048240600.79865
+expm10119 expm1 123 -> 2.6195173187490626e+53
+expm10120 expm1 -12.0 -> -0.99999385578764666
+expm10121 expm1 -35.100000000000001 -> -0.99999999999999944
+
+-- extreme negative values
+expm10201 expm1 -37.0 -> -0.99999999999999989
+expm10200 expm1 -38.0 -> -1.0
+expm10210 expm1 -710.0 -> -1.0
+-- the formula expm1(x) = 2 * sinh(x/2) * exp(x/2) doesn't work so
+-- well when exp(x/2) is subnormal or underflows to zero; check we're
+-- not using it!
+expm10211 expm1 -1420.0 -> -1.0
+expm10212 expm1 -1450.0 -> -1.0
+expm10213 expm1 -1500.0 -> -1.0
+expm10214 expm1 -1e50 -> -1.0
+expm10215 expm1 -1.79e308 -> -1.0
+
+-- extreme positive values
+expm10300 expm1 300 -> 1.9424263952412558e+130
+expm10301 expm1 700 -> 1.0142320547350045e+304
+-- the next test (expm10302) is disabled because it causes failure on
+-- OS X 10.4/Intel: apparently all values over 709.78 produce an
+-- overflow on that platform.  See issue #7575.
+-- expm10302 expm1 709.78271289328393 -> 1.7976931346824240e+308
+expm10303 expm1 709.78271289348402 -> inf overflow
+expm10304 expm1 1000 -> inf overflow
+expm10305 expm1 1e50 -> inf overflow
+expm10306 expm1 1.79e308 -> inf overflow
+
+-- weaker version of expm10302
+expm10307 expm1 709.5 -> 1.3549863193146328e+308
+
+-------------------------
+-- log2: log to base 2 --
+-------------------------
+
+-- special values
+log20000 log2 0.0 -> -inf               divide-by-zero
+log20001 log2 -0.0 -> -inf              divide-by-zero
+log20002 log2 inf -> inf
+log20003 log2 -inf -> nan               invalid
+log20004 log2 nan -> nan
+
+-- exact value at 1.0
+log20010 log2 1.0 -> 0.0
+
+-- negatives
+log20020 log2 -5e-324 -> nan            invalid
+log20021 log2 -1.0 -> nan               invalid
+log20022 log2 -1.7e-308 -> nan          invalid
+
+-- exact values at powers of 2
+log20100 log2 2.0 -> 1.0
+log20101 log2 4.0 -> 2.0
+log20102 log2 8.0 -> 3.0
+log20103 log2 16.0 -> 4.0
+log20104 log2 32.0 -> 5.0
+log20105 log2 64.0 -> 6.0
+log20106 log2 128.0 -> 7.0
+log20107 log2 256.0 -> 8.0
+log20108 log2 512.0 -> 9.0
+log20109 log2 1024.0 -> 10.0
+log20110 log2 2048.0 -> 11.0
+
+log20200 log2 0.5 -> -1.0
+log20201 log2 0.25 -> -2.0
+log20202 log2 0.125 -> -3.0
+log20203 log2 0.0625 -> -4.0
+
+-- values close to 1.0
+log20300 log2 1.0000000000000002 -> 3.2034265038149171e-16
+log20301 log2 1.0000000001 -> 1.4426951601859516e-10
+log20302 log2 1.00001 -> 1.4426878274712997e-5
+
+log20310 log2 0.9999999999999999 -> -1.6017132519074588e-16
+log20311 log2 0.9999999999 -> -1.4426951603302210e-10
+log20312 log2 0.99999 -> -1.4427022544056922e-5
+
+-- tiny values
+log20400 log2 5e-324 -> -1074.0
+log20401 log2 1e-323 -> -1073.0
+log20402 log2 1.5e-323 -> -1072.4150374992789
+log20403 log2 2e-323 -> -1072.0
+
+log20410 log2 1e-308 -> -1023.1538532253076
+log20411 log2 2.2250738585072014e-308 -> -1022.0
+log20412 log2 4.4501477170144028e-308 -> -1021.0
+log20413 log2 1e-307 -> -1019.8319251304202
+
+-- huge values
+log20500 log2 1.7976931348623157e+308 -> 1024.0
+log20501 log2 1.7e+308 -> 1023.9193879716706
+log20502 log2 8.9884656743115795e+307 -> 1023.0
+
+-- selection of random values
+log20600 log2 -7.2174324841039838e+289 -> nan   invalid
+log20601 log2 -2.861319734089617e+265 -> nan    invalid
+log20602 log2 -4.3507646894008962e+257 -> nan   invalid
+log20603 log2 -6.6717265307520224e+234 -> nan   invalid
+log20604 log2 -3.9118023786619294e+229 -> nan   invalid
+log20605 log2 -1.5478221302505161e+206 -> nan   invalid
+log20606 log2 -1.4380485131364602e+200 -> nan   invalid
+log20607 log2 -3.7235198730382645e+185 -> nan   invalid
+log20608 log2 -1.0472242235095724e+184 -> nan   invalid
+log20609 log2 -5.0141781956163884e+160 -> nan   invalid
+log20610 log2 -2.1157958031160324e+124 -> nan   invalid
+log20611 log2 -7.9677558612567718e+90 -> nan    invalid
+log20612 log2 -5.5553906194063732e+45 -> nan    invalid
+log20613 log2 -16573900952607.953 -> nan        invalid
+log20614 log2 -37198371019.888618 -> nan        invalid
+log20615 log2 -6.0727115121422674e-32 -> nan    invalid
+log20616 log2 -2.5406841656526057e-38 -> nan    invalid
+log20617 log2 -4.9056766703267657e-43 -> nan    invalid
+log20618 log2 -2.1646786075228305e-71 -> nan    invalid
+log20619 log2 -2.470826790488573e-78 -> nan     invalid
+log20620 log2 -3.8661709303489064e-165 -> nan   invalid
+log20621 log2 -1.0516496976649986e-182 -> nan   invalid
+log20622 log2 -1.5935458614317996e-255 -> nan   invalid
+log20623 log2 -2.8750977267336654e-293 -> nan   invalid
+log20624 log2 -7.6079466794732585e-296 -> nan   invalid
+log20625 log2 3.2073253539988545e-307 -> -1018.1505544209213
+log20626 log2 1.674937885472249e-244 -> -809.80634755783126
+log20627 log2 1.0911259044931283e-214 -> -710.76679472274213
+log20628 log2 2.0275372624809709e-154 -> -510.55719818383272
+log20629 log2 7.3926087369631841e-115 -> -379.13564735312292
+log20630 log2 1.3480198206342423e-86 -> -285.25497445094436
+log20631 log2 8.9927384655719947e-83 -> -272.55127136401637
+log20632 log2 3.1452398713597487e-60 -> -197.66251564496875
+log20633 log2 7.0706573215457351e-55 -> -179.88420087782217
+log20634 log2 3.1258285390731669e-49 -> -161.13023800505653
+log20635 log2 8.2253046627829942e-41 -> -133.15898277355879
+log20636 log2 7.8691367397519897e+49 -> 165.75068202732419
+log20637 log2 2.9920561983925013e+64 -> 214.18453534573757
+log20638 log2 4.7827254553946841e+77 -> 258.04629628445673
+log20639 log2 3.1903566496481868e+105 -> 350.47616767491166
+log20640 log2 5.6195082449502419e+113 -> 377.86831861008250
+log20641 log2 9.9625658250651047e+125 -> 418.55752921228753
+log20642 log2 2.7358945220961532e+145 -> 483.13158636923413
+log20643 log2 2.785842387926931e+174 -> 579.49360214860280
+log20644 log2 2.4169172507252751e+193 -> 642.40529039289652
+log20645 log2 3.1689091206395632e+205 -> 682.65924573798395
+log20646 log2 2.535995592365391e+208 -> 692.30359597460460
+log20647 log2 6.2011236566089916e+233 -> 776.64177576730913
+log20648 log2 2.1843274820677632e+253 -> 841.57499717289647
+log20649 log2 8.7493931063474791e+297 -> 989.74182713073981

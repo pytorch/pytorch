@@ -269,7 +269,14 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(0)
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Conjugate):
+            extra_dispatch_keys = extra_dispatch_keys.add(
+                torch._C.DispatchKey.Conjugate
+            )
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Negative):
+            extra_dispatch_keys = extra_dispatch_keys.add(torch._C.DispatchKey.Negative)
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             spec.tensor_meta.shape,
             strides=spec.tensor_meta.stride,
@@ -277,6 +284,7 @@ class DTensor(torch.Tensor):
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
+            _extra_dispatch_keys=extra_dispatch_keys,
         )
 
         r._spec = spec
@@ -346,7 +354,7 @@ class DTensor(torch.Tensor):
     @torch._disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
@@ -486,7 +494,7 @@ class DTensor(torch.Tensor):
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
-        DTensor from its current placements to a new placements, or from is current DeviceMesh
+        DTensor from its current placements to a new placements, or from its current DeviceMesh
         to a new DeviceMesh. i.e. we can turn a Sharded DTensor to a Replicated DTensor by
         specifying a Replicate placement for each dimension of the DeviceMesh.
 
@@ -563,7 +571,7 @@ class DTensor(torch.Tensor):
         """
         Return the full tensor of this DTensor. It will perform necessary collectives
         to gather the local tensors from other ranks in its DeviceMesh and concatenate
-        them together. It's a syntatic sugar of the following code:
+        them together. It's a syntactic sugar of the following code:
 
         ``dtensor.redistribute(placements=[Replicate()] * mesh.ndim).to_local()``
 
@@ -996,8 +1004,6 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements: Optional[Sequence[Placement]] = None,
     **kwargs,
 ) -> DTensor:
-    # from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
@@ -1005,7 +1011,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     # set default placements to replicated if not specified
     placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
 
-    # check device_mesh againts placements
+    # check device_mesh against placements
     assert device_mesh.ndim == len(placements), (
         "mesh dimension does not match the length of placements"
     )

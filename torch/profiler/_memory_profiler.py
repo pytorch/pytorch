@@ -91,7 +91,7 @@ class _Storage:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
 class TensorKey(Key):
-    """Hashable identifier for a storage which has been asigned an ID.
+    """Hashable identifier for a storage which has been assigned an ID.
 
     A detailed description of Tensor IDs and why they are needed is given in
     `torch/csrc/profiler/collection.h` when `TensorID` is declared. To
@@ -239,10 +239,12 @@ class SchemaMatcher:
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
-            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            TensorKey.from_tensor(i)
+            if isinstance(i, _TensorMetadata)
             #
             # TensorList
-            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            else [TensorKey.from_tensor(j) for j in i]
+            if isinstance(i, list)
             #
             # Scalar and uncaptured inputs.
             else i
@@ -514,7 +516,7 @@ class DataFlowGraph:
     def flow_nodes(self) -> tuple[DataFlowNode, ...]:
         return tuple(self._flow_nodes)
 
-    def validate(self):
+    def validate(self) -> None:
         # Check that each (Tensor, version) pair has a unique creation node
         outputs: set[tuple[TensorKey, int]] = set()
         for node in self.flow_nodes:
@@ -964,7 +966,7 @@ class MemoryProfile:
                     if key is not None:
                         self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
 
-    def _set_autograd_detail(self):
+    def _set_autograd_detail(self) -> None:
         prior = {None, Category.AUTOGRAD_DETAIL}
         for node in self._data_flow_graph.flow_nodes:
             if RecordScope.BACKWARD_FUNCTION in get_scopes(node._event):
@@ -976,7 +978,7 @@ class MemoryProfile:
 
 
 class MemoryProfileTimeline:
-    def __init__(self, memory_profile):
+    def __init__(self, memory_profile) -> None:
         """The minimum representation of the memory profile timeline
         includes the memory timeline and categories. The timeline
         consists of [timestamp, action, (TensorKey, version), numbytes]
@@ -999,7 +1001,7 @@ class MemoryProfileTimeline:
         times: list[int] = []
         sizes: list[list[int]] = []
 
-        def update(key, version, delta):
+        def update(key, version, delta) -> None:
             category = (
                 self.categories.get(key, version)
                 if isinstance(key, TensorKey)

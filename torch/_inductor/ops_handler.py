@@ -31,6 +31,7 @@ ReductionType = Literal[
     "prod",
     "sum",
     "xor_sum",
+    "online_softmax_reduce",
 ]
 
 
@@ -681,40 +682,6 @@ class OpsHandler(Generic[T]):
     ) -> None:
         raise NotImplementedError
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In CUDA, optimized implementations of other mathematical operations are
-    # offered separately via libdevice for double precision computation (in
-    # Triton, these go to tl.math rather than tl).  We lower to these
-    # operators when doing FP64 on CUDA.  Note that some operators
-    # unconditional go to tl.math.
-    #
-    # TODO(ezyang): Is this really the best way to do this?  What if we have
-    # abs internally route to tl.math automatically when given a double
-    # precision input?  One reason is that when doing codegen, we often don't
-    # know what the dtype of the inputs are!  (In principle we do know, but
-    # for many analyses it's not conveniently available.)
-
-    def libdevice_abs(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_exp(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sqrt(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_cos(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sin(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sigmoid(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_log(self, x0: T) -> T:
-        raise NotImplementedError
-
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
         raise NotImplementedError
@@ -737,6 +704,9 @@ class OpsHandler(Generic[T]):
 
     def placeholder(self, index: int) -> T:
         """This is a fake op used in analysis but not codegen"""
+        raise NotImplementedError
+
+    def device_assert_async(self, cond: T, msg: str) -> T:
         raise NotImplementedError
 
 
@@ -820,6 +790,9 @@ class DefaultHandler(OpsHandler[Any]):
         for target, impl in ctx.items():
             if target in OP_NAMES:
                 setattr(cls, target, impl)
+
+    def device_assert_async(self, cond, msg):
+        return None
 
 
 DefaultHandler._init_cls()
@@ -966,6 +939,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
+    def device_assert_async(self, cond, msg):
+        return None
+
 
 class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler: OpsHandler[Any]):
@@ -1031,6 +1007,9 @@ class KernelFormatterHandler(DefaultHandler):
     def getvalue(self, result):
         self._output.writeline(f"return {result}")
         return self._output.getvalue()
+
+    def device_assert_async(self, cond, msg: str):
+        return f"ops.device_assert_async({cond}, {msg})"
 
 
 class WrapperHandler(DefaultHandler):

@@ -94,21 +94,21 @@ kernel void histogramdd(
   }
 }
 
-#define REGISTER_HISTOGRAMDD_OP(DTYPE)                           \
-  template [[host_name("histogramdd_" #DTYPE)]] kernel void      \
-  histogramdd<DTYPE>(                                            \
-      constant DTYPE * input_ [[buffer(0)]],                     \
-      constant DTYPE * weight [[buffer(1)]],                     \
-      device DTYPE * local_out [[buffer(2)]],                    \
-      constant uint * offsets [[buffer(3)]],                     \
-      constant size_t & num_dims [[buffer(4)]],                  \
-      constant DTYPE * bin_seq [[buffer(5)]],                    \
-      constant int64_t * num_bin_edges [[buffer(6)]],            \
-      constant DTYPE * leftmost_edge [[buffer(7)]],              \
-      constant DTYPE * rightmost_edge [[buffer(8)]],             \
-      constant int64_t * local_out_strides [[buffer(9)]],        \
-      constant uint8_t & bin_selection_algorithm [[buffer(10)]], \
-      constant uint8_t & has_weight [[buffer(11)]],              \
+#define REGISTER_HISTOGRAMDD_OP(DTYPE)                          \
+  template [[host_name("histogramdd_" #DTYPE)]] kernel void     \
+  histogramdd<DTYPE>(                                           \
+      constant DTYPE * input_ [[buffer(0)]],                    \
+      constant DTYPE * weight [[buffer(1)]],                    \
+      device DTYPE * local_out [[buffer(2)]],                   \
+      constant uint * offsets [[buffer(3)]],                    \
+      constant size_t& num_dims [[buffer(4)]],                  \
+      constant DTYPE* bin_seq [[buffer(5)]],                    \
+      constant int64_t* num_bin_edges [[buffer(6)]],            \
+      constant DTYPE* leftmost_edge [[buffer(7)]],              \
+      constant DTYPE* rightmost_edge [[buffer(8)]],             \
+      constant int64_t* local_out_strides [[buffer(9)]],        \
+      constant uint8_t& bin_selection_algorithm [[buffer(10)]], \
+      constant uint8_t& has_weight [[buffer(11)]],              \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);

@@ -19,6 +19,7 @@ variable tracking system.
 import collections
 import inspect
 import operator
+import sys
 from typing import Optional, TYPE_CHECKING
 
 import torch
@@ -26,8 +27,8 @@ import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
-from ..source import AttrSource
+from ..exc import raise_observed_exception, unimplemented_v2
+from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
     cmp_name_to_op_mapping,
     cmp_name_to_op_str_mapping,
@@ -37,6 +38,8 @@ from ..utils import (
     Lit,
     namedtuple_fields,
     odict_values,
+    raise_args_mismatch,
+    range_iterator,
     set_example_value,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -108,6 +111,9 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
+            if index.step == 0:
+                msg = ConstantVariable.create("slice step cannot be zero")
+                raise_observed_exception(ValueError, tx, args=[msg])
             # Set source to None because slicing a list gives a new local
             return self.clone(
                 items=self.items[index],
@@ -116,7 +122,12 @@ class BaseListVariable(VariableTracker):
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
-            return self.items[index]
+            try:
+                return self.items[index]
+            except IndexError:
+                raise_observed_exception(
+                    IndexError, tx, args=["list index out of range"]
+                )
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -131,27 +142,93 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
+            if len(args) != 1:
+                msg = ConstantVariable.create(
+                    f"{name} takes exactly one argument ({len(args)} given)"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:
-                    unimplemented("__getitem__ with non-constant tensor")
+                    unimplemented_v2(
+                        gb_type="Indexing list with non-scalar tensor",
+                        context=f"call_method {self} {name} {args} {kwargs}",
+                        explanation=(
+                            "Attempted to index list-like object with tensor with > 1 element."
+                        ),
+                        hints=[*graph_break_hints.USER_ERROR],
+                    )
             else:
                 value = args[0]
+
+            if value.python_type() not in (int, slice):
+                msg = f"indices must be integers or slices, not {value.python_type()}"
+                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+
             return self.getitem_const(tx, value)
         elif name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
+            if not len(args):
+                raise_args_mismatch(tx, name)
+
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
+        elif name == "count":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+            return VariableTracker.build(tx, operator.countOf).call_function(
+                tx,
+                [self, args[0]],
+                kwargs,
+            )
+        elif name in ("__add__", "__iadd__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            if type(self) != type(args[0]):
+                tp_name = self.python_type_name()
+                other = args[0].python_type_name()
+                msg = ConstantVariable.create(
+                    f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            if name == "__add__":
+                return type(self)(self.items + args[0].items, source=self.source)
+            else:
+                self.items += args[0].items
+                return self
+        elif name in ("__mul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            if not (args[0].is_python_constant() and args[0].python_type() is int):
+                msg = ConstantVariable.create(
+                    f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            val = args[0].as_python_constant()
+
+            if name == "__mul__":
+                return type(self)(self.items * val, source=self.source)
+            else:
+                self.items *= val
+                return self
         elif name in cmp_name_to_op_mapping:
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             left = self
             right = args[0]
             # TODO this type check logic mirrors the following
@@ -200,6 +277,16 @@ class RangeVariable(BaseListVariable):
             start, stop, step = items_to_map
         else:
             raise AssertionError
+
+        def maybe_as_int(x):
+            return (
+                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+            )
+
+        # cast each argument to an integer
+        start = maybe_as_int(start)
+        step = maybe_as_int(step)
+        stop = maybe_as_int(stop)
 
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
@@ -287,7 +374,12 @@ class RangeVariable(BaseListVariable):
             index = length + index
 
         if index < 0 or index >= length:
-            raise IndexError(f"index {index} is out of range")
+            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+            raise_observed_exception(
+                IndexError,
+                tx,
+                args=[ConstantVariable("range object index out of range")],
+            )
 
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
 
@@ -321,8 +413,11 @@ class RangeVariable(BaseListVariable):
 
         if isinstance(index, slice):
             return self.apply_slice(index)
-        else:
+        elif isinstance(index, int):
             return self.apply_index(index)
+        else:
+            msg = ConstantVariable("range indices must be integers or slices")
+            raise_observed_exception(TypeError, tx, args=[msg])
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
@@ -338,11 +433,94 @@ class RangeVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if self.python_type() is not range:
+            return super().call_obj_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr(range(0), name))
+
+    def range_equals(self, other: "RangeVariable"):
+        r0, r1 = self, other
+        if (
+            self.range_length() != r1.range_length()
+            or self.range_length() == 0
+            or r0.start() != r1.start()
+        ):
+            return False
+
+        if len(r0) == 1:
+            return True
+
+        return r0.step() == r1.step()
+
+    def range_count(self, x: VariableTracker):
+        # Based on CPython
+        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
+        x = x.as_python_constant()
+        if type(x) not in (bool, int, float):
+            return 0
+
+        start, stop, step = self.start(), self.stop(), self.step()
+
+        if step == 0:
+            return 0
+
+        in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+
+        if in_range:
+            re = ((x - start) % step) == 0
+            return int(re)
+        return 0
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__iter__":
+            if not all(var.is_python_constant() for var in self.items):
+                # Can't represent a `range_iterator` without well defined bounds
+                return variables.misc.DelayGraphBreakVariable(
+                    msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
+                )
+            return RangeIteratorVariable(
+                self.start(), self.stop(), self.step(), self.range_length()
+            )
+        elif name == "__len__":
+            length = self.range_length()
+            if length > sys.maxsize:
+                raise_observed_exception(OverflowError, tx)
+            return ConstantVariable.create(self.range_length())
+        elif name in ("count", "__contains__"):
+            return ConstantVariable(self.range_count(*args))
+        elif name == "__getitem__":
+            return self.getitem_const(tx, *args)
+        elif name in cmp_name_to_op_mapping:
+            other = args[0]
+            pt = other.python_type()
+            if name not in ("__eq__", "__ne__"):
+                # ranges are only comparable to other ranges
+                msg = f"{name} not supported between instances of 'range' and '{pt}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(msg)],
+                )
+
+            if pt is not range:
+                return ConstantVariable.create(NotImplemented)
+
+            cmp = self.range_equals(other)
+
+            # Two ranges are equal if they produce the same sequence of values
+            if name == "__eq__":
+                return ConstantVariable(cmp)
+            else:
+                return ConstantVariable(not cmp)
+        return super().call_method(tx, name, args, kwargs)
+
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
-        if name not in fields:
-            unimplemented(f"range.{name}")
-        return self.items[fields.index(name)]
+        if name in fields:
+            return self.items[fields.index(name)]
+        return super().var_getattr(tx, name)
 
 
 class CommonListMethodsVariable(BaseListVariable):
@@ -361,24 +539,28 @@ class CommonListMethodsVariable(BaseListVariable):
 
         if name == "append" and self.is_mutable():
             assert not kwargs
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             (arg,) = args
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
             return ConstantVariable.create(None)
-        elif (
-            name == "extend"
-            and self.is_mutable()
-            and args
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
-            assert not kwargs
+        elif name == "extend" and self.is_mutable():
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
+
+            if not args[0].has_force_unpack_var_sequence(tx):
+                msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
+                raise_observed_exception(TypeError, tx, args=[msg])
+
             (arg,) = args
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
-            assert not kwargs
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(tx, name)
             idx, value = args
             if isinstance(idx, SymNodeVariable):
                 const_idx = idx.evaluate_expr()
@@ -389,10 +571,23 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
             assert not kwargs
+            if kwargs or len(args) > 1:
+                raise_args_mismatch(tx, name)
+
+            if len(self.items) == 0:
+                msg = ConstantVariable.create("pop from empty list")
+                raise_observed_exception(IndexError, tx, args=[msg])
+
+            if len(args):
+                idx = args[0].as_python_constant()
+                if idx > len(self.items):
+                    msg = ConstantVariable.create("pop index out of range")
+                    raise_observed_exception(IndexError, tx, args=[msg])
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.is_mutable():
-            assert not kwargs and not args
+            if args or kwargs:
+                raise_observed_exception(TypeError, tx)
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
@@ -400,27 +595,84 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "__setitem__"
             and self.is_mutable()
             and args
-            and args[0].is_python_constant()
+            and (
+                args[0].is_python_constant()
+                or isinstance(args[0], SymNodeVariable)
+                or (
+                    isinstance(args[0], SliceVariable)
+                    and all(
+                        s.is_python_constant() or isinstance(s, SymNodeVariable)
+                        for s in args[0].items
+                    )
+                )
+            )
         ):
             assert not kwargs
             key, value = args
             tx.output.side_effects.mutation(self)
-            if isinstance(key, SliceVariable):
-                self.items[key.as_python_constant()] = list(value.items)
+            if isinstance(key, SymNodeVariable):
+                self.items[key.evaluate_expr()] = value
+            elif isinstance(key, SliceVariable):
+                if key.is_python_constant():
+                    self.items[key.as_python_constant()] = list(value.items)
+                else:
+                    items = slice(
+                        *[
+                            s.evaluate_expr()
+                            if isinstance(s, SymNodeVariable)
+                            else s.as_python_constant()
+                            for s in key.items
+                        ]
+                    )
+                    self.items[items] = list(value.items)
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
+        elif name == "__delitem__" and self.is_mutable():
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            tx.output.side_effects.mutation(self)
+            if args[0].is_python_constant() and isinstance(
+                args[0].as_python_constant(), (int, slice)
+            ):
+                if isinstance(args[0], SymNodeVariable):
+                    idx = args[0].evaluate_expr()
+                else:
+                    idx = args[0].as_python_constant()
+
+                try:
+                    self.items.__delitem__(idx)
+                except (IndexError, ValueError) as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
+            else:
+                msg = ConstantVariable.create(
+                    f"list indices must be integers or slices, not {args[0].python_type_name()}"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
-            assert not kwargs
-            assert not args
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             items = list(self.items)
             return self.modified(items, mutation_type=ValueMutationNew())
         elif name == "reverse" and self.is_mutable():
-            assert not kwargs
-            assert not args
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.items.reverse()
             tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
+        elif name == "remove" and self.is_mutable():
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(tx, name)
+
+            idx = self.call_method(tx, "index", args, kwargs)
+            self.call_method(tx, "pop", [idx], {})
             return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -447,25 +699,49 @@ class ListVariable(CommonListMethodsVariable):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if (
-            name == "__setitem__"
-            and self.is_mutable()
-            and args
-            and args[0].is_python_constant()
-        ):
-            assert not kwargs
+        from .tensor import SymNodeVariable
+
+        if name == "__setitem__" and self.is_mutable():
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(tx, name)
             key, value = args
+
+            if not key.is_python_constant():
+                # probably will graph-break
+                super().call_method(tx, name, args, kwargs)
+
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
-                    unimplemented(
-                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    msg = ConstantVariable.create("can only assign an iterable")
+                    raise_observed_exception(TypeError, tx, args=[msg])
+
+                key = key.as_python_constant()
+                if key.step == 0:
+                    msg = ConstantVariable.create("slice step cannot be zero")
+                    raise_observed_exception(ValueError, tx, args=[msg])
+
+                value = value.force_unpack_var_sequence(tx)
+                try:
+                    self.items[key] = value
+                except Exception as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
                     )
-                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
-                    tx
-                )
             else:
-                self.items[key.as_python_constant()] = value
+                if isinstance(key, SymNodeVariable):
+                    key = key.evaluate_expr()
+                else:
+                    key = key.as_python_constant()
+
+                try:
+                    self.items[key] = value
+                except (IndexError, TypeError) as e:
+                    raise_observed_exception(
+                        type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                    )
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
@@ -485,7 +761,28 @@ class ListVariable(CommonListMethodsVariable):
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
             if not all(k.is_python_constant() for k in keys):
-                unimplemented("sort with non-constant keys")
+                first_non_constant_key = None
+                for k in keys:
+                    if not k.is_python_constant():
+                        first_non_constant_key = k
+                assert first_non_constant_key is not None
+
+                try:
+                    python_type = first_non_constant_key.python_type()
+                except NotImplementedError:
+                    python_type = "unknown"
+
+                unimplemented_v2(
+                    gb_type="sort with non-constant keys",
+                    context=str(first_non_constant_key),
+                    explanation=(
+                        f"Cannot perform sort with non-constant key. "
+                        f"First non-constant key type: {python_type}. "
+                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
+                        f"sort ints."
+                    ),
+                    hints=["Use something else as the key."],
+                )
 
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
@@ -847,10 +1144,10 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs) -> None:
+    def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {}
+        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -950,6 +1247,10 @@ class NamedTupleVariable(TupleVariable):
             else:
                 return None
 
+        if name == "_fields":
+            source = NamedTupleFieldsSource(self.source) if self.source else None
+            return VariableTracker.build(tx, self.fields(), source=source)
+
         if name in self.dynamic_attributes:
             return self.dynamic_attributes[name]
 
@@ -1020,7 +1321,13 @@ class SliceVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
-            unimplemented(f"slice.{name}")
+            unimplemented_v2(
+                gb_type="Unsupported attribute for slice() object",
+                context=f"var_getattr {self} {name}",
+                explanation=f"Expected attribute to be one of {','.join(fields)} "
+                f"but got {name}",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return self.items[fields.index(name)]
 
 
@@ -1053,19 +1360,8 @@ class ListIteratorVariable(IteratorVariable):
         self.index += 1
         return self.items[old_index]
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ):
-        if name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
-            return iter_contains(self.items[self.index :], args[0], tx)
-
-        return super().call_method(tx, name, args, kwargs)
+    def call_obj_hasattr(self, tx, name):
+        return variables.ConstantVariable.create(hasattr(iter([]), name))
 
     def python_type(self):
         return type(iter([]))
@@ -1075,8 +1371,13 @@ class ListIteratorVariable(IteratorVariable):
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
+    def has_unpack_var_sequence(self, tx):
+        return True
+
     def unpack_var_sequence(self, tx):
-        return list(self.items[self.index :])
+        r = list(self.items[self.index :])
+        self.index = len(self.items)
+        return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
@@ -1094,3 +1395,52 @@ class ListIteratorVariable(IteratorVariable):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
+
+
+class RangeIteratorVariable(IteratorVariable):
+    # only needed for isinstance(..., range_iterator) to work
+    _nonvar_fields = {
+        "iter_obj",
+    }
+
+    def __init__(self, start: int, stop: int, step: int, len_: int, **kwargs):
+        super().__init__(**kwargs)
+        self.start = start
+        self.stop = stop
+        self.step = step
+        self.len = len_
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__next__":
+            return self.next_variable(tx)
+        elif name == "__iter__":
+            return self
+        return super().call_method(tx, name, args, kwargs)
+
+    def call_obj_hasattr(self, tx, name):
+        if self.python_type() is range_iterator:
+            ri = iter(range(0))
+            return ConstantVariable(hasattr(ri, name))
+        return super().call_obj_hasattr(tx, name)
+
+    def next_variable(self, tx):
+        if self.len <= 0:
+            raise_observed_exception(StopIteration, tx)
+
+        self.len -= 1
+        current = self.start
+        self.start += self.step
+        return ConstantVariable.create(current)
+
+    def python_type(self):
+        return range_iterator
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(range))
+        )
+        codegen.append_output(codegen.create_load_const(self.start))
+        codegen.append_output(codegen.create_load_const(self.stop))
+        codegen.append_output(codegen.create_load_const(self.step))
+        codegen.extend_output(create_call_function(3, False))
+        codegen.append_output(create_instruction("GET_ITER"))

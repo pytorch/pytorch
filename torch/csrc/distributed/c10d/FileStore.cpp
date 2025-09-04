@@ -33,7 +33,11 @@
 #define LOCK_SH 0x00000010
 #define LOCK_UN 0x00000100
 
-int flock_(int fd, int op) {
+#if defined(_WIN32) && defined(USE_ROCM)
+static
+#endif
+    int
+    flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
   OVERLAPPED offset = {0, 0, 0, 0, NULL};
@@ -306,8 +310,8 @@ FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
   // GC. If python code has directory cleanup procedure, the race condition may
-  // occur between that code and this deconstructor. As a result, we check for
-  // file existense before cleanup
+  // occur between that code and this destructor. As a result, we check for
+  // file existence before cleanup
 #ifdef _WIN32
   int res = syscall(std::bind(::_access, path_.c_str(), 0));
 #else
@@ -323,7 +327,7 @@ FileStore::~FileStore() {
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
   auto refCount = addHelper(refCountKey_, -1);
   // The last worker cleans up the file. If numWorkers was not initialized to
-  // a specific postive value (i.e. meaning that there was not a fixed number
+  // a specific positive value (i.e. meaning that there was not a fixed number
   // of workers), we don't attempt to clean.
   // Clean up the file if number of references is 0.
   if (refCount == 0 && numWorkers_ >= 0 && numFinishedWorker >= numWorkers_) {

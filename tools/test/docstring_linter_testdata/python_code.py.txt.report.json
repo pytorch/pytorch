@@ -2,6 +2,7 @@
   {
     "category": "class",
     "children": [],
+    "decorators": [],
     "display_name": "class ShortWithDocstring",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "ShortWithDocstring",
@@ -10,11 +11,12 @@
     "is_method": false,
     "line_count": 4,
     "parent": null,
-    "start_line": 2
+    "start_line": 1
   },
   {
     "category": "class",
     "children": [],
+    "decorators": [],
     "display_name": "class Short",
     "docstring": "",
     "full_name": "Short",
@@ -23,13 +25,14 @@
     "is_method": false,
     "line_count": 3,
     "parent": null,
-    "start_line": 7
+    "start_line": 6
   },
   {
     "category": "class",
     "children": [
       3
     ],
+    "decorators": [],
     "display_name": "class LongWithDocstring",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "LongWithDocstring",
@@ -38,11 +41,12 @@
     "is_method": false,
     "line_count": 6,
     "parent": null,
-    "start_line": 11
+    "start_line": 10
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def LongWithDocstring.short1()",
     "docstring": "",
     "full_name": "LongWithDocstring.short1",
@@ -51,26 +55,28 @@
     "is_method": true,
     "line_count": 3,
     "parent": 2,
-    "start_line": 14
+    "start_line": 13
   },
   {
     "category": "class",
     "children": [
       5
     ],
+    "decorators": [],
     "display_name": "class LongWithoutDocstring",
     "docstring": "",
     "full_name": "LongWithoutDocstring",
     "index": 4,
     "is_local": false,
     "is_method": false,
-    "line_count": 4,
+    "line_count": 6,
     "parent": null,
-    "start_line": 20
+    "start_line": 17
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def LongWithoutDocstring.short1()",
     "docstring": "",
     "full_name": "LongWithoutDocstring.short1",
@@ -79,13 +85,14 @@
     "is_method": true,
     "line_count": 3,
     "parent": 4,
-    "start_line": 21
+    "start_line": 20
   },
   {
     "category": "class",
     "children": [
       7
     ],
+    "decorators": [],
     "display_name": "class LongWithShortDocstring",
     "docstring": "\"\"\"TODO\"\"\"",
     "full_name": "LongWithShortDocstring",
@@ -94,11 +101,12 @@
     "is_method": false,
     "line_count": 6,
     "parent": null,
-    "start_line": 25
+    "start_line": 24
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def LongWithShortDocstring.short1()",
     "docstring": "",
     "full_name": "LongWithShortDocstring.short1",
@@ -107,13 +115,14 @@
     "is_method": true,
     "line_count": 3,
     "parent": 6,
-    "start_line": 28
+    "start_line": 27
   },
   {
     "category": "class",
     "children": [
       9
     ],
+    "decorators": [],
     "display_name": "class _Protected",
     "docstring": "\"\"\"TODO\"\"\"",
     "full_name": "_Protected",
@@ -122,11 +131,12 @@
     "is_method": false,
     "line_count": 6,
     "parent": null,
-    "start_line": 32
+    "start_line": 31
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def _Protected.short1()",
     "docstring": "",
     "full_name": "_Protected.short1",
@@ -135,24 +145,26 @@
     "is_method": true,
     "line_count": 3,
     "parent": 8,
-    "start_line": 35
+    "start_line": 34
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def short()",
     "docstring": "",
     "full_name": "short",
     "index": 10,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 6,
     "parent": null,
-    "start_line": 42
+    "start_line": 38
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def long()",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "long",
@@ -161,20 +173,21 @@
     "is_method": false,
     "line_count": 8,
     "parent": null,
-    "start_line": 46
+    "start_line": 45
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def long_without_docstring()",
     "docstring": "",
     "full_name": "long_without_docstring",
     "index": 12,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 7,
     "parent": null,
-    "start_line": 59
+    "start_line": 54
   },
   {
     "category": "class",
@@ -184,15 +197,16 @@
       16,
       17
     ],
+    "decorators": [],
     "display_name": "class ImpossibleCombo",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "ImpossibleCombo",
     "index": 13,
     "is_local": false,
     "is_method": false,
-    "line_count": 15,
+    "line_count": 21,
     "parent": null,
-    "start_line": 69
+    "start_line": 62
   },
   {
     "category": "def",
@@ -201,6 +215,7 @@
       16,
       17
     ],
+    "decorators": [],
     "display_name": "def ImpossibleCombo.needs_docs()",
     "docstring": "",
     "full_name": "ImpossibleCombo.needs_docs",
@@ -209,7 +224,7 @@
     "is_method": true,
     "line_count": 12,
     "parent": 13,
-    "start_line": 72
+    "start_line": 71
   },
   {
     "category": "def",
@@ -217,6 +232,7 @@
       16,
       17
     ],
+    "decorators": [],
     "display_name": "def ImpossibleCombo.needs_docs.not_short()",
     "docstring": "",
     "full_name": "ImpossibleCombo.needs_docs.not_short",
@@ -225,11 +241,12 @@
     "is_method": false,
     "line_count": 11,
     "parent": 14,
-    "start_line": 73
+    "start_line": 72
   },
   {
     "category": "class",
     "children": [],
+    "decorators": [],
     "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
     "docstring": "",
     "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
@@ -238,11 +255,12 @@
     "is_method": false,
     "line_count": 6,
     "parent": 15,
-    "start_line": 74
+    "start_line": 73
   },
   {
     "category": "class",
     "children": [],
+    "decorators": [],
     "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
     "docstring": "",
     "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
@@ -251,14 +269,18 @@
     "is_method": false,
     "line_count": 3,
     "parent": 15,
-    "start_line": 81
+    "start_line": 80
   },
   {
     "category": "class",
     "children": [
       19,
       20,
-      21
+      21,
+      22
+    ],
+    "decorators": [
+      "@override"
     ],
     "display_name": "class NotDocstring",
     "docstring": "",
@@ -266,13 +288,14 @@
     "index": 18,
     "is_local": false,
     "is_method": false,
-    "line_count": 12,
+    "line_count": 21,
     "parent": null,
     "start_line": 85
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def NotDocstring.short1()",
     "docstring": "",
     "full_name": "NotDocstring.short1",
@@ -286,40 +309,59 @@
   {
     "category": "def",
     "children": [],
+    "decorators": [
+      "@override"
+    ],
+    "display_name": "def NotDocstring.long_with_override()",
+    "docstring": "",
+    "full_name": "NotDocstring.long_with_override",
+    "index": 20,
+    "is_local": false,
+    "is_method": true,
+    "line_count": 6,
+    "parent": 18,
+    "start_line": 92
+  },
+  {
+    "category": "def",
+    "children": [],
+    "decorators": [],
     "display_name": "def NotDocstring.short2()",
     "docstring": "",
     "full_name": "NotDocstring.short2",
-    "index": 20,
+    "index": 21,
     "is_local": false,
     "is_method": true,
     "line_count": 2,
     "parent": 18,
-    "start_line": 91
+    "start_line": 99
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def NotDocstring.short3()",
     "docstring": "",
     "full_name": "NotDocstring.short3",
-    "index": 21,
+    "index": 22,
     "is_local": false,
     "is_method": true,
-    "line_count": 3,
+    "line_count": 4,
     "parent": 18,
-    "start_line": 94
+    "start_line": 102
   },
   {
     "category": "def",
     "children": [],
+    "decorators": [],
     "display_name": "def long_with_omit()",
     "docstring": "",
     "full_name": "long_with_omit",
-    "index": 22,
+    "index": 23,
     "is_local": false,
     "is_method": false,
-    "line_count": 1,
+    "line_count": 5,
     "parent": null,
-    "start_line": 102
+    "start_line": 107
   }
 ]

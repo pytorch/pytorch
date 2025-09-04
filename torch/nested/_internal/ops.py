@@ -73,9 +73,9 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(
-        dims, (tuple, list)
-    ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+    assert isinstance(dims, (tuple, list)), (
+        f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+    )
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -535,9 +535,9 @@ def clone_default(func, *args, **kwargs):
             from .nested_tensor import jagged_from_list
 
             # TODO: We probably want the output to have the same ragged structure / nested int.
-            assert (
-                inp._ragged_idx == 1
-            ), "NJT with ragged_idx != 1 not supported for contiguous clone"
+            assert inp._ragged_idx == 1, (
+                "NJT with ragged_idx != 1 not supported for contiguous clone"
+            )
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
 
@@ -837,6 +837,46 @@ def _softmax_default(func, *args, **kwargs):
         )  # expand softmax_values back to original shape (inp._values.shape)
 
         return NestedTensor(softmax_values, **extract_kwargs(inp))
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
+@register_jagged_func(
+    torch.ops.aten._log_softmax.default, "self: jt_all, dim: any, half_to_float: any"
+)
+def _log_softmax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    if isinstance(new_kwargs["dim"], tuple):
+        raise RuntimeError(
+            "log_softmax(): not supported for dimensions of type 'tuple' for NestedTensor"
+        )
+
+    inp = new_kwargs.pop("input")
+
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        _reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(), (new_kwargs["dim"],), "log_softmax", inp._ragged_idx
+    )
+
+    if reduce_on_batch:
+        raise RuntimeError(
+            "log_softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
+
+    if reduce_on_ragged:
+        raise RuntimeError(
+            "log_softmax(): not supported when reducing along the ragged dimension for NestedTensor"
+        )
+
+    # torch.log_softmax takes in the reduction dimension as an integer
+    new_kwargs["dim"] = new_kwargs["dim"][0]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1730,8 +1770,8 @@ def native_layer_norm_default(func, *args, **kwargs):
         )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
 
         padded_normalized = (
-            padded_input - mean
-        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+            (padded_input - mean) * padded_mask
+        )  # mask elements outside of the ragged dimension size for correct variance calculation
 
         variance = (
             torch.sum(

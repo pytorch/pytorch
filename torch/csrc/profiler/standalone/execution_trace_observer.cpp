@@ -25,19 +25,17 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
 
-#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_DISTRIBUTED
 
 using namespace at;
 
 // Collective property attributes
 // https://github.com/pytorch/pytorch/issues/124674
-#ifdef USE_DISTRIBUTED
 constexpr auto kETCommsName = "collective_name";
 constexpr auto kETInMsgNelems = "in_msg_nelems";
 constexpr auto kETOutMsgNelems = "out_msg_nelems";
@@ -48,7 +46,6 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
-#endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
 
@@ -112,6 +109,41 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
   std::map<const void*, ID> objectId{};
+
+  using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
+  std::unordered_map<const void*, ID> data_ptr_to_storage_id{};
+  std::unordered_map<const void*, weak_storage_ptr>
+      data_ptr_to_weak_storage_ptr{};
+
+  ID get_tensor_storage_ID(const c10::Storage& t_storage) {
+    const std::lock_guard<std::recursive_mutex> lock(gMutex);
+
+    const void* raw_data_ptr = t_storage.data();
+    auto iter = data_ptr_to_weak_storage_ptr.find(raw_data_ptr);
+    if (iter == data_ptr_to_weak_storage_ptr.end()) {
+      ID id = storage_id_++;
+      data_ptr_to_storage_id.emplace(raw_data_ptr, id);
+      data_ptr_to_weak_storage_ptr.emplace(
+          raw_data_ptr, t_storage.getWeakStorageImpl());
+      return id;
+    } else {
+      // check if the storage is still alive
+      if (iter->second.expired()) {
+        ID id = storage_id_++;
+        // std::unorder_map does not change if the key is already in the map.
+        // So we need to remove the key and insert the key with the new value.
+        data_ptr_to_storage_id.erase(raw_data_ptr);
+        data_ptr_to_storage_id[raw_data_ptr] = id;
+        data_ptr_to_weak_storage_ptr.erase(raw_data_ptr);
+        data_ptr_to_weak_storage_ptr.emplace(
+            raw_data_ptr, t_storage.getWeakStorageImpl());
+        return id;
+      } else {
+        return data_ptr_to_storage_id[raw_data_ptr];
+      }
+    }
+  }
+
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -170,10 +202,12 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
+
+  std::atomic<ID> storage_id_{1};
 };
 
 // Using a singleton manager here to allow init and delete the observer object.
@@ -231,7 +265,6 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
-#ifdef USE_DISTRIBUTED
 static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
@@ -244,7 +277,6 @@ static std::string getAttrJson(
       type,
       value);
 }
-#endif
 
 static void writeJsonNode(
     std::ofstream& out,
@@ -444,8 +476,8 @@ convertIValue(
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      auto& t_storage = tensor_impl->storage();
-      storage_id = getObjectID(ob, t_storage.data());
+      const c10::Storage& t_storage = tensor_impl->storage();
+      storage_id = ob.get_tensor_storage_ID(t_storage);
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
@@ -622,7 +654,6 @@ static void handleKernelBackendInfo(
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
-#ifdef USE_DISTRIBUTED
   // We rely on paramcommsdebug object that is available in thread local info
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
@@ -665,8 +696,6 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
-
-#endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
   return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
@@ -898,18 +927,18 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
-    if (env_variable != nullptr) {
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
       ob.record_integral_tensor_range = true;
     }
 
     // check if the environment variable is set to force recording integer
     // tensors
-    env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
-    if (env_variable != nullptr) {
-      std::istringstream stream(env_variable);
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
       std::string token;
       while (std::getline(stream, token, ',')) {
         ob.nodeListForSavingIntegerTensor.insert(token);

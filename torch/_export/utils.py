@@ -8,6 +8,7 @@ import json
 import math
 import operator
 import re
+from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
@@ -18,6 +19,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -210,6 +212,29 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     return params_buffers_to_node_meta
 
 
+def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch._C._is_torch_function_mode_enabled():
+        return None
+
+    torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+
+    pre_dispatch_tf_modes = [
+        mode
+        for mode in torch_function_mode_stack
+        if isinstance(mode, PreDispatchTorchFunctionMode)
+    ]
+
+    assert len(pre_dispatch_tf_modes) <= 1, (
+        f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+    )
+
+    if len(pre_dispatch_tf_modes) == 0:
+        return None
+
+    mode = pre_dispatch_tf_modes[0]
+    return mode
+
+
 def _populate_param_buffer_metadata_to_new_gm(
     params_buffers_to_node_meta: dict[str, Any],
     gm: torch.fx.GraphModule,
@@ -255,6 +280,8 @@ def _get_shape_env_from_gm(gm: torch.fx.GraphModule):
 
 def _rename_without_collisions(
     name_map: dict[str, str],
+    find_available: dict[str, int],
+    used_names: set[str],
     orig_name: str,
     name: str,
     is_placeholder: bool = False,
@@ -262,23 +289,32 @@ def _rename_without_collisions(
     """
     Renames nodes to avoid name collisions, with suffixing.
     name_map: map from original name to new name
+    find_available: map prefix to available suffix
+    used_names: cache of used names
     orig_name: mapping key
     name: candidate name (potentially suffixed, e.g. mul_2)
     is_placeholder: if the node is a placeholder, avoid detecting suffix
     """
-    if name in name_map.values():
-        # non-placeholder nodes may be suffixed with the count
-        # instead of adding another suffix, we will try to increment it
-        match = re.match(r"(.*)_(\d+)", name)
-        if match and not is_placeholder:
-            name, n = match.group(1), int(match.group(2))
-        else:
-            n = 0
-        while (dup_name := f"{name}_{n + 1}") in name_map.values():
-            n += 1
-        name_map[orig_name] = dup_name
-    else:
-        name_map[orig_name] = name
+    match = re.match(r"(.*)_(\d+)", name)
+    key = name
+
+    if match and not is_placeholder:
+        prefix, n = match.group(1), match.group(2)
+        key = prefix
+
+    new_name = name
+    if new_name in used_names:
+        new_name = f"{key}_{find_available[key] + 1}"
+
+    match = re.match(r"(.*)_(\d+)", new_name)
+    if match:
+        prefix, n = match.group(1), match.group(2)
+        if int(n) > find_available[prefix]:
+            find_available[prefix] = int(n)
+
+    name_map[orig_name] = new_name
+    used_names.add(new_name)
+
     return name_map[orig_name]
 
 
@@ -295,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -308,7 +344,13 @@ def _check_symint(
     keypath: KeyPath,
     i: Optional[int] = None,
 ) -> None:
-    if isinstance(arg, torch.SymInt) and not arg.node.expr.is_number:
+    from torch.export.dynamic_shapes import _IntWrapper
+
+    if (
+        isinstance(arg, torch.SymInt)
+        and not arg.node.expr.is_number
+        or isinstance(arg, _IntWrapper)
+    ):
         # This can happen when, say, arg is a fake tensor.
         # We do not run checks on symbolic shapes of fake inputs as
         # such checks can affect the shape env.
@@ -382,7 +424,9 @@ def _check_symint(
         if i is not None:
             path += f".shape[{i}]"
         raise RuntimeError(
-            f"Expected input at {path} to be equal to {symint}, but got {arg}",
+            f"Expected input at {path} to be equal to {symint}, but got {arg}. "
+            "If you meant for this dimension to be dynamic, please re-export and specify dynamic_shapes "
+            "(e.g. with Dim.DYNAMIC)"
         )
 
 
@@ -440,9 +484,9 @@ def register_dataclass_as_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
-    assert dataclasses.is_dataclass(
-        cls
-    ), f"Only dataclasses can be registered with this function: {cls}"
+    assert dataclasses.is_dataclass(cls), (
+        f"Only dataclasses can be registered with this function: {cls}"
+    )
 
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
@@ -636,11 +680,17 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                 continue
 
             if (tensor_val := node.args[0].meta.get("val")) is not None:
-                with gm.graph.inserting_before(node), _set_node_metadata_hook(
-                    gm,
-                    functools.partial(
-                        _node_metadata_hook,
-                        stack_trace=node.meta.get("stack_trace"),
+                with (
+                    gm.graph.inserting_before(node),
+                    _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            metadata={
+                                "stack_trace": node.meta.get("stack_trace"),
+                                "nn_module_stack": node.meta.get("nn_module_stack"),
+                            },
+                        ),
                     ),
                 ):
                     gm.graph.call_function(
@@ -667,7 +717,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
             "in insert_deferred_runtime_asserts"
         )
         with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            gm,
+            functools.partial(
+                _node_metadata_hook, metadata={"stack_trace": stack_trace}
+            ),
         ):
             shape_env = _get_shape_env_from_gm(gm)
             if shape_env:
@@ -856,6 +909,15 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
+def _build_cache(name, find_available, used_names):
+    used_names.add(name)
+    match = re.match(r"(.*)_(\d+)", name)
+    if match:
+        prefix, n = match.group(1), match.group(2)
+        if int(n) > find_available[prefix]:
+            find_available[prefix] = int(n)
+
+
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     """
     Propagate placeholder names from the top-level graph into HigherOrderOp subgraphs,
@@ -863,6 +925,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     Different HOO subgraph types have different input schemas, so we first enumerate them
     and gather the top-level named placeholder nodes.
     """
+
     # gather all HOO subgraphs and their top-level named placeholder nodes
     subgraph_ph_tuples: list[tuple[torch.fx.GraphModule, list[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
@@ -886,12 +949,17 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     # propagate names
     for subgraph, hoo_phs in subgraph_ph_tuples:
         name_map: dict[str, str] = {}
+        find_available: dict[str, int] = defaultdict(int)
+        used_names: set[str] = set()
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
                 node.name = node.target = hoo_phs[i].name
+                _build_cache(node.name, find_available, used_names)
             else:  # non-placeholder, check for collisions
-                node.name = _rename_without_collisions(name_map, node.name, node.name)
+                node.name = _rename_without_collisions(
+                    name_map, find_available, used_names, node.name, node.name
+                )
 
         # recurse and recompile
         _name_hoo_subgraph_placeholders(subgraph)
@@ -951,6 +1019,8 @@ def placeholder_naming_pass(
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
     name_map: dict[str, str] = {}
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
@@ -967,6 +1037,8 @@ def placeholder_naming_pass(
         if user_input_name:
             _rename_without_collisions(
                 name_map,
+                find_available,
+                used_names,
                 user_input_name,
                 placeholder_prefixes[InputKind.USER_INPUT]
                 + "_".join(_extract_pytree_key(x).lower() for x in arg_path),
@@ -986,10 +1058,18 @@ def placeholder_naming_pass(
 
         _rename_without_collisions(
             name_map,
+            find_available,
+            used_names,
             spec.arg.name,
             placeholder_prefixes[spec.kind] + base_name,
             is_placeholder=True,
         )
+        if base_name in custom_meta:
+            # the keys in custom_meta are node names from `mod`,
+            # which is the base_name here.
+            # we need the re-mapped name for lookup later
+            custom_meta[name_map[spec.arg.name]] = custom_meta[base_name]
+            del custom_meta[base_name]
 
     # handle naming collisions with call_function/get_attr inputs.
     # here, we want to prioritize user input names over call_function names
@@ -998,7 +1078,9 @@ def placeholder_naming_pass(
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             continue
-        _rename_without_collisions(name_map, node.name, node.name)
+        _rename_without_collisions(
+            name_map, find_available, used_names, node.name, node.name
+        )
 
     # assign new node names
     for node in gm.graph.nodes:
@@ -1006,7 +1088,10 @@ def placeholder_naming_pass(
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
-                node.meta["custom"] = custom_meta[node.name]
+                if node.meta.get("custom") is None:
+                    node.meta["custom"] = custom_meta[node.name]
+                else:
+                    assert node.meta["custom"] == custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1074,7 +1159,7 @@ def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
 
 def _detect_fake_mode_from_gm(
     gm: torch.fx.GraphModule,
-) -> torch._subclasses.fake_tensor.FakeTensorMode:
+) -> Optional[torch._subclasses.fake_tensor.FakeTensorMode]:
     """
     For a given graph module, we look at the "val" of placeholder nodes to find the fake inputs.
     Additionally, if gm doesn't have placeholders, we further look at the "example_value" or "val" of other nodes.
@@ -1249,7 +1334,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
 
 
 def _get_decomp_for_cia(op: "OperatorBase"):
-    # [NOTE] Seperating out func.decompose
+    # [NOTE] Separating out func.decompose
     # Ideally we should be able to just register func.decompose but
     # we can't as this decomp is gonna be registered to the py_impl.
     # As a result it will infinitely recurse. So we first check if the op
@@ -1325,6 +1410,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
         import torch
 
+
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1333,11 +1419,14 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             def forward(self, x):
                 return self.linear(x)
 
+
         torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x, m):
                 return m(x) + x
+
 
         ep = torch.export.export(Mod(), (torch.randn(3), Module()))
         print(ep)

@@ -51,7 +51,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
 ) -> list[list[BaseSchedulerNode]]:
     """Horizontally partition the given list of nodes into a list of list of nodes where each sublist
-    represents a partion. Nodes in different partitions are implemented in different combo kernels.
+    represents a partition. Nodes in different partitions are implemented in different combo kernels.
     Nodes in the same partition are likely to be implemented
     in the same combo kernel, but subject to subsequent restrictions like CUDA limits for number of args.
 
@@ -536,7 +536,7 @@ class ComboKernel(Kernel):
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
 
     def get_mutated_args_sub_kernels(self) -> list[str]:
-        mutated_args = OrderedSet[str]()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for sub_kernel in self.sub_kernels:
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:

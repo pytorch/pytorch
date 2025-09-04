@@ -1565,8 +1565,44 @@ class DummyWork(dist._Work):
 class DummyProcessGroup(dist.ProcessGroup):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._bound_device_id = None
+        self.global_rank = args[0]
+        self.group_size = args[1]
         self._aborted = False
         self._shutdown = False
+
+    def rank(self):
+        return self.global_rank
+
+    def size(self):
+        return self.group_size
+
+    @property
+    def supports_splitting(self):
+        return True
+
+    @property
+    def bound_device_id(self):
+        return self._bound_device_id
+
+    @bound_device_id.setter
+    def bound_device_id(self, device):
+        self._bound_device_id = device
+
+    def eager_connect_single_device(self, device=None):
+        self._bound_device_id = device
+
+    def _set_sequence_number_for_group(self):
+        pass
+
+    def _get_backend(self, device):
+        return self
+
+    def comm_split_count(self):
+        return 0
+
+    def perform_nocolor_split(self, device):
+        pass
 
     def getBackendName(self):
         return "Dummy"
@@ -1654,6 +1690,51 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
 
+        # dist.Backend.register_backend(
+        #     "dummy", PythonProcessGroupExtensionTest.create_dummy
+        # )
+
+        # # os.environ["MASTER_ADDR"] = "localhost"
+        # # os.environ["MASTER_PORT"] = "6789"
+        # # dist.init_process_group(
+        # #     "cpu:dummy", rank=0, world_size=1,
+        # # )
+        # dpg = DummyProcessGroup(0, 1)
+        # from torch.distributed.distributed_c10d import _canonicalize_group_rank
+        # self.assertEqual(123, _canonicalize_group_rank(dpg, group_rank=123, return_global=False))
+        # with self.assertRaises(RuntimeError):
+        # _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
+
+    def test_canonicalize_helper(self):
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        dpg = DummyProcessGroup(0, 124)
+        from torch.distributed.distributed_c10d import _canonicalize_group_rank
+
+        # we ensure that a process group with more ranks than the 'default' group can still be used.
+        # e.g. if the dpg had 124 ranks and the world had only 2 ranks.
+        self.assertEqual(
+            123, _canonicalize_group_rank(dpg, group_rank=123, return_global=False)
+        )
+        self.assertEqual(
+            0, _canonicalize_group_rank(dpg, global_rank=0, return_global=True)
+        )
+        with self.assertRaises(ValueError):
+            # TODO(whc) this is actually catching the wrong error:
+            # ValueError: Group <__mp_main__.DummyProcessGroup object at 0x7faa0a844540> is not registered,
+            # please create group with torch.distributed.new_group API
+            # It should be catching a different error where the rank doesn't exist in the global mapping.
+            # But it's still testing the same part of the _canonicalize_group_rank helper so maybe this is fine
+            _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
+
+        dist.destroy_process_group()
+
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
@@ -1728,6 +1809,11 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     class Options:
+        group_name = None
+        split_from = None
+        split_color = None
+        global_ranks_in_group = None
+
         def __init__(self) -> None:
             pass
 
@@ -1737,6 +1823,10 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     @staticmethod
     def create_dummy(store, group_rank, group_size, timeout):
         return DummyProcessGroup(group_rank, group_size)
+
+    @staticmethod
+    def create_dummy_ext(dist_opts, pg_options=None):
+        return DummyProcessGroup(dist_opts.group_rank, dist_opts.group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend(
@@ -2144,8 +2234,8 @@ class LocalRankTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

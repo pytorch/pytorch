@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
+#include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
@@ -23,6 +24,10 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+
+#include <c10/core/Device.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Stream.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -87,7 +92,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -129,6 +134,7 @@ AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
+AOTI_TORCH_DEVICE_TYPE_IMPL(mps, MPS)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
@@ -250,6 +256,11 @@ bool aoti_torch_grad_mode_is_enabled() {
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
   return c10::GradMode::set_enabled(enabled);
+}
+
+size_t aoti_torch_dtype_element_size(int32_t dtype) {
+  auto scalar_type = static_cast<at::ScalarType>(dtype);
+  return c10::elementSize(scalar_type);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
@@ -378,12 +389,39 @@ AOTITorchError aoti_torch_get_device_index(
   });
 }
 
+AOTITorchError aoti_torch_get_layout(
+    AtenTensorHandle tensor,
+    int32_t* ret_layout) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_layout = static_cast<int32_t>(t->layout());
+  });
+}
+
 AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_is_contiguous(
+    AtenTensorHandle tensor,
+    bool* ret_is_contiguous) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_contiguous = t->is_contiguous();
+  });
+}
+
+AOTITorchError aoti_torch_is_defined(
+    AtenTensorHandle tensor,
+    bool* ret_is_defined) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_defined = t->defined();
   });
 }
 
@@ -434,6 +472,28 @@ AOTITorchError aoti_torch_empty_strided(
       *ret_new_tensor =
           new_tensor_handle(at::empty_strided(sizes, strides, options));
     }
+  });
+}
+
+AOTITorchError aoti_torch_empty_strided_pinned(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    TORCH_CHECK(
+        c10::DeviceType(device_type) == c10::DeviceType::CPU,
+        "only CPU tensors can be pinned");
+    *ret_new_tensor = new_tensor_handle(at::detail::empty_strided_cpu(
+        sizes,
+        strides,
+        static_cast<c10::ScalarType>(dtype),
+        /*is_pinned=*/true));
   });
 }
 
@@ -966,16 +1026,17 @@ AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
-    AtenTensorHandle bias,
+    AtenTensorHandle bias, // optional argument
     int64_t out_channel,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
     at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
-    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    auto optional_bias_tensor =
+        pointer_to_optional(tensor_handle_to_tensor_pointer(bias));
 
     *out = new_tensor_handle(at::fbgemm_linear_fp16_weight_fp32_activation(
-        *input_tensor, *weight_tensor, *bias_tensor));
+        *input_tensor, *weight_tensor, optional_bias_tensor));
   });
 }
 
@@ -1037,6 +1098,45 @@ AOTITorchError aoti_torch_check_inf_and_nan(
     at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
 
     assert_inf_and_nan(tensor_name, *check_tensor);
+  });
+}
+
+AOTITorchError aoti_record_function_start(
+    const char* name,
+    IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
+    AtenRecordFunctionHandle* guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* newGuard =
+        new at::RecordFunction(at::RecordScope::FUNCTION);
+    std::unordered_map<std::string, c10::IValue> recordKwargs;
+
+    if (kwargs != nullptr) {
+      auto wrappedKwargs =
+          reinterpret_cast<std::unordered_map<std::string, C10IValueHandle>*>(
+              kwargs);
+      for (const auto& pair : *wrappedKwargs) {
+        recordKwargs.emplace(
+            pair.first, *(reinterpret_cast<c10::IValue*>(pair.second)));
+      }
+    }
+
+    std::vector<c10::IValue> recordInputs(n_inputs);
+    for (size_t i = 0; i < n_inputs; i++) {
+      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+    }
+
+    newGuard->before(name, &recordInputs, &recordKwargs);
+    *guard = reinterpret_cast<AtenRecordFunctionHandle>(newGuard);
+  });
+}
+
+AOTITorchError aoti_record_function_end(AtenRecordFunctionHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* t = reinterpret_cast<at::RecordFunction*>(guard);
+
+    delete t;
   });
 }
 
@@ -1166,8 +1266,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   if (msg) {
     std::cout << "  " << msg;
   }
-  std::cout << "  "
-            << "]:" << '\n';
+  std::cout << "  " << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
@@ -1205,10 +1304,21 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
     if (!is_complex_type) {
       // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
       // (similar for max) Skip printing min/max value for complex type tensors
-      // here If encountered complex dtypes (rare occasions), suggest to print
+      // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->min().item<float>() << '\n';
-      std::cout << "Max value: " << t->max().item<float>() << '\n';
+      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
+      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+    } else {
+      // Set the numel threshold to print as 256 to avoid printing out too much
+      // More info for aten native cuda kernel for "min_all_cuda" implementation
+      // source:
+      // https://github.com/pytorch/pytorch/blob/4b3983241263b03abd25ae381ae4743ac49b648e/aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu#L51
+      if (numel <= 256) {
+        std::cout
+            << "[INFO] Aten built-in function `min_all_cuda/max_all_cuda` not implemented for current dtype: "
+            << t->dtype() << ". Printing out the whole value:\n"
+            << *t << "\n";
+      }
     }
   }
   std::cout << "Device: " << t->device() << '\n';
@@ -1364,9 +1474,8 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
-      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get());
-      return (c10::IValue(arg));
+      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(to<int64_t>(stable_ivalue));
@@ -1433,7 +1542,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
+    auto ministack =
+        std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
@@ -1443,7 +1553,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
-    fn_(ministack.data(), num_arguments, num_returns);
+    fn_(ministack.get(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
@@ -1562,4 +1672,61 @@ AOTITorchError aoti_torch_call_dispatcher(
       stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
     }
   });
+}
+
+AOTITorchError aoti_torch_create_device_guard(
+    int32_t device_index,
+    DeviceGuardHandle* ret_guard // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // checked=true will fail if no accelerator is available
+    const auto device_type =
+        at::accelerator::getAccelerator(/*checked=*/true).value();
+    c10::Device device(device_type, device_index);
+    c10::DeviceGuard* guard = new c10::DeviceGuard(device);
+    *ret_guard = reinterpret_cast<DeviceGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_device_guard(DeviceGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::DeviceGuard*>(guard); });
+}
+
+AOTITorchError aoti_torch_device_guard_set_index(
+    DeviceGuardHandle guard,
+    int32_t device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { reinterpret_cast<c10::DeviceGuard*>(guard)->set_index(device_index); });
+}
+
+AOTITorchError aoti_torch_delete_stream(StreamHandle stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::Stream*>(stream); });
+}
+
+AOTITorchError aoti_torch_stream_id(
+    StreamHandle stream,
+    int64_t* ret_stream_id) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream* stream_ptr = reinterpret_cast<c10::Stream*>(stream);
+    *ret_stream_id = stream_ptr->id();
+  });
+}
+
+// This function creates a new Stream object and makes StreamHandle point to it.
+// The caller is responsible for managing the object's lifecycle.
+AOTITorchError aoti_torch_get_current_stream(
+    int32_t device_index,
+    StreamHandle* ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream stream = at::accelerator::getCurrentStream(device_index);
+    c10::Stream* stream_ptr = new c10::Stream(stream);
+    *ret_stream = reinterpret_cast<StreamHandle>(stream_ptr);
+  });
+}
+
+AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_device_index = at::accelerator::getDeviceIndex(); });
 }

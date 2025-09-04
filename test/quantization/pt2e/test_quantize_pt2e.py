@@ -254,16 +254,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         maxpool_node = node
                         input_act = maxpool_node.args[0]
                         assert isinstance(input_act, Node)
-                        maxpool_node.meta[
-                            "quantization_annotation"
-                        ] = QuantizationAnnotation(
-                            input_qspec_map={
-                                input_act: act_qspec,
-                            },
-                            output_qspec=SharedQuantizationSpec(
-                                (input_act, maxpool_node)
-                            ),
-                            _annotated=True,
+                        maxpool_node.meta["quantization_annotation"] = (
+                            QuantizationAnnotation(
+                                input_qspec_map={
+                                    input_act: act_qspec,
+                                },
+                                output_qspec=SharedQuantizationSpec(
+                                    (input_act, maxpool_node)
+                                ),
+                                _annotated=True,
+                            )
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -339,9 +339,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         def derive_qparams_fn(
                             obs_or_fqs: list[ObserverOrFakeQuantize],
                         ) -> tuple[Tensor, Tensor]:
-                            assert (
-                                len(obs_or_fqs) == 2
-                            ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
+                            assert len(obs_or_fqs) == 2, (
+                                f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
+                            )
                             act_obs_or_fq = obs_or_fqs[0]
                             weight_obs_or_fq = obs_or_fqs[1]
                             act_scale, act_zp = act_obs_or_fq.calculate_qparams()
@@ -442,9 +442,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         def derive_qparams_fn(
                             obs_or_fqs: list[ObserverOrFakeQuantize],
                         ) -> tuple[Tensor, Tensor]:
-                            assert (
-                                len(obs_or_fqs) == 1
-                            ), f"Expecting one weight obs/fq, got: {len(obs_or_fqs)}"
+                            assert len(obs_or_fqs) == 1, (
+                                f"Expecting one weight obs/fq, got: {len(obs_or_fqs)}"
+                            )
                             weight_obs_or_fq = obs_or_fqs[0]
                             (
                                 weight_scale,
@@ -748,16 +748,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                             (first_input_node, cat_node)
                         )
                         for input_node in input_nodes[1:]:
-                            input_qspec_map[
-                                input_node
-                            ] = share_qparams_with_input_act0_qspec
+                            input_qspec_map[input_node] = (
+                                share_qparams_with_input_act0_qspec
+                            )
 
-                        cat_node.meta[
-                            "quantization_annotation"
-                        ] = QuantizationAnnotation(
-                            input_qspec_map=input_qspec_map,
-                            output_qspec=share_qparams_with_input_act0_qspec,
-                            _annotated=True,
+                        cat_node.meta["quantization_annotation"] = (
+                            QuantizationAnnotation(
+                                input_qspec_map=input_qspec_map,
+                                output_qspec=share_qparams_with_input_act0_qspec,
+                                _annotated=True,
+                            )
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -783,9 +783,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 obs_ins0 = getattr(m, input0.target)
                 obs_ins1 = getattr(m, input1.target)
                 assert obs_ins0 == obs_ins1
-        assert (
-            len(conv_output_obs) == 2
-        ), "expecting two observer that follows conv2d ops"
+        assert len(conv_output_obs) == 2, (
+            "expecting two observer that follows conv2d ops"
+        )
         # checking that the output observers for the two convs are shared as well
         assert conv_output_obs[0] == conv_output_obs[1]
 
@@ -850,9 +850,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 obs_ins2 = getattr(m, output_obs.target)
                 assert obs_ins0 == obs_ins2, "input observer does not match output"
 
-        assert (
-            len(conv_output_obs) == 2
-        ), "expecting two observer that follows conv2d ops"
+        assert len(conv_output_obs) == 2, (
+            "expecting two observer that follows conv2d ops"
+        )
         # checking that the output observers for the two convs are shared as well
         assert conv_output_obs[0] == conv_output_obs[1]
 
@@ -967,16 +967,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                             (first_input_node, cat_node)
                         )
                         for input_node in input_nodes[1:]:
-                            input_qspec_map[
-                                input_node
-                            ] = share_qparams_with_input_act0_qspec
+                            input_qspec_map[input_node] = (
+                                share_qparams_with_input_act0_qspec
+                            )
 
-                        cat_node.meta[
-                            "quantization_annotation"
-                        ] = QuantizationAnnotation(
-                            input_qspec_map=input_qspec_map,
-                            output_qspec=share_qparams_with_input_act0_qspec,
-                            _annotated=True,
+                        cat_node.meta["quantization_annotation"] = (
+                            QuantizationAnnotation(
+                                input_qspec_map=input_qspec_map,
+                                output_qspec=share_qparams_with_input_act0_qspec,
+                                _annotated=True,
+                            )
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -1063,16 +1063,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         share_qparams_with_input_act1_qspec = SharedQuantizationSpec(
                             (second_input_node, cat_node)
                         )
-                        input_qspec_map[
-                            first_input_node
-                        ] = share_qparams_with_input_act1_qspec
+                        input_qspec_map[first_input_node] = (
+                            share_qparams_with_input_act1_qspec
+                        )
 
-                        cat_node.meta[
-                            "quantization_annotation"
-                        ] = QuantizationAnnotation(
-                            input_qspec_map=input_qspec_map,
-                            output_qspec=share_qparams_with_input_act1_qspec,
-                            _annotated=True,
+                        cat_node.meta["quantization_annotation"] = (
+                            QuantizationAnnotation(
+                                input_qspec_map=input_qspec_map,
+                                output_qspec=share_qparams_with_input_act1_qspec,
+                                _annotated=True,
+                            )
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -1121,17 +1121,17 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         share_qparams_with_input_act1_qspec = SharedQuantizationSpec(
                             (second_input_node, add_node)
                         )
-                        input_qspec_map[
-                            first_input_node
-                        ] = share_qparams_with_input_act1_qspec
+                        input_qspec_map[first_input_node] = (
+                            share_qparams_with_input_act1_qspec
+                        )
 
-                        add_node.meta[
-                            "quantization_annotation"
-                        ] = QuantizationAnnotation(
-                            input_qspec_map=input_qspec_map,
-                            output_qspec=share_qparams_with_input_act1_qspec,
-                            allow_implicit_sharing=False,
-                            _annotated=True,
+                        add_node.meta["quantization_annotation"] = (
+                            QuantizationAnnotation(
+                                input_qspec_map=input_qspec_map,
+                                output_qspec=share_qparams_with_input_act1_qspec,
+                                allow_implicit_sharing=False,
+                                _annotated=True,
+                            )
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -2333,6 +2333,118 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_conv_padding_bn_relu(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = QuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                weight_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                bias_qspec = QuantizationSpec(
+                    dtype=torch.float32,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                )
+
+                for n in model.graph.nodes:
+                    if (
+                        n.op != "call_function"
+                        or n.target != torch.ops.aten.relu.default
+                    ):
+                        continue
+                    relu_node = n
+                    n = n.args[0]
+
+                    # Check for any of the conv operations
+                    conv_ops = [
+                        torch.ops.aten.conv1d.padding,
+                        torch.ops.aten.conv2d.padding,
+                        torch.ops.aten.conv3d.padding,
+                    ]
+                    if n.op != "call_function" or n.target not in conv_ops:
+                        continue
+
+                    conv_node = n
+                    input_act = conv_node.args[0]
+                    weight = conv_node.args[1]
+                    bias = conv_node.args[2]
+                    conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                        input_qspec_map={
+                            input_act: act_qspec,
+                            weight: weight_qspec,
+                            bias: bias_qspec,
+                        },
+                        _annotated=True,
+                    )
+                    relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                        output_qspec=act_qspec,
+                        _annotated=True,
+                    )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        # Test cases for Conv1d, Conv2d, Conv3d
+        test_cases = [
+            {
+                "dim": 1,
+                "example_input": (torch.randn(1, 3, 5),),
+                "conv_op": torch.ops.aten.conv1d.padding,
+            },
+            {
+                "dim": 2,
+                "example_input": (torch.randn(1, 3, 5, 5),),
+                "conv_op": torch.ops.aten.conv2d.padding,
+            },
+            {
+                "dim": 3,
+                "example_input": (torch.randn(1, 3, 5, 5, 5),),
+                "conv_op": torch.ops.aten.conv3d.padding,
+            },
+        ]
+
+        for test_case in test_cases:
+            with self.subTest(dim=test_case["dim"]):
+                model = TestHelperModules.ConvWithBNRelu(
+                    relu=True,
+                    dim=test_case["dim"],
+                    bn=True,
+                    bias=True,
+                    padding="same",  # This will trigger the .padding variants
+                ).eval()
+
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    test_case["conv_op"],
+                    torch.ops.aten.relu.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                ]
+
+                self._test_quantizer(
+                    model,
+                    test_case["example_input"],
+                    BackendAQuantizer(),
+                    node_occurrence,
+                    node_list,
+                )
+
     def test_multi_users_without_output_observer(self):
         """
         Test the case in which a node is used by multiple users,
@@ -2440,7 +2552,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             ):
-                # Entire graph share the same qspec which was overriden by FixedQParamsObserver
+                # Entire graph share the same qspec which was overridden by FixedQParamsObserver
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
 

@@ -1,9 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <chrono>
 #include <list>
-#include <sstream>
 #include <utility>
+#include <c10/util/env.h>
 
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
@@ -17,13 +16,13 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+  static auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
 
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
+  if (envar.has_value()) {
+    if (envar == "0") {
       return false;
     }
-    if (strcmp(envar, "1") == 0) {
+    if (envar == "1") {
       return true;
     }
     TORCH_WARN(
@@ -175,6 +174,18 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
     std::vector<OperatorName> allOpNames;
     for (const auto& op : operatorLookupTable) {
         allOpNames.push_back(op.first);
+    }
+    return allOpNames;
+  });
+}
+
+const std::vector<OperatorName> Dispatcher::getAllOpNamesForDispatchKey(DispatchKey k) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> allOpNames;
+    for (const auto& op : operatorLookupTable) {
+      if (op.second.hasKernelForDispatchKey(k)) {
+        allOpNames.push_back(op.first);
+      }
     }
     return allOpNames;
   });
@@ -557,9 +568,9 @@ bool Dispatcher::profilingOperatorEvents() {
   return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
 }
 
-C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref, std::vector<void*>& argsAddresses, std::vector<const char*>& argsTypes) {
   if (TORCH_SDT_IS_ENABLED(operator_start)) {
-    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
+    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str(), argsAddresses.size(), argsAddresses.data(), argsTypes.data());
   }
 }
 

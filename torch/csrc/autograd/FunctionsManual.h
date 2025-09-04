@@ -35,9 +35,7 @@ TORCH_API Tensor toNonOptFwGrad(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptPrimal(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptTensor(const std::optional<Tensor>& t);
 
-TORCH_API inline std::optional<Tensor> wrap_opt_if(
-    const Tensor& t,
-    const bool cond) {
+inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
   using OptTensor = std::optional<Tensor>;
   return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
@@ -828,6 +826,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask);
+
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
@@ -966,6 +973,20 @@ Tensor layer_norm_jvp(
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     c10::SymIntArrayRef normalized_shape);
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,
