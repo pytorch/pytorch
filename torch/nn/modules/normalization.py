@@ -306,7 +306,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
         if not self.start_dim < rank:
             raise ValueError(
-                f"start dim {self.start_dim} cannot not be greater or equal to the rank of the input got input of shape {input_shape}"
+                f"start dim {self.start_dim} cannot not be greater or equal to the rank of the input tensor got input of shape {input_shape}"
             )
 
         self.normalized_shape = input_shape[self.start_dim :]
