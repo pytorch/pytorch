@@ -3487,10 +3487,18 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     """
     Ensures the configuration is internally consistent for standalone AOTInductor.
 
-    If `aot_inductor.compile_standalone` is set to True in the provided
+    If `aot_inductor_mode.compile_standalone` is set to True in the provided
     `config_patches` (or falls back to the global config), this function ensures
-    that the following configs are also enabled:
+    that the following configs are also set:
         - `aot_inductor.package_cpp_only`
+        - `aot_inductor.embed_kernel_binary`
+        - `aot_inductor.emit_multi_arch_kernel`
+        - `aot_inductor.link_libtorch=False`
+        - `aot_inductor.dynamic_linkage=False`
+
+    If `aot_inductor.dynamic_linkage` is set to False in the provided
+    `config_patches` (or falls back to the global config):
+        - `aot_inductor.model_name_for_generated_files` is default to "aoti_model" if not set.
 
     Args:
         config_patches (dict[str, Any]): A dictionary of user-provided config
@@ -3512,7 +3520,8 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
             )
 
     compile_standalone = config_patches.get(
-        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+        "aot_inductor_mode.compile_standalone",
+        config.aot_inductor_mode.compile_standalone,
     )
     # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
     config_patches = config_patches.copy()
@@ -3525,6 +3534,13 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(
             config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
         )
+        patch_config(config_patches, "aot_inductor.dynamic_linkage", False)
+        patch_config(config_patches, "aot_inductor.compile_with_torchstandalone", True)
+
+    dynamic_linkage = config_patches.get(
+        "aot_inductor.dynamic_linkage", config.aot_inductor.dynamic_linkage
+    )
+    if not dynamic_linkage:
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )

@@ -65,14 +65,27 @@ _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 # initialize variables for compilation
 _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
-_IS_WINDOWS = sys.platform == "win32"
-
-SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (
+    ("utf-8",)
+    if sys.platform == "win32" or config.aot_inductor.cross_target_platform == "windows"
+    else ()
+)
 
 log = logging.getLogger(__name__)
 
 
 # =============================== toolchain ===============================
+def is_target_windows() -> bool:
+    return (
+        sys.platform == "win32"
+        or config.aot_inductor.cross_target_platform == "windows"
+    )
+
+
+def is_compiling_on_windows() -> bool:
+    return sys.platform == "win32"
+
+
 @functools.lru_cache(1)
 def cpp_compiler_search(search: str) -> str:
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
@@ -133,6 +146,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
+    if config.aot_inductor.cross_target_platform == "windows":
+        # Do not check compiler if cross target platform is windows.
+        return
     try:
         subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
@@ -332,7 +348,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
 
 def get_cpp_compiler() -> str:
-    if _IS_WINDOWS:
+    if is_target_windows():
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
@@ -349,7 +365,7 @@ def get_cpp_compiler() -> str:
 
 
 def get_ld_and_objcopy(use_relative_path: bool) -> tuple[str, str]:
-    if _IS_WINDOWS:
+    if is_target_windows():
         raise RuntimeError("Windows is not supported yet.")
     else:
         if config.is_fbcode():
@@ -403,7 +419,7 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
-    elif _IS_WINDOWS:
+    elif is_target_windows():
         # clang suite have many compilers, and only clang-cl is supported.
         if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
             raise RuntimeError(
@@ -423,7 +439,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 @functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
-    if not _IS_WINDOWS:
+    if not is_compiling_on_windows():
         return False
 
     try:
@@ -445,7 +461,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         """
         On Windows: early version icx has `-print-file-name` issue, and can't preload correctly for inductor.
         """
-        min_version = "2024.2.1" if _IS_WINDOWS else "0.0.0"
+        min_version = "2024.2.1" if is_target_windows() else "0.0.0"
         if compiler_version < TorchVersion(min_version):
             raise RuntimeError(
                 f"Intel Compiler error: less than minimal version {min_version}."
@@ -461,7 +477,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         )
         is_intel_compiler = "Intel" in output_msg.splitlines()[0]
         if is_intel_compiler:
-            if _IS_WINDOWS:
+            if is_target_windows():
                 if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
                     raise RuntimeError(
                         "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
@@ -594,7 +610,7 @@ def run_compile_cmd(cmd_line: str, cwd: str) -> None:
 
 
 def normalize_path_separator(orig_path: str) -> str:
-    if _IS_WINDOWS:
+    if is_target_windows():
         return orig_path.replace(os.sep, "/")
     return orig_path
 
@@ -719,14 +735,14 @@ class BuildOptionsBase:
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
-    if not _IS_WINDOWS:
+    if not is_target_windows():
         return ["Wall"] if warning_all else []
     else:
         return []
 
 
 def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
-    if _IS_WINDOWS:
+    if is_target_windows():
         """
         On Windows, only c++20 can support `std::enable_if_t`.
         Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
@@ -741,7 +757,7 @@ def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
 
 
 def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
-    if _IS_WINDOWS:
+    if is_target_windows():
         cflags = [
             "wd4819",
             "wd4251",
@@ -778,7 +794,7 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
 
 def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
     os_definitions: list[str] = []
-    if _IS_WINDOWS:
+    if is_target_windows():
         # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
         # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
         os_definitions.append("NOMINMAX")
@@ -788,7 +804,7 @@ def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
 
 
 def _get_ffast_math_flags() -> list[str]:
-    if _IS_WINDOWS:
+    if is_target_windows():
         flags = []
     else:
         # ffast-math is equivalent to these flags as in
@@ -825,7 +841,7 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     cflags: list[str] = []
     ldflags: list[str] = []
 
-    if _IS_WINDOWS:
+    if is_target_windows():
         cflags = ["ZI", "_DEBUG"]
         ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
     else:
@@ -848,19 +864,19 @@ def _get_optimization_cflags(
 
     if b_debug_build:
         cflags, ldflags = _get_inductor_debug_symbol_cflags()
-        if _IS_WINDOWS:
+        if is_target_windows():
             cflags += ["Od", "Ob0", "Oy-"]
         else:
             cflags.append("O0")
     else:
-        if _IS_WINDOWS:
+        if is_target_windows():
             cflags = ["O1" if min_optimize else "O2"]
         else:
             cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
 
     cflags += _get_ffast_math_flags()
 
-    if _IS_WINDOWS:
+    if is_target_windows():
         pass
     else:
         if sys.platform != "darwin":
@@ -882,7 +898,7 @@ def _get_optimization_cflags(
 
 
 def _get_shared_cflags(do_link: bool) -> list[str]:
-    if _IS_WINDOWS:
+    if is_target_windows():
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
@@ -923,7 +939,11 @@ def get_cpp_options(
 
     definitions += _get_os_related_cpp_definitions(cpp_compiler)
 
-    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+    if (
+        not is_target_windows()
+        and config.aot_inductor.enable_lto
+        and _is_clang(cpp_compiler)
+    ):
         ldflags.append("fuse-ld=lld")
         ldflags.append("flto=thin")
 
@@ -1005,7 +1025,7 @@ def _use_custom_generated_macros() -> list[str]:
 
 
 def _use_fb_internal_macros() -> list[str]:
-    if not _IS_WINDOWS:
+    if not is_target_windows():
         if config.is_fbcode():
             fb_internal_macros = [
                 "C10_USE_GLOG",
@@ -1027,7 +1047,7 @@ def _setup_standard_sys_libs(
     cflags: list[str] = []
     include_dirs: list[str] = []
     passthrough_args: list[str] = []
-    if _IS_WINDOWS:
+    if is_target_windows():
         return cflags, include_dirs, passthrough_args
 
     if config.is_fbcode():
@@ -1098,7 +1118,7 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
 
-    if _IS_WINDOWS:
+    if is_target_windows() and config.aot_inductor.link_libtorch:
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries
@@ -1120,12 +1140,12 @@ def _get_python_include_dirs() -> list[str]:
 def _get_python_related_args() -> tuple[list[str], list[str]]:
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
-        "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
+        "include", scheme="nt" if is_target_windows() else "posix_prefix"
     )
     if python_include_path is not None:
         python_include_dirs.append(python_include_path)
 
-    if _IS_WINDOWS:
+    if is_target_windows():
         python_lib_path = [
             str(
                 (
@@ -1273,7 +1293,7 @@ def _get_openmp_args(
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
-    elif _IS_WINDOWS:
+    elif is_target_windows():
         """
         On Windows, `clang` and `icx` have their specific openmp implenmention.
         And the openmp lib is in compiler's some sub-directory.
@@ -1419,6 +1439,7 @@ def get_cpp_torch_options(
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
+
     passthrough_args = (
         sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
@@ -1585,6 +1606,8 @@ def get_cpp_torch_device_options(
                 libraries += ["c10_hip", "torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
+            if is_target_windows():
+                libraries += ["CUDA::cudart"]
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
@@ -1597,7 +1620,7 @@ def get_cpp_torch_device_options(
             "Intel GPU driver is not properly installed, please follow the instruction "
             "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
         )
-        if _IS_WINDOWS:
+        if is_target_windows():
             ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
             if ze_root is None:
                 raise OSError(xpu_error_string)
@@ -1766,26 +1789,26 @@ class CppBuilder:
 
     @staticmethod
     def __get_python_module_flags() -> tuple[str, str]:
-        extension = ".pyd" if _IS_WINDOWS else ".so"
-        output_flags = "/Fe" if _IS_WINDOWS else "-o"
+        extension = ".pyd" if is_target_windows() else ".so"
+        output_flags = "/Fe" if is_target_windows() else "-o"
         return extension, output_flags
 
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
-        extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
+        extension = ".obj" if is_target_windows() else ".o"
+        output_flags = "/c /Fo" if is_target_windows() else "-c -o"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
     def __get_precompiled_header_flags() -> tuple[str, str]:
-        extension = ".pch" if _IS_WINDOWS or not is_gcc() else ".gch"
-        output_flags = "/Fp" if _IS_WINDOWS else "-o"
+        extension = ".pch" if is_target_windows() or not is_gcc() else ".gch"
+        output_flags = "/Fp" if is_target_windows() else "-o"
         return extension, output_flags
 
     @staticmethod
     def __get_preprocessor_output_flags() -> tuple[str, str]:
         extension = ".i"
-        output_flags = "/EP /P" if _IS_WINDOWS else "-E -P -o"
+        output_flags = "/EP /P" if is_target_windows() else "-E -P -o"
         return extension, output_flags
 
     def __init__(
@@ -1837,7 +1860,7 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
+        assert not is_target_windows() or not self._precompiling, (
             "Cannot currently precompile headers on Windows!"
         )
 
@@ -1856,7 +1879,7 @@ class CppBuilder:
             if self._use_relative_path
             else self._target_file
         )
-        if _IS_WINDOWS:
+        if is_target_windows():
             if self._preprocessing:
                 # The target file name is automatically determined by MSVC.
                 self._output = output_flags
@@ -1883,19 +1906,19 @@ class CppBuilder:
             self._sources_args = " ".join(sources)
 
         for cflag in BuildOption.get_cflags():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._cflags_args += f"/{cflag} "
             else:
                 self._cflags_args += f"-{cflag} "
 
         for definition in BuildOption.get_definitions():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._definitions_args += f"/D {definition} "
             else:
                 self._definitions_args += f"-D {definition} "
 
         if precompiled_header := BuildOption.precompiled_header:
-            if _IS_WINDOWS:
+            if is_target_windows():
                 log.warning(
                     "Precompiled header support for MSVC is currently unavailable; ignoring %s",
                     precompiled_header,
@@ -1904,25 +1927,25 @@ class CppBuilder:
                 self._include_dirs_args = f"-include {precompiled_header} "
 
         for inc_dir in BuildOption.get_include_dirs():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._include_dirs_args += f'/I "{inc_dir}" '
             else:
                 self._include_dirs_args += f"-I{shlex.quote(inc_dir)} "
 
         for ldflag in BuildOption.get_ldflags():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._ldflags_args += f"/{ldflag} "
             else:
                 self._ldflags_args += f"-{ldflag} "
 
         for lib_dir in BuildOption.get_libraries_dirs():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
                 self._libraries_dirs_args += f"-L{lib_dir} "
 
         for lib in BuildOption.get_libraries():
-            if _IS_WINDOWS:
+            if is_target_windows():
                 self._libraries_args += f'"{lib}.lib" '
             else:
                 self._libraries_args += f"-l{lib} "
@@ -1943,7 +1966,7 @@ class CppBuilder:
             passthrough_args: str,
             output: str,
         ) -> str:
-            if _IS_WINDOWS:
+            if is_target_windows():
                 # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
                 # https://stackoverflow.com/a/31566153
                 cmd = (
@@ -2043,7 +2066,7 @@ class CppBuilder:
 
         definitions = " ".join(self._build_option.get_definitions())
         target_library_type = (
-            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+            "STATIC" if not config.aot_inductor.dynamic_linkage else "SHARED"
         )
 
         contents = textwrap.dedent(
@@ -2058,10 +2081,7 @@ class CppBuilder:
             """
         )
 
-        if (
-            not config.aot_inductor.compile_standalone
-            or config.test_configs.use_libtorch
-        ):
+        if config.aot_inductor.link_libtorch or config.test_configs.use_libtorch:
             # When compile_standalone is True, the generated cpp project should
             # not use Torch. But for unit testing purpose, we need to use Torch here.
             contents += textwrap.dedent(
@@ -2071,24 +2091,7 @@ class CppBuilder:
 
                 """
             )
-            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
-            # will make the generated CMake file more portable and won't really hurt performance.
-            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
-            # be still needed.
-            contents += textwrap.dedent(
-                f"""
-                # Add macro definitions
-                target_compile_definitions({self._target_name} PRIVATE {definitions})
-
-                # Add compile flags
-                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
-
-                # Backend-specific flags
-                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
-
-                """
-            )
-        else:
+        elif config.aot_inductor.compile_with_torchstandalone:
             # When compile_standalone is True, use TorchStandalone instead of Torch
             contents += textwrap.dedent(
                 f"""
@@ -2100,73 +2103,148 @@ class CppBuilder:
                 """
             )
 
+        contents += textwrap.dedent(
+            f"""
+            # Add macro definitions
+            target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+            # Add compile flags
+            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+            # Backend-specific flags
+            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+            """
+        )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
-                f"""
+                """
                 enable_language(CUDA)
                 set(CMAKE_CUDA_STANDARD 17)
                 find_package(CUDAToolkit REQUIRED)
-                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
-                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
-                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
-
-                find_program(OBJCOPY_EXECUTABLE objcopy)
-                if(NOT OBJCOPY_EXECUTABLE)
-                    message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
-                endif()
-
-                set(KERNEL_TARGETS "")
-                set(KERNEL_OBJECT_FILES "")
-                # Function to embed a single kernel
-                function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
-                    set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
-                    set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
-                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
-                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
-
-                    # --- Define UNIQUE C symbol names ---
-                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
-                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
-                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
-                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
-                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
-                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
-                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
-
-                    # --- PTX to FATBIN Command & Target ---
-                    add_custom_command(
-                        OUTPUT ${{FATBIN_FILE}}
-                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
-                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
-                        DEPENDS ${{PTX_FILE}}
-                    )
-
-                    # --- FATBIN to Object File (.o) Command ---
-                    add_custom_command(
-                        OUTPUT ${{OBJECT_FILE}}
-                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
-                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
-                                ${{OBJECT_FILE}}
-                        COMMAND ${{OBJCOPY_EXECUTABLE}}
-                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
-                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
-                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
-                                ${{OBJECT_FILE}}
-                        DEPENDS ${{FATBIN_FILE}}
-                    )
-                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
-
-                    # --- Add to a list for linking later ---
-                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
-                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
-                endfunction()
-
                 """
             )
+            if config.aot_inductor.cross_target_platform == "windows":
+                exports_str = (
+                    """LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/windows_symbol_exports.def" """
+                    if config.aot_inductor.dynamic_linkage
+                    else ""
+                )
+
+                contents += textwrap.dedent(
+                    f"""
+                    # Make output use .pyd instead of .dll
+                    set_target_properties({self._target_name} PROPERTIES SUFFIX ".pyd" {exports_str})
+
+                    set(KERNEL_TARGETS "")
+                    set(KERNEL_OBJECT_FILES "")
+                    # Function to compile ptx to cubin
+                    function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
+                        set(CUBIN_BASENAME ${{KERNEL_NAME}}.cubin)
+                        set(CUBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{CUBIN_BASENAME}})
+                        # --- PTX to FATBIN Command & Target ---
+                        add_custom_command(
+                            OUTPUT ${{CUBIN_FILE}}
+                            COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --cubin ${{PTX_FILE}}
+                                    -o ${{CUBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                    -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                            DEPENDS ${{PTX_FILE}}
+                        )
+
+                        add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{CUBIN_FILE}})
+                        set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                        """
+                )
+                if config.aot_inductor.embed_kernel_binary:
+                    contents += textwrap.indent(
+                        textwrap.dedent(
+                            """
+                        # CUBIN → C++ array via xxd -i
+                        set(C_SRC_BASENAME ${KERNEL_NAME}.c)
+                        set(C_SRC_FILE ${CMAKE_CURRENT_BINARY_DIR}/${C_SRC_BASENAME})
+
+                        add_custom_command(
+                            OUTPUT ${C_SRC_FILE}
+                            COMMAND xxd -i -n __${KERNEL_NAME}_start ${CUBIN_FILE} > ${C_SRC_FILE}
+                            DEPENDS ${CUBIN_FILE}
+                            COMMENT "Embedding ${CUBIN_FILE} as C array in ${C_SRC_FILE}"
+                        )
+
+                        set_source_files_properties(${C_SRC_FILE}
+                            PROPERTIES GENERATED TRUE LANGUAGE C COMPILE_FLAGS "/TC")  # /TC forces MSVC C mode
+
+                        target_sources(model PRIVATE ${C_SRC_FILE})
+                        """
+                        ),
+                        " " * 4,
+                    )
+                contents += textwrap.dedent(
+                    """
+                    endfunction()
+                    """
+                )
+            elif config.aot_inductor.embed_kernel_binary:
+                contents += textwrap.dedent(
+                    f"""
+                    find_program(OBJCOPY_EXECUTABLE objcopy)
+                    if(NOT OBJCOPY_EXECUTABLE)
+                        message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
+                    endif()
+
+                    set(KERNEL_TARGETS "")
+                    set(KERNEL_OBJECT_FILES "")
+                    # Function to embed a single kernel
+                    function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
+                        set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
+                        set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
+                        set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
+                        set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
+
+                        # --- Define UNIQUE C symbol names ---
+                        set(SYMBOL_START __${{KERNEL_NAME}}_start)
+                        set(SYMBOL_END __${{KERNEL_NAME}}_end)
+                        set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
+                        string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
+                        set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
+                        set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
+                        set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
+
+                        # --- PTX to FATBIN Command & Target ---
+                        add_custom_command(
+                            OUTPUT ${{FATBIN_FILE}}
+                            COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}}
+                                    -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                    -gencode arch=compute_80,code=compute_80
+                                    -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                            DEPENDS ${{PTX_FILE}}
+                        )
+
+                        # --- FATBIN to Object File (.o) Command ---
+                        add_custom_command(
+                            OUTPUT ${{OBJECT_FILE}}
+                            COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
+                            COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                    ${{OBJECT_FILE}}
+                            COMMAND ${{OBJCOPY_EXECUTABLE}}
+                                    --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
+                                    --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
+                                    --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
+                                    ${{OBJECT_FILE}}
+                            DEPENDS ${{FATBIN_FILE}}
+                        )
+                        add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
+
+                        # --- Add to a list for linking later ---
+                        set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                        set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
+                    endfunction()
+
+                    """
+                )
 
         with open(cmake_path, "w") as f:
             f.write(contents)
@@ -2196,15 +2274,15 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        if (
-            config.aot_inductor.compile_standalone
-            and not config.test_configs.use_libtorch
-        ):
-            # When compile_standalone is True, do not link with libtorch
-            return
-
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
+
+        if (
+            config.aot_inductor.compile_with_torchstandalone
+            and not config.test_configs.use_libtorch
+        ):
+            libs += " ${TorchStandalone_LIBRARIES}"
+
         contents = textwrap.dedent(
             f"""
             # Add linker flags
@@ -2224,7 +2302,7 @@ class CppBuilder:
 
 def run_asm_build_object(src: str, target: str, cwd: str) -> None:
     def get_asm_compiler() -> str:
-        if _IS_WINDOWS:
+        if is_target_windows():
             ASM_CC = "ml64"
         else:
             ASM_CC = get_cpp_compiler()
@@ -2234,7 +2312,7 @@ def run_asm_build_object(src: str, target: str, cwd: str) -> None:
         return ASM_CC
 
     def get_command_line(asm_cc: str, src: str, target: str) -> str:
-        if _IS_WINDOWS:
+        if is_target_windows():
             # Format reference:
             # https://learn.microsoft.com/en-us/cpp/assembler/masm/ml-and-ml64-command-line-reference?view=msvc-170
             cmd = f"{asm_cc} {src} /c /Fo {target}"  # codespell:ignore /Fo

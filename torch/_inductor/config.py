@@ -1585,7 +1585,14 @@ class aot_inductor:
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
 
-    compile_standalone: bool = False
+    # If set to "windows", we will compile from WSL and generate a C++ project file for
+    # further Windows native compilation
+    # Only works with package_cpp_only=True
+    cross_target_platform: Optional[str] = None
+
+    # If package_cpp_only is True, whether cpp files will be compiled to a
+    # dynamically linked library or static linked library
+    dynamic_linkage: bool = True
 
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
@@ -1600,6 +1607,22 @@ class aot_inductor:
     # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
     # TODO: should consolidate this flag with compile_standalone
     libtorch_free_headers: Optional[list[str]] = None
+
+    # compile to TorchStandalone
+    compile_with_torchstandalone: int = False
+
+
+# a convenient class that automatically sets a group of the configs in aot_inductor
+# it should only control the flags in aot_inductor.
+# it should not do anything else.
+class aot_inductor_mode:
+    # dynamic_linkage=False
+    # link_libtorch=False
+    # package_cpp_only=True
+    # embed_kernel_binary=True
+    # emit_multi_arch_kernel=True
+    # compile_with_torchstandalone=True
+    compile_standalone: bool = False
 
 
 class cuda:
