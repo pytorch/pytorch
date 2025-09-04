@@ -9,6 +9,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -148,6 +149,33 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             ).aot_compile((example_inputs, {}))
             actual = compiled_fn(*example_inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_graph_break_error_fmt(self):
+        def foo(x, y):
+            a = x + x
+            torch._dynamo.graph_break()
+            b = y + y
+            c = a + b
+            return c
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(foo, fullgraph=True).aot_compile(
+                ((torch.ones(3), torch.ones(3)), {})
+            ),
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+from user code:
+   File "test_aot_compile.py", line N, in foo
+    torch._dynamo.graph_break()""",
+        )
 
 
 if __name__ == "__main__":
