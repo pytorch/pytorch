@@ -127,6 +127,7 @@ if TYPE_CHECKING:
     from .codegen.cuda.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
+    from .kernel_template_choice import KernelTemplateChoice
     from .utils import IndentedBuffer
 
 else:
@@ -4974,6 +4975,16 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        self._ktc: Union[KernelTemplateChoice, None] = None
+
+    def set_ktc(self, ktc: KernelTemplateChoice) -> None:
+        assert self._ktc is None, (
+            f"cannot override the KernelTemplateChoice on ChoiceCaller {self.name}"
+        )
+        self._ktc = ktc
+
+    def get_ktc(self) -> Union[KernelTemplateChoice, None]:
+        return self._ktc
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
