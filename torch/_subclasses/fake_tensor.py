@@ -940,6 +940,21 @@ class FakeTensor(Tensor):
                 if any(map(check_cpu_device, (common_device, t.device))):
                     return
 
+            # if prefer_device_type is set, prefer that device type over others
+            prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
+            if prefer_device_type is not None:
+                common_has_preferred = prefer_device_type in common_device.type
+                t_has_preferred = prefer_device_type in t.device.type
+
+                if not common_has_preferred and t_has_preferred:
+                    # Switch to the preferred device type
+                    common_device = t.device
+                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                    return
+                elif common_has_preferred and not t_has_preferred:
+                    # Keep the existing preferred device type
+                    return
+
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(

@@ -354,6 +354,25 @@ skip_tensor_guards_with_matching_dict_tags = True
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = True
 
+
+# The recursive-dict-tag guard relies on the class/function identity staying
+# stable.  We therefore assume that the following function dunder attributes
+# are **never rebound** to a different object:
+#
+#     • __code__        • __closure__
+#     • __defaults__    • __kwdefaults__
+#     • __annotations__ • __mro__
+#
+# It is fine to mutate the objects they already point to (e.g. tweak an element
+# inside __defaults__), but assignments like
+#
+#     foo.__defaults__ = (3, 4)          # REBIND  - NOT SUPPORTED
+#
+# would invalidate the optimization.  This type of rebinding is rare, so we
+# assume that the rebinding never happens for guard purposes.  Set the flag
+# below to False only in environments where such rebinding is known to occur.
+assume_dunder_attributes_remain_unchanged = True
+
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
 use_recursive_dict_tags_for_guards = True
@@ -429,6 +448,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
+# Resume tracing in nested frames if a nested graph break occurs
+# Old behavior is to bubble up the graph break to the top level frame.
+nested_graph_breaks = False
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
@@ -457,6 +480,18 @@ issue_3_13_0_warning = True
 # If False, skip frame (and future calls to the same code object) if we determine that the
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
+
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+debug_force_nested_calls = False
+
+# Used for testing - forces a graph break when a function
+# that doesn't make any Dynamo-inlined calls returns
+debug_force_graph_break_on_leaf_return = False
+
+# Used for testing - causes CompileCounter.frame_count to always
+# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
+# always pass.
+debug_disable_compile_counter = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
@@ -559,6 +594,8 @@ fake_tensor_disable_inference_mode = True
 # Enables automatic DynamoCache save/load
 caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
+strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
+
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
 # compiled region. But AOTAutograd traces without knowledge of backward hooks which are
@@ -645,6 +682,8 @@ wrap_top_frame = False
 # Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
+
+enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None

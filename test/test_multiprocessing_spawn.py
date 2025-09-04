@@ -47,7 +47,7 @@ def _test_terminate_signal_func(i):
 def _test_terminate_exit_func(i, arg):
     if i == 0:
         sys.exit(arg)
-    time.sleep(1.0)
+    time.sleep(4.0)
 
 
 def _test_success_first_then_exception_func(i, arg):
@@ -145,7 +145,7 @@ class _TestMultiProcessing:
         with self.assertRaisesRegex(Exception, message):
             mp.start_processes(_test_terminate_signal_func, nprocs=2, start_method=self.start_method)
 
-    @parametrize("grace_period", [None, 5])
+    @parametrize("grace_period", [None, 20])
     def test_terminate_exit(self, grace_period):
         exitcode = 123
         ctx = mp.start_processes(_test_terminate_exit_func, args=(exitcode,), nprocs=2, start_method=self.start_method, join=False)
