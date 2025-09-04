@@ -1814,30 +1814,6 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
 
 
 @functools.cache
-def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
-    """
-    Check if we should use the contiguous subgraph transform.
-    This transform makes the second matrix contiguous before the matmul.
-    """
-    decompose_k_threshold = config.triton.decompose_k_threshold
-
-    # Similar conditions to decompose_k but for contiguous transform
-    from torch._inductor.virtualized import V
-
-    return (
-        bool(torch.version.hip)  # Only relevant on AMD
-        and V.graph.sizevars.statically_known_true(
-            sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
-            )
-        )
-        and not V.graph.aot_mode
-        and not V.graph.cpp_wrapper
-    )
-
-
-@functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
     k_splits_limit = config.triton.num_decompose_k_splits

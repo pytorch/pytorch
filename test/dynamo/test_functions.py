@@ -3529,7 +3529,6 @@ class GraphModule(torch.nn.Module):
             return a + b
         return a - b
 
-    @unittest.expectedFailure
     @make_test
     def test_range_iterator_2(a, b):
         # should pass once we stop having three different paths on call_iter
