@@ -80,7 +80,7 @@ ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 # Install some system dependencies and double check python version
 RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
-        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
     else \
         dnf install -y git curl wget sudo vim; \
     fi \
