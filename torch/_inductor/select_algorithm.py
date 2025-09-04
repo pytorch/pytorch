@@ -1453,9 +1453,7 @@ class TritonTemplate(KernelTemplate):
         """
 
         try:
-            choice = self.generate(generate_with_caching=True, **kwargs)
-            if choice is not None:
-                choices.append(choice)
+            choices.append(self.generate(generate_with_caching=True, **kwargs))
             return None
         except NotImplementedError as e:
             log.info(
@@ -1516,17 +1514,21 @@ class TritonTemplate(KernelTemplate):
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
-        defines = defines.getvalue()
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            raise NotImplementedError(
-                "64-bit indexing is not yet implemented for triton templates"
-            )
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int32"
+        else:
+            index_dtype = "tl.int64"
+
+        # Add index dtype to defines so it's available in the template
+        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
+        defines = defines.getvalue()
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -3356,9 +3358,6 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
-    def clear_feedback_savers(self):
-        self.feedback_saver_fns = []
-
     def add_preprocessing_fn(self, fn: PreprocessingFunction):
         self.preprocessing_fns.append(fn)
 
@@ -3404,12 +3403,6 @@ def add_feedback_saver(
 ):
     cache = get_algorithm_selector_cache()
     cache.add_feedback_saver(fn)
-
-
-def clear_feedback_savers():
-    """Clear all feedback saver functions."""
-    cache = get_algorithm_selector_cache()
-    cache.clear_feedback_savers()
 
 
 def add_preprocessing_fn(

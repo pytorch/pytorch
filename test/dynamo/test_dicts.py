@@ -7,7 +7,7 @@ import operator
 import types
 import unittest
 import weakref
-from collections import defaultdict, namedtuple, OrderedDict, UserDict
+from collections import defaultdict, namedtuple, OrderedDict
 from typing import Any
 
 import torch
@@ -28,10 +28,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 
 class SimpleDict(dict):
-    pass
-
-
-class DummyUserDict(UserDict):
     pass
 
 
@@ -791,17 +787,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
-
-    def test_construct_user_dict_and_return(self):
-        def fn(x):
-            return DummyUserDict({"a": x + 1})
-
-        x = torch.randn(4)
-        res = fn(x)
-        self.assertEqual(res["a"], x + 1)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(res["a"], opt_fn(x)["a"])
 
     def test_fn_id(self):
         def fn(x, f):

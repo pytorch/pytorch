@@ -968,7 +968,6 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
+    global _CODE_STATE, _INIT_CODE_STATE
     _CODE_STATE = None
     _INIT_CODE_STATE = None
-    _LOGGED_DYNAMIC_ALLOWLIST = False

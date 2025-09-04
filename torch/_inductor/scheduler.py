@@ -611,9 +611,6 @@ class BaseSchedulerNode:
                     + stack_trace_last_line.replace("{", "{{")
                     .replace("}", "}}")
                     .replace("\n", "\\")
-                    .replace(
-                        "\\", "\\\\"
-                    )  # For windows safe path, avoid for example \x, \U.
                 )
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
@@ -2771,10 +2768,10 @@ class Scheduler:
             node.max_order = order
 
     def merge_loops(self) -> None:
-        if not config.loop_ordering_after_fusion:
-            return
-
         for node in self.nodes:
+            if not config.loop_ordering_after_fusion:
+                continue
+
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (

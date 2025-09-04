@@ -1521,8 +1521,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = MutableMappingVariable(value, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return MutableMappingVariable(value, source=self.source)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)

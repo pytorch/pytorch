@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
+import os
+import subprocess
+import sys
 
 import torch
 import torch._inductor.config
 from torch._inductor import metrics
 from torch._inductor.compiler_bisector import BisectionResult, CompilerBisector
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -98,6 +100,18 @@ class TestTorchDeviceAssertTrigger(TestCase):
         self._run_assert_should_not_throw(device)
         self._run_assert_inline_expression_should_not_throw(device)
 
+    @torch._inductor.config.patch(force_disable_caches=True, cpp_wrapper=True)
+    def test_assert_should_throw_cpp_wrapper(self):
+        device = "cpu"
+        self._run_assert_should_throw(device)
+        self._run_assert_inline_expression_should_throw(device)
+
+    @torch._inductor.config.patch(force_disable_caches=True, cpp_wrapper=True)
+    def test_assert_should_not_throw_cpp_wrapper(self):
+        device = "cpu"
+        self._run_assert_should_not_throw(device)
+        self._run_assert_inline_expression_should_not_throw(device)
+
     @requires_cuda_and_triton
     @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
@@ -121,23 +135,69 @@ class TestTorchDeviceAssertTrigger(TestCase):
     @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_run_assert_triton(self):
-        @torch.compile(backend="inductor")
-        def fn():
-            a = torch.tensor([1.0, 2.0], device="cuda")
-            result = torch.all(a > 0)
-            assert result, "should throw"
+        should_throw = """
+import torch
+import torch._dynamo
 
-        def should_not_throw(fn):
-            try:
-                fn()
-                return True
-            except Exception:
-                return False
+def func_should_throw():
+    a = torch.tensor([1.0, -2.0], device='cuda')
+    result = torch.all(a > 0)
+    assert result, "should throw"
 
-        self.assertEqual(should_not_throw(fn), True)
+def test_fn():
+    torch._dynamo.reset()
+    f_c = torch.compile(func_should_throw, backend="inductor")
 
-        _, code = run_and_get_code(fn)
-        self.assertEqual(code[0].count("tl.device_assert"), 1)
+    try:
+        f_c()
+        torch.cuda.synchronize()
+        return False
+    except Exception as e:
+        return True
+
+result = test_fn()
+print(f"Test result: {result}")
+"""
+
+        should_not_throw = """
+import torch
+import torch._dynamo
+
+def func_should_not_throw():
+    a = torch.tensor([1.0, 2.0], device='cuda')
+    result = torch.all(a > 0)
+    assert result, "should throw"
+
+def test_fn():
+    torch._dynamo.reset()
+    f_c = torch.compile(func_should_not_throw, backend="inductor")
+
+    try:
+        f_c()
+        torch.cuda.synchronize()
+        return True
+    except Exception as e:
+        return False
+
+result = test_fn()
+print(f"Test result: {result}")
+"""
+        for script in [should_not_throw, should_throw]:
+            p = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                capture_output=True,
+                text=True,
+            )
+
+            output = p.stdout + "\n" + p.stderr
+
+            self.assertIn("Test result: True", output)
+
+            if p.returncode != 0:
+                self.fail(
+                    f"Subprocess failed with return code {p.returncode}. Output: {output}"
+                )
 
 
 if __name__ == "__main__":

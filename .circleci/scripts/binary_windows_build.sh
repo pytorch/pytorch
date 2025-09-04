@@ -15,7 +15,8 @@ fi
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
     export VC_YEAR=2022
     export USE_SCCACHE=0
-    export XPU_VERSION=2025.2
+    export XPU_VERSION=2025.1
+    export XPU_ENABLE_KINETO=1
 fi
 
 echo "Free space on filesystem before build:"

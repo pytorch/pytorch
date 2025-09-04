@@ -221,23 +221,10 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
-    def _get_all_module_attributes(mod):
-        # return attributes from all modules and submodules
-        result = {}
-        for name, submodule in mod.named_modules():
-            result[name] = _get_attributes(submodule)
-        return result
-
-    def _restore_all_module_attributes(mod, snapshot):
-        # restore attributes to all modules and submodules
-        for name, submodule in mod.named_modules():
-            if name in snapshot:
-                submodule.__dict__.update(snapshot[name])
-
     # save state of attributes before enter
     snapshot = pytree.tree_map(
         lambda x: x,
-        _get_all_module_attributes(mod),
+        _get_attributes(mod),
         is_leaf=lambda x: type(x) in _pytree_subclasses_that_lose_info,
     )
     try:
@@ -249,75 +236,41 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
 
         def _collect_assigned_tensor_attributes(kp, v, _v):
             if _v is not v:
-                module_name, attr, *rest = kp
+                attr, *rest = kp
                 if isinstance(v, torch.Tensor):
-                    module_prefix = f"{module_name.key}." if module_name.key else ""
                     assigned_tensor_attributes.append(
-                        f"self.{module_prefix}{attr.key}{pytree.keystr(rest)}"
+                        f"self.{attr.key}{pytree.keystr(rest)}"
                     )
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
             return v
 
-        new_attrs = _get_all_module_attributes(mod)
+        new_attrs = _get_attributes(mod)
+        if len(new_attrs) != len(snapshot):
+            added_attrs = new_attrs.keys() - snapshot.keys()
+            deleted_attrs = snapshot.keys() - new_attrs.keys()
 
-        # Check for added/deleted attributes across all modules
-        for module_name in snapshot.keys() | new_attrs.keys():
-            old_module_attrs = snapshot.get(module_name, {})
-            new_module_attrs = new_attrs.get(module_name, {})
+            if len(added_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
 
-            module_prefix = f"self.{module_name}." if module_name else "self."
-
-            if len(new_module_attrs) != len(old_module_attrs):
-                added_attrs = new_module_attrs.keys() - old_module_attrs.keys()
-                deleted_attrs = old_module_attrs.keys() - new_module_attrs.keys()
-
-                if len(added_attrs) > 0:
-                    formatted_attrs = [f"{module_prefix}{attr}" for attr in added_attrs]
-                    raise ValueError(
-                        f"During torch.export, following attrs were created in the model.forward: {formatted_attrs} "
-                        f"Such attributes must be registered as buffers using the `register_buffer` "
-                        f"API and must be initialized at model.__init__ "
-                        f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                    )
-
-                if len(deleted_attrs) > 0:
-                    formatted_attrs = [
-                        f"{module_prefix}{attr}" for attr in deleted_attrs
-                    ]
-                    raise ValueError(
-                        f"During torch.export, following attrs were deleted in the model.forward: {formatted_attrs} "
-                        f"Such attributes must be registered as buffers using the `register_buffer` "
-                        f"API and must be initialized at model.__init__ "
-                        f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                    )
-
-            # Tensors could have leaked at container attributes
-            for k, new_v in new_module_attrs.items():
-                assert k in old_module_attrs
-                if isinstance(new_v, (tuple, list, dict)):
-                    flat_new_v, _ = pytree.tree_flatten(new_v)
-                    flat_old_v, _ = pytree.tree_flatten(old_module_attrs[k])
-                    if len(flat_new_v) != len(flat_old_v):
-                        leaked_values = [
-                            v
-                            for v in flat_new_v
-                            if v not in flat_old_v and isinstance(v, torch.Tensor)
-                        ]
-                        if len(leaked_values) > 0:
-                            raise ValueError(
-                                f"During torch.export, following tensors were leaked at {module_prefix}{k}: {leaked_values} "
-                                f"Such attributes must be registered as buffers using the `register_buffer` "
-                                f"API and must be initialized at model.__init__ "
-                                f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer). "  # noqa: 950
-                                f"Alternatively, consider using `torch.export.export(strict=True)` to export the model."
-                            )
+            if len(deleted_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
 
         pytree.tree_map_with_path(
             _collect_assigned_tensor_attributes, snapshot, new_attrs
         )
         # restore state of all attributes (including, e.g., of primitive types)
-        _restore_all_module_attributes(mod, snapshot)
+        mod.__dict__.update(snapshot)
 
         if assigned_tensor_attributes:
             if len(assigned_tensor_attributes) > 1:
