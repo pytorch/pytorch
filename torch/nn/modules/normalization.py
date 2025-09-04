@@ -280,6 +280,12 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
         self.reset_parameters()
 
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
+        if not self.has_uninitialized_params():
+            super().reset_parameters()
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
