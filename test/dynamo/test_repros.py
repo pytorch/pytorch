@@ -5006,6 +5006,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
 
+    # https://github.com/pytorch/pytorch/issues/159258
+    def test_weakref_proxy(self):
+        class DummyTrainer:
+            def __init__(self, x):
+                self.foo = x
+
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trainer = None
+
+            def foo(self):
+                return self.trainer.foo
+
+        x = torch.randn(4)
+        model = DummyModel()
+        trainer = DummyTrainer(x)
+        model.trainer = weakref.proxy(trainer)
+        compiled_foo = torch.compile(model.foo, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_foo(), x)
+
     def test_weakref_reconstruct(self):
         def fn(x_weak, weight, y):
             y = torch.sin(y)
@@ -7748,6 +7769,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_cuda_sync(self):
+        def fn(x):
+            y = x + 1
+            torch.cuda.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device="cuda")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)

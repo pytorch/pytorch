@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import os
 from functools import partial
 from threading import Lock
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -31,7 +32,7 @@ from ..utils import (
     using_b200,
 )
 from ..virtualized import V
-from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -557,34 +558,69 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return scaled_configs
 
+    def _get_exceeding_shared_memory_checker(
+        self,
+    ) -> Optional[Callable[[BaseConfig, int], bool]]:
+        """
+        Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
+        If the device does not report available shared memory, returns None.
+        """
+
+        try:
+            device = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(device)
+            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                return None
+            sm_available = int(props.shared_memory_per_block_optin)
+        except Exception:
+            # If CUDA is not available or properties cannot be queried, return None
+            return None
+
+        # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
+        def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:
+            shared_mem_accum = dtype_size * (
+                gemm_config.block_m * gemm_config.block_k
+                + gemm_config.block_n * gemm_config.block_k
+            )
+            return shared_mem_accum * gemm_config.num_stages > sm_available
+
+        return exceeds
+
+    def _prune_exceeding_max_shared_mem_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        if dtype_size <= 0:
+            return configs
+
+        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
+        if is_exceeding_shared_memory is None:
+            return configs
+
+        return [c for c in configs if not is_exceeding_shared_memory(c, dtype_size)]
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        import torch
+        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
 
         pruned_configs = []
         for gemm_config in configs:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
-            NUM_REG = 255
+            # Will use more shared memory than available
+            if is_exceeding_shared_memory and is_exceeding_shared_memory(
+                gemm_config, dtype_size
+            ):
+                continue
 
+            NUM_REG = 255
             acc_regs = math.ceil(
                 gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
             )
-
-            shared_mem_accum = dtype_size * (
-                gemm_config.block_m * gemm_config.block_k
-                + gemm_config.block_n * gemm_config.block_k
-            )
-
-            # Will use more shared memory than available
-            if shared_mem_accum * gemm_config.num_stages > sm_available:
-                continue
             # Lower bound for register spillage, if exceeds the kernel will certainly spill
-            elif acc_regs > NUM_REG:
+            if acc_regs > NUM_REG:
                 continue
 
             pruned_configs.append(gemm_config)
@@ -616,6 +652,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
+
+        # Filter out configs that require more shared memory than is available.
+        if config.max_autotune_prune_choices_based_on_shared_mem:
+            scaled_configs = self._prune_exceeding_max_shared_mem_configs(
+                scaled_configs, dtype_size
+            )
+
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
             scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
@@ -799,7 +842,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
@@ -814,7 +857,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
@@ -1098,13 +1141,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        return configs
-
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1250,8 +1286,128 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
     """
-    Placeholder child class for XPU specific overrides.
+    Placeholder child class for Intel GPU specific overrides.
     """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.xpu_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 128): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 256): FlexConfig(64, 16, 1, 8),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 256): FlexConfig(32, 64, 1, 4),
+            (torch.float16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 256): FlexConfig(32, 64, 1, 4),
+        }
+        self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
+            FlexConfig(32, 16, 2, 4),
+            FlexConfig(128, 64, 2, 16),
+            FlexConfig(128, 64, 2, 8),
+            FlexConfig(128, 32, 2, 16),
+            FlexConfig(128, 32, 2, 8),
+        ]
+        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = []
+        self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
+
+        if not bool(os.getenv("CI")):
+            self.flex_attn_bwd_autotune_configs += [
+                FlexConfig(BLOCK1, BLOCK2, s, w)
+                for BLOCK1 in [32, 64]
+                for BLOCK2 in [32, 64, 128]
+                for s in [1, 3, 4, 5]  # num_stages
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
+                if BLOCK2 % BLOCK1 == 0
+            ]
+            self.flex_decode_autotune_configs += [
+                FlexDecodeConfig(32, 1, 2),
+                FlexDecodeConfig(32, 1, 1),
+                FlexDecodeConfig(32, 2, 2),
+                FlexDecodeConfig(32, 2, 1),
+                FlexDecodeConfig(64, 1, 2),
+                FlexDecodeConfig(64, 1, 1),
+                FlexDecodeConfig(64, 2, 2),
+                FlexDecodeConfig(64, 2, 1),
+            ]
+
+    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+        flex_attn_fwd_configs: list[FlexConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_attn_fwd_configs
+            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+
+        if head_dim <= 256:
+            if dtype == torch.float32:
+                default_config = FlexConfig(64, 64, 1, 8)
+            else:
+                default_config = FlexConfig(128, 64, 1, 16)
+            default_config = self.xpu_default_flex_config.get(
+                (dtype, head_dim), default_config
+            )
+        else:
+            if dtype == torch.float32:
+                default_config = FlexConfig(32, 16, 1, 4)
+            else:
+                default_config = FlexConfig(64, 32, 1, 8)
+
+        if default_config not in flex_attn_fwd_configs:
+            flex_attn_fwd_configs.append(default_config)
+
+        return flex_attn_fwd_configs
+
+    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+        flex_attn_bwd_configs: list[FlexConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_attn_bwd_configs
+            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+
+        if dtype == torch.float32:
+            default_config = FlexConfig(16, 16, 1, 4)
+        elif head_dim <= 256:
+            if head_dim == 64:
+                default_config = FlexConfig(64, 64, 1, 8)
+            elif head_dim == 128:
+                default_config = FlexConfig(64, 128, 1, 8)
+            else:
+                default_config = FlexConfig(64, 64, 1, 8)
+        else:  # modest hardware or extremely large head_dim
+            default_config = FlexConfig(16, 16, 1, 4)
+
+        if default_config not in flex_attn_bwd_configs:
+            flex_attn_bwd_configs.append(default_config)
+
+        return flex_attn_bwd_configs
+
+    def get_flex_decode_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexDecodeConfig]:
+        flex_decode_configs: list[FlexDecodeConfig] = []
+
+        if config.max_autotune:
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return self.exhaustive_flex_decode_configs
+            flex_decode_configs += self.flex_decode_autotune_configs
+
+        default_config = FlexDecodeConfig(64, 1, 2)
+
+        if default_config not in flex_decode_configs:
+            flex_decode_configs.append(default_config)
+
+        return flex_decode_configs
+
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
 
 
 class MTIAConfigHeuristic(BaseConfigHeuristic):
@@ -1261,7 +1417,7 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-class MMTemplateConfigMixin(TemplateConfigHeuristics):
+class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
     This handles the logic that was previously in choices.get_mm_configs.
@@ -1292,7 +1448,7 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         else:
             return self.get_mm_configs()
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1407,6 +1563,24 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         super().__init__()
         self.should_scale_configs = False
 
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+        max_autotune: bool = False,
+    ) -> Generator[dict[str, Any], None, None]:
+        assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
+        m, n, k = kernel_inputs.mnk_symbolic()
+        for kwargs in super()._get_template_configs_impl(
+            kernel_inputs, layout, op_name, max_autotune
+        ):
+            # Apply BLOCK_K constraint specific to mm_plus_mm
+            # see https://github.com/triton-lang/triton/issues/1298
+            # BLOCK_K = K causes llvm error
+            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k), k):
+                yield kwargs
+
 
 class TMAWorkspaceMixin(MMTemplateConfigMixin):
     """
@@ -1442,7 +1616,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1464,7 +1638,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             yield {**template_kwargs, **tma_opts}
@@ -1511,7 +1685,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes, mat1_idx=kernel_inputs._mat1_idx, mat2_idx=kernel_inputs._mat2_idx
         )
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1564,7 +1738,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return
 
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
@@ -1620,7 +1794,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1631,7 +1805,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         Generate scaled TMA template configs with both scaled MM and TMA-specific options.
         """
         # Get base scaled MM template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             # Add TMA-specific options for device TMA scaled MM
@@ -1700,6 +1874,32 @@ class CUDAPersistentTMATemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
+    persistent_tma_mm_template.uid,
+    "xpu",
+)
+class XPUPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, XPUConfigHeuristic
+):
+    """Persistent TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
+    persistent_tma_mm_template.uid,
+    "xpu",
+    op_name="addmm",
+)
+class XPUAddmmPersistentTMATemplateConfigHeuristic(
+    AddMMConfigMixin, XPUPersistentTMATemplateConfigHeuristic
+):
+    """Addmm specific mixin for XPU"""
 
 
 @register_template_heuristic(
@@ -1810,11 +2010,11 @@ class ROCmMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic(
-    "mm", "cuda", register=torch.version.hip is not None, op_name="addmm"
+    mm_template.uid, "cuda", register=torch.version.hip is not None, op_name="addmm"
 )
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic(
-    "bmm", "cuda", register=torch.version.hip is not None, op_name="baddbmm"
+    bmm_template.uid, "cuda", register=torch.version.hip is not None, op_name="baddbmm"
 )
 class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeuristic):
     """Addmm specific mixin for ROCm"""
