@@ -132,3 +132,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ROCm/aiter.git
+[submodule "third_party/nccl"]
+	path = third_party/nccl
+	url = https://github.com/NVIDIA/nccl
