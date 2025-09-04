@@ -257,46 +257,75 @@ IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
   set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
 
-  if(USE_ROCM)
-    # Only include the kernels we want to build to avoid increasing binary size.
-    file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
-    set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
-    # Add additional HIPCC compiler flags for performance
-    set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
-      -mllvm
-      -amdgpu-coerce-illegal-types=1
-      -mllvm
-      -enable-post-misched=0
-      -mllvm
-      -greedy-reverse-local-assignment=1
-      -fhip-new-launch-api)
-
-    # Only compile for gfx942 for now.
-    # This is rather hacky, I could not figure out a clean solution :(
-    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
-    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
-    list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
-    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
-
-    hip_add_library(
-      fbgemm_genai STATIC
-      ${fbgemm_genai_native_rocm_hip}
-      HIPCC_OPTIONS ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
-    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
-
+  if(USE_CUDA)
+    add_library(fbgemm_genai OBJECT)
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
-
-    target_include_directories(fbgemm_genai PUBLIC
-      # FBGEMM version of Composable Kernel is used due to some customizations
-      ${FBGEMM_THIRD_PARTY}/composable_kernel/include
-      ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-      ${FBGEMM_GENAI_DIR}/include/
-      ${FBGEMM_GENAI_DIR}/common/include/
+    # To avoid increasing the build time/binary size unneccesarily, use an allow-list of kernels to build.
+    # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
+    set(FBGEMM_CUTLASS_KERNELS_REGEX
+      ".*(f8f8bf16_rowwise).*"
+      ".*(mx8mx8bf16_grouped_mm).*"
     )
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
+    list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
+    set(fbgemm_genai_native_cuda_cuh
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/f8f8bf16_rowwise/"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped_mm/"
+    )
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
+      "${FBGEMM_GENAI_SRCS}/common/*.cpp"
+      # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
+      "${FBGEMM_GENAI_SRCS}/quantize_defs_torch.cpp"
+      "${FBGEMM_GENAI_SRCS}/quantize_torch.cpp"
+    )
+    set(fbgemm_genai_native_cuda_h
+      "${FBGEMM_GENAI_SRCS}/common/include/"
+    )
+    target_include_directories(fbgemm_genai PUBLIC
+      ${FBGEMM_THIRD_PARTY}/cutlass/include
+      ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+      ${fbgemm_genai_native_cuda_cuh}
+      ${fbgemm_genai_native_cuda_h}
+    )
+    target_sources(fbgemm_genai PRIVATE
+      ${fbgemm_genai_native_cuda_cu}
+      ${fbgemm_genai_native_cuda_cpp}
+    )
+  else()
+    if(USE_ROCM)
+      # Only include the kernels we want to build to avoid increasing binary size.
+      file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
+        "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+        "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+      set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+      # Add additional HIPCC compiler flags for performance
+      set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
+        -mllvm
+        -amdgpu-coerce-illegal-types=1
+        -mllvm
+        -enable-post-misched=0
+        -mllvm
+        -greedy-reverse-local-assignment=1
+        -fhip-new-launch-api)
+
+      hip_add_library(
+        fbgemm_genai STATIC
+        ${fbgemm_genai_native_rocm_hip}
+        HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+      set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+
+      target_include_directories(fbgemm_genai PUBLIC
+        # FBGEMM version of Composable Kernel is used due to some customizations
+        ${FBGEMM_THIRD_PARTY}/composable_kernel/include
+        ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
+        ${FBGEMM_GENAI_DIR}/include/
+        ${FBGEMM_GENAI_DIR}/common/include/
+      )
+    endif()
   endif()
 endif()
 

@@ -1551,6 +1551,180 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 }
 
 namespace {
+    void check_scaled_grouped_mm_mxfp8_2d2d(
+        const at::Tensor& mat_a,
+        const at::Tensor& mat_b,
+        const at::Tensor& scale_a,
+        const at::Tensor& scale_b,
+        const at::Tensor& offs) {
+        // For 2d-2d grouped gemm, groups are along the K (contracting) dim
+        TORCH_CHECK(
+            scale_a.dim() == mat_a.dim(),
+            "Expected scale_a to have same number of dims as target tensor, but got scale_a.dim()=",
+            scale_a.dim(), ", mat_a.dim()=", mat_a.dim(), ".");
+
+        TORCH_CHECK(
+            scale_b.dim() == mat_b.dim(),
+            "Expected scale_b to have same number of dims as target tensor, but got scale_b.dim()=",
+            scale_b.dim(), ", mat_b.dim()=", mat_b.dim(), ".");
+
+        auto round_up = [](auto x, auto y) {
+          // Rounds up x to the nearest multiple of y
+          return ((x + y - 1) / y) * y;
+        };
+
+        // For 2d-2d, groups are along K dim.
+        // Calculate total size of scale K dim after per group blocked format is applied
+        int64_t padded_per_group_scale_K = 0;
+        int64_t group_start_off = 0;
+        auto offs_accessor = offs.accessor<int64_t, 1>();
+
+        for (int i = 0; i < offs_accessor.size(0); ++i) {
+            int64_t group_end_off = offs_accessor[i];
+            int64_t group_size = group_end_off - group_start_off;
+            int64_t expected_group_size = round_up(group_size / 32, (int64_t)4);
+            padded_per_group_scale_K += expected_group_size;
+            group_start_off = group_end_off;
+        }
+
+        // Check scale_a has shape (padded_M, padded_per_group_scale_K)
+        int64_t M = mat_a.size(0);
+        int64_t padded_scale_M = round_up(M, (int64_t)128);
+        TORCH_CHECK(
+            scale_a.size(0) == padded_scale_M && scale_a.size(1) == padded_per_group_scale_K,
+            "For 2d-2d MXFP8 grouped gemm, for mat_a.shape=(", mat_a.size(0), ",", mat_a.size(1), "), with offs=", offs,
+            ", expected scale_a to have shape (", padded_scale_M, ", ",
+            padded_per_group_scale_K, "), but got (", scale_a.size(0), ", ", scale_a.size(1), ").");
+
+        // Check scale_b has shape (padded_N, padded_per_group_scale_K)
+        int64_t N = mat_b.size(-1);
+        int64_t padded_scale_N = round_up(N, (int64_t)128);
+        TORCH_CHECK(
+            scale_b.size(0) == padded_scale_N && scale_b.size(1) == padded_per_group_scale_K,
+            "For 2d-2d MXFP8 grouped gemm, for mat_b.shape=(", mat_b.size(0), ",", mat_b.size(1), "), with offs=", offs,
+            ", expected scale_b to have shape (", padded_scale_N, ", ",
+            padded_per_group_scale_K, "), but got (", scale_b.size(0), ", ", scale_b.size(1), ").");
+    }
+
+    void check_scaled_grouped_mm_mxfp8_2d3d(
+        const at::Tensor& mat_a,
+        const at::Tensor& mat_b,
+        const at::Tensor& scale_a,
+        const at::Tensor& scale_b,
+        const at::Tensor& offs) {
+        // For 2d-3d grouped gemm, groups are along the M dim
+        TORCH_CHECK(
+            scale_a.dim() == mat_a.dim(),
+            "Expected scale_a to have same number of dims as target tensor, but got scale_a.dim()=",
+            scale_a.dim(), ", mat_a.dim()=", mat_a.dim(), ".");
+
+        TORCH_CHECK(
+            scale_b.dim() == mat_b.dim(),
+            "Expected scale_b to have same number of dims as target tensor, but got scale_b.dim()=",
+            scale_b.dim(), ", mat_b.dim()=", mat_b.dim(), ".");
+
+        auto round_up = [](auto x, auto y) {
+          // Rounds up x to the nearest multiple of y
+          return ((x + y - 1) / y) * y;
+        };
+
+        // For 2d-3d, groups are along M dim.
+        // Calculate total size of scale M dim after per group blocked format is applied
+        int64_t padded_per_group_scale_M = 0;
+        int64_t group_start_off = 0;
+        auto offs_accessor = offs.accessor<int64_t, 1>();
+
+        for (int i = 0; i < offs_accessor.size(0); ++i) {
+            int64_t group_end_off = offs_accessor[i];
+            int64_t group_size = group_end_off - group_start_off;
+            int64_t expected_group_size = round_up(group_size, (int64_t)128);
+            padded_per_group_scale_M += expected_group_size;
+            group_start_off = group_end_off;
+        }
+
+        // Check scale_a has shape (padded_per_group_scale_M, padded_scale_K)
+        int64_t K = mat_a.size(-1);
+        int64_t padded_scale_K = round_up(K / 32, (int64_t)4);
+        TORCH_CHECK(
+            scale_a.size(0) == padded_per_group_scale_M && scale_a.size(1) == padded_scale_K,
+            "For 2d-3d MXFP8 grouped gemm, for mat_a.shape=(", mat_a.size(0), ", ", mat_a.size(1),
+            ") with offs=", offs, ", expected scale_a to have shape (", padded_per_group_scale_M, ", ",
+            padded_scale_K, "), but got (", scale_a.size(0), ", ", scale_a.size(1), ").");
+
+        // Check scale_b has shape (..., padded_scale_N, padded_scale_K)
+        int64_t N = mat_b.size(-1);
+        int64_t padded_scale_N = round_up(N, (int64_t)128);
+        TORCH_CHECK(
+            scale_b.size(-2) == padded_scale_N && scale_b.size(-1) == padded_scale_K,
+            "For 2d-3d MXFP8 grouped gemm, for mat_b.shape=(", mat_b.size(0), ",", mat_b.size(1), ", ", mat_b.size(2),
+            "), expected scale_b to have shape (..., ", padded_scale_N, ", ",
+            padded_scale_K, "), but got (..., ", scale_b.size(-2), ", ", scale_b.size(-1), ").");
+    }
+
+  at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
+  const Tensor& mat_b,
+  const std::optional<at::Tensor>& offs,
+  std::optional<c10::ScalarType> out_dtype
+  ) {
+    c10::SmallVector<int64_t, 3> out_size;
+    const bool a_is_2d = mat_a.dim() == 2;
+    const bool b_is_2d = mat_b.dim() == 2;
+    if (a_is_2d) {
+      if (b_is_2d) {
+        out_size = {offs->size(0), mat_a.size(0), mat_b.size(1)};
+      } else {
+        TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
+        out_size = {mat_a.size(0), mat_b.size(-1)};
+      }
+    } else {
+      if (b_is_2d) {
+        // this case is not actually encountered for MoE gemms
+        TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
+        out_size = {mat_a.size(1), mat_b.size(1)};
+      } else { // regular bmm
+        TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
+        out_size = {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
+      }
+    }
+
+    const auto out_dtype_ = out_dtype.value_or(kBFloat16);
+    TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+
+    #ifndef USE_ROCM
+    // For TMA transfers, strides of output tensor have to be either
+    // 1, or aligned to 16 bytes.
+    const auto last_dim = out_size.size() - 1;
+    const auto alignment = 16 / c10::elementSize(out_dtype_);
+    const int64_t size_padded = (out_size[last_dim] + alignment - 1) / alignment * alignment;
+    std::vector<int64_t> out_stride;
+    if (a_is_2d != b_is_2d) {
+      out_stride = {size_padded, 1};
+    } else {
+      out_stride = {out_size[1] * size_padded, size_padded, 1};
+    }
+    return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
+    #else
+    return at::empty(out_size, mat_a.options().dtype(out_dtype_));
+    #endif
+  }
+
+  bool check_valid_strides_and_return_transposed(const Tensor& mat) {
+    IntArrayRef tensor_strides = mat.strides();
+    IntArrayRef tensor_sizes = mat.sizes();
+    int end_dim = mat.dim() - 1;
+    int alignment = 16 / mat.element_size();
+    TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
+    if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
+      TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
+      return true;
+    } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
+      TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
+      return false;
+    } else {
+      TORCH_CHECK(false, "Invalid strides/sizes, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
+    }
+  }
+
   void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
     if (mat.dim() == 2) {
       TORCH_CHECK(
@@ -1646,6 +1820,38 @@ bool use_fast_accum) {
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
 
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+
+  #ifdef USE_FBGEMM_GENAI
+    // MXFP8 grouped GEMM dispatching
+    bool is_mx8m8bf16 = (
+      mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
+      scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu &&
+      out_dtype == at::kBFloat16
+    )
+
+    if (is_mx8m8bf16) {
+      bool b_is_3d = mat_b.dim() == 3;
+      bool is_2d_2d = a_is_2d && b_is_2d;
+      bool is_2d_3d = a_is_2d && b_is_3d;
+
+      if (is_2d_2d) {
+        check_scaled_grouped_mm_mxfp8_2d2d(mat_a, mat_b, scale_a, scale_b, offs);
+      } else if (is_2d_3d) {
+        check_scaled_grouped_mm_mxfp8_2d3d(mat_b, mat_a, scale_b, scale_a, offs);
+      } else {
+        TORCH_CHECK(false, "Only 2d-2d and 2d-3d grouped gemm are currently supported for MXFP8");
+      }
+      fbgemm_gpu::mx8mx8bf16_grouped_mm(
+          mat_a,
+          mat_b,
+          scale_a,
+          scale_b,
+          offs,
+          out);
+    }
+  #endif
+
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
@@ -1657,8 +1863,6 @@ bool use_fast_accum) {
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
 #ifndef USE_ROCM
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());

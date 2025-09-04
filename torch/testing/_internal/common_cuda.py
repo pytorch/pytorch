@@ -129,9 +129,17 @@ def evaluate_platform_supports_mx_gemm():
             return SM100OrLater
     return False
 
+def evaluate_platform_supports_mxfp8_grouped_gemm():
+    if torch.cuda.is_available():
+        built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
+        return built_with_fbgemm_genai and SM100OrLater
+    return False
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
+PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
     try:
