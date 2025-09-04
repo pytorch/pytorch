@@ -1722,8 +1722,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score * 2
 
         self.run_test_with_paged_attention(
-            score_mod, dtype, device=device,
-            kernel_options={"PARTITION_SIZE": partition_size}
+            score_mod,
+            dtype,
+            device=device,
+            kernel_options={"PARTITION_SIZE": partition_size},
         )
 
     @supported_platform
