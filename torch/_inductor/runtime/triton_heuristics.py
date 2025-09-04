@@ -2523,21 +2523,8 @@ def pointwise(
         filename=filename,
     )
 
-
-def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
-) -> list[Config]:
-    reduction_hint = inductor_meta.get("reduction_hint", None)
-
-    # Convert reductions to 1D, to simplify heuristics.
-    rnumel = get_total_reduction_numel(size_hints)
-
-    register_intensive = False
-    MAX_R0_BLOCK = 2048
-    loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
-        "num_reduction", 0
-    )
-    if size_hints["x"] >= 1024 and loads_and_red >= 10:
+def max_r_block_for_reduction(x, loads_and_red):
+    if x >= 1024 and loads_and_red >= 10:
         # A heuristics to reduce R0_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
@@ -2550,8 +2537,22 @@ def _reduction_configs(
         #
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
-        MAX_R0_BLOCK = 1024
-        register_intensive = True
+        return 1024
+    return 2048
+
+def _reduction_configs(
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
+) -> list[Config]:
+    reduction_hint = inductor_meta.get("reduction_hint", None)
+    loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_reduction", 0
+    )
+
+    # Convert reductions to 1D, to simplify heuristics.
+    rnumel = get_total_reduction_numel(size_hints)
+
+    MAX_R0_BLOCK = max_r_block_for_reduction(size_hints["x"], loads_and_red)
+    register_intensive = MAX_R0_BLOCK == 1024
 
     def make_config(
         x,

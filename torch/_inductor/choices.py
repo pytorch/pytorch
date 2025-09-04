@@ -188,10 +188,17 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
-        threshold = {
-            ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
 
+        from .runtime.triton_heuristics import max_r_block_for_reduction
+
+        xnumel = features.numel
+        memory_stats = features.memory_stats().persistent
+        reads = memory_stats.reads.loop[0].count_per_thread
+        writes = memory_stats.reads.loop[0].count_per_thread
+        threshold = {
+            ReductionHint.INNER: max_r_block_for_reduction(xnumel, reads + writes),
+        }.get(features.get_reduction_hint(), 64)
+        import pdb; pdb.set_trace()
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
             try:
