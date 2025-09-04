@@ -587,6 +587,7 @@ class AOTInductorModelBase {
 #endif
 
     size_t bytes_read = 0;
+    size_t non_folded_idx = 0; // Separate index for non-folded constants
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -596,12 +597,13 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
-                constants_internal_offset[i],
+                constants_internal_offset[non_folded_idx],
                 bytes_read,
                 data_size,
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
+      non_folded_idx++; // Increment the non-folded index
 
       // Create at::Tensor from copied memory.
       auto dtype = this->constant_dtype(i);
