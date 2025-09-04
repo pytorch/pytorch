@@ -1178,6 +1178,14 @@ class TestTensorCreation(TestCase):
         ref = torch.cat([x1.cpu(), x2.cpu()], dim=-1)
         self.assertEqual(res, ref)
 
+    @dtypes(torch.float)
+    def test_cat_multi_batch(self, device, dtype):
+        xs = [torch.randn(16, 16, device=device, dtype=dtype) for _ in range(130)]
+        xs_cpu = [x.cpu() for x in xs]
+        res = torch.cat(xs, dim=-1)
+        ref = torch.cat(xs_cpu, dim=-1)
+        self.assertEqual(res, ref)
+
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
     @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
