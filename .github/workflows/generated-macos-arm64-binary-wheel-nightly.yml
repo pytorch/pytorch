@@ -59,7 +59,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.10.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -166,7 +167,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -273,7 +275,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -380,7 +383,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.13.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -487,7 +491,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13t"
+          python-version: "3.13.0"
+          freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -594,7 +599,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14-rc2.0"
+          python-version: "3.14.0-rc2"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -701,7 +707,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14t-rc2.0"
+          python-version: "3.14.0-rc2"
+          freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
