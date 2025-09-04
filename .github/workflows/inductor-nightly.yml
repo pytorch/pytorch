@@ -32,13 +32,13 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build:
-    name: linux-jammy-cpu-py3.9-gcc11-nightly-dynamo-benchmarks
+  nightly-dynamo-benchmarks-build:
+    name: nightly-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
@@ -51,13 +51,13 @@ jobs:
       build-additional-packages: "vision audio torchao"
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-test:
-    name: linux-jammy-cpu-py3.9-gcc11-nightly-dynamo-benchmarks
+  nightly-dynamo-benchmarks-test:
+    name: nightly-dynamo-benchmarks-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build
+    needs: nightly-dynamo-benchmarks-build
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build.outputs.test-matrix }}
+      docker-image: ${{ needs.nightly-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.nightly-dynamo-benchmarks-build.outputs.test-matrix }}
       timeout-minutes: 720
     secrets: inherit
