@@ -308,6 +308,10 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
             raise ValueError(
                 f"start dim {self.start_dim} cannot not be greater or equal to the rank of the input got input of shape {input_shape}"
             )
+
+        self.normalized_shape = input_shape[self.start_dim :]
+
+
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
 
