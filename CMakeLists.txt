@@ -298,7 +298,7 @@ cmake_dependent_option(
     "LINUX" OFF)
 
 if(NOT DEFINED USE_VULKAN)
-  cmake_dependent_option(USE_VULKAN "Use Vulkan GPU backend" ON "ANDROID" OFF)
+  option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)

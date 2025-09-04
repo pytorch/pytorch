@@ -108,6 +108,10 @@
 #include <torch/csrc/profiler/kineto_client_interface.h>
 #include <sstream>
 
+#ifdef USE_VULKAN_API
+#include <ATen/vulkan/Context.h>
+#endif
+
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
@@ -2379,6 +2383,13 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_is_flash_attention_available", []() {
 #ifdef USE_CUDA
     return sdp::is_flash_attention_available();
+#else
+    return false;
+#endif
+  });
+  py_module.def("_is_vulkan_available", []() {
+#ifdef USE_VULKAN_API
+    return at::native::is_vulkan_available();
 #else
     return false;
 #endif

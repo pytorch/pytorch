@@ -8,6 +8,26 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing import FileCheck
 import io
 
+class TestVulkanBackend(TestCase):
+    def test_vulkan_backend_module(self):
+        """Test that the vulkan backend module works correctly."""
+        # Test that we can import the backend
+        from torch.backends import vulkan
+        
+        # Test that both availability functions return the same result
+        main_available = torch.is_vulkan_available()
+        backend_available = vulkan.is_available()
+        
+        # They should be consistent
+        self.assertEqual(main_available, backend_available,
+                        "torch.is_vulkan_available() and torch.backends.vulkan.is_available() should return the same value")
+        
+        # Test that the function returns a boolean
+        self.assertIsInstance(main_available, bool,
+                            "is_vulkan_available should return a boolean")
+        self.assertIsInstance(backend_available, bool,
+                            "vulkan.is_available should return a boolean")
+
 @unittest.skipUnless(torch.is_vulkan_available(),
                      "Vulkan backend must be available for these tests.")
 class TestVulkanRewritePass(TestCase):
