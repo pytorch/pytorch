@@ -162,16 +162,13 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             )
         )
 
-    if use_triton_template(layout1):
+    if use_triton_template(layout1, check_max_autotune=False):
         # Get template choices using the new unified function
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"
             )
         )
-        # TODO: Apply BLOCK_K constraint specific to mm_plus_mm
-        # For now, we'll add all choices since we can't easily inspect kwargs
-        # This may need to be handled in the template/heuristic level
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1

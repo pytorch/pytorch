@@ -204,7 +204,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             )
         )
 
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
@@ -275,7 +275,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(kernel_inputs, layout, aten_baddbmm, name)
         )
 
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,

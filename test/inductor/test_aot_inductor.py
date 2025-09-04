@@ -21,6 +21,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
@@ -151,6 +152,13 @@ except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+
+def get_module_ext_type():
+    if IS_WINDOWS:
+        return "pyd"
+    else:
+        return "so"
 
 
 class AOTInductorTestsTemplate:
@@ -306,7 +314,11 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
+        expected_path = normalize_path_separator(
+            os.path.join(
+                tempfile.mkdtemp(dir=cache_dir()), f"model.{get_module_ext_type()}"
+            )
+        )
         actual_path = AOTIRunnerUtil.legacy_compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
@@ -6893,12 +6905,6 @@ class AOTInductorTestsTemplate:
                     "aot_inductor.model_name_for_generated_files": "test_model"
                 },
             )
-
-        def get_module_ext_type():
-            if IS_WINDOWS:
-                return "pyd"
-            else:
-                return "so"
 
         with zipfile.ZipFile(package_path, "r") as zip_ref:
             all_files = zip_ref.namelist()
