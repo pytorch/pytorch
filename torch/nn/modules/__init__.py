@@ -111,6 +111,7 @@ from .normalization import (
     CrossMapLRN2d,
     GroupNorm,
     LayerNorm,
+    LazyLayerNorm,
     LocalResponseNorm,
     RMSNorm,
 )
@@ -252,6 +253,7 @@ __all__ = [
     "LazyInstanceNorm1d",
     "LazyInstanceNorm2d",
     "LazyInstanceNorm3d",
+    "LazyLayerNorm",
     "LazyLinear",
     "LeakyReLU",
     "Linear",

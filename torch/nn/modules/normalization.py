@@ -12,7 +12,7 @@ from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
+__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "LazyLayerNorm", "GroupNorm", "RMSNorm"]
 
 
 class LocalResponseNorm(Module):
