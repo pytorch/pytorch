@@ -59,7 +59,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: "3.10"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -79,6 +79,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -92,6 +93,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -163,7 +166,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: "3.11"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -183,6 +186,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -196,6 +200,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -267,7 +273,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.12
+          python-version: "3.12"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -287,6 +293,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -300,6 +307,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -371,7 +380,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.13
+          python-version: "3.13"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -391,6 +400,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -404,6 +414,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -475,7 +487,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.13t
+          python-version: "3.13t"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -495,6 +507,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -508,6 +521,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -579,7 +594,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.14-rc2
+          python-version: "3.14-rc2.0"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -599,6 +614,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -612,6 +628,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
@@ -683,7 +701,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.14t-rc2
+          python-version: "3.14t-rc2.0"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -703,6 +721,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -716,6 +735,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 

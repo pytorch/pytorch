@@ -63,7 +63,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: "3.10"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -83,6 +83,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build

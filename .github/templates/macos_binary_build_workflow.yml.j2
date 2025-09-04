@@ -26,7 +26,7 @@ name: !{{ build_environment }}
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: !{{ py_ver }}!{{ "-rc2" if "3.14" in py_ver else "" }}
+          python-version: "!{{ py_ver }}!{{ '-rc2.0' if '3.14' in py_ver else '' }}"
 {%- endmacro %}
 
 on:
@@ -77,6 +77,7 @@ jobs:
         run: |
           set -eux -o pipefail
           # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
@@ -91,6 +92,8 @@ jobs:
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
