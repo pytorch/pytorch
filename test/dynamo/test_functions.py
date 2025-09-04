@@ -4075,9 +4075,11 @@ class GraphModule(torch.nn.Module):
             return torch.get_device_module()
 
         f5()
-        new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device(device_type) else device_type
-        )
+        if torch._C._get_accelerator() == torch.device(device_type):
+            new_device = "cpu"
+        else:
+            new_device = device_type
+
         old_get_device_module = torch.get_device_module
 
         def new_get_device_module(device=None):
@@ -4729,7 +4731,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = torch.empty(
                 (2, 3),
                 dtype=torch.float32,
-                device=torch.accelerator.current_device_index()
+                device=torch.accelerator.current_device_index(),
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
