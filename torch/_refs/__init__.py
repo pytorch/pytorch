@@ -2239,7 +2239,7 @@ def _reduction(
         for i in dims:
             torch._check(
                 a.shape[i] > 0,
-                "found empty reduction axis with reduction op without an identity",
+                "found empty reduction axis for op without an identity",
             )
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
