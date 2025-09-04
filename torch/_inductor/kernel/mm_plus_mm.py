@@ -158,7 +158,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     if use_triton_template(layout1):
         # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
         ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
@@ -167,9 +167,8 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
                 mm_plus_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout1,
                     **kwargs,
+                    **extra_kwargs,
                 )
 
     return autotune_select_algorithm(
