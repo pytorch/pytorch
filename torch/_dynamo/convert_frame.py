@@ -946,16 +946,29 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         )
         return gm
 
-    dynamo_output = compile_frame(
-        frame.code,
-        frame.globals,
-        frame.locals,
-        frame.builtins,
-        frame.closure,
-        compiler_fn=fullgraph_compiler,
-        one_graph=True,
-        restart_reasons=set(),
-    )
+    try:
+        dynamo_output = compile_frame(
+            frame.code,
+            frame.globals,
+            frame.locals,
+            frame.builtins,
+            frame.closure,
+            compiler_fn=fullgraph_compiler,
+            one_graph=True,
+            restart_reasons=set(),
+        )
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
+    except Unsupported as e:
+        augment_exc_message(e)
+        if config.verbose:
+            raise
+        # strip internal tracebacks from causes
+        cur_exn: BaseException = e
+        while cur_exn.__cause__ is not None:
+            cur_exn.__cause__.with_traceback(None)
+            cur_exn = cur_exn.__cause__
+        raise e.with_traceback(None) from e.__cause__  # User compiler error
+
     assert backend_input is not None
     return CaptureOutput(dynamo_output, backend_input)
 
