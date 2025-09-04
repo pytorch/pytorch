@@ -246,7 +246,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
     def __init__(
         self,
-        dim: Union[int, tuple[int, ...]],
+        dim: Union[int, list[int], tuple[int, ...]],
         eps: float = 1e-5,
         elementwise_affine: bool = True,
         bias: bool = True,
