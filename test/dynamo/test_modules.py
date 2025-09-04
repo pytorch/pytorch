@@ -1934,10 +1934,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.fc = torch.nn.Linear(16, 16)
+
             def forward(self, x):
                 y = self.fc(x)
                 self.to("cpu")
                 return y
+
         mod = Mod()
         x = torch.rand(2, 16)
         ref = mod(x)
