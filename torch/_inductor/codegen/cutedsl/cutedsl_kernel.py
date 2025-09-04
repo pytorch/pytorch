@@ -409,19 +409,75 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
-            # CuteDSL tensor indexing (not Triton tl.load!)
-            line = f"{var}[{index_str}]"
+            # Get the CuteDSL dtype mapping
+            cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
+                var_dtype, "cutlass.Float32"
+            )
 
+            # NB
+            # This assumes single-value loads which is not generally the case but is a workaround
+            # since we don't have gather support yet. We do loads in non-SSA form then convert
+            # back to SSA form for any remaining operations over the loaded values.
+            #
+            # Pattern:
+            #   index_frag = cute.make_fragment(1, cutlass.Int32)
+            #   index_frag.store(index)
+            #   val_frag = cute.make_fragment(1, dtype)
+            #   index = index_frag[0]
+            #   val_frag[0] = tensor[index]
+            #   result = val_frag.load()
+
+            index_frag = self.kernel.cse.generate(
+                self.kernel.body,
+                "cute.make_fragment(1, cutlass.Int32)",
+                dtype=torch.int32,
+                bounds=ValueRanges.unknown(),
+            )
+
+            self.kernel.cse.generate(
+                self.kernel.body,
+                f"{index_frag}.store({index_str})",
+                dtype=torch.int32,
+                bounds=ValueRanges.unknown(),
+            )
+
+            val_frag = self.kernel.cse.generate(
+                self.kernel.body,
+                f"cute.make_fragment(1, {cute_dtype})",
+                dtype=var_dtype,
+                bounds=ValueRanges.unknown(),
+            )
+
+            index_var = self.kernel.cse.generate(
+                self.kernel.body,
+                f"{index_frag}[0]",
+                dtype=torch.int32,
+                bounds=ValueRanges.unknown(),
+            )
+
+            self.kernel.cse.generate(
+                self.kernel.body,
+                f"{val_frag}[0] = ({var}[{index_var}])",
+                dtype=var_dtype,
+                bounds=ValueRanges.unknown(),
+            )
+
+            final_expr = f"{val_frag}.load()"
+
+            # Handle upcast to fp32 if needed
             if (
                 var_dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
             ):
-                # CuteDSL dtype conversion
-                line = f"({line}).to(cutlass.Float32)"
+                # Apply dtype conversion after fragment load
+                final_expr = f"({final_expr}).to(cutlass.Float32)"
                 var_dtype = torch.float32
 
             out = self.kernel.cse.generate(
-                self.kernel.body, line, dtype=var_dtype, bounds=ValueRanges.unknown()
+                self.kernel.body,
+                final_expr,
+                dtype=var_dtype,
+                bounds=ValueRanges.unknown(),
             )
             return out
 
