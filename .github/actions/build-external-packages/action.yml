@@ -68,7 +68,6 @@ runs:
         MAX_JOBS="$(nproc --ignore=6)"
         export MAX_JOBS
 
-        sleep 7200
         # Split the comma-separated list and build each target
         IFS=',' read -ra TARGETS <<< "$BUILD_TARGETS"
         for target in "${TARGETS[@]}"; do
