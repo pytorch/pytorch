@@ -172,7 +172,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
 
-  # Copied from build-triton-wheel
+  # Copied from build-triton-wheel (mostly)
   upload-wheel:
     name: "Upload ${{ matrix.device }} vLLM wheel"
     needs:
@@ -232,7 +232,6 @@ jobs:
         run: |
           set -ex
 
-          # reference ends with an RC suffix
           if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
