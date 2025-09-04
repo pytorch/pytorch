@@ -5,8 +5,8 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._inductor.config as config
 
-from ..choices import InductorChoices
 from ..kernel_template_choice import make_ktc_generator
+from ..lookup_table.choices import LookupTableChoices
 from ..template_heuristics.registry import get_template_heuristic
 from .core import predict_and_filter_choices
 from .registry import get_model_function_for_key
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class PerformanceModelChoices(InductorChoices):
+class PerformanceModelChoices(LookupTableChoices):
     """
     LookupTableChoices subclass that uses a performance model for kernel selection.
     """
@@ -123,7 +123,7 @@ class PerformanceModelChoices(InductorChoices):
 
         return all_choices, original_sizes
 
-    def _adjust_mm_configs(
+    def _fallback(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -162,7 +162,7 @@ class PerformanceModelChoices(InductorChoices):
             )
             enabled = False
         if not enabled:
-            return super()._adjust_mm_configs(
+            return super()._fallback(
                 template_choices,
                 kernel_inputs,
                 layout,
@@ -171,6 +171,7 @@ class PerformanceModelChoices(InductorChoices):
                 kwarg_overrides,
                 max_autotune,
             )
+
         # Expand template choices using performance model logic
         kwarg_overrides = kwarg_overrides or {}
         actualized_choices, original_sizes = self._expand(
