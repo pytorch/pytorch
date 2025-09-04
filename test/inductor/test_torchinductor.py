@@ -649,6 +649,7 @@ def check_model(
             )
 
     torch._dynamo.reset()
+    return run
 
 
 @torch._inductor.config.patch("triton.cudagraphs", False)

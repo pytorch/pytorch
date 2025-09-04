@@ -255,6 +255,9 @@ class Vectorized<double> {
         Sleef_copysignd2(_vec0, sign._vec0),
         Sleef_copysignd2(_vec1, sign._vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE erf_u20() const {
+    return erf();
+  }
   Vectorized<double> erf() const {
     return {Sleef_erfd2_u10(_vec0), Sleef_erfd2_u10(_vec1)};
   }
