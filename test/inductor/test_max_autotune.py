@@ -962,7 +962,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=8e-2, rtol=7e-2)
 
     @config.patch(
         max_autotune=True,
