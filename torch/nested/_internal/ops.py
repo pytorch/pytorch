@@ -2078,21 +2078,15 @@ def all_any_max_min_default(func, *args, **kwargs):
     return func(inp._values, **new_kwargs)
 
 
-@register_jagged_func(torch.ops.aten._is_any_true.default, "self: jt_all")
-def _is_any_true_default(func, *args, **kwargs):
+@register_jagged_func(
+    [torch.ops.aten._is_all_true.default, torch.ops.aten._is_any_true.default],
+    "self: jt_all",
+)
+def _is_true_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
-    return func(inp._values)
-
-
-@register_jagged_func(torch.ops.aten._is_all_true.default, "self: jt_all")
-def _is_all_true_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
     inp = new_kwargs.pop("input")
     return func(inp._values)
 
