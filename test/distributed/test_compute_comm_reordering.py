@@ -259,6 +259,11 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "reorder_compute_for_overlap",
         ],
     )
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_mms_benchmark",
+        False,
+    )
     def test_reorder_compute_for_overlap(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -289,10 +294,10 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
-                .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_all_reduce_mul")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_add")
                 .check("extern_kernels.mm")
