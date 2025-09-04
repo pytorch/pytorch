@@ -263,20 +263,20 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`..."
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`..."
         )
 
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ✅"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ❌"
         )
 
 
