@@ -68,7 +68,7 @@ def _sycl_compiler_options() -> list[str]:
         "-fsycl",
         f"-fsycl-targets={_sycl_arch_as_compile_option()}",
         "-Xspirv-translator",
-        "-spirv-ext=+SPV_INTEL_split_barrier",
+        "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate",
         "-fno-sycl-instrument-device-code",
         "-DMKL_ILP64",
         "-MD",
