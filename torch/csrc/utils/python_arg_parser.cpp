@@ -962,15 +962,15 @@ static bool is_int_or_symint_list(
     int broadcast_size,
     int64_t* failed_idx = nullptr,
     std::vector<PyObject*>* overloaded_args = nullptr) {
-  if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+  const bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size == 0) {
       return true;
     }
 
     // Check all elements, not just the first one, when looking for torch
     // functions
-    const bool is_tuple = PyTuple_Check(obj);
-    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
     bool has_torch_func = false;
 
     for (Py_ssize_t idx = 0; idx < size; idx++) {
