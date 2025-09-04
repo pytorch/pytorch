@@ -318,7 +318,7 @@ def get_fill_order(
     """
     Convert strides to fill order (argsort)
     """
-    if shape_env is None:
+    if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
         sorted_idx: Sequence[int] = argsort(seq)
     else:
         # argsort_sym handles unbacked symints (with the help of the shape_env)
@@ -1094,7 +1094,10 @@ class Pointwise(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(
-            device=device, dtype=self.dtype, inner_fn=loader, ranges=self.ranges
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
         )
 
 
@@ -3743,18 +3746,20 @@ class Layout(OutputSpec):
         ):
             return in_strides
 
-        # get_stride_order does not work with dynamic shape. Also we can not
-        # statically decide if a padding is needed or how much padding we should
-        # do for dynamic shape.
-        #
-        # Skip padding the strides for dynamic shape for now.
-        if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
-        ):
+        shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
+
+        def contains_unbacked_symints(expr: sympy.Expr | int) -> bool:
+            if shape_env is None:
+                return False
+            if not isinstance(expr, sympy.Expr):
+                return False
+            return any(shape_env.is_unbacked_symint(s) for s in expr.free_symbols)
+
+        # Skip padding the strides when it contains unbacked symints for now.
+        if shape_env and any(contains_unbacked_symints(s) for s in in_strides):
             return in_strides
 
-        stride_order = get_stride_order(in_strides)
+        stride_order = get_stride_order(in_strides, shape_env)
         fill_order = stride_order2fill_order(stride_order)
 
         new_strides = [0 for _ in range(len(in_strides))]
@@ -3766,11 +3771,17 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
+            # Static stride and meets padding conditions OR
+            # Dynamic stride and config.pad_dynamic_shape=True
+            require_padding = (
+                isinstance(stride, (int, sympy.Integer))
+                and stride > config.padding_stride_threshold
+                and stride % align != 0
+            ) or (isinstance(stride, sympy.Expr) and config.pad_dynamic_shapes)
             new_strides[idx] = stride
+            if require_padding:
+                new_strides[idx] = ceildiv(stride, align) * align
+                padded = True
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -4423,6 +4434,17 @@ class ComputedBuffer(OperationBuffer):
     """
 
     data: Loops
+    _force_realize: ClassVar[bool] = False
+
+    @staticmethod
+    @contextlib.contextmanager
+    def force_realize() -> Iterator[None]:
+        old_value = ComputedBuffer._force_realize
+        try:
+            ComputedBuffer._force_realize = True
+            yield
+        finally:
+            ComputedBuffer._force_realize = old_value
 
     def get_computed_buffer_name(self) -> Optional[str]:
         """
@@ -4497,6 +4519,7 @@ class ComputedBuffer(OperationBuffer):
             not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
+            and not self._force_realize
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -6470,6 +6493,14 @@ class MutationOutput(Buffer):
 
     def should_allocate(self) -> bool:
         return False
+
+    def get_mutation_buffers(self) -> Sequence[IRNode]:
+        mutation_names = self.get_mutation_names()
+        return [
+            buf
+            for buf in (V.graph.try_get_buffer(name) for name in mutation_names)
+            if buf is not None
+        ]
 
 
 class TMADescriptor(ExternKernel):
@@ -8707,7 +8738,6 @@ class WhileLoop(ExternKernel):
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         assert device is not None
         while_loop = WhileLoop(

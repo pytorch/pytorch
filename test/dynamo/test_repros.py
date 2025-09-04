@@ -60,13 +60,16 @@ from torch.testing._internal.common_cuda import (
     SM70OrLater,
     TEST_CUDA,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    E4M3_MAX_POS,
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
     skipIfHpu,
-    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
 )
@@ -4186,6 +4189,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend=counter)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_get_type_hints(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            typing.get_type_hints(Foo, include_extras=True)
+            return torch.sin(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -4990,6 +5008,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/159258
+    def test_weakref_proxy(self):
+        class DummyTrainer:
+            def __init__(self, x):
+                self.foo = x
+
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trainer = None
+
+            def foo(self):
+                return self.trainer.foo
+
+        x = torch.randn(4)
+        model = DummyModel()
+        trainer = DummyTrainer(x)
+        model.trainer = weakref.proxy(trainer)
+        compiled_foo = torch.compile(model.foo, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_foo(), x)
 
     def test_weakref_reconstruct(self):
         def fn(x_weak, weight, y):
@@ -6486,21 +6525,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.no_grad():
             model(x)
 
-    def test_ao_fake_quantize_tracing(self):
-        import torch.ao.quantization.fake_quantize
-
-        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
-
-        def fn(x):
-            return q(x)
-
-        x = torch.ones(2, 2)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        eager_res = fn(x)
-
-        self.assertEqual(res, eager_res)
-
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
             type: Literal["pixel_values"]
@@ -7129,6 +7153,24 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 0, sys.monitoring.events.PY_START, old_callback
             )
 
+    def test_312_local_cell_overlap(self):
+        keys = range(10)
+        allowed = [0, 1, 2, 3]
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            key = [key for key in keys if key in allowed]
+
+            def inner():
+                nonlocal key
+
+            return x + key[0]
+
+        self.assertEqual(
+            fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
+        )
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
@@ -7437,7 +7479,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
     @requires_cuda
     def test_partitioner_saves_weights_for_bw(self):
@@ -7449,9 +7490,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return a
 
         def scale(t, amax_t):
-            max_v = torch.finfo(torch.float8_e4m3fn).max
+            max_v = E4M3_MAX_POS
             scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
-            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(torch.float8_e4m3fn)
+            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(e4m3_type)
             return t_fp8, scale_t
 
         def matmul(first, amax_first, second_t, amax_second_t, bias):
@@ -7730,6 +7771,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_cuda_sync(self):
+        def fn(x):
+            y = x + 1
+            torch.cuda.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device="cuda")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)

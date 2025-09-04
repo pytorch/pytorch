@@ -203,6 +203,9 @@ class _DisableUpdateTensorTracker(threading.local):
 _disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
 
 
+_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT: dict[int, torch.fx.Node] = {}
+
+
 def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
     """
     Returns current state of disabling update tensor tracker.
@@ -1904,6 +1907,25 @@ class _ModuleStackTracer(PythonKeyTracer):
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
 
+        # NOTE [export non-strict fake tensor leak detection]
+        # In non-strict export, we don't have dynamo's side effect
+        # tracking logic which makes some cases hard to detect.
+        # In general, our detecting strategy is:
+        #  (1) We do gc.collect() before export and get the alive fake tensors
+        #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT)
+        #  (3) We query gc again to get alive fake tensors
+        #  (4) We take the delta between (1) and (3)
+        #  (5) Filter out fake tensors that are:
+        #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
+        #      (2) Associated with gm.meta
+        #  (6) Do ID match with the proxies
+
+        global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
+        _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
+
+        for key, val in self.tensor_tracker.items():
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
         # to the tracer while tracing, the proxy object gets registered
@@ -2033,6 +2055,7 @@ class _MakefxTracer:
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool,
         record_stack_traces: bool = False,
+        parent_tracer: Optional[_MakefxTracer] = None,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2064,6 +2087,7 @@ class _MakefxTracer:
             nullcontext()
         )
         self.record_stack_traces = record_stack_traces
+        self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2312,6 +2336,16 @@ class _MakefxTracer:
                 )
                 raise
 
+        if (
+            self.is_hop_subgraph_tracer()
+            and (fake_mode := torch._guards.detect_fake_mode(args))
+            and fake_mode.shape_env is not None
+        ):
+            from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+            insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
+            t.recompile()
+
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None
@@ -2321,6 +2355,9 @@ class _MakefxTracer:
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:
         with self._init_modes_from_inputs(f, args):
             return self._trace_inner(f, *args)
+
+    def is_hop_subgraph_tracer(self) -> bool:
+        return self.parent_tracer is not None
 
     def trace_subgraph(self, f: Callable, *args: object) -> GraphModule:
         # Create a new tracer based on parent's config
@@ -2332,6 +2369,7 @@ class _MakefxTracer:
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops,
+            parent_tracer=self,
         )
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)

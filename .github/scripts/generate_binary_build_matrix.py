@@ -40,7 +40,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.9-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.9-aarch64", "13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -113,26 +113,26 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.1.1 | "
-        "intel-cmplr-lib-ur==2025.1.1 | "
-        "intel-cmplr-lic-rt==2025.1.1 | "
-        "intel-sycl-rt==2025.1.1 | "
-        "oneccl-devel==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.15.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.15.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-sycl-blas==2025.1.0 | "
-        "onemkl-sycl-dft==2025.1.0 | "
-        "onemkl-sycl-lapack==2025.1.0 | "
-        "onemkl-sycl-rng==2025.1.0 | "
-        "onemkl-sycl-sparse==2025.1.0 | "
-        "dpcpp-cpp-rt==2025.1.1 | "
-        "intel-opencl-rt==2025.1.1 | "
-        "mkl==2025.1.0 | "
-        "intel-openmp==2025.1.1 | "
-        "tbb==2022.1.0 | "
-        "tcmlib==1.3.0 | "
-        "umf==0.10.0 | "
-        "intel-pti==0.12.3"
+        "intel-cmplr-lib-rt==2025.2.1 | "
+        "intel-cmplr-lib-ur==2025.2.1 | "
+        "intel-cmplr-lic-rt==2025.2.1 | "
+        "intel-sycl-rt==2025.2.1 | "
+        "oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-sycl-blas==2025.2.0 | "
+        "onemkl-sycl-dft==2025.2.0 | "
+        "onemkl-sycl-lapack==2025.2.0 | "
+        "onemkl-sycl-rng==2025.2.0 | "
+        "onemkl-sycl-sparse==2025.2.0 | "
+        "dpcpp-cpp-rt==2025.2.1 | "
+        "intel-opencl-rt==2025.2.1 | "
+        "mkl==2025.2.0 | "
+        "intel-openmp==2025.2.1 | "
+        "tbb==2022.2.0 | "
+        "tcmlib==1.4.0 | "
+        "umf==0.11.0 | "
+        "intel-pti==0.13.1"
     ),
 }
 
@@ -244,8 +244,6 @@ def generate_libtorch_matrix(
                 arches.remove("13.0")
         elif os == "windows":
             arches += CUDA_ARCHES
-            if "13.0" in arches:
-                arches.remove("13.0")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -310,8 +308,6 @@ def generate_wheels_matrix(
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            if "13.0" in arches:
-                arches.remove("13.0")
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -334,13 +330,14 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13t on cpu-s390x
-            if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
-                continue
             # TODO: Enable python 3.14 for rest
-            if os not in ["linux", "linux-aarch64", "macos-arm64", "windows"] and (
-                python_version == "3.14" or python_version == "3.14t"
-            ):
+            if os not in [
+                "linux",
+                "linux-aarch64",
+                "linux-s390x",
+                "macos-arm64",
+                "windows",
+            ] and (python_version == "3.14" or python_version == "3.14t"):
                 continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
