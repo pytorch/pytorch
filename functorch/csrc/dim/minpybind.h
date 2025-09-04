@@ -232,7 +232,7 @@ struct base {
         return obj<T>::steal(self);
     }
     template<typename ... Args>
-    static obj<T> create(Args ... args) {
+    static obj<T> create(Args&&... args) {
         auto self = alloc();
         self->init(std::forward<Args>(args)...);
         return self;

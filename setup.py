@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=1
-#     enables the FBGEMM GenAI kernels to build
+#   USE_FBGEMM_GENAI=0
+#     disables the FBGEMM GenAI build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -324,6 +324,7 @@ from tools.setup_helpers.env import (
     IS_WINDOWS,
 )
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+from tools.setup_helpers.rocm_env import get_ck_dependency_string, IS_ROCM
 
 
 def str2bool(value: str | None) -> bool:
@@ -420,6 +421,41 @@ for i, arg in enumerate(sys.argv):
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
+    if arg == "develop":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".",
+                "-v",
+                "--no-build-isolation",
+            ],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
+    if arg == "install":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -470,7 +506,6 @@ else:
     CMAKE_PYTHON_LIBRARY = Path(
         sysconfig.get_config_var("LIBDIR")
     ) / sysconfig.get_config_var("INSTSONAME")
-
 
 ################################################################################
 # Version, create_version_file, and package_name
@@ -1457,6 +1492,12 @@ def configure_extension_build() -> tuple[
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
         extra_install_requires.extend(
             map(str.strip, pytorch_extra_install_requires.split("|"))
+        )
+
+    # Adding extra requirements for ROCm builds
+    if IS_ROCM and platform.system() == "Linux":
+        extra_install_requires.append(
+            f"rocm-composable-kernel {get_ck_dependency_string()}"
         )
 
     # Cross-compile for M1
