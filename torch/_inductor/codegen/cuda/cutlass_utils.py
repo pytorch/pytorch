@@ -13,7 +13,9 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...ir import Layout
@@ -26,6 +28,10 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 CUTLASS_OPERATION_KIND: str = "gemm"
+ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
+XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
+)
 
 
 @atexit.register
@@ -39,7 +45,10 @@ def move_cutlass_compiled_cache() -> None:
     else:
         import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
-    if not os.path.exists(python_cutlass.CACHE_FILE):
+    # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
+    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
+        python_cutlass.CACHE_FILE
+    ):
         return
 
     try:
@@ -119,7 +128,7 @@ def try_import_cutlass() -> bool:
         if tmp_cutlass_full_path not in sys.path:
 
             def link_and_append(dst_link, src_path, parent_dir):
-                if os.path.exists(dst_link):
+                if os.path.lexists(dst_link):
                     assert os.path.islink(dst_link), (
                         f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                     )
@@ -278,9 +287,10 @@ def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
-    arch = get_cuda_arch()
-    version = get_cuda_version()
-    return _gen_ops_cached(arch, version)
+    with dynamo_timed("cutlass_utils.gen_ops"):
+        arch = get_cuda_arch()
+        version = get_cuda_version()
+        return _gen_ops_cached(arch, version)
 
 
 DTYPE_TO_CUTLASS_TYPE = {
@@ -346,6 +356,10 @@ def get_accumulator_dtype(
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
+    assert OrderedSet(input_torch_dtypes) <= XW_DTYPES, (
+        f"{input_torch_dtypes=} is not supported"
+    )
+
     if len(input_torch_dtypes) != 2:
         return None
 
@@ -366,10 +380,16 @@ def get_accumulator_dtype(
             torch_dtype = dtype0
 
     if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
-        return torch.float
-    if torch_dtype == torch.int8:
-        return torch.int32
-    raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+        accumulator_dtype = torch.float
+    elif torch_dtype == torch.int8:
+        accumulator_dtype = torch.int32
+    else:
+        raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+
+    assert accumulator_dtype in ACCUMULATOR_DTYPES, (
+        f"{accumulator_dtype=} is not supported"
+    )
+    return accumulator_dtype
 
 
 @functools.lru_cache(32)

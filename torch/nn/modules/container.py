@@ -170,6 +170,9 @@ class Sequential(Module):
             )
 
     def pop(self, key: Union[int, slice]) -> Module:
+        """
+        Pop ``key`` from self.
+        """
         v = self[key]
         del self[key]
         return v
@@ -240,6 +243,9 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         for module in self:
             input = module(input)
         return input
@@ -486,7 +492,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -626,7 +632,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
@@ -746,6 +752,9 @@ class ParameterList(Module):
         return self
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         child_lines = []
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):

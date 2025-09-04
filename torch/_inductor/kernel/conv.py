@@ -29,7 +29,6 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import mm_config_kwargs
 
 
 if TYPE_CHECKING:
@@ -59,13 +58,6 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
-
-
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    if m > 256 or n > 256 or k > 256:
-        return True
-    return m * n * k > 2**17
 
 
 LOOP_BODY_2D = """
@@ -537,18 +529,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)
+        x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)
+        weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
@@ -603,7 +595,6 @@ def convolution(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(

@@ -42,7 +42,7 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
-from .utils import same
+from .utils import CompileCounterInt, same
 
 
 np: Optional[types.ModuleType] = None
@@ -200,13 +200,13 @@ def debug_insert_nops(
             return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
-        code = transform_code_object(frame.f_code, insert_nops)
+        code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
-            root_tx=None,
+            root_tx=None,  # type: ignore[arg-type]
             export=False,
-            export_constraints=None,
+            export_constraints=[],
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),
@@ -227,8 +227,8 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count = 0
-        self.op_count = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -240,16 +240,19 @@ class CompileCounter:
         return gm.forward
 
     def clear(self) -> None:
-        self.frame_count = 0
+        if config.debug_disable_compile_counter:
+            self.frame_count = CompileCounterInt(0)
+        else:
+            self.frame_count = 0
         self.op_count = 0
 
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count = 0
-        self.op_count = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
+        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -264,7 +267,10 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
     def clear(self) -> None:
-        self.frame_count = 0
+        if config.debug_disable_compile_counter:
+            self.frame_count = CompileCounterInt(0)
+        else:
+            self.frame_count = 0
         self.op_count = 0
         self.graphs = []
 

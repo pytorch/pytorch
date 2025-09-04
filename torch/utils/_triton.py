@@ -6,13 +6,22 @@ from typing import Any
 @functools.cache
 def has_triton_package() -> bool:
     try:
-        from triton.compiler.compiler import triton_key
+        import triton  # noqa: F401
 
-        return triton_key is not None
+        return True
     except ImportError:
         return False
-    except RuntimeError:
-        return False
+
+
+@functools.cache
+def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
+    try:
+        import triton  # noqa: F401
+
+        major, minor = tuple(int(v) for v in triton.__version__.split(".")[:2])
+        return (major, minor)
+    except ImportError:
+        return fallback
 
 
 @functools.cache
@@ -73,7 +82,7 @@ def has_triton_tma_device() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -105,7 +114,7 @@ def has_triton_stable_tma_api() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -137,6 +146,7 @@ def has_triton() -> bool:
         "cuda": cuda_extra_check,
         "xpu": _return_true,
         "cpu": cpu_extra_check,
+        "mtia": _return_true,
     }
 
     def is_device_compatible_with_triton() -> bool:
@@ -160,7 +170,7 @@ def triton_backend() -> Any:
 
 @functools.cache
 def triton_hash_with_backend() -> str:
-    from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import triton_key
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"

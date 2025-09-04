@@ -11,9 +11,24 @@ from typing_extensions import TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.serde.serialize import deserialize, serialize, SerializedArtifact
+from torch._export.serde import schema
+from torch._export.serde.serialize import (
+    _dataclass_to_dict,
+    _dict_to_dataclass,
+    deserialize_device,
+    deserialize_scalar_type,
+    deserialize_size,
+    deserialize_storage_offset,
+    deserialize_stride,
+    ExportedProgramDeserializer,
+    serialize,
+    serialize_tensor_meta,
+    SerializedArtifact,
+)
+from torch._inductor.cpp_builder import normalize_path_separator
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
-from torch.export.exported_program import ExportedProgram
 from torch.export.pt2_archive._package_weights import (
     get_complete,
     group_weights,
@@ -25,13 +40,16 @@ from torch.export.pt2_archive.constants import (
     ARCHIVE_FORMAT_VALUE,
     ARCHIVE_VERSION_PATH,
     ARCHIVE_VERSION_VALUE,
+    CONSTANTS_CONFIG_FILENAME_FORMAT,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
     SAMPLE_INPUTS_FILENAME_FORMAT,
+    TENSOR_CONSTANT_FILENAME_PREFIX,
     WEIGHT_FILENAME_PREFIX,
+    WEIGHTS_CONFIG_FILENAME_FORMAT,
     WEIGHTS_DIR,
 )
 from torch.types import FileLike
@@ -75,6 +93,8 @@ class PT2ArchiveWriter:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileWriter(archive_path_or_buffer)  # type: ignore[arg-type]
         # NOTICE: version here is different from the archive_version
         # this is the version of zip file format, which is used by PyTorchFileWriter, which write to /.data/version
@@ -169,6 +189,8 @@ class PT2ArchiveReader:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
         assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
             "Invalid archive format"
@@ -214,6 +236,11 @@ class PT2ArchiveReader:
         Get the file names in the archive.
         """
         return self.archive_file.get_all_records()
+
+
+is_pt2_package.__module__ = "torch.export.pt2_archive"
+PT2ArchiveWriter.__module__ = "torch.export.pt2_archive"
+PT2ArchiveReader.__module__ = "torch.export.pt2_archive"
 
 
 def _package_aoti_files(
@@ -298,6 +325,161 @@ def _package_aoti_files(
             logger.debug(weights_config)
 
 
+def _is_fake_tensor(t: torch.Tensor) -> bool:
+    return isinstance(t, FakeTensor)
+
+
+def _is_tensor_subclass(t: torch.Tensor) -> bool:
+    return isinstance(t, torch.Tensor) and type(t.data) is not torch.Tensor
+
+
+def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
+    """
+    Get the raw bytes of a tensor. This is used to save the tensor in pt2 archive.
+    """
+    # NOTE: don't chain .cpu() with .data_ptr(). If an HtoD copy needs to be
+    # performed, the CPU copy needs to be kept alive when its underlying
+    # memory is accessed.
+    import ctypes
+
+    if _is_fake_tensor(value):
+        value_bytes = b""
+    elif value.data_ptr():
+        cpu_tensor = value.cpu().contiguous()
+        # we store the raw bytes of tensor. Tensor metadata is stored separately
+        value_bytes = bytes(
+            ctypes.cast(
+                cpu_tensor.data_ptr(),
+                ctypes.POINTER(ctypes.c_ubyte * value.element_size() * value.numel()),
+            ).contents
+        )
+    else:
+        # for empty tensor
+        value_bytes = b""
+    return value_bytes
+
+
+def _package_state_dict(
+    exported_program: ExportedProgram,
+    archive_writer: PT2ArchiveWriter,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+) -> schema.PayloadConfig:
+    weights_config: dict[str, schema.PayloadMeta] = {}
+    storage_map: dict[torch.UntypedStorage, str] = {}
+
+    idx = archive_writer.count_prefix(os.path.join(WEIGHTS_DIR, WEIGHT_FILENAME_PREFIX))
+    for weight_fqn, weight_tensor in exported_program.state_dict.items():
+        assert isinstance(weight_tensor, torch.Tensor), (
+            "only torch.Tensor is allowed in state_dict"
+        )
+        path_name = f"{WEIGHT_FILENAME_PREFIX}{idx}"
+        is_param = isinstance(weight_tensor, torch.nn.Parameter)
+        # use pickle for non-fake tensor subclasses
+        use_pickle = _is_tensor_subclass(weight_tensor) and not _is_fake_tensor(
+            weight_tensor
+        )
+        archive_path = os.path.join(WEIGHTS_DIR, path_name)
+        if use_pickle:
+            buffer = io.BytesIO()
+            torch.save(weight_tensor, buffer, pickle_protocol=pickle_protocol)
+            archive_writer.write_bytes(archive_path, buffer.getvalue())
+            idx += 1
+        else:
+            tensor_storage = weight_tensor.untyped_storage()
+            if tensor_storage not in storage_map:
+                storage_map[tensor_storage] = path_name
+                tensor_bytes = _get_raw_tensor_bytes(weight_tensor)
+                archive_writer.write_bytes(archive_path, tensor_bytes)
+                idx += 1
+            else:
+                path_name = storage_map[tensor_storage]
+
+        weights_config[weight_fqn] = schema.PayloadMeta(
+            path_name=path_name,
+            is_param=is_param,
+            use_pickle=use_pickle,
+            tensor_meta=serialize_tensor_meta(weight_tensor),
+        )
+
+    return schema.PayloadConfig(config=weights_config)
+
+
+def _package_constants(
+    exported_program: ExportedProgram,
+    archive_writer: PT2ArchiveWriter,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+) -> schema.PayloadConfig:
+    constants_config: dict[str, schema.PayloadMeta] = {}
+    storage_map: dict[torch.UntypedStorage, str] = {}
+
+    tensor_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, TENSOR_CONSTANT_FILENAME_PREFIX)
+    )
+    custom_obj_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, CUSTOM_OBJ_FILENAME_PREFIX)
+    )
+
+    for constant_fqn, constant in exported_program.constants.items():
+        if isinstance(constant, torch.Tensor):
+            use_pickle = _is_tensor_subclass(constant) and not _is_fake_tensor(constant)
+            path_name = f"{TENSOR_CONSTANT_FILENAME_PREFIX}{tensor_idx}"
+            archive_path = os.path.join(CONSTANTS_DIR, path_name)
+            if use_pickle:
+                buffer = io.BytesIO()
+                torch.save(constant, buffer, pickle_protocol=pickle_protocol)
+                archive_writer.write_bytes(archive_path, buffer.getvalue())
+                tensor_idx += 1
+            else:
+                # Only save once when tensors share the same storage
+                tensor_storage = constant.untyped_storage()
+                if tensor_storage not in storage_map:
+                    storage_map[tensor_storage] = path_name
+                    tensor_bytes = _get_raw_tensor_bytes(constant)
+                    archive_writer.write_bytes(archive_path, tensor_bytes)
+                    tensor_idx += 1
+                else:
+                    path_name = storage_map[tensor_storage]
+
+            constants_config[constant_fqn] = schema.PayloadMeta(
+                path_name=path_name,
+                is_param=False,
+                use_pickle=use_pickle,
+                tensor_meta=serialize_tensor_meta(constant),
+            )
+
+        elif isinstance(constant, torch._C.ScriptObject):
+            # use pickle for custom objects
+            path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+            custom_obj_idx += 1
+            constants_config[constant_fqn] = schema.PayloadMeta(
+                path_name=path_name,
+                is_param=False,
+                use_pickle=True,
+                tensor_meta=None,
+            )
+            archive_path = os.path.join(CONSTANTS_DIR, path_name)
+            custom_obj_bytes = torch._C._pickle_save(constant)
+            archive_writer.write_bytes(archive_path, custom_obj_bytes)
+
+        else:
+            raise RuntimeError(f"Unsupported constant type: {type(constant)}")
+
+    return schema.PayloadConfig(config=constants_config)
+
+
+def _package_payload_config(
+    archive_writer: PT2ArchiveWriter,
+    payload_config: schema.PayloadConfig,
+    config_file: str,
+) -> None:
+    """
+    Save the payload config as json file in the archive.
+    """
+    archive_writer.write_string(
+        config_file, json.dumps(_dataclass_to_dict(payload_config))
+    )
+
+
 def _package_exported_programs(
     archive_writer: PT2ArchiveWriter,
     exported_programs: Optional[Union[ExportedProgram, dict[str, ExportedProgram]]],
@@ -308,20 +490,27 @@ def _package_exported_programs(
         return
 
     if isinstance(exported_programs, ExportedProgram):
-        exported_programs = {"model", exported_programs}  # type: ignore[assignment]
+        exported_programs = {"model": exported_programs}
 
     assert isinstance(exported_programs, dict)
 
     for model_name, ep in exported_programs.items():
-        artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
+        weights_config = _package_state_dict(ep, archive_writer, pickle_protocol)
+        weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        _package_payload_config(archive_writer, weights_config, weights_config_file)
+
+        constants_config = _package_constants(ep, archive_writer, pickle_protocol)
+        constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        _package_payload_config(archive_writer, constants_config, constants_config_file)
+
+        artifact: SerializedArtifact = serialize(
+            ep,
+            opset_version,
+            pickle_protocol,
+        )
 
         archive_writer.write_bytes(
             MODELS_FILENAME_FORMAT.format(model_name), artifact.exported_program
-        )
-        # TODO:Consider dedup this with the weights saved in package_aoti_files
-        archive_writer.write_bytes(f"{WEIGHTS_DIR}{model_name}.pt", artifact.state_dict)
-        archive_writer.write_bytes(
-            f"{CONSTANTS_DIR}{model_name}.pt", artifact.constants
         )
         archive_writer.write_bytes(
             SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name),
@@ -350,22 +539,21 @@ def package_pt2(
     opset_version: Optional[dict[str, int]] = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> FileLike:
-    """
-    Saves the artifacts to a PT2Archive format
-    (https://docs.google.com/document/d/1RQ4cmywilnFUT1VE-4oTGxwXdc8vowCSZsrRgo3wFA8/edit?tab=t.0#heading=h.v2y2jgnwc56a).
-    The artifact can then be loaded using ``load_pt2``.
+    r"""
+    Saves the artifacts to a PT2Archive format. The artifact can then be loaded
+    using ``load_pt2``.
 
     Args:
-        f (str | os.PathLike[str] | IO[bytes]) A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         exported_programs (Union[ExportedProgram, dict[str, ExportedProgram]]):
          The exported program to save, or a dictionary mapping model name to an
          exported program to save. The exported program will be saved under
-         models/*.json. If only one ExportedProgram is specified, this will
+         models/\*.json. If only one ExportedProgram is specified, this will
          automatically be named "model".
 
-        aoti_files (Union[list[str], dict[str, list[str]]): A list of files
+        aoti_files (Union[list[str], dict[str, list[str]]]): A list of files
          generated by AOTInductor via
          ``torch._inductor.aot_compile(..., {"aot_inductor.package": True})``,
          or a dictionary mapping model name to its AOTInductor generated files.
@@ -391,6 +579,7 @@ def package_pt2(
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
+        or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
         # TODO: turn this into an error
         logger.warning(
@@ -476,6 +665,185 @@ class PT2ArchiveContents:
     extra_files: dict[str, Any]
 
 
+def _create_flat_tensor_from_bytes(
+    tensor_bytes: bytes,
+    tensor_meta: schema.TensorMeta,
+) -> torch.Tensor:
+    """
+    Create a flat tensor from raw bytes with dtype, device and requires_grad.
+    It will be re-strided based on size, stride, and storage_offset later.
+    """
+    dtype = deserialize_scalar_type(tensor_meta.dtype)
+    size = deserialize_size(tensor_meta.sizes)
+    device = deserialize_device(tensor_meta.device)
+
+    if len(tensor_bytes) != 0:
+        tensor = torch.frombuffer(
+            tensor_bytes, dtype=dtype, requires_grad=tensor_meta.requires_grad
+        ).to(device)
+    else:
+        # cannot call torch.frombuffer() on empty bytes
+        logger.warning(
+            "Cannot call torch.frombuffer() on empty bytes. "
+            "Creating a tensor with zeros as workaround."
+        )
+        tensor = torch.zeros(size, dtype=dtype, device=device)
+
+    return tensor
+
+
+def _build_file_map(
+    archive_reader: PT2ArchiveReader,
+    config: schema.PayloadConfig,
+    base_dir: str,
+) -> dict[str, torch.Tensor]:
+    """
+    Build a map from file path to the payload in flat tensor format.
+    """
+    file_map: dict[str, torch.Tensor] = {}
+    for payload_meta in config.config.values():
+        # skip pickled objects
+        if payload_meta.use_pickle:
+            continue
+        # skip files that already exist in the map
+        if payload_meta.path_name in file_map:
+            continue
+
+        tensor_bytes = archive_reader.read_bytes(
+            os.path.join(base_dir, payload_meta.path_name)
+        )
+        assert payload_meta.tensor_meta is not None
+        tensor = _create_flat_tensor_from_bytes(tensor_bytes, payload_meta.tensor_meta)
+        file_map[payload_meta.path_name] = tensor
+
+    return file_map
+
+
+def _load_payload_config(
+    archive_reader: PT2ArchiveReader,
+    config_file: str,
+) -> schema.PayloadConfig:
+    """
+    Load and parse a payload config from the archive.
+    """
+    return _dict_to_dataclass(
+        schema.PayloadConfig,
+        json.loads(archive_reader.read_string(config_file)),
+    )
+
+
+def _load_state_dict(
+    archive_reader: PT2ArchiveReader,
+    model_name: str,
+) -> Union[dict[str, torch.Tensor], bytes]:
+    # Make it BC compatible with legacy weight files
+    legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
+    if legacy_weights_file in archive_reader.get_file_names():
+        logger.warning(
+            "You are loading weight from the legacy format. "
+            "Please generate a new pt2 file using torch.export.save()."
+        )
+        return archive_reader.read_bytes(legacy_weights_file)
+    else:
+        weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        assert weights_config_file in archive_reader.get_file_names(), (
+            f"{weights_config_file} not found in PT2 archive"
+        )
+        weights_config = _load_payload_config(archive_reader, weights_config_file)
+        # construct the mapping from file name (e.g. weight_0) to flat weight payload
+        state_dict_file_map = _build_file_map(
+            archive_reader, weights_config, WEIGHTS_DIR
+        )
+        # chain the mapping weight FQN -> weight file name -> strided weight payload
+        # so that the aliasing of weights is preserved
+        state_dict: dict[str, torch.Tensor] = {}
+        for weight_fqn, payload_meta in weights_config.config.items():
+            if payload_meta.use_pickle:
+                weight_bytes = archive_reader.read_bytes(
+                    os.path.join(WEIGHTS_DIR, payload_meta.path_name)
+                )
+                state_dict[weight_fqn] = torch.load(
+                    io.BytesIO(weight_bytes), weights_only=False
+                )
+            else:
+                tensor_meta = payload_meta.tensor_meta
+                assert tensor_meta is not None
+                weight_tensor = torch.as_strided(
+                    input=state_dict_file_map[payload_meta.path_name],
+                    size=deserialize_size(tensor_meta.sizes),
+                    stride=deserialize_stride(tensor_meta.strides),
+                    storage_offset=deserialize_storage_offset(
+                        tensor_meta.storage_offset
+                    ),
+                )
+                if payload_meta.is_param:
+                    state_dict[weight_fqn] = torch.nn.Parameter(weight_tensor)
+                else:
+                    state_dict[weight_fqn] = weight_tensor
+
+        return state_dict
+
+
+def _load_constants(
+    archive_reader: PT2ArchiveReader,
+    model_name: str,
+) -> Union[dict[str, torch.Tensor], bytes]:
+    # Make it BC compatible with legacy constant files
+    legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
+    if legacy_constants_file in archive_reader.get_file_names():
+        logger.warning(
+            "You are loading constant from the legacy format. "
+            "Please generate a new pt2 file using torch.export.save()."
+        )
+        return archive_reader.read_bytes(legacy_constants_file)
+    else:
+        constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        assert constants_config_file in archive_reader.get_file_names(), (
+            f"{constants_config_file} not found in PT2 archive"
+        )
+        constants_config = _load_payload_config(archive_reader, constants_config_file)
+        # construct the mapping from file name (e.g. constant_0) to constant payload
+        constant_file_map = _build_file_map(
+            archive_reader, constants_config, CONSTANTS_DIR
+        )
+        # chain the mapping constant FQN -> constant file name -> strided constant payload
+        # so that the aliasing of constants is preserved
+        constants: dict[str, torch.Tensor] = {}
+        for constant_fqn, payload_meta in constants_config.config.items():
+            path_name = payload_meta.path_name
+            if path_name.startswith(TENSOR_CONSTANT_FILENAME_PREFIX):
+                if payload_meta.use_pickle:
+                    constant_bytes = archive_reader.read_bytes(
+                        os.path.join(CONSTANTS_DIR, path_name)
+                    )
+                    constants[constant_fqn] = torch.load(
+                        io.BytesIO(constant_bytes), weights_only=False
+                    )
+                else:
+                    tensor_meta = payload_meta.tensor_meta
+                    assert tensor_meta is not None
+                    constant_tensor = torch.as_strided(
+                        input=constant_file_map[path_name],
+                        size=deserialize_size(tensor_meta.sizes),
+                        stride=deserialize_stride(tensor_meta.strides),
+                        storage_offset=deserialize_storage_offset(
+                            tensor_meta.storage_offset
+                        ),
+                    )
+                    constants[constant_fqn] = constant_tensor
+
+            elif path_name.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
+                constant_bytes = archive_reader.read_bytes(
+                    os.path.join(CONSTANTS_DIR, path_name)
+                )
+                constants[constant_fqn] = torch._C._pickle_load_obj(constant_bytes)
+
+            else:
+                raise RuntimeError(f"Unsupported constant type: {path_name}")
+
+        return constants
+
+
 def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
@@ -493,24 +861,25 @@ def _load_exported_programs(
             len(prefix) : -len(suffix)
         ]  # given "models/foo.json" we can now get "foo"
 
-        weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
-        constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
         sample_inputs_file = SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name)
-
-        serialized_exported_program = archive_reader.read_bytes(file)
-        serialized_weights = archive_reader.read_bytes(weights_file)
-        serialized_constants = archive_reader.read_bytes(constants_file)
         serialized_sample_inputs = archive_reader.read_bytes(sample_inputs_file)
 
-        artifact: SerializedArtifact = SerializedArtifact(
+        from torch._export.serde.serialize import _bytes_to_dataclass
+
+        exported_program_bytes = archive_reader.read_bytes(file)
+        serialized_exported_program = _bytes_to_dataclass(
+            schema.ExportedProgram, exported_program_bytes
+        )
+        state_dict = _load_state_dict(archive_reader, model_name)
+        constants = _load_constants(archive_reader, model_name)
+
+        ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
-            serialized_weights,
-            serialized_constants,
+            state_dict,
+            constants,
             serialized_sample_inputs,
         )
 
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
         exported_programs[model_name] = ep
 
     return exported_programs
@@ -563,6 +932,8 @@ def load_pt2(
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
     """
 
+    from torch._inductor.cpp_builder import normalize_path_separator
+
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
@@ -601,6 +972,9 @@ def load_pt2(
                 file_end = file[
                     len(AOTINDUCTOR_DIR) :
                 ]  # remove data/aotinductor/ prefix
+                file_end = normalize_path_separator(
+                    file_end
+                )  # Win32 need normalize path before split.
                 model_name = file_end.split("/")[
                     0
                 ]  # split "model_name/...cpp" into "model_name"

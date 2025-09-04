@@ -53,6 +53,7 @@ void binary_op_kernel(const std::string func_name,
                   .add_input(input)
                   .add_input(other)
                   .check_all_same_dtype(false)
+                  .promote_inputs_to_common_dtype(true)
                   .build();
 
   lib.exec_binary_kernel(iter, func_name, alpha);
@@ -119,6 +120,30 @@ static void chebyshev_polynomial_w_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "chebyshev_polynomial_w");
 }
 
+static void shifted_chebyshev_polynomial_t_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "shifted_chebyshev_polynomial_t_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "shifted_chebyshev_polynomial_t");
+}
+
+static void shifted_chebyshev_polynomial_u_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "shifted_chebyshev_polynomial_u_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "shifted_chebyshev_polynomial_u");
+}
+
+static void shifted_chebyshev_polynomial_v_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "shifted_chebyshev_polynomial_v_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "shifted_chebyshev_polynomial_v");
+}
+
+static void shifted_chebyshev_polynomial_w_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "shifted_chebyshev_polynomial_w_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "shifted_chebyshev_polynomial_w");
+}
+
 static void hermite_polynomial_h_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
                    "hermite_polynomial_h_mps not implemented for non-floating types");
@@ -167,6 +192,14 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "fmod");
 }
 
+static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igamma");
+}
+
+static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igammac");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -177,6 +210,10 @@ REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kerne
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_mps_kernel)
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polynomial_t_mps_kernel)
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polynomial_u_mps_kernel)
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_mps_kernel)
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
@@ -188,4 +225,6 @@ REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
+REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
+REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 } // namespace at::native

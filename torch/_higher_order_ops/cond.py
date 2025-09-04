@@ -1,12 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import logging
 import warnings
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._C._functorch import (
@@ -20,6 +20,9 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     check_input_alias_and_mutation_return_outputs,
+    create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -36,8 +39,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-
-from .utils import clone_outputs_aliasing_inputs
 
 
 log = logging.getLogger(__name__)
@@ -240,66 +241,14 @@ def cond(
     ):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             if metadata_mode:
-                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                backend: Union[str, Callable[..., Any]] = (
+                    make_eager_backend_with_torch_function_mode(metadata_mode)
+                )
             else:
                 backend = "eager"
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
                 pred, true_fn, false_fn, operands
             )
-
-
-def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
-    """
-    For a fn that accepts flat inputs and returns flat outputs:
-        fw_out = fn(*args),
-    this function returns:
-        grad_args = bw_fn(*args_and_grad_output)
-    with the following invariants:
-      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
-      2. grad_args has an 1-1 corresponsence to args
-      3. for tensor arg whose requires_grad is False, its corresponding grad in
-         grad_args will be a zero tensor with the same shape.
-    """
-
-    from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
-
-    dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
-        decompositions={},
-        num_params_buffers=0,
-        aot_id=0,
-        keep_inference_input_mutations=False,
-    )
-    n_primals = len(args)
-
-    bw_fn = create_joint(
-        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
-    )
-
-    def flat_fn(*args_and_grad_outs):
-        primals = args_and_grad_outs[:n_primals]
-        tangents = args_and_grad_outs[n_primals:]
-        grad_args = bw_fn(primals, tangents)[1]
-        assert len(args) == len(grad_args)
-        # In order to keep HOPs functional where the backward graph,
-        # would have outputs that are aliasing inputs.
-        # For example in cases where the backward of the function is simply
-        # passing the upstream gradients through.
-        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
-
-        return [
-            (
-                torch.zeros_like(arg)
-                if isinstance(arg, torch.Tensor) and grad is None
-                else maybe_clone(grad)
-            )
-            for grad, arg in zip(grad_args, primals)
-        ]
-
-    return flat_fn
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -395,16 +344,33 @@ class CondAutogradOp(torch.autograd.Function):
         operands = saved_tensors_and_symints(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        # trace through the joint function when torch.compile torch.autograd.grad.
+
+        grads_tensor_masks = []
+
+        def create_fn_remove_none(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                nonlocal grads_tensor_masks
+
+                true_outputs = fn(*args)
+                grads_tensor_masks = [
+                    True if isinstance(out, torch.Tensor) else False
+                    for out in true_outputs
+                ]
+                return filter_with_masks(true_outputs, grads_tensor_masks)
+
+            return wrapped
+
         true_bw_gm = materialize_as_graph(
-            ctx._true_bw_fn,
+            create_fn_remove_none(ctx._true_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
         false_bw_gm = materialize_as_graph(
-            ctx._false_bw_fn,
+            create_fn_remove_none(ctx._false_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -416,7 +382,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_bw_gm,
             args,
         )
-        return None, None, None, *grads
+        return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 # Note:
@@ -578,11 +544,11 @@ def _merge_output(
 
     """
     This follows the logic in symbolic_shapes._compute_symbolic_stride
-    Step 2: Since tensor stride is an accumulative muliplication of the sizes, which is a permutated
-        (due to view ops) non-decending sequence.
+    Step 2: Since tensor stride is an accumulative multiplication of the sizes, which is a permutated
+        (due to view ops) non-descending sequence.
 
         Case 1: No size is 1. In this case, strides have unique values.
-            For example, suppose we have a tenosr with:
+            For example, suppose we have a tensor with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
             merged_size [u0, u1, u2, u3, u4, u5].
@@ -599,7 +565,7 @@ def _merge_output(
                 ...
 
         Case 2: At least one dimension has size 1, which can produce duplicates in strides.
-            In this case, theorectically, we cannot uniquely determine the expr of strides because
+            In this case, theoretically, we cannot uniquely determine the expr of strides because
             the accessing stride_expr with same key in different order causes the final stride expression
             to be different.
 
@@ -609,7 +575,7 @@ def _merge_output(
                 merged_size: (u0, u1)
 
             The stride expr could either be (u1, 1) or (1, u0) depending on whether we start with u1 or u0.
-            For this reason, we try to break tie by sorting via decending index so we always get (u1, 1).
+            For this reason, we try to break tie by sorting via descending index so we always get (u1, 1).
 
             Note that backend might optimize the strides anyway so this is usually not a problem as long
             as two branches matches. See relevant discussions in https://github.com/pytorch/pytorch/issues/142024.

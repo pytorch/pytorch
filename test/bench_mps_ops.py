@@ -71,6 +71,15 @@ def bench_binary(
     return rc
 
 
+def check_eager_vs_compile(rc_c, rc_e, func, dtype):
+    if not torch.allclose(rc_c, rc_e):
+        mdiff = (rc_c - rc_e).abs().max()
+        warnings.warn(
+            f"Eager and compile reduction do not match for {func.__name__} and {dtype} max_diff={mdiff}",
+            stacklevel=2,
+        )
+
+
 def bench_reduction(
     reduction_func, device: str = "mps", dtype: torch.dtype = torch.float32
 ) -> list[Measurement]:
@@ -81,25 +90,23 @@ def bench_reduction(
         return reduction_func(t, dim=0)
 
     f.__name__ = reduction_func.__name__
-    f_c = torch.compile(f, dynamic=False)
+    f_c = torch.compile(f, dynamic=False, fullgraph=True)
 
     for size in (512, 1024, 2048, 4096):
         x = torch.testing.make_tensor(size, size, device=device, dtype=dtype)
         rc_c, rc_e = f(x), f_c(x)
         rc_c, rc_e = (rc_c[0], rc_e[0]) if isinstance(rc_c, tuple) else (rc_c, rc_e)
-        if not torch.allclose(rc_c, rc_e):
-            mdiff = (rc_c - rc_e).abs().max()
-            warnings.warn(
-                f"Eager and compile reduction do not match for {reduction_func.__name__} and {dtype} max_diff={mdiff}",
-                stacklevel=2,
-            )
+        check_eager_vs_compile(rc_c, rc_e, reduction_func, dtype)
         rc.append(bench_unary_op(f, x, f"eager-{size}x{size}"))
         rc.append(bench_unary_op(f_c, x, f"compile-{size}x{size}"))
     return rc
 
 
 def bench_scan(
-    scan_func, device: str = "mps", dtype: torch.dtype = torch.float32
+    scan_func,
+    device: str = "mps",
+    dtype: torch.dtype = torch.float32,
+    with_indices: bool = False,
 ) -> list[Measurement]:
     rc = []
 
@@ -109,19 +116,18 @@ def bench_scan(
         def f(t):
             return scan_func(t, dim=dim)
 
-        f_c = torch.compile(f, dynamic=False)
+        f_c = torch.compile(f, dynamic=False, fullgraph=True)
 
         for size in (32, 128, 512, 1024):
             f.__name__ = f"{scan_func.__name__}-dim{dim}-{size}x{size}"
             f_c.__name__ = f.__name__
             x = torch.testing.make_tensor(size, size, device=device, dtype=dtype)
             rc_c, rc_e = f(x), f_c(x)
-            if not torch.allclose(rc_c, rc_e):
-                mdiff = (rc_c - rc_e).abs().max()
-                warnings.warn(
-                    f"Eager and compile scan do not match for {scan_func.__name__} dim={dim} and {dtype} max_diff={mdiff}",
-                    stacklevel=2,
-                )
+            if with_indices:
+                check_eager_vs_compile(rc_c[0], rc_e[0], scan_func, dtype)
+                check_eager_vs_compile(rc_c[1], rc_e[1], scan_func, dtype)
+            else:
+                check_eager_vs_compile(rc_c, rc_e, scan_func, dtype)
             rc.append(bench_unary_op(f, x, "eager"))
             rc.append(bench_unary_op(f_c, x, "compile"))
 
@@ -129,19 +135,18 @@ def bench_scan(
     def f_1d(t):
         return scan_func(t, dim=0)
 
-    f_1d_c = torch.compile(f_1d, dynamic=False)
+    f_1d_c = torch.compile(f_1d, dynamic=False, fullgraph=True)
 
     for size in (100, 10000, 1000000):
         f_1d.__name__ = f"{scan_func.__name__}-1d-{size}"
         f_1d_c.__name__ = f_1d.__name__
         x = torch.testing.make_tensor(size, device=device, dtype=dtype)
         rc_c, rc_e = f_1d(x), f_1d_c(x)
-        if not torch.allclose(rc_c, rc_e):
-            mdiff = (rc_c - rc_e).abs().max()
-            warnings.warn(
-                f"Eager and compile 1D scan do not match for {scan_func.__name__} and {dtype} max_diff={mdiff}",
-                stacklevel=2,
-            )
+        if with_indices:
+            check_eager_vs_compile(rc_c[0], rc_e[0], scan_func, dtype)
+            check_eager_vs_compile(rc_c[1], rc_e[1], scan_func, dtype)
+        else:
+            check_eager_vs_compile(rc_c, rc_e, scan_func, dtype)
         rc.append(bench_unary_op(f_1d, x, "eager"))
         rc.append(bench_unary_op(f_1d_c, x, "compile"))
 
@@ -149,9 +154,18 @@ def bench_scan(
 
 
 def main() -> None:
-    dtypes = [torch.float16, torch.float32]
-    if torch.backends.mps.is_macos_or_newer(14, 0):
-        dtypes.append(torch.bfloat16)
+    dtypes = [torch.float16, torch.float32, torch.bfloat16]
+
+    # Profile index ops
+    B = 11
+    rc = []
+    for dtype, N in itertools.product(
+        [torch.int8, torch.float16, torch.float32], [50, 100, 500, 1000, 2000]
+    ):
+        x = torch.testing.make_tensor((B, N, N), device="mps", dtype=dtype)
+        y = torch.randint(0, B, (3,))
+        rc.append(bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}"))
+    Compare(rc).print()
 
     # Profile unary ops
     rc = []
@@ -171,6 +185,12 @@ def main() -> None:
         rc.extend(bench_scan(torch.cumsum, dtype=dtype))
     Compare(rc).print()
 
+    # Profile scan with indices ops (cummin)
+    rc = []
+    for dtype in dtypes:
+        rc.extend(bench_scan(torch.cummin, dtype=dtype, with_indices=True))
+    Compare(rc).print()
+
     # Profile binary ops
     rc = []
     ops = [torch.fmax, torch.add]
@@ -182,4 +202,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    torch._dynamo.config.cache_size_limit = 2**16
     main()

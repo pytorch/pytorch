@@ -297,7 +297,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                         # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("py::gil_scoped_release release;")
+                        self.prefix.splice("py::gil_scoped_release_simple release;")
 
                     self.prefix.splice(
                         f"""
@@ -409,6 +409,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -564,10 +565,18 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buffer.get_size(),
             buffer.get_stride(),
             buffer if self.can_stack_allocate_buffer(buffer) else None,
+            buffer.get_is_pinned(),
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        buffer_if_can_stack_allocate=None,
+        is_pinned=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
@@ -614,8 +623,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
         )
 
         return f"RAIIAtenTensorHandle {name}({name}_handle);"
@@ -761,7 +771,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
         # so disable stack allocation here

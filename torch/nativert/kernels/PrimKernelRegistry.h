@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/ATen.h>
+
 #include <torch/nativert/executor/OpKernel.h>
 #include <torch/nativert/graph/Graph.h>
 #include <torch/nativert/kernels/C10Kernel.h>
@@ -15,16 +17,13 @@ TORCH_DECLARE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
   class OpKernel_##id : public OpKernel {                      \
    public:                                                     \
     OpKernel_##id(const Node* node)                            \
-        : OpKernel(                                            \
-              node,                                            \
-              std::nullopt,                                    \
-              torch::nativert::OpKernelKind::kPrimKernel) {}   \
+        : OpKernel(node, OpKernelKind::kPrimKernel) {}         \
     void computeInternal(                                      \
         ExecutionFrame& executionFrame) const override final { \
       __VA_ARGS__;                                             \
     }                                                          \
   };                                                           \
-  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id);
+  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id)
 
 inline bool checkResizedDataPtr(at::Tensor& t) {
   auto const prev_data_ptr = t.data_ptr();

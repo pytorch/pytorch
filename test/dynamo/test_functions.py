@@ -11,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import types
 import typing
 import unittest
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import ifdynstaticdefault, same
+from torch._dynamo.utils import ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
@@ -266,6 +267,54 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x, i in itertools.product([a, b], [1, 2]):
             v = v + x * i
         return v
+
+    def test_itertools_product_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.product(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_product_various_iterators(a, b):
+        itertools.product(
+            [a, b],
+            zip([1, 2], [3, 4]),
+            map(lambda x: x, [1, 2]),
+            filter(lambda x: True, [1, 2]),
+        )
+        return a
+
+    def test_itertools_permutations_basic(self):
+        def fn():
+            return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertEqual(actual, expected)
+
+    def test_itertools_permutations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.permutations(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_permutations_various_iterators(a, b):
+        itertools.permutations([a, b])
+        itertools.permutations(zip([1, 2], [3, 4]))
+        itertools.permutations(map(lambda x: x, [1, 2]))
+        itertools.permutations(filter(lambda x: True, [1, 2]))
+        return a
+
+    @make_test
+    def test_itertools_filterfalse_basic(a, b):
+        for x in itertools.filterfalse(lambda x: x > 0, [-0.5, 0, 0.5]):
+            a += x
+        return a
 
     @make_test
     def test_itertools_chain(a, b):
@@ -518,6 +567,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tuple2(a, b):
         args = [a, b]
         return sub(*args)
+
+    @make_test
+    def test_tuple_map(a, b):
+        t = tuple(map(torch.sin, [a, b]))
+        return t[0] + t[1]
 
     def test_size_tuple_add(self):
         def fn():
@@ -1240,7 +1294,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_inline_softmax(x, y):
-        # This is common in sme huggingface models
+        # This is common in some huggingface models
         return torch.nn.Softmax(dim=-1)(x + y * 2)
 
     @make_test
@@ -1703,46 +1757,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
-    def test_set_invalid_ConstantVariable_op(a, b):
-        s = set({"banana", "apple", "orange"})
-        try:
-            s - 1
-        except TypeError:
-            return a + b
-        except Exception:
-            return a - b
+    def test_set_in_frozenset(x):
+        var = set("abc")
+        other = set([frozenset("abc")])
+        if var in other:
+            return x + 1
         else:
-            return a * b
-
-    @make_test
-    def test_set_pop_raise_KeyError(a, b):
-        s = set()
-        try:
-            s.pop()
-        except KeyError:
-            return a + b
-        except Exception:
-            return a - b
-        else:
-            return a * b
-
-    @make_test
-    def test_set_issubset(a, b):
-        vals1 = {"a", "b", "c"}
-        vals2 = {"b", "c"}
-        vals3 = {"b", "e", "f"}
-        if vals2.issubset(vals1) and not vals2.issubset(vals3):
-            return a + b
-        return a - b
-
-    @make_test
-    def test_set_issuperset(a, b):
-        vals1 = {"a", "b", "c"}
-        vals2 = {"b", "c"}
-        vals3 = {"b", "e", "f"}
-        if vals1.issuperset(vals2) and not vals1.issuperset(vals3):
-            return a + b
-        return a - b
+            return x - 1
 
     @make_test
     def test_set_update_bytecode(x):
@@ -1761,181 +1782,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
-
-    @make_test
-    def test_set_contains(a, b):
-        vals = set(["a", "b", "c"])
-        if "a" in vals:
-            x = a + b
-        else:
-            x = a - b
-        if "d" in vals:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
-
-    def test_set_isdisjoint(self):
-        x = {"apple", "banana", "cherry"}
-        y = {"google", "microsoft", "apple"}
-
-        def fn(a):
-            if x.isdisjoint(y):
-                return a + 1
-            else:
-                return a - 1
-
-        test = make_test(fn)
-        test(self)
-
-    @make_test
-    def test_set_intersection(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        intersection_set = set1.intersection(set2, set3)
-        if "apple" in intersection_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in intersection_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in intersection_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_intersection_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        set1.intersection_update(set2, set3)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @parametrize("_type", [set])
-    def test_set_union(self, _type):
-        @make_test
-        def fn(a, b):
-            set1 = _type({"apple", "banana", "cherry"})
-            set2 = _type({"google", "microsoft", "apple"})
-            set3 = _type({"shoes", "flipflops", "sneakers"})
-            union_set = set1.union(set2, set3)
-            if "apple" in union_set:
-                x = a + b
-            else:
-                x = a - b
-            if "banana" in union_set:
-                y = a + b
-            else:
-                y = a - b
-            if "shoes" in union_set:
-                z = a + b
-            else:
-                z = a - b
-            return x, y, z
-
-        fn(self)
-
-    @parametrize(
-        "fn_name", ["add", "symmetric_difference", "symmetric_difference_update"]
-    )
-    def test_set_raise_TypeError(self, fn_name):
-        @make_test
-        def fn(a, b):
-            set1 = {"apple", "banana", "cherry"}
-            try:
-                getattr(set1, fn_name)()
-            except TypeError:
-                return a + b
-            return a - b
-
-        fn(self)
-
-    @make_test
-    def test_set_difference(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        difference_set = set1.difference(set2, set3)
-        if "apple" in difference_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in difference_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in difference_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_difference_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        set1.difference_update(set2, set3)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_symmetric_difference(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        symmetric_diff_set = set1.difference(set2)
-        if "apple" in symmetric_diff_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in symmetric_diff_set:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
-
-    @make_test
-    def test_set_symmetric_difference_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set1.difference(set2)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
 
     def test_set_keys_view(self):
         from collections.abc import KeysView
@@ -1968,23 +1814,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
-
-    @parametrize("method", ["add", "__contains__"])
-    def test_set_raise_TypeError_on_unshashable_obj(self, method):
-        @make_test
-        def fn(a, b):
-            s = set({1, 2, 3, 4})
-            try:
-                m = getattr(s, method)
-                m([[]])
-            except TypeError:
-                return a + b
-            except Exception:
-                return a - b
-            else:
-                return a * b
-
-        fn(self)
 
     def test_constant_set(self):
         s = set([1, 2])
@@ -2196,6 +2025,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         )
         tmp = mytuple(a, xy=b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
+
+    @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        t = mytuple(a, b)
+        t._replace(x=b)
+        return t.x + t.y
+
+    @make_test
+    def test_namedtuple_fields(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        if mytuple._fields == ("x", "y"):
+            return a + b
+        else:
+            return a - b
 
     class MyNamedTuple(NamedTuple):
         first: torch.Tensor
@@ -3647,6 +3491,51 @@ class GraphModule(torch.nn.Module):
             args[2] = 1
         return args
 
+    def test_range_iterator_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 7, 2).__iter__()
+            y = x + next(it)
+            torch._dynamo.graph_break()
+            return y + next(it) + next(it)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x + 1 + 3 + 5)
+
+    def test_range_iterator_graph_break_2(self):
+        @torch.compiler.disable
+        def g(y, it):
+            return y + next(it) + next(it)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 10, 2).__iter__()
+            y = x + next(it)
+            z = g(y, it)
+            k = next(it)
+            assert k == 7
+            return z + k
+
+        x = torch.tensor([1.0])
+        z = fn(x)
+        self.assertEqual(z, x + 1 + 3 + 5 + 7)
+
+    @make_test
+    def test_range_iterator(a, b):
+        it = range(5).__iter__()
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
+
+    @make_test
+    def test_range_iterator_2(a, b):
+        # should pass once we stop having three different paths on call_iter
+        it = iter(range(5))
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
+
     def test_range_length(self):
         def test(*args, expected=None):
             r = range(*args)
@@ -4132,6 +4021,99 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_functools_cache_guard(self):
+        class Foo:
+            @functools.lru_cache  # noqa: B019
+            def run(self, val, c=1.0):
+                return val * c * 2
+
+        f = Foo()
+
+        def fn(x):
+            return f.run(x)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_torch_get_device_module(self):
+        def f1():
+            mod1 = torch.get_device_module()
+            mod2 = torch.get_device_module("cpu")
+            mod3 = torch.get_device_module(torch.device("cuda"))
+            return mod1, mod2, mod3
+
+        self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2():
+            torch.get_device_module(foo="cpu")
+
+        with self.assertRaises(Unsupported):
+            f2()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f3():
+            torch.get_device_module("cpu", device="cpu")
+
+        with self.assertRaises(Unsupported):
+            f3()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f4():
+            torch.get_device_module("asdf")
+
+        with self.assertRaises(Unsupported):
+            f4()
+
+        # test for changing torch.get_device_module() (super rare case due to lru_cache)
+        @torch.compile(backend="eager", fullgraph=True)
+        def f5():
+            return torch.get_device_module()
+
+        f5()
+        new_device = (
+            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+        )
+        old_get_device_module = torch.get_device_module
+
+        def new_get_device_module(device=None):
+            if device:
+                return old_get_device_module(device)
+            return getattr(torch, new_device)
+
+        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
+        # torch.get_device_module
+        with patch("torch.get_device_module", new_get_device_module):
+            print(torch.get_device_module())
+            self.assertEqual(f5(), getattr(torch, new_device))
+
+        # synchronize causes a graph break, so no fullgraph=True
+        @torch.compile(backend="eager")
+        def f6():
+            mod = torch.get_device_module()
+            mod.synchronize()
+            return mod
+
+        f6()
+
+    def test_torch_source(self):
+        global torch
+
+        g = torch.get_device_module
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            return g()
+
+        try:
+            old_torch = torch
+            torch = 1
+            self.assertEqual(torch, 1)
+            self.assertIsInstance(f(), types.ModuleType)
+        finally:
+            torch = old_torch
+
 
 def udf_mul(x, y):
     return x * y
@@ -4225,6 +4207,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_meth_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4422,6 +4405,33 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return a + b
             else:
                 return a - b
+
+        fn(self)
+
+    @parametrize(
+        "method_name",
+        [
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+            "union",
+        ],
+    )
+    def test_frozenset_return_type(self, method_name):
+        @make_test
+        def fn(a, b):
+            set1 = frozenset({"apple", "banana", "cherry"})
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if method_name == "copy":
+                result = set1.copy()
+            else:
+                result = getattr(set1, method_name)(set2)
+            if type(result) is frozenset:
+                x = a + b
+            else:
+                x = a - b
+            return x
 
         fn(self)
 
@@ -5133,6 +5143,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         a = SkipFunctionVariable(value=w)
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
+
+    def test_inspect_method_source(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def check(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return x * 2
+
+        mod = Mod()
+
+        def fn(x):
+            inspect.signature(mod.check).parameters.items()
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(FunctionTests)

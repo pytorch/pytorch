@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
 
 This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
@@ -18,10 +16,11 @@ import os
 import re
 import sys
 import unittest
-from typing import Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.testing
+from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
@@ -102,6 +101,18 @@ class TestCase(TorchTestCase):
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
 
+    def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if (
+            config.debug_disable_compile_counter
+            and isinstance(x, utils.CompileCounterInt)
+            or isinstance(y, utils.CompileCounterInt)
+        ):
+            return
+        return super().assertEqual(x, y, *args, **kwargs)
+
+    # assertExpectedInline might also need to be disabled for wrapped nested
+    # graph break tests
+
 
 class CPythonTestCase(TestCase):
     """
@@ -136,12 +147,12 @@ class CPythonTestCase(TestCase):
     assertRegex = unittest.TestCase.assertRegex
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
-    assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
-    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertMultiLineEqual = polyfills.assert_multi_line_equal
+    assertSequenceEqual = polyfills.assert_sequence_equal
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
-    assertDictEqual = unittest.TestCase.assertDictEqual
+    assertDictEqual = polyfills.assert_dict_equal
     assertRaises = unittest.TestCase.assertRaises
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
@@ -150,7 +161,12 @@ class CPythonTestCase(TestCase):
     fail = unittest.TestCase.fail
     failureException = unittest.TestCase.failureException
 
-    def compile_fn(self, fn, backend, nopython):
+    def compile_fn(
+        self,
+        fn: Callable[..., Any],
+        backend: Union[str, Callable[..., Any]],
+        nopython: bool,
+    ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
@@ -158,7 +174,7 @@ class CPythonTestCase(TestCase):
         setattr(self, self._testMethodName, method)
         return fn
 
-    def _dynamo_test_key(self):
+    def _dynamo_test_key(self) -> str:
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]

@@ -1,6 +1,7 @@
 // Implementation of specal math functions for Metal
 #pragma once
 #include <c10/metal/expm1f.h>
+#include <c10/metal/igamma.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -45,6 +46,11 @@ inline float erf(T x) {
   r = ::metal::fma(r, s, 1.28379166e-1f); //  0x1.06eba8p-3
   r = ::metal::fma(r, a, a);
   return r;
+}
+
+template <typename T>
+float erfc(T x) {
+  return 1.0 - erf(x);
 }
 
 template <typename T>
@@ -1559,7 +1565,7 @@ float chebyshev_polynomial_t_forward(T x, int64_t n) {
   float q = x;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = (x + x) * q - p;
     p = q;
     q = r;
@@ -1603,7 +1609,7 @@ float chebyshev_polynomial_u_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2 * x * q - p;
     p = q;
     q = r;
@@ -1656,7 +1662,7 @@ float chebyshev_polynomial_v_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2 * x * q - p;
     p = q;
     q = r;
@@ -1713,7 +1719,7 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
   auto p = 1.0;
   float r;
 
-  for (int64_t k = 2; k <= n; k++) {
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
     r = 2.0 * x * q - p;
     p = q;
     q = r;
@@ -1721,6 +1727,207 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
 
   return r;
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == T(1.0)) {
+    return 1.0;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    return ::metal::precise::cos(n * ::metal::precise::acos(xpxm1));
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1;
+  }
+
+  float p = 1.0;
+  float q = xpxm1;
+  float r;
+
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return n + 1;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return n + 1;
+    }
+
+    return -(n + 1);
+  }
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    const float divisor = ::metal::precise::sin(acos_2xm1);
+    if (divisor != 0.0) {
+      return ::metal::precise::sin((n + 1) * acos_2xm1) / divisor;
+    }
+
+    return (n + 1) * ::metal::precise::cos((n + 1) * acos_2xm1) / xpxm1;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1;
+  float r;
+
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return 1.0;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return (n + n + 1);
+    }
+
+    return -(n + n + 1);
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    if (::metal::precise::sin(acos_2xm1 / 2.0) != 1.0) {
+      return ::metal::precise::cos((n + 0.5) * acos_2xm1) /
+          ::metal::precise::cos(acos_2xm1 / 2.0);
+    }
+
+    if (n % 2 == 0) {
+      return n + n + 1;
+    }
+
+    return -(n + n + 1);
+  }
+
+  if (n == 0) {
+    return T(1.0);
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1 - 1.0;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1 - 1.0;
+  float r;
+
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return n + n + 1;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 4) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    if (::metal::precise::cos(acos_2xm1 / 2.0) != 1.0) {
+      return ::metal::precise::sin((n + 0.5) * acos_2xm1) /
+          ::metal::precise::sin(acos_2xm1 / 2.0);
+    }
+
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1 + 1.0;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1 + 1.0;
+  float r;
+
+  for (int64_t k = 2; (k <= n) && !::metal::isnan(q); k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template <typename T>
 // TODO: Add 512 if/when double will be supported in Metal

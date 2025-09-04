@@ -61,6 +61,10 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+# Whether or not to normalize placeholder names in graphs
+# from dynaom in AOTAutogradCache
+autograd_cache_normalize_inputs = not is_fbcode()
+
 
 def remote_autograd_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
@@ -230,6 +234,40 @@ fake_tensor_crossref = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# AOTDispatcher traces out a backward graph at the time of the forward pass.
+# This flags controls whether or not that backward graph gets autocast behavior
+# applied to it.
+#
+# The options are either:
+# - "same_as_forward". We assume that the backward of the torch.compile'ed region
+#   will be run under the same autocast context manager that the region was run
+#   under. This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#       z.backward()
+#
+# - "off". We assume that the backward of the torch.compile'd region will
+#   not be run under any autocast context managers.
+#   This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#   z.backward()
+#
+# - or a list of kwargs dicts that represent an autocast context manager to turn
+#   on during the backward pass.
+#
+#   e.g. [{"device_type": "cuda"}] is equivalent to running the following code in eager:
+#
+#   y = region(x)
+#   ...
+#   with torch.amp.autocast(device="cuda"):
+#       z.backward()
+backward_pass_autocast = "same_as_forward"
+
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = False if is_fbcode() else True
@@ -242,6 +280,17 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # kernel mismatch is detected, bypasses by making a fake kernel from the
 # real tensor outputs.
 generate_fake_kernels_from_real_mismatches = False
+
+# When there are device mismatches in FakeTensor device propagation,
+# prefer a specific device type over others. This is particularly useful
+# in full compiled mode where intermediate tensors with device mismatches
+# represent only logical differences during compilation - these intermediate
+# tensors will never physically materialize in the binary execution, so the
+# device mismatch is not a real runtime concern. Enabling this allows the
+# compiler to proceed with compilation by choosing the preferred device type
+# for consistency. For example, set to "mtia" to prefer MTIA devices over
+# CPU, or "cuda" to prefer CUDA devices over CPU.
+fake_tensor_prefer_device_type: Optional[str] = None
 
 # CUDAGraph save run_with_rng functionalization.
 # TODO: turn on by default
@@ -258,7 +307,7 @@ strict_autograd_cache = False
 #   which can reorder or ,delete duplicate nodes in the graph
 # - If any of these passes reorder/delete/duplicate a collective
 #   in a setting where the compiler is being run independently on multiple
-#   ranks, we run the risk that the compiler will make a different decison on
+#   ranks, we run the risk that the compiler will make a different decision on
 #   different ranks, resulting in a NCCL hang when using torch.compile
 # To handle this, we will (by default) ensure that collectives are not modified
 # by the compiler.
@@ -289,7 +338,7 @@ guess_tangent_strides_as_outputs = False
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will untimately be removed once we share size_hints across ranks through compiler collectives
-_broadcast_rank0_decision = False
+_sync_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
 # "donated" buffers are invisible to the user, they are intermediates of the forward graph.

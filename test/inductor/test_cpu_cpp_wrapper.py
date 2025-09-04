@@ -110,7 +110,6 @@ def make_test_case(
 
     @config.patch(
         cpp_wrapper=True,
-        search_autotune_cache=False,
         cpp_wrapper_build_separate=test_build_separate,
     )
     def fn(self):
@@ -269,7 +268,7 @@ if RUN_CPU:
             "test_multi_threading",
             condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
-            code_string_count={"py::gil_scoped_release release;": 2},
+            code_string_count={"py::gil_scoped_release_simple release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

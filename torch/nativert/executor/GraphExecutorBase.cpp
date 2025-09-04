@@ -13,14 +13,14 @@ GraphExecutorBase::GraphExecutorBase(
     : graph_(graph),
       nodeKernels_(std::move(nodeKernels)),
       executorConfig_(executorConfig),
-      execPlan_(ExecutionPlanner{graph_}.createPlan()) {};
+      execPlan_(ExecutionPlanner{graph_}.createPlan()) {}
 
 void GraphExecutorBase::fillUserInputs(
     ExecutionFrame& frame,
     std::vector<c10::IValue> inputs) {
   RECORD_USER_SCOPE("Executor::fillUserInputs");
   const auto& inputValues = graph_.userInputs();
-  TORCH_CHECK_EQ(inputValues.size(), inputs.size());
+  TORCH_CHECK(inputValues.size() == inputs.size());
 
   // load user input tensor into execution frame
   for (size_t i = 0; i < inputValues.size(); i++) {
@@ -32,7 +32,7 @@ void GraphExecutorBase::fillUserInputs(
 
 ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
     ExecutionFrame& executionFrame,
-    std::vector<std::vector<c10::IValue>> inputsList,
+    const std::vector<std::vector<c10::IValue>>& inputsList,
     const uint32_t warmupRuns,
     const uint32_t mainRuns) {
   // TODO: add support for memory profiling
@@ -40,6 +40,13 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
 
   ProfileMetrics results;
   const auto numNodes = static_cast<uint32_t>(nodeKernels_.size());
+
+  results.percentPerNode.resize(numNodes, 0.0f);
+  results.nodeTypes.reserve(numNodes);
+  for (const auto& nodeKernel : nodeKernels_) {
+    results.nodeTypes.emplace_back(nodeKernel->node()->target());
+  }
+
   results.timePerNode.resize(numNodes, 0);
   if (inputsList.empty()) {
     auto i = 0;
@@ -74,22 +81,24 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
 
   // Execute kernels
   caffe2::Timer timer;
-  for (uint32_t i = 0; i < mainRuns; i++) {
-    for (auto inputs : inputsList) {
-      const auto& inputValues = graph_.userInputs();
+  executionFrame.withManagedMemory([&](auto) {
+    for (uint32_t i = 0; i < mainRuns; i++) {
+      for (auto inputs : inputsList) {
+        const auto& inputValues = graph_.userInputs();
 
-      TORCH_CHECK_EQ(inputValues.size(), inputs.size());
-      for (size_t j = 0; j < inputValues.size(); j++) {
-        executionFrame.setIValue(inputValues[j]->id(), std::move(inputs[j]));
-      }
-      for (NodeIndex nodeIdx = 0; nodeIdx < nodeKernels_.size(); ++nodeIdx) {
-        timer.Start();
-        nodeKernels_[nodeIdx]->compute(executionFrame);
-        float millis = timer.MilliSeconds();
-        results.timePerNode[nodeIdx] += millis;
+        TORCH_CHECK(inputValues.size() == inputs.size());
+        for (size_t j = 0; j < inputValues.size(); j++) {
+          executionFrame.setIValue(inputValues[j]->id(), std::move(inputs[j]));
+        }
+        for (NodeIndex nodeIdx = 0; nodeIdx < nodeKernels_.size(); ++nodeIdx) {
+          timer.Start();
+          nodeKernels_[nodeIdx]->compute(executionFrame);
+          float millis = timer.MilliSeconds();
+          results.timePerNode[nodeIdx] += millis;
+        }
       }
     }
-  }
+  });
 
   // Summarize results
   const float numTotalIters =
@@ -112,7 +121,11 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   results.totalNodesCount = numNodes;
   for (const auto& r : results.timePerNodeType) {
     const std::string& target = r.first;
-    results.percentPerNodeType[target] = r.second * 100.0 / results.totalTime;
+    results.percentPerNodeType[target] = r.second * 100.0f / results.totalTime;
+  }
+  for (const auto i : c10::irange(numNodes)) {
+    results.percentPerNode[i] =
+        results.timePerNode[i] * 100.0f / results.totalTime;
   }
   return results;
 }

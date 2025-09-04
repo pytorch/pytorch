@@ -42,6 +42,7 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    TypeMROSource,
     TypeSource,
     WeakRefCallSource,
 )
@@ -134,9 +135,7 @@ class SuperVariable(VariableTracker):
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
                         source = AttrSource(
-                            GetItemSource(
-                                AttrSource(type_to_use_source, "__mro__"), index
-                            ),
+                            GetItemSource(TypeMROSource(type_to_use_source), index),
                             name,
                         )
                     return resolved_getattr, source
@@ -247,14 +246,14 @@ class SuperVariable(VariableTracker):
                 # different from type(self) with polymorphism.
                 cls_source = None
                 if self.objvar.source:
-                    cls_source = AttrSource(self.objvar.source, "__class__")
+                    cls_source = TypeSource(self.objvar.source)
                 cls_variable = VariableTracker.build(
                     tx, self.objvar.value_type, cls_source
                 )
 
-            return variables.UserMethodVariable(
-                inner_fn.__func__, cls_variable, source=source
-            ).call_function(tx, args, kwargs)
+            return variables.UserFunctionVariable(
+                inner_fn.__func__, source=AttrSource(source, "__func__")
+            ).call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
@@ -305,6 +304,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedSetVariable)
+            and inner_fn in self.objvar._set_methods
+        ):
+            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
         elif (
             isinstance(self.objvar, variables.UserDefinedTupleVariable)
             and inner_fn in tuple_methods
@@ -653,13 +657,13 @@ class AutogradFunctionVariable(VariableTracker):
     def call_apply(self, tx: "InstructionTranslator", args, kwargs):
         requires_grad = False
 
-        def visit(node):
+        def visit(vt):
             nonlocal requires_grad
-            if isinstance(node, variables.TensorVariable):
-                if node.requires_grad is not False:
+            if isinstance(vt, variables.TensorVariable):
+                if vt.requires_grad is not False:
                     requires_grad = True
-            if isinstance(node, variables.NNModuleVariable):
-                if node.is_training(tx):
+            if isinstance(vt, variables.NNModuleVariable):
+                if vt.is_training(tx):
                     requires_grad = True
 
         VariableTracker.visit(visit, (args, kwargs))
@@ -1006,7 +1010,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph, (
+                assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
                 return variables.UserFunctionVariable(
@@ -1177,6 +1181,15 @@ class GetAttrVariable(VariableTracker):
                 self.obj.convert_to_unspecialized(tx)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def get_forwarded_dict(self, tx):
+        assert (
+            self.name == "__dict__"
+            and isinstance(self.obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(self.obj)
+        )
+        self.obj.ban_mutation = True
+        return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
 
 
 class MethodWrapperVariable(VariableTracker):
