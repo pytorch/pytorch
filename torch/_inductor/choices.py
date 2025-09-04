@@ -115,7 +115,6 @@ class InductorChoices:
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
-        max_autotune: bool = False,
     ) -> list[KernelTemplateChoice]:
         """
         This method can be subclassed to perform any override/modification of the choices.
@@ -133,7 +132,6 @@ class InductorChoices:
             templates: List of template objects (KernelTemplate or ExternKernelChoice) in use
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm")
             kwarg_overrides: Optional dict of kwargs to override for each template heuristic
-            max_autotune: Whether to use max autotune
 
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
@@ -144,19 +142,19 @@ class InductorChoices:
         return choices
 
     def _can_try_flexible_layout(
-        self, adjusted_choices: list[KernelTemplateChoice], max_autotune: bool
+        self,
+        adjusted_choices: list[KernelTemplateChoice],
     ) -> bool:
         """
         Check if we can try flexible layout for a given kernel template choice.
 
         Args:
             ktc: KernelTemplateChoice object
-            max_autotune: Whether to use max autotune
 
         Returns:
             True if we can try flexible layout, False otherwise
         """
-        if not max_autotune:
+        if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
             return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
@@ -194,9 +192,6 @@ class InductorChoices:
         Returns:
             List of ChoiceCaller objects from the templates
         """
-        # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
-        # the max-autotune bool, rather than inferring it here
-        max_autotune = config.max_autotune or config.max_autotune_gemm
         if kwarg_overrides is None:
             kwarg_overrides = {}
         input_tensors = kernel_inputs.nodes()
@@ -212,7 +207,9 @@ class InductorChoices:
         for template in templates:
             heuristic = get_template_heuristic(template.uid, device_type, op_name)
             cs = heuristic.get_template_configs(
-                kernel_inputs, layout, op_name, max_autotune
+                kernel_inputs,
+                layout,
+                op_name,
             )
             extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
 
@@ -245,10 +242,9 @@ class InductorChoices:
             templates,
             op_name,
             kwarg_overrides,
-            max_autotune,
         )
         # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
-        if self._can_try_flexible_layout(adjusted_choices, max_autotune):
+        if self._can_try_flexible_layout(adjusted_choices):
             for ktc in adjusted_choices:
                 if isinstance(ktc.layout, FixedLayout):
                     ktc.layout = FlexibleLayout(
