@@ -88,8 +88,6 @@ class PerformanceModelChoices(InductorChoices):
                         kernel_inputs,
                         layout,
                         op_name,
-                        # always in max-autotune mode here
-                        max_autotune=True,
                     )
                     # Create new generator with exhaustive configs
                     # Need to reconstruct the template and other args from original choices
@@ -131,7 +129,6 @@ class PerformanceModelChoices(InductorChoices):
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
-        max_autotune: bool = False,
     ) -> list[KernelTemplateChoice]:
         """
         Performance model fallback implementation.
@@ -169,7 +166,6 @@ class PerformanceModelChoices(InductorChoices):
                 templates,
                 op_name,
                 kwarg_overrides,
-                max_autotune,
             )
         # Expand template choices using performance model logic
         kwarg_overrides = kwarg_overrides or {}

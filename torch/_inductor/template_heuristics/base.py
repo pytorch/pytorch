@@ -25,7 +25,6 @@ class TemplateConfigHeuristics:
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get template configs for the given inputs.
@@ -37,7 +36,9 @@ class TemplateConfigHeuristics:
             return
 
         yield from self._get_template_configs_impl(
-            kernel_inputs, layout, op_name, max_autotune
+            kernel_inputs,
+            layout,
+            op_name,
         )
 
     def _get_template_configs_impl(
@@ -45,7 +46,6 @@ class TemplateConfigHeuristics:
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get template configs for the given inputs.
