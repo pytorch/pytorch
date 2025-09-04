@@ -49,10 +49,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    TEST_XPU,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
@@ -65,9 +65,8 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 )
 
 
-if torch.accelerator.is_available():
-    DEVICE_TYPE = torch.accelerator.current_accelerator().type
-    BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
+DEVICE_TYPE = torch.accelerator.current_accelerator().type
+BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -152,7 +151,9 @@ class TestShardedTensorMetadata(TestCase):
 
 
 class TestCreateTensorFromParams(TestCase):
-    @skip_but_pass_in_sandcastle_if(not torch.accelerator.is_available(), "Accelerator is needed")
+    @skip_but_pass_in_sandcastle_if(
+        not torch.accelerator.is_available(), "Accelerator is needed"
+    )
     def test_empty(self):
         expected_dtype = torch.double
         tensor_properties = TensorProperties(
@@ -537,7 +538,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             if self.rank == 3:
                 self.assertEqual((1, 20), local_shard.size())
             else:
@@ -857,7 +860,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -888,7 +893,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 shard = remote_shard.to_here()
                 self.assertEqual(
-                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
+                    str(shard.metadata.placement),
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
 
@@ -914,7 +920,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -945,10 +953,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 self.assertEqual(
-                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
+                    str(shard.metadata.placement),
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
-
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -1003,7 +1011,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual((2, 20), shard.tensor.size())
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
 
-
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharding_columns(self):
@@ -1026,7 +1033,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             self.assertEqual((10, 8), local_shard.size())
 
             # Validate global metadata.
@@ -1152,12 +1161,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank <= 1:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             self.assertEqual((1, 20), local_shard.size())
         else:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
+            self.assertEqual(
+                torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device
+            )
             self.assertEqual(local_shard.numel(), 0)
 
         # Validate global metadata.
@@ -1168,7 +1181,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         for shard_rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual([shard_rank, 0], shard_metadata.shard_offsets)
             self.assertEqual(
-                f"rank:{shard_rank}/{DEVICE_TYPE}:{shard_rank}", str(shard_metadata.placement)
+                f"rank:{shard_rank}/{DEVICE_TYPE}:{shard_rank}",
+                str(shard_metadata.placement),
             )
             if shard_rank <= 1:
                 self.assertEqual([1, 20], shard_metadata.shard_sizes)
@@ -1349,7 +1363,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.init_rpc()
 
         dist.init_process_group(
-            backend=dist.get_default_backend_for_device(torch.accelerator.current_accelerator()),
+            backend=dist.get_default_backend_for_device(
+                torch.accelerator.current_accelerator()
+            ),
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -1529,7 +1545,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -1539,7 +1557,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -1551,7 +1570,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -1563,7 +1584,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
-
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
@@ -1602,7 +1622,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard is initialized with torch.ones
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
         self.assertEqual(local_shard.tensor, torch.ones(5, 5))
 
@@ -1994,14 +2016,17 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         verify_size(self.rank, local_shard.tensor.size())
 
         # Verify local shard metadata.
         verify_offsets(self.rank, local_shard.metadata.shard_offsets)
         verify_size(self.rank, local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2011,7 +2036,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             verify_offsets(rank, shard_metadata.shard_offsets)
             verify_size(rank, shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2064,7 +2091,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2191,7 +2220,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             # Verify local shards.
             for idx, local_shard in enumerate(st.local_shards()):
                 self.assertEqual(
-                    torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+                    torch.device(f"{DEVICE_TYPE}:{self.rank}"),
+                    local_shard.tensor.device,
                 )
                 self.assertEqual((5, 5), local_shard.tensor.size())
 
@@ -2273,7 +2303,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -2283,7 +2315,8 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"worker{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"worker{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2295,7 +2328,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"worker{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"worker{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2324,7 +2359,9 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             )
             rank_to_metadata[rank] = shard_metadata
             if rank == self.rank:
-                local_tensor = torch.rand(shard_metadata.shard_sizes).to(torch.device(device))
+                local_tensor = torch.rand(shard_metadata.shard_sizes).to(
+                    torch.device(device)
+                )
                 local_shard_metadata = shard_metadata
 
         # TODO: figure out what the API should behave when some rank have no shard
@@ -2342,7 +2379,9 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
         # Verify local shard.
         local_shard = st.local_shards()[0]
         self.assertEqual(st.local_tensor(), local_tensor)
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
 
         # Verify local shard metadata.
         self.assertEqual(
@@ -2366,7 +2405,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 # If remote shard does not exist, to_here() will throw exception.
-                    # if tensor_meta.shards_metadata[rpc_rank]:
+                # if tensor_meta.shards_metadata[rpc_rank]:
                 shard = remote_shard.to_here()
                 self.assertEqual(
                     rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
@@ -2462,7 +2501,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
 
@@ -2474,7 +2514,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -2484,7 +2526,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2495,7 +2538,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2523,7 +2568,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
             local_shards = [
                 sharded_tensor.Shard(
-                    torch.randn(shard_size, shard_size, device=f"{DEVICE_TYPE}:{self.rank}"),
+                    torch.randn(
+                        shard_size, shard_size, device=f"{DEVICE_TYPE}:{self.rank}"
+                    ),
                     local_shard_metadata,
                 )
             ]
@@ -2591,7 +2638,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
         with self.assertRaises(ValueError):
@@ -2610,7 +2658,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
 
@@ -2646,7 +2695,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             shards_metadata.append(local_shard_metadata)
             shards.append(
                 sharded_tensor.Shard(
-                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{rank}"), local_shard_metadata
+                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{rank}"),
+                    local_shard_metadata,
                 )
             )
 
@@ -2690,7 +2740,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
@@ -2718,7 +2770,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shards = [
             sharded_tensor.Shard(
-                torch.randn(0, 0, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(0, 0, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
 
@@ -2746,7 +2799,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((0, 0), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -2756,7 +2811,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         )
         self.assertEqual((0, 0), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2765,7 +2821,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual((0, 0), shard_metadata.shard_offsets)
             self.assertEqual((0, 0), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
@@ -2796,7 +2854,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
             local_shards = [
                 sharded_tensor.Shard(
-                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                    local_shard_metadata,
                 )
             ]
 
@@ -2891,7 +2950,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
 
@@ -2919,7 +2979,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         # Verify local shard.
         local_shard = st.local_shards()[0]
-        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device)
+        self.assertEqual(
+            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
+        )
         self.assertEqual((5, 5), local_shard.tensor.size())
 
         # Verify local shard metadata.
@@ -2929,7 +2991,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
         self.assertEqual(
-            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}", str(local_shard.metadata.placement)
+            f"rank:{self.rank}/{DEVICE_TYPE}:{self.rank}",
+            str(local_shard.metadata.placement),
         )
 
         # Verify global metadata.
@@ -2940,7 +3003,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
             )
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank}/{DEVICE_TYPE}:{rank}", str(shard_metadata.placement)
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2967,7 +3032,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             )
             local_shards = [
                 sharded_tensor.Shard(
-                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                    torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                    local_shard_metadata,
                 )
             ]
 
@@ -3000,7 +3066,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
                 self.assertEqual((5, 5), shard_metadata.shard_sizes)
                 self.assertEqual(
-                    f"rank:{rank + 1}/{DEVICE_TYPE}:{rank + 1}", str(shard_metadata.placement)
+                    f"rank:{rank + 1}/{DEVICE_TYPE}:{rank + 1}",
+                    str(shard_metadata.placement),
                 )
 
     @with_comms(backend=BACKEND)
@@ -3037,7 +3104,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         wrong_memory_format_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}").t(), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}").t(),
+                local_shard_metadata,
             )
         ]
         with self.assertRaisesRegex(
@@ -3050,7 +3118,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         with self.assertRaisesRegex(ValueError, "Shard tensor size does not match"):
             sharded_tensor.Shard(
-                torch.randn(2, 3, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(2, 3, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
 
         with self.assertRaisesRegex(
@@ -3070,7 +3139,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         tensor_overall_size = [10, 10] if self.rank == 0 else [10, 5]
         wrong_dtype_shards = [
             sharded_tensor.Shard(
-                torch.ones(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.ones(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
         ]
         with self.assertRaisesRegex(
@@ -3084,7 +3154,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         tensor_dtype = torch.int if self.rank == 0 else torch.float32
         wrong_dtype_shards = [
             sharded_tensor.Shard(
-                torch.ones(5, 5, device=f"{DEVICE_TYPE}:{self.rank}", dtype=tensor_dtype),
+                torch.ones(
+                    5, 5, device=f"{DEVICE_TYPE}:{self.rank}", dtype=tensor_dtype
+                ),
                 local_shard_metadata,
             )
         ]
@@ -3100,7 +3172,10 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         wrong_requires_grad_shards = [
             sharded_tensor.Shard(
                 torch.randn(
-                    5, 5, device=f"{DEVICE_TYPE}:{self.rank}", requires_grad=tensor_requires_grad
+                    5,
+                    5,
+                    device=f"{DEVICE_TYPE}:{self.rank}",
+                    requires_grad=tensor_requires_grad,
                 ),
                 local_shard_metadata,
             )
@@ -3250,10 +3325,12 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         wrong_num_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             ),
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             ),
         ]
         with self.assertRaisesRegex(
@@ -3267,7 +3344,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             ValueError, "Shard tensor size does not match with metadata.shard_lengths"
         ):
             sharded_tensor.Shard(
-                torch.randn(2, 3, device=f"{DEVICE_TYPE}:{self.rank}"), local_shard_metadata
+                torch.randn(2, 3, device=f"{DEVICE_TYPE}:{self.rank}"),
+                local_shard_metadata,
             )
 
         with self.assertRaisesRegex(
@@ -3307,7 +3385,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         wrong_requires_grad_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}", requires_grad=True),
+                torch.randn(
+                    5, 5, device=f"{DEVICE_TYPE}:{self.rank}", requires_grad=True
+                ),
                 local_shard_metadata,
             )
         ]
@@ -3321,7 +3401,8 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         wrong_memory_format_shards = [
             sharded_tensor.Shard(
-                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}").t(), local_shard_metadata
+                torch.randn(5, 5, device=f"{DEVICE_TYPE}:{self.rank}").t(),
+                local_shard_metadata,
             )
         ]
         with self.assertRaisesRegex(
