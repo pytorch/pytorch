@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 import torch.distributed as dist
-from torch.distributed._distributed_c10d import FakeProcessGroup
+from torch._C._distributed_c10d import FakeProcessGroup
 
 
 class FakeStore(dist.Store):
@@ -28,5 +28,5 @@ def _create_fake_pg(common_opts, backend_opts):
 
 
 dist.Backend.register_backend(
-    "fake", _create_fake_pg, extended_api=True, devices=["cpu", "cuda", "hpu"]
+    "fake", _create_fake_pg, extended_api=True, devices=["cpu", "cuda", "hpu", "xpu"]
 )
