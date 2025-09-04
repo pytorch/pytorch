@@ -295,9 +295,18 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
         input_shape = input.shape
 
-        if self.dim[-1] >= len(input_shape):
+        rank = len(input_shape)
+
+        self.start_dim = self.start_dim if self.start_dim > 0 else rank + self.start_dim
+
+        if self.start_dim <= 0:
             raise ValueError(
-                f"Invalid dim the highest specified dim is {self.dim[-1]}, but the input tensor has only rank {len(input_shape)}"
+                f"start dim {self.start_dim} cannot be less or equal to zero"
+            )
+
+        if not self.start_dim < rank:
+            raise ValueError(
+                f"start dim {self.start_dim} cannot not be greater or equal to the rank of the input got input of shape {input_shape}"
             )
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
