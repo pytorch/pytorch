@@ -32,7 +32,7 @@ from ..utils import (
     using_b200,
 )
 from ..virtualized import V
-from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -1417,7 +1417,7 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-class MMTemplateConfigMixin(TemplateConfigHeuristics):
+class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
     This handles the logic that was previously in choices.get_mm_configs.
@@ -1448,7 +1448,7 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         else:
             return self.get_mm_configs()
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1563,6 +1563,24 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         super().__init__()
         self.should_scale_configs = False
 
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+        max_autotune: bool = False,
+    ) -> Generator[dict[str, Any], None, None]:
+        assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
+        m, n, k = kernel_inputs.mnk_symbolic()
+        for kwargs in super()._get_template_configs_impl(
+            kernel_inputs, layout, op_name, max_autotune
+        ):
+            # Apply BLOCK_K constraint specific to mm_plus_mm
+            # see https://github.com/triton-lang/triton/issues/1298
+            # BLOCK_K = K causes llvm error
+            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k), k):
+                yield kwargs
+
 
 class TMAWorkspaceMixin(MMTemplateConfigMixin):
     """
@@ -1598,7 +1616,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1620,7 +1638,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             yield {**template_kwargs, **tma_opts}
@@ -1667,7 +1685,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes, mat1_idx=kernel_inputs._mat1_idx, mat2_idx=kernel_inputs._mat2_idx
         )
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1720,7 +1738,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return
 
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
@@ -1776,7 +1794,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1787,7 +1805,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         Generate scaled TMA template configs with both scaled MM and TMA-specific options.
         """
         # Get base scaled MM template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name, max_autotune
         ):
             # Add TMA-specific options for device TMA scaled MM
