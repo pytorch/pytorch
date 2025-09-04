@@ -263,7 +263,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
             # mypy error: incompatible types in assignment
             dim = (dim,)  # type: ignore[assignment]
 
-        self.dim = sorted(set(dim))
+        self.dim = tuple(sorted(set(dim)))  # type: ignore[assignment]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         self.bias = bias
