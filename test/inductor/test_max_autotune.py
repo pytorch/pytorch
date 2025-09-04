@@ -1450,6 +1450,11 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
         b = torch.randn(N, K, dtype=torch.float32, device=GPU_TYPE)
 
+        # Compute fp64 baseline
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = mm_transpose_relu(a_fp64, b_fp64)
+
         # Force contiguous transform
         with (
             mock.patch(
@@ -1459,7 +1464,12 @@ class TestMaxAutotune(TestCase):
             contiguous_mock.return_value = True
 
             compiled_func = torch.compile(mm_transpose_relu)
-            _, code = run_and_get_code(compiled_func, a, b)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+            )
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
