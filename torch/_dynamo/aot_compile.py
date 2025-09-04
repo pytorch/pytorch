@@ -287,11 +287,18 @@ class AOTCompiledModel:
         return self.compiled_results[0](self.model, *args, **kwargs)
 
     def serialize(self) -> bytes:
-        return pickle.dumps(self.compiled_results)
+        data: list[bytes] = []
+        for result in self.compiled_results:
+            data.append(CompileArtifacts.serialize(result))
+        return pickle.dumps(data)
 
     @classmethod
     def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
-        return cls(model, pickle.loads(data))
+        data: list[bytes] = pickle.loads(data)
+        compiled_results = []
+        for result in data:
+            compiled_results.append(CompileArtifacts.deserialize(result))
+        return cls(model, compiled_results)
 
 
 def aot_compile_module(

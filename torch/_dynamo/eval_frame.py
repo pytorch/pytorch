@@ -439,6 +439,31 @@ class OptimizedModule(torch.nn.Module):
 
         self.forward = aot_compile_module(model, inputs, hooks, backend)
 
+    def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        assert isinstance(self.forward, AOTCompiledModel)
+        result: bytes = self.forward.serialize()
+        if path is not None:
+            with open(path, "wb") as f:
+                f.write(result)
+        return result
+
+    def _load_aot_compiled_module(self, data: bytes) -> None:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        compiled_forward = AOTCompiledModel.deserialize(self._orig_mod, data)
+        assert isinstance(compiled_forward, AOTCompiledModel)
+        self.forward = compiled_forward
+
     def __reduce__(
         self,
     ) -> tuple[type[OptimizedModule], tuple[torch.nn.Module, _TorchDynamoContext]]:

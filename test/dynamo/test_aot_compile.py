@@ -186,7 +186,31 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             model.train()
             expected.sum().backward()
 
-        # TODO: Test saving/loading
+        model._save_aot_compiled_module(self.path())
+        torch._dynamo.reset()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
+            },
+        )
+        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+        with open(self.path(), "rb") as f:
+            data = f.read()
+            model._load_aot_compiled_module(data)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            model.eval()
+            inputs = (torch.randn(3, 3),)
+            expected = mod(*inputs)
+            actual = model(*inputs)
+            self.assertEqual(expected, actual)
+
+            # Shouldn't recompile
+            model.train()
+            expected.sum().backward()
 
 
 if __name__ == "__main__":
