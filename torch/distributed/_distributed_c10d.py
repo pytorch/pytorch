@@ -85,6 +85,9 @@ except ImportError:
     from torch.distributed._C_stubs import HashStore
 
 # NVSHMEM/SymmetricMemory components
+
+# There are multiple backends for SymmetricMemory, as a result,
+# _SymmetricMemory should not be imported together with NVSHMEM related modules.
 try:
     from torch._C._distributed_c10d import _SymmetricMemory
 except ImportError:
