@@ -2911,7 +2911,7 @@ def _persistent_reduction_configs(
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
-            or (max_autotune_enabled or rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL)
+            or rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL
             and xblock <= xnumel
         ]
     else:
