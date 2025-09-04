@@ -11,12 +11,17 @@ if TYPE_CHECKING:
 
 
 class TemplateConfigHeuristics:
-    @property
-    def should_run(self) -> bool:
+    """Base class for generating sets of configs for an associated template."""
+
+    def should_run(self, inputs: KernelInputs, layout: Layout) -> bool:
         """
         hookup to check whether the configs are right to run at all e.g. you can check
         max-autotune specific to your heuristic here or other things
         If this returns False, get_template_configs will yield no configs
+
+        Args:
+            inputs: KernelInputs
+            layout: Layout
         """
         return True
 
@@ -32,7 +37,7 @@ class TemplateConfigHeuristics:
         Prefer to override the _get_template_configs_impl method
         to leverage things like should_run
         """
-        if not self.should_run:
+        if not self.should_run(kernel_inputs, layout):
             return
 
         yield from self._get_template_configs_impl(
