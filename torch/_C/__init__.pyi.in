@@ -2389,6 +2389,7 @@ class _XpuDeviceProperties:
     gpu_subslice_count: _int
     architecture: _int
     type: str
+    uuid: Any
 
 # Defined in torch/csrc/xpu/Stream.cpp
 class _XpuStreamBase(Stream):
