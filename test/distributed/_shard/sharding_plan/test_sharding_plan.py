@@ -8,7 +8,10 @@ from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -31,6 +34,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
     BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+
 
 # Example ShardingPlanner that chunks every parameter in the module
 # to all available devices defined.
@@ -107,7 +111,9 @@ class TestShardingPlan(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_planner(self):
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(torch.device(self.rank))
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
+            torch.device(self.rank)
+        )
         planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM)
         sharding_plan = planner.build_plan(megatron_lm)
 
