@@ -172,7 +172,7 @@ def parse_args():
         "--output-json-for-dashboard",
         "--output_json_for_dashboard",
         help="Save results in JSON format for display on the OSS dashboard",
-        default="False",
+        default="benchmark-results.json",
     )
 
     args, _ = parser.parse_known_args()
