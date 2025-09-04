@@ -265,6 +265,38 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
 
         dist.barrier()
 
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_consolidate_one_file_with_two_ranks(self):
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+        import safetensors
+
+        # this is testing the case where one rank has no data to write
+        # and the other rank has two tensors to write.
+        # the rank with no work should wait properly for the other rank to finish
+        checkpoint_dir = self.temp_dir
+        output_dir = os.path.join(checkpoint_dir, "consolidated")
+        os.makedirs(output_dir, exist_ok=True)
+
+        self._create_d_tensors()
+
+        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+
+        fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 1}
+        consolidate_safetensors_files_on_every_rank(
+            checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping
+        )
+
+        file1_path = os.path.join(output_dir, "model-00001-of-00001.safetensors")
+
+        loaded_dict = safetensors.torch.load_file(file1_path)
+        self.assertEqual(loaded_dict.keys(), {"dtensor", "dtensor_col"})
+        self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
+        self.assertTrue(torch.equal(loaded_dict["dtensor_col"], global_tensor))
+
     def test_write_sub_tensor_to_file_optimized(self) -> None:
         """Test the _write_sub_tensor_to_file_optimized function with various scenarios."""
 

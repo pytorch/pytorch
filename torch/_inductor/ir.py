@@ -1094,7 +1094,10 @@ class Pointwise(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(
-            device=device, dtype=self.dtype, inner_fn=loader, ranges=self.ranges
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
         )
 
 
@@ -3748,8 +3751,10 @@ class Layout(OutputSpec):
         # do for dynamic shape.
         #
         # Skip padding the strides for dynamic shape for now.
-        # If outermost dim is dynamic, stride still can be fully static
-        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
+        if not all(
+            isinstance(s, (int, sympy.Integer))
+            for s in itertools.chain(in_strides, size)
+        ):
             return in_strides
 
         stride_order = get_stride_order(in_strides)
@@ -3764,11 +3769,11 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-            if isinstance(stride, (int, sympy.Integer)):
-                if stride > config.padding_stride_threshold and stride % align != 0:
-                    stride = ceildiv(stride, align) * align
-                    padded = True
-                new_strides[idx] = stride
+
+            if stride > config.padding_stride_threshold and stride % align != 0:
+                stride = ceildiv(stride, align) * align
+                padded = True
+            new_strides[idx] = stride
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -4421,6 +4426,17 @@ class ComputedBuffer(OperationBuffer):
     """
 
     data: Loops
+    _force_realize: ClassVar[bool] = False
+
+    @staticmethod
+    @contextlib.contextmanager
+    def force_realize() -> Iterator[None]:
+        old_value = ComputedBuffer._force_realize
+        try:
+            ComputedBuffer._force_realize = True
+            yield
+        finally:
+            ComputedBuffer._force_realize = old_value
 
     def get_computed_buffer_name(self) -> Optional[str]:
         """
@@ -4495,6 +4511,7 @@ class ComputedBuffer(OperationBuffer):
             not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
+            and not self._force_realize
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -8296,7 +8313,7 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(operand, ShapeAsConstantBuffer):
+            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -8705,7 +8722,6 @@ class WhileLoop(ExternKernel):
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         assert device is not None
         while_loop = WhileLoop(
