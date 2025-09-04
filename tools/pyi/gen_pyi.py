@@ -619,7 +619,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "weight: Tensor | None = None",
                         "reduction: str = ...",
                         "ignore_index: int = -100",
-                        "label_smoothing: float=0.0",
+                        "label_smoothing: float = 0.0",
                     ],
                     "Tensor",
                 )
