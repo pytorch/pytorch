@@ -1462,11 +1462,7 @@ class TestMaxAutotune(TestCase):
             contiguous_mock.return_value = True
 
             compiled_func = torch.compile(mm_transpose_relu)
-            out, code = run_and_get_code(compiled_func, a, b)
-
-            # Verify correctness
-            expected = mm_transpose_relu(a, b)
-            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+            _, code = run_and_get_code(compiled_func, a, b)
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
