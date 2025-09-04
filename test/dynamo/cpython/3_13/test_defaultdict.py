@@ -184,7 +184,7 @@ class TestDefaultDict(__TestCase):
 
     def test_recursive_repr(self):
         # Issue2045: stack overflow when default_factory is a bound method
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class sub(defaultdict):
                 def __init__(self):
                     self.default_factory = self._factory

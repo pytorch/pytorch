@@ -7126,7 +7126,7 @@ Args:
     {opt_keepdim}
 
 Keyword arguments:
-    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -10052,7 +10052,7 @@ Example::
 add_docstr(
     torch.argsort,
     r"""
-argsort(input, dim=-1, descending=False, stable=False) -> Tensor
+argsort(input, dim=-1, descending=False, *, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -10068,6 +10068,8 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+
+Keyword args:
     stable (bool, optional): controls the relative order of equivalent elements
 
 Example::
@@ -12395,6 +12397,24 @@ Keyword args:
     {device}
     {requires_grad}
     {memory_format}
+
+Example::
+
+    >>> x = torch.ones(2, 3)
+    >>> torch.full_like(x, 3.141592)
+    tensor([[ 3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416]])
+    >>> torch.full_like(x, 7)
+    tensor([[7., 7., 7.],
+            [7., 7., 7.]])
+    >>> torch.full_like(x, 0.5, dtype=torch.int32)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], dtype=torch.int32)
+    >>> y = torch.randn(3, 4, dtype=torch.float64)
+    >>> torch.full_like(y, -1.0)
+    tensor([[-1., -1., -1., -1.],
+            [-1., -1., -1., -1.],
+            [-1., -1., -1., -1.]], dtype=torch.float64)
 """.format(**factory_like_common_args),
 )
 

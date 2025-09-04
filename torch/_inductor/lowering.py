@@ -1334,13 +1334,8 @@ def _assert_async(cond, msg):
     cond = to_dtype(cond, torch.bool)
 
     def inner_fn(index):
-        if hasattr(cond.data, "data") and hasattr(cond.data.data, "force_realize"):
-            with cond.data.data.force_realize():
-                cond_loader = cond.make_loader()
-                return ops.device_assert_async(cond_loader(index), msg)
-        else:
-            cond_loader = cond.make_loader()
-            return ops.device_assert_async(cond_loader(index), msg)
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
 
     assertion_op = Pointwise.create(
         device=cond.get_device(),
@@ -3019,7 +3014,7 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]

@@ -8683,28 +8683,15 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             # there will be a resume function here
             return f(x)
 
+    def test_error_on_recompile(self):
+        @torch.compile(backend="eager")
+        def fn(a, b):
+            return a + b
+
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             with self.assertRaises(torch._dynamo.exc.RecompileError):
-                x = torch.rand(2, 3)
-                self.assertEqual(outer(x, True), torch.compile(outer)(x, True))
-                self.assertEqual(outer(x, False), torch.compile(outer)(x, False))
-
-    def test_create_nested_fn_cache_clear(self):
-        def outer(x):
-            @torch._dynamo.disable()
-            def f(y):
-                return y + 2
-
-            return f(x) + 1
-
-        outer = torch.compile(outer)
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            with self.assertRaises(torch._dynamo.exc.RecompileError):
-                outer(torch.randn(3, 3))
-                from torch._dynamo.utils import create_nested_fn_cache
-
-                create_nested_fn_cache.clear()
-                outer(torch.randn(3, 3))
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -10916,8 +10903,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
 """,
         )
         self._replay_and_check(main)
