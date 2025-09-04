@@ -238,7 +238,8 @@ class TestDCE(TestCase):
 
     def test_impure_random(self):
         """
-        Test that DCE doesn't remove call_function for torch.rand.
+        Test that DCE doesn't remove call_function for torch.rand and other random functions.
+        Tests both FX tracing and AOT compilation (issue #151524).
         """
 
         class TestModule(torch.nn.Module):
@@ -246,8 +247,62 @@ class TestDCE(TestCase):
                 x = torch.rand([10])  # noqa: F841
                 return a * 2
 
-        # %torch.rand should not be removed because it has side effects.
+        # Test FX tracing + DCE
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+        # Test comprehensive random functions in AOT compilation
+        class ComprehensiveRandomModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Test various random functions that should be preserved
+                a = torch.rand(1)  # noqa: F841
+                b = torch.randn(1)  # noqa: F841
+                c = torch.randint(0, 10, (1,))  # noqa: F841
+                d = torch.randperm(5)  # noqa: F841
+                e = torch.normal(0, 1, (1,))  # noqa: F841
+                f = torch.poisson(torch.tensor([1.0]))  # noqa: F841
+                g = torch.rand(1)  # Used
+
+                # Test that random operations with explicit generators are also preserved
+                gen = torch.Generator().manual_seed(123)
+                h = torch.rand(1, generator=gen)  # noqa: F841
+                i = torch.randn(1, generator=gen)  # noqa: F841
+                j = torch.rand(1, generator=gen)  # Used
+                return x + g + j
+
+        def aot_backend(gm, example_inputs):
+            def count_random_ops():
+                return len(
+                    [
+                        n
+                        for n in gm.graph.nodes
+                        if n.op == "call_function"
+                        and any(
+                            fn in str(n.target)
+                            for fn in [
+                                "rand",
+                                "randn",
+                                "randint",
+                                "randperm",
+                                "normal",
+                                "poisson",
+                            ]
+                        )
+                    ]
+                )
+
+            rand_count = count_random_ops()
+            gm.graph.eliminate_dead_code()
+            self.assertEqual(
+                count_random_ops(), rand_count, "Random ops should be preserved"
+            )
+            return gm.forward
+
+        model = ComprehensiveRandomModule()
+        torch.manual_seed(42)
+        eager_result = model(torch.tensor([1.0]))
+        torch.manual_seed(42)
+        compiled_result = torch.compile(model, backend=aot_backend)(torch.tensor([1.0]))
+        self.assertEqual(eager_result, compiled_result)
 
     def test_impure_kwargs(self):
         """

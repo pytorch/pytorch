@@ -675,8 +675,8 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert packed_weight.get_dtype() is torch.int8, (
-                "Only int8 weights are supported by oneDNN qlinear."
+            assert packed_weight.get_dtype() in [torch.int8, torch.float8_e4m3fn], (
+                "Only int8 and e4m3fn weights are supported by oneDNN qlinear."
             )
             x_size = x.get_size()
             if len(x_size) > 2:

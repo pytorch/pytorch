@@ -180,7 +180,9 @@ TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
 }
 
 Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
-  TORCH_CHECK(sizes.size() == 2, "expected matrix input");
+  if (sizes.size() != 2) {
+    throw std::runtime_error("expected matrix input");
+  }
 
   auto grad_input = at::zeros_symint(sizes[0] * sizes[1], grad.options());
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));

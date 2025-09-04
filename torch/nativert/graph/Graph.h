@@ -584,6 +584,8 @@ class Graph {
   void setWeightsMeta(
       const std::unordered_map<std::string, torch::_export::TensorMeta>&
           tensorsMeta) {
+    TORCH_CHECK(!placementApplied_);
+
     for (auto [name, tensorMeta] : tensorsMeta) {
       weightsMeta_.emplace(name, TensorMeta{tensorMeta});
     }
@@ -605,6 +607,8 @@ class Graph {
   void setTensorValuesMeta(
       const std::unordered_map<std::string, torch::_export::TensorMeta>&
           tensorsMeta) {
+    TORCH_CHECK(!placementApplied_);
+
     for (auto [name, tensorMeta] : tensorsMeta) {
       tensorValuesMeta_.emplace(name, TensorMeta{tensorMeta});
     }
@@ -629,6 +633,8 @@ class Graph {
   Graph();
   friend std::ostream& operator<<(std::ostream& out, const Graph& g);
   GraphSignature signature_;
+
+  bool placementApplied_ = false;
 
   // keys are parameters, buffers, tensor_constants' names
   std::unordered_map<std::string, TensorMeta> weightsMeta_;

@@ -4,9 +4,9 @@ import inspect
 import logging
 import operator
 import types
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, TypeAlias, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -15,6 +15,7 @@ from torch.fx.operator_schemas import (
     normalize_function,
     normalize_module,
 )
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
@@ -45,7 +46,7 @@ BaseArgumentTypes = Union[
 ]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
-Target = Union[Callable[..., Any], str]
+Target: TypeAlias = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
@@ -597,6 +598,8 @@ class Node(_NodeBase):
         self,
         placeholder_names: Optional[list[str]] = None,
         maybe_return_typename: Optional[list[str]] = None,
+        *,
+        include_tensor_metadata: bool = False,
     ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
@@ -618,6 +621,7 @@ class Node(_NodeBase):
             maybe_return_typename: A single-element list that will store
                 a formatted string representing the output of the
                 generated ``forward`` function. Internal use only.
+            include_tensor_metadata: Whether to include tensor metadata
 
         Returns:
             str: If 1) we're using ``format_node`` as an internal helper
@@ -649,11 +653,36 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
-            maybe_typename = (
-                f"{_type_repr(self.type)} " if self.type is not None else ""
+
+            def stringify_shape(shape: Iterable) -> str:
+                return f"[{', '.join([str(x) for x in shape])}]"
+
+            meta_val = self.meta.get(
+                "val",
+                self.meta.get("tensor_meta", self.meta.get("example_value", None)),
             )
+            type_annotation = ""
+            if (
+                include_tensor_metadata
+                and isinstance(meta_val, torch.Tensor)
+                and meta_val.layout
+                not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                )
+            ):
+                stride_annotation = f"{stringify_shape(meta_val.stride())}"
+                device_annotation = f"{meta_val.device}"
+                type_annotation = (
+                    f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    f'{stride_annotation}{device_annotation}"'
+                )
+            else:
+                type_annotation = (
+                    f"{_type_repr(self.type)} " if self.type is not None else ""
+                )
             return (
-                f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = "
+                f"%{self.name} : {type_annotation}[num_users={len(self.users)}] = "
                 f"{self.op}[target={self._pretty_print_target(self.target)}]("
                 f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
             )
@@ -743,6 +772,29 @@ class Node(_NodeBase):
                 if getattr(self.target, "_nondeterministic_seeded", False):
                     # impure since it mutates RNG state
                     return True
+
+            # Handle Python random functions that don't have _nondeterministic_seeded
+            # but still affect global RNG state (issue #151524)
+            # These should be impure regardless of impure_random setting to maintain
+            # consistency between eager and compiled execution
+            _random_functions = {
+                torch.rand,
+                torch.randn,
+                torch.randint,
+                torch.randperm,
+                torch.rand_like,
+                torch.randn_like,
+                torch.randint_like,
+                torch.normal,
+                torch.poisson,
+                torch.bernoulli,
+                torch.multinomial,
+            }
+
+            if self.target in _random_functions:
+                # All random operations are impure to ensure consistent behavior
+                # between eager and compiled execution, regardless of generator usage
+                return True
 
             return self.target in _side_effectful_functions
 

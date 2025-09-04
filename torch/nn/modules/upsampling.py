@@ -169,6 +169,9 @@ class Upsample(Module):
         self.recompute_scale_factor = recompute_scale_factor
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.interpolate(
             input,
             self.size,
@@ -185,6 +188,9 @@ class Upsample(Module):
         super().__setstate__(state)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         if self.scale_factor is not None:
             info = "scale_factor=" + repr(self.scale_factor)
         else:

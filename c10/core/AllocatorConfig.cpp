@@ -1,7 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/env.h>
-#include <c10/util/irange.h>
 
 namespace c10::CachingAllocator {
 
@@ -221,6 +220,15 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
     } else {
+      // If a device-specific configuration parser hook is registered, it will
+      // check if the key is unrecognized.
+      if (device_config_parser_hook_) {
+        TORCH_CHECK(
+            getKeys().find(key) != getKeys().end(),
+            "Unrecognized key '",
+            key,
+            "' in Accelerator allocator config.");
+      }
       i = tokenizer.skipKey(i);
     }
 

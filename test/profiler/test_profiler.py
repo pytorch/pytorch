@@ -985,6 +985,50 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    def test_override_time_units(self):
+        US_IN_SECOND = 1000.0 * 1000.0
+        US_IN_MS = 1000.0
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with _profile() as prof:
+            model(inputs)
+
+        profiler_output = prof.key_averages().table(time_unit="s")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_s = f"{event.cpu_time / US_IN_SECOND:.3f}s"
+            cpu_time_total_str_s = f"{event.cpu_time_total / US_IN_SECOND:.3f}s"
+            self.assertTrue(cpu_time_str_s in profiler_output)
+            self.assertTrue(cpu_time_total_str_s in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="ms")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_ms = f"{event.cpu_time / US_IN_MS:.3f}ms"
+            cpu_time_total_str_ms = f"{event.cpu_time_total / US_IN_MS:.3f}ms"
+            self.assertTrue(cpu_time_str_ms in profiler_output)
+            self.assertTrue(cpu_time_total_str_ms in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="us")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_us = f"{event.cpu_time:.3f}us"
+            cpu_time_total_str_us = f"{event.cpu_time_total:.3f}us"
+            self.assertTrue(cpu_time_str_us in profiler_output)
+            self.assertTrue(cpu_time_total_str_us in profiler_output)
+
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
@@ -1424,7 +1468,7 @@ class TestProfiler(TestCase):
                     cats = {e.get("cat", None) for e in j["traceEvents"]}
             self.assertTrue(
                 "cuda_sync" in cats,
-                "Expected to find cuda_sync event" f" found = {cats}",
+                f"Expected to find cuda_sync event found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
@@ -2291,6 +2335,74 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             # test spawning thread from within the profiled region
             events = main_with_thread_fn(profile_all_threads)
             verify_events(events)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_python_gc_event(self):
+        activities = [ProfilerActivity.CPU]
+
+        def payload():
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            with record_function("pre_gc"):
+                torch.mm(x, y)
+            gc.collect()
+            with record_function("post_gc"):
+                torch.mm(x, y)
+
+        def validate_json(prof, gc_collection_on):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    # Find required events
+                    if gc_collection_on:
+                        pre_gc = next(
+                            (e for e in events if e["name"] == "pre_gc"), None
+                        )
+                        post_gc = next(
+                            (e for e in events if e["name"] == "post_gc"), None
+                        )
+                        python_gc_events = [
+                            e for e in events if e["name"] == "Python GC"
+                        ]
+                        # Assert all required events are present
+                        self.assertIsNotNone(pre_gc, "pre_gc event is missing")
+                        self.assertIsNotNone(post_gc, "post_gc event is missing")
+                        self.assertTrue(
+                            len(python_gc_events) > 0, "No Python GC events found"
+                        )
+                        # Calculate boundaries
+                        pre_gc_end = pre_gc["ts"] + pre_gc.get("dur", 0)
+                        post_gc_start = post_gc["ts"]
+                        # Assert each Python GC event is correctly placed
+                        for python_gc in python_gc_events:
+                            python_gc_start = python_gc["ts"]
+                            python_gc_end = python_gc["ts"] + python_gc.get("dur", 0)
+                            self.assertTrue(
+                                python_gc_start > pre_gc_end
+                                and python_gc_end < post_gc_start,
+                                f"Python GC event at {python_gc_start} is not correctly placed.",
+                            )
+                    else:
+                        python_gc_events = [
+                            e for e in events if e["name"] == "Python GC"
+                        ]
+                        self.assertTrue(
+                            len(python_gc_events) == 0,
+                            "Python GC event found when flag off",
+                        )
+
+        for gc_flag in [True, False]:
+            with profile(
+                activities=activities,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    record_python_gc_info=gc_flag
+                ),
+                with_stack=True,
+            ) as prof:
+                payload()
+            validate_json(prof, gc_flag)
 
 
 class SimpleNet(nn.Module):

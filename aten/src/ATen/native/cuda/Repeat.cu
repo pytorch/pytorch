@@ -17,7 +17,13 @@ __global__ static void compute_cuda_kernel(
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
-  CUDA_KERNEL_ASSERT(result_size == cumsum_ptr[size - 1]);
+  if (C10_UNLIKELY((result_size != cumsum_ptr[size - 1]))) {
+    printf("%s:%d:%s: block: [%d,%d,%d], thread: [%d,%d,%d] "
+      "Invalid input! In `repeat_interleave`, the `output_size` argument (%ld) must be the same as the sum of the elements in the `repeats` tensor (%ld).\n",
+      __FILE__, __LINE__, __func__,blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, threadIdx.z, result_size, cumsum_ptr[size - 1 ]);
+    CUDA_KERNEL_ASSERT(result_size == cumsum_ptr[size - 1])
+  }
+
   int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   int64_t stride = (blockDim.x * gridDim.x) / C10_WARP_SIZE;
   int warp_id = idx / C10_WARP_SIZE;

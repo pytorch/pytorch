@@ -24,8 +24,15 @@ from .dependencies import WeakDep
 
 if TYPE_CHECKING:
     from .ir import IRNode, Operation
+    from .scheduler import SchedulerBuffer
 
-from .memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
+from .memory import (
+    estimate_peak_memory,
+    estimate_peak_memory_allocfree,
+    FreeableInputBuffer,
+    get_freeable_input_buf,
+    SNodeMemory,
+)
 from .utils import (
     contains_collective,
     contains_wait,
@@ -149,9 +156,8 @@ def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
         return True
 
     if (
-        hasattr(node, "python_kernel_name")
-        and node.python_kernel_name == "extern_kernels.mm"
-    ):
+        python_kernel_name := getattr(node, "python_kernel_name", None)
+    ) and "extern_kernels" in python_kernel_name:
         return True
     return False
 
@@ -186,34 +192,89 @@ def _group_name(snode, with_bufs=False) -> str:
     return ret
 
 
+def _is_fake_dep(d):
+    return isinstance(d, WeakDep) and d.is_fake
+
+
+def _group_names(gns: list[BaseSchedulerNode]) -> str:
+    return "~".join([gn.get_name() for gn in gns])
+
+
+def _initialize_memory_tracking(snodes, graph_inputs, graph_outputs):
+    """Initialize memory tracking data structures"""
+    name_to_freeable_input_buf = get_freeable_input_buf(snodes, graph_inputs)
+    peak_memory, snodes_curr_memory, snodes_allocfree, buf_to_snode_last_use = (
+        estimate_peak_memory_allocfree(
+            snodes, name_to_freeable_input_buf, graph_outputs
+        )
+    )
+    _curr_memory = dict(zip(snodes, snodes_curr_memory))
+    _curr_memory[None] = (0, 0)
+    return (
+        peak_memory,
+        _curr_memory,
+        snodes_allocfree,
+        buf_to_snode_last_use,
+        name_to_freeable_input_buf,
+    )
+
+
+def _initialize_double_linked_list(
+    snodes: list[BaseSchedulerNode],
+) -> tuple[
+    dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    BaseSchedulerNode,
+]:
+    """Create double-linked list structure from snodes"""
+    _prev = {}
+    _next = {}
+    for i, snode in enumerate(snodes):
+        _prev[snode] = snodes[i - 1] if i > 0 else None
+        _next[snode] = snodes[i + 1] if i < len(snodes) - 1 else None
+    _head = snodes[0]
+    return _prev, _next, _head
+
+
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
-    from torch._inductor.scheduler import GroupedSchedulerNode, init_group_node
-
-    original_snodes_num = len(snodes)
     """
     Internal testing helper that also returns debug info.
     Returns:
         - reordered snodes list
         - dict {snode: ReorderInfo}
     """
+    has_collectives = False
+    for snode in snodes:
+        if contains_collective(snode):
+            has_collectives = True
+            break
+    if not has_collectives:
+        return snodes, {}
+
+    from torch._inductor.scheduler import GroupedSchedulerNode
+
+    original_snodes_num = len(snodes)
     # heuristic to avoid degenerating to quadratic time
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
     graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
-        snodes, graph_inputs
-    )
-    peak_memory, curr_memory = estimate_peak_memory(
-        snodes, name_to_freeable_input_buf, graph_outputs
-    )
-    runtimes = {snode: estimate_op_runtime(snode) for snode in snodes}
-    snode_to_curr_memory = dict(zip(snodes, curr_memory))
-
+    (
+        peak_memory,
+        _curr_memory,
+        snodes_allocfree,
+        buf_to_snode_last_use,
+        name_to_freeable_input_buf,
+    ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
+    runtimes: dict[BaseSchedulerNode, float] = {
+        snode: estimate_op_runtime(snode) for snode in snodes
+    }
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
 
-    def exposed_communication_time(collective_snode, remaining_snodes):
+    def exposed_communication_time(
+        collective_snode: BaseSchedulerNode, remaining_snodes: list[BaseSchedulerNode]
+    ) -> float:
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = estimate_op_runtime(collective_snode)
         compute_time = 0.0
@@ -225,160 +286,320 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
                 break
 
-            def accumulate_time(_snode):
+            def accumulate_time(_snode: BaseSchedulerNode) -> None:
                 nonlocal compute_time
                 compute_time += runtimes[_snode]
 
             _temp_group_visit_leaves(snode, accumulate_time)
         return max(0, comm_time - compute_time)
 
-    MOVE_LIMIT = len(snodes) * 100
     total_moves = 0
-    # TODO - experiment with whether this limit is useful, setting `len(snodes)` disables it
-    PER_COLLECTIVE_PREFETCH_LIMIT = len(snodes)
-    if config.reorder_prefetch_limit is not None:
-        PER_COLLECTIVE_PREFETCH_LIMIT = config.reorder_prefetch_limit
 
-    # Dicts to keep track of "next" and "previous" as double-linked structure during grouping
-    _prev: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]] = {}
-    _next: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]] = {}
-    for i, snode in enumerate(snodes):
-        _prev[snode] = snodes[i - 1] if i > 0 else None
-        _next[snode] = snodes[i + 1] if i < len(snodes) - 1 else None
+    _prev, _next, _head = _initialize_double_linked_list(snodes)
 
-    gsnodes: list[GroupedSchedulerNode] = [
-        GroupedSchedulerNode(snode.scheduler, [snode], temp_grouping=True)
-        for snode in snodes
-    ]
-    for i, gsnode in enumerate(gsnodes):
-        snode = gsnode.snodes[0]  # type: ignore[attr-defined]
-        if contains_collective(snode):
-            reorder_info = stats[snode] = ReorderInfo()
-            reorder_info.initial_exposed = reorder_info.final_exposed = (
-                exposed_communication_time(snode, snodes[i + 1 :])
+    def _group_nodes(
+        head: Optional[BaseSchedulerNode], tail: Optional[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        ret = []
+        n = head
+        while True:
+            if n is not None:
+                ret.append(n)
+            if n == tail:
+                break
+            n = _next[n]  # type: ignore[index]
+        return ret
+
+    def _perform_double_linked_list_swap(candidate, group_head, group_tail):
+        # swap (candidate, group_head...group_tail)
+        # Before:
+        # candidate_prev -0-> candidate -1-> group_head...group_tail -2-> group_tail_next
+        # After:
+        # candidate_prev -0-> group_head...group_tail -1-> candidate -2-> group_tail_next
+        # 0
+        candidate_prev = _prev[candidate]
+        if candidate_prev:
+            _next[candidate_prev] = group_head
+        _prev[group_head] = candidate_prev
+
+        # 2
+        group_tail_next = _next[group_tail]
+        if group_tail_next:
+            _prev[group_tail_next] = candidate
+        _next[candidate] = group_tail_next
+
+        # 1
+        _prev[candidate] = group_tail
+        _next[group_tail] = candidate
+
+        nonlocal _head
+        if _head == candidate:
+            _head = group_head
+
+    def _calculate_potential_peak_memory(
+        candidate, group_ns, group_n_to_bufs_after_swap_dealloc_by_candidate
+    ):
+        # Caching calculations of memory for group nodes and candidate,
+        # to apply without recalculation after swap.
+        _post_alloc_update: dict[BaseSchedulerNode, int] = {}
+        potential_peak: int = 0
+        if not group_n_to_bufs_after_swap_dealloc_by_candidate:
+            # Not accounting for buffers last use change
+            potential_peak = max(
+                group_peak_memory - candidate_delta_mem,
+                _curr_memory[group_tail][1]
+                - candidate_delta_mem
+                + candidate_allocfree.size_alloc,
             )
-            if total_moves >= MOVE_LIMIT:
-                reorder_info.limiting_factor = "move limit"
-                continue
+            return potential_peak, _post_alloc_update
 
-            for j in range(i - 1, -1, -1):
-                prev_gsnode = gsnodes[j]
-                if len(prev_gsnode.snodes) == 0:
-                    continue
+        # If candidate will be after group, the starting memory level of group nodes
+        # changes to the -(candidate.size_alloc - candidate.size_free)
+        mem_after_reorder_delta: int = -candidate_delta_mem
+        for gn in gns:
+            gn_post_alloc_mem = _curr_memory[gn][0] + mem_after_reorder_delta
+            _post_alloc_update[gn] = gn_post_alloc_mem
+            potential_peak = max(potential_peak, gn_post_alloc_mem)
 
-                if j < max(0, i - PER_COLLECTIVE_PREFETCH_LIMIT):
-                    reorder_info.limiting_factor = "prefetch limit"
+            bufs = group_n_to_bufs_after_swap_dealloc_by_candidate.get(gn, None)
+            if bufs is not None:
+                for buf in bufs:
+                    # Candidate will deallocate those buffers
+                    mem_after_reorder_delta += buf.mpi_buffer.size_free
+
+        candidate_mem_post_alloc = (
+            _curr_memory[group_tail][1]
+            + mem_after_reorder_delta
+            + candidate_allocfree.size_alloc
+        )
+        _post_alloc_update[candidate] = candidate_mem_post_alloc
+        potential_peak = max(potential_peak, candidate_mem_post_alloc)
+        return potential_peak, _post_alloc_update
+
+    def _update_memory_tracking_after_swap(
+        candidate,
+        gns,
+        group_n_to_bufs_after_swap_dealloc_by_candidate,
+        _post_alloc_update,
+    ):
+        if not group_n_to_bufs_after_swap_dealloc_by_candidate:
+            for gn in gns:
+                cm = _curr_memory[gn]
+                _curr_memory[gn] = (
+                    cm[0] - candidate_delta_mem,
+                    cm[1] - candidate_delta_mem,
+                )
+            _candidate_post_alloc_mem = (
+                _curr_memory[group_tail][1] + candidate_allocfree.size_alloc
+            )
+            _candidate_post_free_mem = (
+                _candidate_post_alloc_mem - candidate_allocfree.size_free
+            )
+            _curr_memory[candidate] = (
+                _candidate_post_alloc_mem,
+                _candidate_post_free_mem,
+            )
+            return
+
+        # Candidate becomes last use of some bufs
+        for (
+            gn,
+            bufs,
+        ) in group_n_to_bufs_after_swap_dealloc_by_candidate.items():
+            for buf in bufs:
+                buf_to_snode_last_use[buf] = candidate
+
+        size_free_to_move_to_candidate_sum: int = 0
+        for n in gns:
+            _gn_post_alloc_mem: int = _post_alloc_update[n]
+            size_free_to_move_to_candidate: int = sum(
+                buf.mpi_buffer.size_free
+                for buf in group_n_to_bufs_after_swap_dealloc_by_candidate[n]
+            )
+            size_free_to_move_to_candidate_sum += size_free_to_move_to_candidate
+            # group node does not deallocate this after swap
+            snodes_allocfree[n].size_free -= size_free_to_move_to_candidate
+            gn_post_free_mem: int = _gn_post_alloc_mem - snodes_allocfree[n].size_free
+            _curr_memory[n] = (_gn_post_alloc_mem, gn_post_free_mem)
+        _candidate_post_alloc_mem = _post_alloc_update[candidate]
+        snodes_allocfree[candidate].size_free += size_free_to_move_to_candidate_sum
+        candidate_post_free_mem = (
+            _candidate_post_alloc_mem - snodes_allocfree[candidate].size_free
+        )
+        _curr_memory[candidate] = (
+            _candidate_post_alloc_mem,
+            candidate_post_free_mem,
+        )
+
+    debug_num_collectives_to_reorder: Optional[int] = (
+        config.reorder_iterative_debug_limit_to_reorder
+    )
+
+    num_processed_collectives: int = 0
+    curr = _head
+    debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
+    iterative_recompute_error = False
+
+    while _next[curr] is not None:
+        if iterative_recompute_error:
+            break
+        if contains_collective(curr):
+            if debug_num_collectives_to_reorder is not None and (
+                num_processed_collectives >= debug_num_collectives_to_reorder
+            ):
+                break
+            num_processed_collectives += 1
+
+            info = stats[curr] = ReorderInfo()
+            info.initial_exposed = info.final_exposed = exposed_communication_time(
+                curr, _group_nodes(_next[curr], None)
+            )
+
+            candidate = _prev[curr]
+            group_head = curr
+            group_tail = curr
+            group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
+            while candidate is not None:
+                if contains_collective(candidate):
+                    info.limiting_factor = "collective ordering"
                     break
-                if contains_collective(prev_gsnode):
-                    reorder_info.limiting_factor = "collective ordering"
-                    break
 
-                dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
-                prev_outs = prev_gsnode.get_outputs()
+                gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
+                group = GroupedSchedulerNode(
+                    curr.scheduler,
+                    gns,
+                    temp_grouping=True,
+                )
+
+                # We can have multiple deps with the same name.
+                # As we ignore WeakDep(is_fake=True) =>
+                # filter them out first to avoid overwriting  of real dep.
+                data_deps = {
+                    d.name: d for d in group.unmet_dependencies if not _is_fake_dep(d)
+                }
+
+                candidate_outs = candidate.get_outputs()
                 data_dep = None
-                for o in prev_outs:
-                    if o.get_name() in dep_names:
-                        data_dep = o.get_name()
+                for o in candidate_outs:
+                    if d := data_deps.get(o.get_name(), None):
+                        data_dep = d
                         break
 
                 if data_dep is not None:
 
-                    def is_groupable(prev_gsnode):
+                    def is_groupable(
+                        candidate: BaseSchedulerNode,
+                    ) -> tuple[bool, Optional[str]]:
                         # preserve ordering
-                        if contains_collective(prev_gsnode):
-                            return False
+                        if contains_collective(candidate):
+                            return False, "contains_collective"
 
-                        if contains_gemm_like(prev_gsnode):
-                            return False
-                        return True
+                        if contains_gemm_like(candidate):
+                            return False, "contains_gemm_like"
+                        return True, None
 
-                    if is_groupable(prev_gsnode):
-                        new_snodes = prev_gsnode.snodes + gsnode.snodes
-                        init_group_node(gsnode, gsnode.scheduler, new_snodes)
-                        prev_gsnode.snodes = []
-                        reorder_info.grouped += 1
-                        reorder_info.grouped_info = gsnode.get_name()
+                    is_groupable_result, grouping_reason = is_groupable(candidate)
+                    if is_groupable_result:
+                        group_head = candidate
+                        group_peak_memory = max(
+                            group_peak_memory, _curr_memory[candidate][0]
+                        )
+                        info.grouped += 1
+                        info.grouped_info = _group_names(gns)
+                        candidate = _prev[candidate]
                         continue
                     else:
                         msg = (
-                            f"data dependency {data_dep}(dep_names:{dep_names})"
-                            f" prev_gsnode.outputs:{[o.get_name() for o in prev_outs]}"
+                            f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
+                            f"\n candidate:{candidate.get_name()}(outs:{[candidate.get_buffer_names()]})"
+                            f"dep on {_group_names(gns)}"
+                            f"\n non_group_reason:{grouping_reason}"
                         )
-                        reorder_info.limiting_factor = msg
+                        info.limiting_factor = msg
                         break
 
-                if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
-                    reorder_info.limiting_factor = "peak memory"
+                candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
+                candidate_delta_mem: int = (
+                    candidate_allocfree.size_alloc - candidate_allocfree.size_free
+                )
+                # candidate and one of group nodes are successors of the same buffer
+                # and last use of the buffer happen in group nodes.
+                # This last use deallocates it.
+                # If we swap [candidate [group]] to [[group] candidate],
+                # candidate becomes the last use
+                # and deallocated this buffer instead of group node.
+                # we need to update size_free accordingly to group_node and candidate,
+                # and recalculate post_alloc, post_free for them.
+                #
+                # Buf that changes its last use snode,
+                # after swap will be deallocated only by candidate,
+                # while before it was deallocated by group node.
+                group_n_to_bufs_after_swap_dealloc_by_candidate: dict[
+                    BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+                ] = defaultdict(list)
+                for (
+                    buf,
+                    snode_last_use,
+                ) in buf_to_snode_last_use.items():
+                    succ_nodes = buf.mpi_buffer.succ_nodes
+                    if candidate not in succ_nodes:
+                        continue
+
+                    if not any(gn == snode_last_use for gn in gns):
+                        continue
+
+                    group_n_to_bufs_after_swap_dealloc_by_candidate[
+                        snode_last_use
+                    ].append(buf)
+
+                potential_peak, _post_alloc_update = _calculate_potential_peak_memory(
+                    candidate, gns, group_n_to_bufs_after_swap_dealloc_by_candidate
+                )
+
+                if potential_peak > peak_memory:
+                    info.limiting_factor = (
+                        f"peak memory new:{potential_peak} vs base:{peak_memory}"
+                    )
                     break
-                if reorder_info.final_exposed > runtimes[snode]:
-                    reorder_info.limiting_factor = "sufficient overlapping"
-                    break
-                reorder_info.moves += 1
+                info.moves += 1
                 total_moves += 1
 
-                # swapping nodes j and j+1 affects curr memory at j only
-                # j_plus_one_alloc = curr_memory[j + 1] - curr_memory[j]
-                # j_alloc = curr_memory[j] - curr_memory[j - 1]
-                # curr_memory[j] = curr_memory[j] - j_alloc + j_plus_one_alloc
-                def swap_curr_memory_with_previous(
-                    snode_j_plus_one, snode_j, snode_j_minus_one
-                ):
-                    curr_memory_j_plus_one = snode_to_curr_memory[snode_j_plus_one]
-                    curr_memory_j = snode_to_curr_memory[snode_j]
-                    curr_memory_j_minus_one = (
-                        snode_to_curr_memory[snode_j_minus_one]
-                        if snode_j_minus_one is not None
-                        else 0
-                    )
-                    j_plus_one_alloc = curr_memory_j_plus_one - curr_memory_j
-                    j_alloc = curr_memory_j - curr_memory_j_minus_one
-                    snode_to_curr_memory[snode_j] = (
-                        curr_memory_j - j_alloc + j_plus_one_alloc
-                    )
+                _perform_double_linked_list_swap(candidate, group_head, group_tail)
 
-                # Recompuing curr_mem for swapping grouped nodes j (group A) and j + 1 (group B)
-                # swap([A0, A1, A2], [B0, B1]) --> [B0, B1], [A0, A1, A2]
-                # decomposing to:
-                # swap(A2, B0) -> A0, A1, B0, A2, B1
-                # swap(A2, B1) -> A0, A1, B0, B1, A2
-                # swap(A1, B0) -> A0, B0, A1, B1, A2
-                # swap(A1, B1) -> A0, B0, B1, A1, A2
-                # swap(A0, B0) -> B0, A0, B1, A1, A2
-                # swap(A0, B1) -> B0, B1, A0, A1, A2
-                for _j in range(len(gsnodes[j].snodes) - 1, -1, -1):  # group A
-                    snode_j = gsnodes[j].snodes[_j]
-                    for _i, snode_i in enumerate(gsnode.snodes):  # group B
-                        swap_curr_memory_with_previous(
-                            snode_j_plus_one=snode_i,
-                            snode_j=snode_j,
-                            snode_j_minus_one=_prev[snode_j],
-                        )
-
-                        # Update _next and _prev for swap [snode_j, snode_i] -> [snode_i, snode_j]
-                        first = snode_j
-                        second = snode_i
-                        first_prev = _prev[first]
-                        second_next = _next[second]
-                        if first_prev:
-                            _next[first_prev] = second
-                        _prev[second] = first_prev
-
-                        if second_next:
-                            _prev[second_next] = first
-                        _next[first] = second_next
-
-                        _next[second] = first
-                        _prev[first] = second
-
-                tmp = gsnodes[j]
-                gsnodes[j] = gsnodes[j + 1]
-                gsnodes[j + 1] = tmp
-                reorder_info.final_exposed = exposed_communication_time(
-                    snode,
-                    itertools.chain(
-                        gsnode.snodes[1:], *[n.snodes for n in gsnodes[j + 1 :]]
-                    ),
+                info.final_exposed = exposed_communication_time(
+                    curr, _group_nodes(_next[curr], None)
                 )
+
+                _update_memory_tracking_after_swap(
+                    candidate,
+                    gns,
+                    group_n_to_bufs_after_swap_dealloc_by_candidate,
+                    _post_alloc_update,
+                )
+
+                if debug_iterative_memory_recompute:
+                    # Compare iteratively recomputed memory data
+                    # with full run of estimate_peak_memory
+
+                    from .comms_debug import _debug_iterative_memory_recompute
+
+                    iterative_recompute_error = _debug_iterative_memory_recompute(
+                        candidate,
+                        gns,
+                        _group_names(gns),
+                        _group_nodes(_head, None),
+                        name_to_freeable_input_buf,
+                        graph_outputs,
+                        peak_memory,
+                        _curr_memory,
+                        snodes_allocfree,
+                        "reorder_communication_preserving_peak_memory",
+                        group_n_to_bufs_after_swap_dealloc_by_candidate,
+                    )
+                    if iterative_recompute_error:
+                        break
+                candidate = _prev[group_head]
+        curr = _next[curr]  # type: ignore[assignment]
 
     node_stats = stats
     improvement = {snode: node_stats[snode].improvement for snode in node_stats}
@@ -402,15 +623,15 @@ def _reorder_communication_preserving_peak_memory_internal(
     rows = [
         [
             node_summary(snode),
-            node_reorder_info.initial_exposed,
-            node_reorder_info.final_exposed,
-            node_reorder_info.improvement,
-            node_reorder_info.limiting_factor,
-            node_reorder_info.moves,
-            node_reorder_info.grouped,
-            node_reorder_info.grouped_info,
+            node_info.initial_exposed,
+            node_info.final_exposed,
+            node_info.improvement,
+            node_info.limiting_factor,
+            node_info.moves,
+            node_info.grouped,
+            node_info.grouped_info,
         ]
-        for snode, node_reorder_info in node_stats.items()
+        for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
         from tabulate import tabulate
@@ -426,17 +647,13 @@ def _reorder_communication_preserving_peak_memory_internal(
         reorder_log_str += str(headers) + "\n"
         reorder_log_str += "\n".join(map(str, rows))
 
-    grouping_logs: list[str] = []
-    flatten_gsnodes: list[BaseSchedulerNode] = []
-    for i, gsnode in enumerate(gsnodes):
-        if isinstance(gsnode, GroupedSchedulerNode) and gsnode.temp_grouping:
-            flatten_gsnodes.extend(gsnode.snodes)
-        else:
-            flatten_gsnodes.append(gsnode)
-
-    grouping_log_str = "\n".join(grouping_logs)
-    reorder_log_str += "\n"
-    reorder_log_str += grouping_log_str
+    new_snodes = _group_nodes(_head, None)
+    assert len(new_snodes) == original_snodes_num
+    new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
+        new_snodes, name_to_freeable_input_buf, graph_outputs
+    )
+    reorder_log_str += f"\n peak_memory_before:{peak_memory}"
+    reorder_log_str += f"\n peak_memory_after:{new_peak_memory}"
 
     overlap_log.info(reorder_log_str)
     trace_structured(
@@ -448,8 +665,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         payload_fn=lambda: reorder_log_str,
     )
 
-    assert len(flatten_gsnodes) == original_snodes_num
-    return flatten_gsnodes, stats
+    return new_snodes, stats
 
 
 def _schedule_for_comm(
@@ -623,7 +839,9 @@ def decide_global_ordering_of_comms(
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
         for buf in comm_nodes[i - 1].get_buffer_names():
-            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
+            comm_nodes[i].add_fake_dep(
+                WeakDep(buf, mutating_buf=mutating_buf, is_fake=True)
+            )
 
     return nodes
 
@@ -640,66 +858,316 @@ class SinkWaitInfo:
 def _sink_waits_iterative_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
-    from torch._inductor.scheduler import GroupedSchedulerNode, init_group_node
+    from torch._inductor.scheduler import GroupedSchedulerNode
 
-    n = len(snodes)
+    original_snodes_num = len(snodes)
+    if original_snodes_num == 0:
+        return snodes, {}
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    (
+        peak_memory,
+        _curr_memory,
+        snodes_allocfree,
+        buf_to_snode_last_use,
+        name_to_freeable_input_buf,
+    ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
+
+    _prev, _next, _head = _initialize_double_linked_list(snodes)
+
     stats: dict[BaseSchedulerNode, SinkWaitInfo] = {}
-    gsnodes: list[GroupedSchedulerNode] = [
-        GroupedSchedulerNode(snode.scheduler, [snode], temp_grouping=True)
-        for snode in snodes
-    ]
-    for i in range(n - 1, -1, -1):
-        gsnode = gsnodes[i]
-        if contains_wait(gsnode):
-            info = stats[gsnode.snodes[0]] = SinkWaitInfo()
-            for j in range(i + 1, n):
-                wait_gsnode = gsnodes[j - 1]
-                wait_outs = wait_gsnode.get_outputs()
-                next_gsnode = gsnodes[j]
-                dep_names = OrderedSet([s.name for s in next_gsnode.unmet_dependencies])
+
+    def _group_nodes(
+        head: Optional[BaseSchedulerNode], tail: Optional[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        ret = []
+        n = head
+        while True:
+            if n is not None:
+                ret.append(n)
+            if n == tail:
+                break
+            n = _next[n]  # type: ignore[index]
+        return ret
+
+    def _calculate_potential_peak_memory(
+        candidate, group_ns, group_n_to_bufs_after_swap_dealloc_instead_of_candidate
+    ):
+        pre_group_mem = (
+            _curr_memory[group_head][0] - snodes_allocfree[group_head].size_alloc
+        )
+        # Stash memory tracing updates to not recompute them after swap
+        _post_alloc_update: dict[BaseSchedulerNode, int] = {}
+        _size_free_delta_update: dict[BaseSchedulerNode, int] = {}
+
+        potential_peak = 0
+        if not group_n_to_bufs_after_swap_dealloc_instead_of_candidate:
+            # Not accounting for buffers liveliness change
+            potential_peak = max(
+                group_peak_memory + candidate_delta_mem,
+                pre_group_mem + candidate_allocfree.size_alloc,
+            )
+            return potential_peak, _post_alloc_update, _size_free_delta_update
+
+        candidate_post_alloc = pre_group_mem + candidate_allocfree.size_alloc
+        _post_alloc_update[candidate] = candidate_post_alloc
+        potential_peak = candidate_post_alloc
+        candidate_size_free_to_move = sum(
+            buf.mpi_buffer.size_free  # type: ignore[attr-defined]
+            for buf in itertools.chain.from_iterable(
+                group_n_to_bufs_after_swap_dealloc_instead_of_candidate.values()
+            )
+        )
+        _size_free_delta_update[candidate] = -candidate_size_free_to_move
+        delta_mem = candidate_delta_mem + candidate_size_free_to_move
+        for gn in gns:
+            gn_post_alloc = _curr_memory[gn][0] + delta_mem
+            _post_alloc_update[gn] = gn_post_alloc
+            potential_peak = max(potential_peak, gn_post_alloc)
+            gn_size_free_to_add = 0
+            if gn in group_n_to_bufs_after_swap_dealloc_instead_of_candidate:
+                bufs = group_n_to_bufs_after_swap_dealloc_instead_of_candidate[gn]
+                for buf in bufs:
+                    gn_size_free_to_add += buf.mpi_buffer.size_free
+                _size_free_delta_update[gn] = gn_size_free_to_add
+            delta_mem -= gn_size_free_to_add
+        return potential_peak, _post_alloc_update, _size_free_delta_update
+
+    def _perform_double_linked_list_swap(candidate, group_head, group_tail):
+        # group_head_prev -0-> candidate -1-> group_head...group_tail -2-> candidate_next
+        # 0:
+        group_head_prev = _prev[group_head]
+        if group_head_prev:
+            _next[group_head_prev] = candidate
+        _prev[candidate] = group_head_prev
+
+        # 2:
+        candidate_next = _next[candidate]
+        if candidate_next:
+            _prev[candidate_next] = group_tail
+        _next[group_tail] = candidate_next
+
+        # 1:
+        _prev[group_head] = candidate
+        _next[candidate] = group_head
+        nonlocal _head
+        if group_head == _head:
+            _head = candidate
+
+    def _update_memory_tracking_after_swap(
+        candidate,
+        gns,
+        group_n_to_bufs_after_swap_dealloc_instead_of_candidate,
+        _post_alloc_update,
+        _size_free_delta_update,
+    ):
+        group_head = gns[0]
+        pre_group_mem = (
+            _curr_memory[group_head][0] - snodes_allocfree[group_head].size_alloc
+        )
+        if not group_n_to_bufs_after_swap_dealloc_instead_of_candidate:
+            candidate_post_alloc = pre_group_mem + candidate_allocfree.size_alloc
+            _curr_memory[candidate] = (
+                candidate_post_alloc,
+                candidate_post_alloc - candidate_allocfree.size_free,
+            )
+            for gn in gns:
+                cm = _curr_memory[gn]
+                _curr_memory[gn] = (
+                    cm[0] + candidate_delta_mem,
+                    cm[1] + candidate_delta_mem,
+                )
+            return
+
+        for n in [candidate, *gns]:
+            post_alloc = _post_alloc_update[n]
+            snodes_allocfree[n].size_free += _size_free_delta_update[n]
+            _curr_memory[n] = (
+                post_alloc,
+                post_alloc - snodes_allocfree[n].size_free,
+            )
+
+    curr = snodes[-1]
+
+    processed_waits = OrderedSet()  # type: ignore[var-annotated]
+    debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
+    debug_num_sink_waits_to_reorder: Optional[int] = (
+        config.sink_waits_iterative_debug_limit_to_sink
+    )
+
+    iterative_recompute_error = False
+
+    while _prev[curr] is not None:
+        if iterative_recompute_error:
+            break
+        if (
+            debug_num_sink_waits_to_reorder is not None
+            and len(processed_waits) >= debug_num_sink_waits_to_reorder
+        ):
+            break
+
+        if contains_wait(curr) and curr not in processed_waits:
+            processed_waits.add(curr)
+            info = stats[curr] = SinkWaitInfo()
+            candidate = _next[curr]
+            wait_snode = curr
+            group_head = curr
+            group_tail = curr
+            group_peak_memory = _curr_memory[curr][0]
+            while candidate is not None:
+                if iterative_recompute_error:
+                    break
+                gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
+                group = GroupedSchedulerNode(
+                    wait_snode.scheduler,
+                    gns,
+                    temp_grouping=True,
+                )
+
+                # We can have multiple deps with the same name.
+                # As we ignore WeakDep(is_fake=True) =>
+                # filter them out first to avoid overwriting  of real dep.
+                data_deps = {
+                    d.name: d
+                    for d in candidate.unmet_dependencies
+                    if not _is_fake_dep(d)
+                }
+
+                group_outs = group.get_outputs()
                 data_dep = None
-                for o in wait_outs:
-                    if o.get_name() in dep_names:
-                        data_dep = o.get_name()
+                for o in group_outs:
+                    if d := data_deps.get(o.get_name(), None):
+                        data_dep = d
                         break
                 # 1. If we have data_dep - we can not swap => trying to group
-                # 2. If swap candidate and current node boths contain collectives => trying to group
+                # 2. If swap candidate and current node both contain collectives => trying to group
                 if data_dep is not None or (
                     both_contain_comms := (
-                        contains_collective(wait_gsnode)
-                        and contains_collective(next_gsnode)
+                        contains_collective(group) and contains_collective(candidate)
                     )
                 ):
 
                     def is_groupable(snode):
-                        return not contains_gemm_like(snode)
+                        # We do not want to group with collectives to not reorder them forward.
+                        if contains_collective(snode):
+                            return (
+                                False,
+                                f"candidate contains collective {snode.get_name()}",
+                            )
+                        if contains_gemm_like(snode):
+                            return (
+                                False,
+                                f"candidate contains gemm_like {snode.get_name()}",
+                            )
+                        return True, None
 
-                    if is_groupable(next_gsnode):
-                        new_snodes = wait_gsnode.snodes + next_gsnode.snodes
-                        init_group_node(next_gsnode, gsnode.scheduler, new_snodes)
-                        wait_gsnode.snodes = []
+                    is_grp, grp_reason = is_groupable(candidate)
+                    if is_grp:
+                        group_tail = candidate
+                        group_peak_memory = max(
+                            group_peak_memory, _curr_memory[candidate][0]
+                        )
                         info.grouped += 1
-                        info.grouped_info = _group_name(next_gsnode)
+                        info.grouped_info = _group_names(gns)
+                        candidate = _next[candidate]
                         continue
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
-                            f"collective ordering {_group_name(wait_gsnode)}"
-                            f" with candidate:{_group_name(next_gsnode)}"
-                        )
-                    else:
-                        info.limiting_factor = (
-                            f"data dependency {data_dep}(dep_names:{dep_names})"
-                            f" candidate:{_group_name(next_gsnode)} dep on {_group_name(wait_gsnode)}"
-                            f" outs:{[o.get_name() for o in wait_outs]}"
+                            f"collective ordering {_group_names(gns)}"
+                            f" with candidate:{candidate.get_name()}"
                         )
                         break
-                info.moves += 1
-                info.moves_info += f"+{_group_name(next_gsnode)}"
+                    else:
+                        info.limiting_factor = (
+                            f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
+                            f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
+                            f"dep on {gns}"
+                            f"\n outs:{[o.get_name() for o in group_outs]}"
+                            f"\n non_group_reason:{grp_reason}"
+                        )
+                        break
+                candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
+                candidate_delta_mem = (
+                    candidate_allocfree.size_alloc - candidate_allocfree.size_free
+                )
+                # [group] candidate -> candidate [group]
+                # Check for buffers with successors in group and candidate last successor
+                #
+                # Buf that  changes its last use snode,
+                # It was deallocated by candidate,
+                # but after swap it will be deallocated by group node.
+                group_n_to_bufs_after_swap_dealloc_instead_of_candidate: dict[
+                    BaseSchedulerNode, list[Union[FreeableInputBuffer, SchedulerBuffer]]
+                ] = defaultdict(list)
+                for (
+                    buf,
+                    snode_last_use,
+                ) in buf_to_snode_last_use.items():
+                    succ_nodes = buf.mpi_buffer.succ_nodes
+                    if snode_last_use != candidate:  # noqa: E711
+                        continue
+                    # candidate is last use of buf
+                    last_succ_gn = None
+                    for gn in gns:
+                        if gn in succ_nodes:
+                            last_succ_gn = gn
+                    if last_succ_gn is None:
+                        continue
 
-                # Swapping snodes j and j - 1
-                tmp = gsnodes[j - 1]
-                gsnodes[j - 1] = gsnodes[j]
-                gsnodes[j] = tmp
+                    # gn has successors of buf that after potential swap will become
+                    # last use of buf and start deallocating buf instead of candidate
+                    group_n_to_bufs_after_swap_dealloc_instead_of_candidate[
+                        last_succ_gn
+                    ].append(buf)
+
+                potential_peak, _post_alloc_update, _size_free_delta_update = (
+                    _calculate_potential_peak_memory(
+                        candidate,
+                        gns,
+                        group_n_to_bufs_after_swap_dealloc_instead_of_candidate,
+                    )
+                )
+                if potential_peak > peak_memory:
+                    info.limiting_factor = (
+                        f"peak memory new:{potential_peak} vs base:{peak_memory}"
+                    )
+                    break
+
+                info.moves += 1
+                info.moves_info += f"+{candidate.get_name()}"
+
+                _perform_double_linked_list_swap(candidate, group_head, group_tail)
+
+                _update_memory_tracking_after_swap(
+                    candidate,
+                    gns,
+                    group_n_to_bufs_after_swap_dealloc_instead_of_candidate,
+                    _post_alloc_update,
+                    _size_free_delta_update,
+                )
+
+                if debug_iterative_memory_recompute:
+                    from .comms_debug import _debug_iterative_memory_recompute
+
+                    iterative_recompute_error = _debug_iterative_memory_recompute(
+                        candidate,
+                        gns,
+                        _group_names(gns),
+                        _group_nodes(_head, None),
+                        name_to_freeable_input_buf,
+                        graph_outputs,
+                        peak_memory,
+                        _curr_memory,
+                        snodes_allocfree,
+                        "sink_waits_iterative",
+                        group_n_to_bufs_after_swap_dealloc_instead_of_candidate,
+                    )
+                    if iterative_recompute_error:
+                        break
+
+                candidate = _next[group_tail]
+        curr = _prev[curr]  # type: ignore[assignment]
+
     headers = [
         "Wait node",
         "grouped",
@@ -732,16 +1200,13 @@ def _sink_waits_iterative_internal(
         log_str += str(headers) + "\n"
         log_str += "\n".join(map(str, rows))
     overlap_log.info(log_str)
-    grouping_logs = []
-    flatten_snodes = []
-    for i, gsnode in enumerate(gsnodes):
-        grouping_logs.append(f"gsnode[{i}]:{_group_name(gsnode, with_bufs=True)}")
-        if isinstance(gsnode, GroupedSchedulerNode) and gsnode.temp_grouping:
-            flatten_snodes.extend(gsnode.snodes)
-        else:
-            flatten_snodes.append(gsnode)
-    grouping_log_str = "\n".join(grouping_logs)
-    log_str += grouping_log_str
+    new_snodes = _group_nodes(_head, None)
+    assert len(new_snodes) == original_snodes_num
+    new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
+        new_snodes, name_to_freeable_input_buf, graph_outputs
+    )
+    log_str += f"\n sink_waits_iterative peak_memory_before:{peak_memory}"
+    log_str += f"\n sink_waits_iterative peak_memory_after:{new_peak_memory}"
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -750,8 +1215,7 @@ def _sink_waits_iterative_internal(
         },
         payload_fn=lambda: log_str,
     )
-    assert len(flatten_snodes) == n
-    return flatten_snodes, stats
+    return new_snodes, stats
 
 
 def sink_waits_iterative(
@@ -777,7 +1241,9 @@ def node_summary(snode):
     if len(snodes) == 1:
         detail = ""
         if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
-            detail = f" ({snode.node.python_kernel_name})"
+            outs_str = f"outs:{[o.get_name() for o in snode.get_outputs()]}"
+            ins_str = f"ins:{[d.name for d in snode.unmet_dependencies]}"
+            detail = f" {snode.get_name()} ({snode.node.python_kernel_name})\n {outs_str}\n ({ins_str})"
         layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
         out_tensor_info = ",".join(
             [
@@ -1352,7 +1818,7 @@ def enforce_comm_ordering_for_fsdp(
             mutating_buf = next(iter(ag_group_node.get_buffer_names()))
             for o in prev_ag_wait.get_outputs():
                 ag_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
                 )
         prev_ag_wait = wait_group_node
 
@@ -1364,7 +1830,7 @@ def enforce_comm_ordering_for_fsdp(
             mutating_buf = next(iter(rs_group_node.get_buffer_names()))
             for o in prev_rs_wait.get_outputs():
                 rs_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
                 )
         prev_rs_wait = wait_group_node
 

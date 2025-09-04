@@ -1,22 +1,23 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
+    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_bw_fn,
     first_slice_copy,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -95,14 +96,6 @@ def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
     return slc
 
 
-def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    assert sum(chunk_sizes) == len(iterable), (
-        "the sum of all chunks needs to match the length of the iterable."
-    )
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
-
-
 def call_operator(operator, *args):
     return pytree.tree_leaves(operator(*args))
 
@@ -135,7 +128,7 @@ def scan(
             and the second output  of ``combine_fn`` represents a slice of the output.
             This function must be pure, i.e., no lifted arguments are supported at the moment
             and may not have any side effects.
-        init (torch.Tensor or pytree with tensor leaves): The inital scan carry, a tensor, or nested pytree of tensors.
+        init (torch.Tensor or pytree with tensor leaves): The initial scan carry, a tensor, or nested pytree of tensors.
             The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
         xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
@@ -154,7 +147,7 @@ def scan(
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
             or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
 
-        - The combine_fn shoudn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
+        - The combine_fn shouldn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
             if you input mutation support for training is needed.
 
         - The combine_fn's init carry should match the next_carry in pytree structure and in tensor metadata.
@@ -273,6 +266,56 @@ class ScanOp(HigherOrderOperator):
         )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, additional_inputs)
+
+    def gen_schema(self, combine_fn, init, xs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        all_inputs = tuple(
+            list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
+        )
+
+        combine_gm: torch.fx.GraphModule = (
+            combine_fn
+            if isinstance(combine_fn, torch.fx.GraphModule)
+            else materialize_as_graph(combine_fn, all_inputs)
+        )
+
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in combine_gm.graph.find_nodes(op="placeholder")
+        ]
+
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("combine_fn", combine_gm)
+
+        for idx, arg in enumerate(init):
+            schema_gen.add_arg(f"init{idx}", arg)
+
+        for idx, arg in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", arg)
+
+        for idx, arg in enumerate(additional_inputs):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(combine_fn, init, xs, additional_inputs)
+        return schema_gen.gen_schema()
 
 
 scan_op = ScanOp()
@@ -585,9 +628,9 @@ class ScanAutogradOp(torch.autograd.Function):
             carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
             return [
                 *carry,
-                # We additionally checkpoint all the intemediate carry outputs for backward.
+                # We additionally checkpoint all the intermediate carry outputs for backward.
                 *[
-                    n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c
+                    n_c.detach().clone() if isinstance(n_c, torch.Tensor) else n_c
                     for n_c in carry
                 ],
                 *y,
@@ -793,7 +836,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # Prepare the bwd_init
         bwd_init = [*initial_g_additional_inputs, *g_c_T]
 
-        # 5.) Perform the backwrad scan:
+        # 5.) Perform the backward scan:
         # The ``combine_fn_bw_wrapped`` receives the
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``

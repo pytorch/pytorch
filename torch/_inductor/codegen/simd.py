@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
@@ -40,6 +41,7 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -50,7 +52,6 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -407,6 +408,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_cooperative_reduction()
         )
         self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
+        self.tiling: dict[str, sympy.Expr] = tiling
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -1448,15 +1450,17 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
+        debug_handles: list[tuple[str, Optional[int]]] = []
         for kernel in kernels:
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(
+            if config.trace.provenance_tracking_level != 0:
+                debug_handle = set_kernel_post_grad_provenance_tracing(
                     node_schedule,  # type: ignore[arg-type]
                     kernel_name,
                 )
+                debug_handles.append((kernel_name, debug_handle))
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1473,6 +1477,10 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         self.codegen_comment(node_schedule)
+        for kernel_name, debug_handle in debug_handles:
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )
         final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1548,18 +1556,19 @@ class SIMDScheduling(BaseScheduling):
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-    def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
-    ) -> Optional[str]:
+    def _codegen_single_template(
+        self,
+        kernel,
+        render,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
+    ):
         """
-        Codegen a triton template
-
-        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        Helper method to codegen a single template kernel variant
         """
-        _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
-
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
@@ -1637,11 +1646,16 @@ class SIMDScheduling(BaseScheduling):
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if isinstance(partial_code, str):
-                    src_code = partial_code
-                else:
+                if not isinstance(partial_code, str):
                     partial_code.finalize_hook("<STORE_OUTPUT>")
-                    src_code = partial_code.code
+
+            if isinstance(partial_code, str):
+                src_code = partial_code
+            else:
+                # Ensure all hooks are finalized before the kernel is defined.
+                # Note: some of these hooks may have been registered by a kernel subclass
+                src_code = partial_code.finalize_remaining()
+
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
@@ -1655,18 +1669,113 @@ class SIMDScheduling(BaseScheduling):
             if only_gen_src_code:
                 return src_code
 
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+            if config.trace.provenance_tracking_level != 0:
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule, kernel.kernel_name
+                )
 
-        self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+            return kernel
 
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-        self.free_buffers_in_scheduler()
-        return None
+    def codegen_template(
+        self,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
+        hint_override: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Codegen a triton template with multi-kernel dispatch support
+
+        If `only_gen_src_code=True` the src code will be returned instead of being
+        codegenned into the wrapper
+        """
+
+        _, (_numel, rnumel) = template_node.group
+        assert rnumel == 1
+
+        if (
+            isinstance(template_node.node, MultiTemplateBuffer)
+            and template_node.node._make_kernel_renders
+        ):
+            kernels = []
+            src_codes = []
+
+            for make_kernel_render in template_node.node._make_kernel_renders.values():
+                kernel, render = make_kernel_render(
+                    template_node.node, hint_override=hint_override
+                )
+
+                if only_gen_src_code:
+                    src_code = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=True,
+                    )
+                    assert isinstance(src_code, str)
+                    src_codes.append(src_code)
+                else:
+                    kernel = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=False,
+                    )
+                    kernels.append(kernel)
+
+            if only_gen_src_code:
+                return "\n\n".join(src_codes)
+
+            MultiKernel.merge_workspaces_inplace(kernels)
+            multi_kernel = MultiKernel(kernels)
+            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+            self.codegen_comment(node_schedule)
+
+            multi_kernel.call_kernel(multi_kernel.kernel_name)
+            V.graph.removed_buffers |= multi_kernel.removed_buffers
+            V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
+            self.free_buffers_in_scheduler()
+            return None
+        else:
+            kernel, render = template_node.node.make_kernel_render(
+                template_node.node, hint_override=hint_override
+            )
+
+            if only_gen_src_code:
+                return self._codegen_single_template(
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=True,
+                )
+            else:
+                kernel = self._codegen_single_template(
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=False,
+                )
+
+                node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+                self.codegen_comment(node_schedule)
+                kernel.call_kernel(kernel.kernel_name, template_node.node)
+
+                V.graph.removed_buffers |= kernel.removed_buffers
+                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                self.free_buffers_in_scheduler()
+                return None
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
@@ -1747,7 +1856,7 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.enabled:
+            if config.trace.provenance_tracking_level != 0:
                 set_kernel_post_grad_provenance_tracing(
                     combo_kernel_node.snodes, kernel_name
                 )
@@ -1889,7 +1998,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -1904,7 +2013,7 @@ class SIMDScheduling(BaseScheduling):
         cls,
         tiling: Sequence[sympy.Expr],
         is_pointwise: bool,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         return cls.create_tiling(
             tiling if is_pointwise else [],
             tiling if not is_pointwise else [],
@@ -1916,7 +2025,7 @@ class SIMDScheduling(BaseScheduling):
         tiling: dict[str, sympy.Expr],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
@@ -1937,7 +2046,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         pointwise_numel,
         reduction_numel,
-    ) -> list[dict[str, tuple[sympy.Expr]]]:
+    ) -> list[immutable_dict[str, sympy.Expr]]:
         """
         Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
@@ -1945,7 +2054,7 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
         is_pointwise = reduction_numel == 1
-        tilings = OrderedSet[dict[str, sympy.Expr]]()
+        tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
@@ -2210,7 +2319,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
-        tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
+        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr]]] = []
         for (pw_split, pw_score), (red_split, red_score) in score_split:
             candidate = CandidateTiling(
                 cls.create_tiling(pw_split, red_split),
@@ -2439,7 +2548,9 @@ class SIMDScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def generate_kernel_code_from_nodes(
+        self, nodes, benchmark_kernel=False, hint_override: Optional[int] = None
+    ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2464,6 +2575,7 @@ class SIMDScheduling(BaseScheduling):
                     epilogue,
                     prologue,
                     only_gen_src_code=True,
+                    hint_override=hint_override,
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

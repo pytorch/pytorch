@@ -2,7 +2,7 @@
 import datetime
 import functools
 import unittest
-from collections import defaultdict
+from collections import Counter
 from typing import Optional
 from unittest.mock import patch
 
@@ -413,6 +413,21 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_allgather_scalar_tensor_input(self):
+        def func(tensor, world_size):
+            tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
+            torch.distributed.all_gather(tensor_list, tensor)
+            return tensor_list
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            func_compiled = torch.compile(func)
+            inp = torch.tensor(self.rank, dtype=torch.long, device="cuda")
+            out = func_compiled(inp, self.world_size)
+            correct = func(inp, self.world_size)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -651,7 +666,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         class TrackingMode(TorchDispatchMode):
             def __init__(self):
                 super().__init__()
-                self.ops_counter = defaultdict(int)
+                self.ops_counter = Counter()
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 if kwargs is None:
@@ -825,7 +840,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -892,7 +907,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -1357,7 +1372,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -1404,7 +1419,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("buf0 = empty_strided")
@@ -1475,7 +1490,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("buf0 = empty_strided")
@@ -1509,6 +1524,71 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_all_gather_bucket(self):
+        def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            ag_2_out = torch.ops.c10d_functional.wait_tensor(ag_2_out)
+
+            ag_0 = ag_2_out + ag_0
+            ag_0_cast = ag_0.to(torch.bfloat16)
+
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_0_out = ag_0_out * 2
+
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
+
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            ag_3_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_3, group_size, group_name
+            )
+            ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
+            return y, ag_0_out, ag_1_out, ag_2_out, ag_3_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_2 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_3 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
+        correct = func(*inputs, **self.get_world_trs())
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unnecessary copy is made.
+        (
+            FileCheck()
+            .check_count(".all_gather_into_tensor_out.default(", 2, exactly=True)
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_all_gather_bucket_path(self):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1517,19 +1597,26 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_0_cast = ag_0.to(torch.bfloat16)
             ag_1_cast = ag_1.to(torch.bfloat16)
 
-            # allgather
+            # first allgather
             group_name = (
                 torch.distributed.distributed_c10d._get_default_group().group_name
             )
             ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
                 ag_0_cast, group_size, group_name
             )
-            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
-                ag_1_cast, group_size, group_name
-            )
-
-            # wait op
             ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_0_out = ag_0_out * 2
+
+            # Create dependency: second allgather input depends on first allgather output
+            # This prevents fusion of the two allgather operations
+            ag_1_modified = (
+                ag_1_cast + ag_0_out[: ag_1_cast.shape[0]]
+            )  # Use part of ag_0_out
+
+            # second allgather (now depends on the first one)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_modified, group_size, group_name
+            )
             ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
 
             return y, ag_0_out, ag_1_out
@@ -1542,18 +1629,82 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": "fsdp",
+                "bucket_all_gathers_fx": "all",
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-        # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
-        (FileCheck().check("all_gather_into_tensor_out").run(code))
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+
+        # shouldnt have bucketed
+        FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_reduce_scatter_bucket(self):
+        def func(x, w, rs_0, rs_1, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            rs_0_cast = rs_0.to(torch.bfloat16)
+            rs_1_cast = rs_1.to(torch.bfloat16)
+
+            # reduce_scatter
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+
+            return y, rs_0_out, rs_1_out
+
+        # test "fsdp" mode to allow convert_element_type after wait
+        def func2(x, w, rs_0, rs_1, tag, ranks, group_size):
+            y, rs_0_out, rs_1_out = func(x, w, rs_0, rs_1, tag, ranks, group_size)
+            return y, rs_0_out.to(torch.float32), rs_1_out.to(torch.float32)
+
+        for f in [func, func2]:
+            x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+            w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+            rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+            rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+            inputs = [x, w, rs_0, rs_1]
+            f(*inputs, **self.get_world_trs())
+
+            with torch._inductor.config.patch(
+                {
+                    "bucket_reduce_scatters_fx": "fsdp",
+                    "reorder_for_compute_comm_overlap": False,
+                }
+            ):
+                compiled = torch.compile(f)
+                compiled(*inputs, **self.get_world_trs())
+                code = run_and_get_triton_code(
+                    compiled, *inputs, **self.get_world_trs()
+                )
+            # NOTE: The first return value should be the output of the first wait_tensor.
+            # We want to make sure no unnecessary copy is made.
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=1,
+                    exactly=True,
+                )
+                .run(code)
+            )
+            out = compiled(*inputs, **self.get_world_trs())
+            correct = f(*inputs, **self.get_world_trs())
+            assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
@@ -1564,7 +1715,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         comm from moving due to data dependency.
         """
 
-        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+        def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
 
@@ -1587,13 +1738,62 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
             ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
 
-            return y, ag_0_out, ag_1_out
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            y += torch.mm(2 * x, 2 * w)
+
+            # cast the inputs
+            ag_2_cast = ag_2.to(torch.bfloat16)
+            ag_3_cast = ag_3.to(torch.bfloat16)
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2_cast, group_size, group_name
+            )
+            ag_3_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_3_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_2_out = torch.ops.c10d_functional.wait_tensor(ag_2_out)
+            ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
+
+            #
+            rs_2_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_2_cast, "sum", group_size, group_name
+            )
+            rs_3_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_3_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_2_out = torch.ops.c10d_functional.wait_tensor(rs_2_out)
+            rs_3_out = torch.ops.c10d_functional.wait_tensor(rs_3_out)
+            return (
+                y,
+                ag_0_out,
+                ag_1_out,
+                ag_2_out,
+                ag_3_out,
+                rs_0_out,
+                rs_1_out,
+                rs_2_out,
+                rs_3_out,
+            )
 
         x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
         w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(512, device="cuda", dtype=torch.float32)
-        inputs = [x, w, ag_0, ag_1]
+        ag_0 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
         node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
@@ -1611,27 +1811,67 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
+                "bucket_reduce_scatters_fx": "all",
+                "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    _reorder_communication_preserving_peak_memory,
                     sink_waits_iterative,
+                    _reorder_communication_preserving_peak_memory,
                 ],
+                "allow_buffer_reuse": False,
+                "test_configs.track_memory_lifecycle": "error",
             }
         ):
-            compiled = torch.compile(func)
+            compiled = torch.compile(func, fullgraph=True)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        # make sure memory tracking is codegen. the ops will then do runtime checking with assertion.
+        FileCheck().check("check_memory_step").check("tracked_empty_strided").run(code)
+
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
-        (FileCheck().check("all_gather_into_tensor_out").run(code))
+        # We want to make sure no unnecessary copy is made.
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                count=2,
+                exactly=True,
+            )
+            .check(
+                "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
+            )
+            .run(code)
+        )
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                count=2,
+                exactly=True,
+            )
+            .check(
+                "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
+            )
+            .run(code)
+        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
-        self.assertEqual(len(node_stats), 1)
-        node_stat = next(iter(node_stats.values()))
-        self.assertTrue(node_stat.moves > 0)
-        self.assertTrue(node_stat.limiting_factor == "None")
+        self.assertEqual(len(node_stats), 4)
+        it = iter(node_stats.values())
+        node_stat0 = next(it)
+        self.assertTrue(node_stat0.limiting_factor == "None")
+        node_stat1 = next(it)
+        self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
@@ -1683,7 +1923,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("all_gather")
