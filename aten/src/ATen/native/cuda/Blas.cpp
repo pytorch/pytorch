@@ -1655,7 +1655,10 @@ bool use_fast_accum) {
   check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
   check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
 
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
+  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
 #ifndef USE_ROCM
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
@@ -1698,9 +1701,14 @@ const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+  bool a_b_and_out_are_bf16 = (
+    mat_a.dtype() == at::kBFloat16 &&
+    mat_b.dtype() == at::kBFloat16 &&
+    out_dtype.value_or(at::kBFloat16) == at::kBFloat16
+  );
+  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);

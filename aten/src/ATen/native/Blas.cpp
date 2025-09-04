@@ -346,7 +346,8 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   return out;
 }
