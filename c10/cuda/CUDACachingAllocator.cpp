@@ -4159,7 +4159,18 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+// Register this HIP allocator as the CUDA allocator to allow it to work
+// with both c10::GetAllocator(kCUDA) and c10::getDeviceAllocator(kCUDA)
+// APIs. We don't perform this masquerading inside
+// HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
+// initialization, and doing so there may introduce static initialization
+// order (SIOF) issues.
+#define HIP_MASQUERADING_AS_CUDA \
+  "cud"                          \
+  "a"
+    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
+#undef HIP_MASQUERADING_AS_CUDA
   }
 };
 
@@ -4186,11 +4197,8 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom,
-    bool symmetric)
-    : allocator_(allocator),
-      is_user_created_(is_user_created),
-      symmetric_(symmetric) {
+    bool use_on_oom)
+    : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4211,10 +4219,6 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
-}
-
-bool MemPool::is_symmetric() {
-  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {

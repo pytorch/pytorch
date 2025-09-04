@@ -9,7 +9,7 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -1306,11 +1306,8 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if (
-        query.device.type != "cuda"
-        and query.device.type != "cpu"
-        and query.device.type != "hpu"
-    ):
+    supported_devices = {"cuda", "cpu", "xpu", "hpu"}
+    if query.device.type not in supported_devices:
         raise ValueError(
             "FlexAttention is only supported on CUDA, CPU or HPU devices. "
             f"Found input tensors on {query.device.type} device."
@@ -1607,8 +1604,8 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                     if metadata_mode:
-                        backend = make_eager_backend_with_torch_function_mode(
-                            metadata_mode
+                        backend: Union[str, Callable[..., Any]] = (
+                            make_eager_backend_with_torch_function_mode(metadata_mode)
                         )
                     else:
                         backend = "eager"

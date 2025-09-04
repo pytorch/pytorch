@@ -5,10 +5,6 @@ set -ex
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 case "${GPU_ARCH_TYPE:-BLANK}" in
-    BLANK)
-        # Legacy behavior for CircleCI
-        bash "${SCRIPTPATH}/build_cuda.sh"
-        ;;
     cuda | cuda-aarch64)
         bash "${SCRIPTPATH}/build_cuda.sh"
         ;;

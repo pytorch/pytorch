@@ -59,14 +59,24 @@ class ItertoolsVariable(VariableTracker):
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
 
-        if (
-            self.value is itertools.product
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
+        if self.value is itertools.product:
+            if any(kw != "repeat" for kw in kwargs.keys()):
+                unimplemented_v2(
+                    gb_type="Unsupported kwargs for itertools.product",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'repeat', but got "
+                    f"{','.join(set(kwargs.keys()) - {'repeat'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+
+            if "repeat" in kwargs.keys():
+                r = kwargs["repeat"].as_python_constant()
+            else:
+                r = 1
+            seqs = [arg.force_unpack_var_sequence(tx) for arg in args]
             items = [
-                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+                variables.TupleVariable(list(item))
+                for item in itertools.product(*seqs, repeat=r)
             ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
@@ -179,6 +189,24 @@ class ItertoolsVariable(VariableTracker):
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
+            )
+        elif (
+            self.value is itertools.permutations
+            and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
+            and not kwargs
+        ):
+            if len(args) == 2:
+                r = args[1].as_python_constant()
+            else:
+                r = None
+            items = [
+                variables.TupleVariable(list(item))
+                for item in itertools.permutations(
+                    args[0].force_unpack_var_sequence(tx), r
+                )
+            ]
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
             )
         else:
             return super().call_function(tx, args, kwargs)
@@ -317,7 +345,7 @@ class ZipVariable(IteratorVariable):
 
     def __init__(
         self,
-        iterables: list[Union[list[VariableTracker], VariableTracker]],
+        iterables: list[VariableTracker],
         strict: bool = False,
         **kwargs,
     ) -> None:
@@ -351,6 +379,10 @@ class ZipVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.is_mutable()
+
+        if len(self.iterables) == 0:
+            raise_observed_exception(StopIteration, tx)
+
         old_index = self.index
         args = []
 
