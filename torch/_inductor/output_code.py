@@ -628,6 +628,11 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
+        if config.graph_partition and config.triton.customized_cudagraph_wrappers:
+            # Mechanically apply user-specified cudagraph wrappers without modification
+            assert self.recursively_apply_fns is not None
+            self.recursively_apply_fns(config.triton.customized_cudagraph_wrappers)
+
         set_tracing_context_output_strides(example_inputs, self)
         assert graph_kwargs["cudagraphs"] is not None
         assert graph_kwargs["is_backward"] is not None

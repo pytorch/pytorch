@@ -1212,6 +1212,11 @@ class triton:
     # Default to None, which means we capture cudagraphs for all shapes.
     cudagraph_capture_sizes: Optional[tuple[Union[int, tuple[int, ...]]]] = None
 
+    # A tuple of customized cudagraph wrappers from users. Inductor mechanically wraps
+    # each partition fn with the customized cudagraph wrapper. Users need to handle
+    # the cudagraphs directly such as static inputs, dynamic shapes, etc.
+    customized_cudagraph_wrappers: Optional[tuple[Callable, ...]] = None
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
