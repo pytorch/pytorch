@@ -1747,7 +1747,7 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    with decorators.set_fullgraph(fullgraph=False):
+    with decorators.error_on_graph_break(False):
         try:
             _compile(
                 record.code,
