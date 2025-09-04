@@ -115,8 +115,6 @@ jobs:
           echo "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" >> "$GITHUB_ENV"
           echo "container_name=${container_name}" >> "$GITHUB_ENV"
 
-          sleep 7200
-
       - name: Build vLLM wheel
         uses: ./.github/actions/build-external-packages
         with:
