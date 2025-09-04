@@ -150,7 +150,7 @@ jobs:
               if [[ \$package == vllm ]]; then
                 new_wheel=\${repair_wheel/\$version/1.0.0.\$nightly}
               else
-                major_version=\$(echo \$version | cut -d'.' -f1-3)
+                major_version=\$(echo \$version | tr '.+' '.' | cut -d'.' -f1-3)
                 new_wheel=\${repair_wheel/\$version/\$major_version.\$nightly}
               fi
 
@@ -164,7 +164,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: vllm-wheel-${{ matrix.python-version }}-${{ matrix.device }}-${{ env.PLATFORM }}
+          name: vllm-wheel-${{ matrix.device }}-${{ matrix.python-version }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/externals/vllm/wheels/*.whl
 
@@ -174,9 +174,16 @@ jobs:
 
   # Copied from build-triton-wheel
   upload-wheel:
-    runs-on: ubuntu-latest
+    name: "Upload ${{ matrix.device }} vLLM wheel"
     needs:
       - build-wheel
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [ 'cu128', 'cu129' ]
+    env:
+      BUILD_DEVICE: ${{ matrix.device }}
     permissions:
       id-token: write
       contents: read
@@ -211,7 +218,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-"${BUILD_DEVICE}"-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -230,11 +237,10 @@ jobs:
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
 
-      # NB: This step is gated by DRY_RUN, which is enabled everywhere except main and release branches
       - name: Upload binaries
         env:
           PACKAGE_TYPE: wheel
-          UPLOAD_SUBFOLDER: ""
+          UPLOAD_SUBFOLDER: ${{ env.BUILD_DEVICE }}
           PKG_DIR: ${{ runner.temp }}/artifacts
         shell: bash
         run: |
