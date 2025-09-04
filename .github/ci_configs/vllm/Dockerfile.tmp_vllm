@@ -58,7 +58,7 @@ RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
     && gcc --version && g++ --version
 
 # install uv for faster pip installs
-RUN --mount=type=cache,target=/root/.cache/uv \	
+RUN --mount=type=cache,target=/root/.cache/uv \
     python3 -m pip install uv==0.8.4
 
 ENV UV_HTTP_TIMEOUT=500
@@ -378,7 +378,7 @@ FROM vllm-base as test
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts	
+# Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
 COPY tests/ tests/
