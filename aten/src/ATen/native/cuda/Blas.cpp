@@ -1551,116 +1551,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 }
 
 namespace {
-    void check_scaled_grouped_mm_mxfp8_2d2d(
-        const at::Tensor& mat_a,
-        const at::Tensor& mat_b,
-        const at::Tensor& scale_a,
-        const at::Tensor& scale_b,
-        const at::Tensor& offs) {
-        // For 2d-2d grouped gemm, groups are along the K (contracting) dim
-        TORCH_CHECK(
-            scale_a.dim() == mat_a.dim(),
-            "Expected scale_a to have same number of dims as target tensor, but got scale_a.dim()=",
-            scale_a.dim(), ", mat_a.dim()=", mat_a.dim(), ".");
-
-        TORCH_CHECK(
-            scale_b.dim() == mat_b.dim(),
-            "Expected scale_b to have same number of dims as target tensor, but got scale_b.dim()=",
-            scale_b.dim(), ", mat_b.dim()=", mat_b.dim(), ".");
-
-        auto round_up = [](auto x, auto y) {
-          // Rounds up x to the nearest multiple of y
-          return ((x + y - 1) / y) * y;
-        };
-
-        // For 2d-2d, groups are along K dim.
-        // Calculate total size of scale K dim after per group blocked format is applied
-        int64_t padded_per_group_scale_K = 0;
-        int64_t group_start_off = 0;
-        auto offs_accessor = offs.accessor<int64_t, 1>();
-
-        for (int i = 0; i < offs_accessor.size(0); ++i) {
-            int64_t group_end_off = offs_accessor[i];
-            int64_t group_size = group_end_off - group_start_off;
-            int64_t expected_group_size = round_up(group_size / 32, (int64_t)4);
-            padded_per_group_scale_K += expected_group_size;
-            group_start_off = group_end_off;
-        }
-
-        // Check scale_a has shape (padded_M, padded_per_group_scale_K)
-        int64_t M = mat_a.size(0);
-        int64_t padded_scale_M = round_up(M, (int64_t)128);
-        TORCH_CHECK(
-            scale_a.size(0) == padded_scale_M && scale_a.size(1) == padded_per_group_scale_K,
-            "For 2d-2d MXFP8 grouped gemm, for mat_a.shape=(", mat_a.size(0), ",", mat_a.size(1), "), with offs=", offs,
-            ", expected scale_a to have shape (", padded_scale_M, ", ",
-            padded_per_group_scale_K, "), but got (", scale_a.size(0), ", ", scale_a.size(1), ").");
-
-        // Check scale_b has shape (padded_N, padded_per_group_scale_K)
-        int64_t N = mat_b.size(-1);
-        int64_t padded_scale_N = round_up(N, (int64_t)128);
-        TORCH_CHECK(
-            scale_b.size(0) == padded_scale_N && scale_b.size(1) == padded_per_group_scale_K,
-            "For 2d-2d MXFP8 grouped gemm, for mat_b.shape=(", mat_b.size(0), ",", mat_b.size(1), "), with offs=", offs,
-            ", expected scale_b to have shape (", padded_scale_N, ", ",
-            padded_per_group_scale_K, "), but got (", scale_b.size(0), ", ", scale_b.size(1), ").");
-    }
-
-    void check_scaled_grouped_mm_mxfp8_2d3d(
-        const at::Tensor& mat_a,
-        const at::Tensor& mat_b,
-        const at::Tensor& scale_a,
-        const at::Tensor& scale_b,
-        const at::Tensor& offs) {
-        // For 2d-3d grouped gemm, groups are along the M dim
-        TORCH_CHECK(
-            scale_a.dim() == mat_a.dim(),
-            "Expected scale_a to have same number of dims as target tensor, but got scale_a.dim()=",
-            scale_a.dim(), ", mat_a.dim()=", mat_a.dim(), ".");
-
-        TORCH_CHECK(
-            scale_b.dim() == mat_b.dim(),
-            "Expected scale_b to have same number of dims as target tensor, but got scale_b.dim()=",
-            scale_b.dim(), ", mat_b.dim()=", mat_b.dim(), ".");
-
-        auto round_up = [](auto x, auto y) {
-          // Rounds up x to the nearest multiple of y
-          return ((x + y - 1) / y) * y;
-        };
-
-        // For 2d-3d, groups are along M dim.
-        // Calculate total size of scale M dim after per group blocked format is applied
-        int64_t padded_per_group_scale_M = 0;
-        int64_t group_start_off = 0;
-        auto offs_accessor = offs.accessor<int64_t, 1>();
-
-        for (int i = 0; i < offs_accessor.size(0); ++i) {
-            int64_t group_end_off = offs_accessor[i];
-            int64_t group_size = group_end_off - group_start_off;
-            int64_t expected_group_size = round_up(group_size, (int64_t)128);
-            padded_per_group_scale_M += expected_group_size;
-            group_start_off = group_end_off;
-        }
-
-        // Check scale_a has shape (padded_per_group_scale_M, padded_scale_K)
-        int64_t K = mat_a.size(-1);
-        int64_t padded_scale_K = round_up(K / 32, (int64_t)4);
-        TORCH_CHECK(
-            scale_a.size(0) == padded_per_group_scale_M && scale_a.size(1) == padded_scale_K,
-            "For 2d-3d MXFP8 grouped gemm, for mat_a.shape=(", mat_a.size(0), ", ", mat_a.size(1),
-            ") with offs=", offs, ", expected scale_a to have shape (", padded_per_group_scale_M, ", ",
-            padded_scale_K, "), but got (", scale_a.size(0), ", ", scale_a.size(1), ").");
-
-        // Check scale_b has shape (..., padded_scale_N, padded_scale_K)
-        int64_t N = mat_b.size(-1);
-        int64_t padded_scale_N = round_up(N, (int64_t)128);
-        TORCH_CHECK(
-            scale_b.size(-2) == padded_scale_N && scale_b.size(-1) == padded_scale_K,
-            "For 2d-3d MXFP8 grouped gemm, for mat_b.shape=(", mat_b.size(0), ",", mat_b.size(1), ", ", mat_b.size(2),
-            "), expected scale_b to have shape (..., ", padded_scale_N, ", ",
-            padded_scale_K, "), but got (..., ", scale_b.size(-2), ", ", scale_b.size(-1), ").");
-    }
-
   at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
   const Tensor& mat_b,
   const std::optional<at::Tensor>& offs,
@@ -1727,37 +1617,78 @@ namespace {
 
   void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
     if (mat.dim() == 2) {
-      TORCH_CHECK(
-          scale.dim() == 1,
-          "scale must be a 1D tensor, but got ",
-          scale.dim(),
-          "D, arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
-      TORCH_CHECK(
-          scale.size(0) == mat.size(dim) * scale_multiplier,
-          "scale must have the same length as mat for arg ",
-          arg_idx);
+      if (scale.dtype() == kFloat) { // FP8 checks
+          TORCH_CHECK(
+              scale.dim() == 1,
+              "scale must be a 1D tensor, but got ",
+              scale.dim(),
+              "D, arg ",
+              arg_idx);
+          TORCH_CHECK(
+              scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
+          TORCH_CHECK(
+              scale.size(0) == mat.size(dim) * scale_multiplier,
+              "scale must have the same length as mat for arg ",
+              arg_idx);
+
+      } else if (scale.dtype() == at::kFloat8_e8m0fnu) { // MXFP8 checks
+        // For MXFP8, 2d tensors have variable size groups represented as subtensors,
+        // that are converted to blocked padded format individually,
+        // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
+        TORCH_CHECK(
+          scale.dim() == mat.dim(),
+          "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx);
+      } else {
+        TORCH_CHECK(
+            false,
+            "scale must be float32 or float8_e8m0fnu, but got ",
+            scale.dtype());
+      }
     } else {
-      TORCH_CHECK(
-          scale.dim() == 2,
-          "scale must be a 2D tensor, but got ",
-          scale.dim(),
-          "D for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.stride(1) == 1,
-          "scale must be contiguous in the last dimension for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.size(0) == mat.size(0),
-          "scale must have the same batch dimension as mat for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.size(1) == mat.size(1 + dim),
-          "scale must have the same first dimension as mat for arg ",
-          arg_idx);
+      if (scale.dtype() == kFloat) { // FP8 checks
+        TORCH_CHECK(
+            scale.dim() == 2,
+            "scale must be a 2D tensor, but got ",
+            scale.dim(),
+            "D for arg ",
+            arg_idx);
+        TORCH_CHECK(
+            scale.stride(1) == 1,
+            "scale must be contiguous in the last dimension for arg ",
+            arg_idx);
+        TORCH_CHECK(
+            scale.size(0) == mat.size(0),
+            "scale must have the same batch dimension as mat for arg ",
+            arg_idx);
+        TORCH_CHECK(
+            scale.size(1) == mat.size(1 + dim),
+            "scale must have the same first dimension as mat for arg ",
+            arg_idx);
+        } else if (scale.dtype() == at::kFloat8_e8m0fnu) { // MXFP8 checks
+          // For MXFP8, 3d tensors have groups defined by the leading dim, not as subtensors defined by the `offsets` arg,
+          // so we can check the expected scale sizes here without a d2h sync.
+          auto round_up = [](auto x, auto y) {
+              return ((x + y - 1) / y) * y;
+          };
+          int64_t G = mat.size(0);
+          int64_t K = mat.size(-2);
+          int64_t N = mat.size(-1);
+          int64_t blocked_scale_K = round_up(K/32, 4);
+          int64_t blocked_scale_N = round_up(N, 128);
+          TORCH_CHECK(
+            scale.dim() == mat.dim(),
+            "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
+          );
+          TORCH_CHECK(
+            scale.size(-2) == K && scale.size(-1) == blocked_scale_N,
+            "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
+          );
+        } else {
+          TORCH_CHECK(
+              false,
+              "scale must be float32 or float8_e8m0fnu, but got ",
+              scale.dtype());
+        }
     }
 }
 
@@ -1820,42 +1751,12 @@ bool use_fast_accum) {
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
 
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
-
-  #ifdef USE_FBGEMM_GENAI
-    // MXFP8 grouped GEMM dispatching
-    bool is_mx8m8bf16 = (
-      mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
-      scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu &&
-      out_dtype == at::kBFloat16
-    )
-
-    if (is_mx8m8bf16) {
-      bool b_is_3d = mat_b.dim() == 3;
-      bool is_2d_2d = a_is_2d && b_is_2d;
-      bool is_2d_3d = a_is_2d && b_is_3d;
-
-      if (is_2d_2d) {
-        check_scaled_grouped_mm_mxfp8_2d2d(mat_a, mat_b, scale_a, scale_b, offs);
-      } else if (is_2d_3d) {
-        check_scaled_grouped_mm_mxfp8_2d3d(mat_b, mat_a, scale_b, scale_a, offs);
-      } else {
-        TORCH_CHECK(false, "Only 2d-2d and 2d-3d grouped gemm are currently supported for MXFP8");
-      }
-      fbgemm_gpu::mx8mx8bf16_grouped_mm(
-          mat_a,
-          mat_b,
-          scale_a,
-          scale_b,
-          offs,
-          out);
-    }
-  #endif
-
-  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+  // FP8 per-tensor and per-row scaling expect fp32 scales.
+  // MXFP8 expects float8_e8m0fnu scales.
   TORCH_CHECK(
-      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
-      "Both scale_a and scale_b must be float (fp32) tensors.");
+      (scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat) ||
+      (scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu),
+      "For FP8 tensorwise and rowwise, both scale_a and scale_b must be float32 tensors. For MXFP8, scales must be float8_e8m0fnu tensors");
 
   const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
   check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
@@ -1863,6 +1764,32 @@ bool use_fast_accum) {
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+
+#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA)
+  // MXFP8 grouped GEMM dispatching
+  bool is_mx8mx8bf16 = (
+    mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
+    scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu &&
+    out_dtype == at::kBFloat16
+  )
+
+  if (is_mx8mx8bf16) {
+    bool b_is_3d = mat_b.dim() == 3;
+    bool is_2d_2d = a_is_2d && b_is_2d;
+    bool is_2d_3d = a_is_2d && b_is_3d;
+    TORCH_CHECK(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
+
+    fbgemm_gpu::mx8mx8bf16_grouped_mm(
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        offs,
+        out);
+  }
+#endif
 
 #ifndef USE_ROCM
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
@@ -1895,6 +1822,7 @@ bool use_fast_accum) {
 #else
   TORCH_CHECK(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
 #endif
+
 #endif
 
 }
