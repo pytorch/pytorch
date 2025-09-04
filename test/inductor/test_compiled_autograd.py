@@ -5170,6 +5170,7 @@ known_graph_breaks_tests = {
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
     "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks
     "test_graph_save_on_cpu",  # dynamo disabled
+    "test_checkpointing_preserves_torch_function_mode_stack",  # marked as skipped
     "test_nested_checkpoint_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_early_stop_True",  # dynamo disable
     "test_nested_checkpoint_kwargs_early_stop_False",  # dynamo disable
