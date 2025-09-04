@@ -86,16 +86,19 @@ except ImportError:
 
 # NVSHMEM/SymmetricMemory components
 try:
+    from torch._C._distributed_c10d import _SymmetricMemory
+except ImportError:
+    from torch.distributed._C_stubs import _SymmetricMemory
+
+try:
     from torch._C._distributed_c10d import (
         _is_nvshmem_available,
         _nvshmemx_cumodule_init,
-        _SymmetricMemory,
     )
 except ImportError:
     from torch.distributed._C_stubs import (
         _is_nvshmem_available,
         _nvshmemx_cumodule_init,
-        _SymmetricMemory,
     )
 
 # MPI backend
