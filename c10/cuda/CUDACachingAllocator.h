@@ -37,6 +37,7 @@ namespace c10::cuda::CUDACachingAllocator {
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingAllocator::kLargeBuffer;
+using c10::CachingDeviceAllocator::AnnotationEntry;
 using c10::CachingDeviceAllocator::BlockInfo;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::OutOfMemoryObserver;
@@ -111,22 +112,6 @@ struct TraceEntry {
   std::string compile_context_{};
 };
 
-// Calls made by record_function will save annotations
-struct AnnotationEntry {
-  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
-      : device_(device) {
-    time_.approx_t_ = time;
-  }
-
-  void recordUserMetadata(const std::string& name, std::string value) {
-    metadata_[name] = std::move(value);
-  }
-
-  c10::DeviceIndex device_;
-  trace_time_ time_{};
-  std::unordered_map<std::string, std::string> metadata_;
-};
-
 struct AllocatorConfigInfo {
   double garbage_collection_threshold;
   size_t max_split_size;
@@ -162,9 +147,7 @@ struct ShareableHandle {
 
 class CUDAAllocator : public DeviceAllocator {
  public:
-  virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
-  virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
