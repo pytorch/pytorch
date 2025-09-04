@@ -66,8 +66,7 @@ PT_EXPORT {{kernel_call_signature}} {
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
   if (hw_info.sm_count == 0) {
-    //hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
-    hw_info.sm_count = 56;
+    hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
