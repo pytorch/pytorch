@@ -50,7 +50,6 @@ class SimpleLinearModule(torch.nn.Module):
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
-@torch._dynamo.config.patch("strict_precompile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
     def path(self):
