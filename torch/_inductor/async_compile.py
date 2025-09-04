@@ -37,6 +37,7 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
+    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -547,6 +548,19 @@ class AsyncCompile:
                 output_path, *_ = CUDACodeCache.compile(source_code, "o")
                 CUDACodeCache.aot_kernels_o.append(output_path)
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
+    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("XPU Kernel:\n%s", source_code)
+
+        def task():
+            if aot_compile:
+                # We rely on JITInductor to compile the CUDA code,
+                # so that we can load it into AOTInductor.
+                output_path, *_ = XPUCodeCache.compile(source_code, "o")
+                XPUCodeCache.aot_kernels_o.append(output_path)
+            return XPUCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
