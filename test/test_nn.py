@@ -12048,11 +12048,10 @@ class TestNNDeviceType(NNTestCase):
             # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
-    def test_nll_loss_incompatible_1d_input_1d_target(self, device):
-        x = torch.randn((10,), device=device)  # 1D input: single sample, 10 classes
-        t = torch.zeros((10,), dtype=torch.int64, device=device)  # 1D target: 10 class indices
-
-        with self.assertRaisesRegex(ValueError, "Expected target to be 0D when input is 1D"):
+    def test_nll_loss_1d_input_1d_target_invalid_size(self, device):
+        x = torch.randn(10, device=device)
+        t = torch.randint(0, 10, (3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, "For 1D input, 1D target must have size 1"):
             F.nll_loss(x, t)
 
     def test_nll_loss_mismatched_batch(self, device):
