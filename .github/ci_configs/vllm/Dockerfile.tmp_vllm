@@ -16,7 +16,7 @@ ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
 
-#################### TORCH NIGHTLY  BASE IMAGE ####################
+#################### TORCH NIGHTLY BASE IMAGE ####################
 # A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 
@@ -142,8 +142,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
 # Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG xformer_cuda_arch_list='7.5;8.0+PTX;9.0a'
-ENV TORCH_CUDA_ARCH_LIST=${xformer_cuda_arch_list}
+ARG xformers_cuda_arch_list='7.5;8.0+PTX;9.0a'
+ENV TORCH_CUDA_ARCH_LIST=${xformers_cuda_arch_list}
 
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
