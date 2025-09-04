@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_dict.py b/test/dynamo/cpython/3_13/test_dict.py
-index 4c095464cbb..fcda6484ea6 100644
+index 4729132c5a5..6ecf111c1e3 100644
 --- a/test/dynamo/cpython/3_13/test_dict.py
 +++ b/test/dynamo/cpython/3_13/test_dict.py
 @@ -1,3 +1,60 @@
@@ -63,7 +63,7 @@ index 4c095464cbb..fcda6484ea6 100644
  import collections
  import collections.abc
  import gc
-@@ -11,7 +68,7 @@ from test import support
+@@ -11,11 +68,12 @@ from test import support
  from test.support import import_helper, get_c_recursion_limit
  
  
@@ -71,49 +71,376 @@ index 4c095464cbb..fcda6484ea6 100644
 +class DictTest(__TestCase):
  
      def test_invalid_keyword_arguments(self):
-         class Custom(dict):
-@@ -265,39 +322,7 @@ class DictTest(unittest.TestCase):
+-        class Custom(dict):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Custom(dict):
++                pass
+         for invalid in {1 : 2}, Custom({1 : 2}):
+             with self.assertRaises(TypeError):
+                 dict(**invalid)
+@@ -108,8 +166,9 @@ class DictTest(unittest.TestCase):
+ 
+     def test_views_mapping(self):
+         mappingproxy = type(type.__dict__)
+-        class Dict(dict):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Dict(dict):
++                pass
+         for cls in [dict, Dict]:
+             d = cls()
+             m1 = d.keys().mapping
+@@ -157,25 +216,27 @@ class DictTest(unittest.TestCase):
+ 
+         self.assertRaises(TypeError, d.__getitem__)
+ 
+-        class BadEq(object):
+-            def __eq__(self, other):
+-                raise Exc()
+-            def __hash__(self):
+-                return 24
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class BadEq(object):
++                def __eq__(self, other):
++                    raise Exc()
++                def __hash__(self):
++                    return 24
+ 
+         d = {}
+         d[BadEq()] = 42
+         self.assertRaises(KeyError, d.__getitem__, 23)
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+ 
+         x = BadHash()
+         d[x] = 42
+@@ -201,70 +262,79 @@ class DictTest(unittest.TestCase):
+ 
+         self.assertRaises((TypeError, AttributeError), d.update, None)
+ 
+-        class SimpleUserDict:
+-            def __init__(self):
+-                self.d = {1:1, 2:2, 3:3}
+-            def keys(self):
+-                return self.d.keys()
+-            def __getitem__(self, i):
+-                return self.d[i]
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class SimpleUserDict:
++                def __init__(self):
++                    self.d = {1:1, 2:2, 3:3}
++                def keys(self):
++                    return self.d.keys()
++                def __getitem__(self, i):
++                    return self.d[i]
+         d.clear()
+         d.update(SimpleUserDict())
+         self.assertEqual(d, {1:1, 2:2, 3:3})
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+         d.clear()
+-        class FailingUserDict:
+-            def keys(self):
+-                raise Exc
++
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class FailingUserDict:
++                def keys(self):
++                    raise Exc
+         self.assertRaises(Exc, d.update, FailingUserDict())
+ 
+-        class FailingUserDict:
+-            def keys(self):
+-                class BogonIter:
+-                    def __init__(self):
+-                        self.i = 1
+-                    def __iter__(self):
+-                        return self
+-                    def __next__(self):
+-                        if self.i:
+-                            self.i = 0
+-                            return 'a'
+-                        raise Exc
+-                return BogonIter()
+-            def __getitem__(self, key):
+-                return key
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class FailingUserDict:
++                def keys(self):
++                    class BogonIter:
++                        def __init__(self):
++                            self.i = 1
++                        def __iter__(self):
++                            return self
++                        def __next__(self):
++                            if self.i:
++                                self.i = 0
++                                return 'a'
++                            raise Exc
++                    return BogonIter()
++                def __getitem__(self, key):
++                    return key
+         self.assertRaises(Exc, d.update, FailingUserDict())
+ 
+-        class FailingUserDict:
+-            def keys(self):
+-                class BogonIter:
+-                    def __init__(self):
+-                        self.i = ord('a')
+-                    def __iter__(self):
+-                        return self
+-                    def __next__(self):
+-                        if self.i <= ord('z'):
+-                            rtn = chr(self.i)
+-                            self.i += 1
+-                            return rtn
+-                        raise StopIteration
+-                return BogonIter()
+-            def __getitem__(self, key):
+-                raise Exc
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class FailingUserDict:
++                def keys(self):
++                    class BogonIter:
++                        def __init__(self):
++                            self.i = ord('a')
++                        def __iter__(self):
++                            return self
++                        def __next__(self):
++                            if self.i <= ord('z'):
++                                rtn = chr(self.i)
++                                self.i += 1
++                                return rtn
++                            raise StopIteration
++                    return BogonIter()
++                def __getitem__(self, key):
++                    raise Exc
+         self.assertRaises(Exc, d.update, FailingUserDict())
+ 
+-        class badseq(object):
+-            def __iter__(self):
+-                return self
+-            def __next__(self):
+-                raise Exc()
++
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class badseq(object):
++                def __iter__(self):
++                    return self
++                def __next__(self):
++                    raise Exc()
+ 
+         self.assertRaises(Exc, {}.update, badseq())
  
          self.assertRaises(ValueError, {}.update, [(1, 2, 3)])
  
--    def test_update_shared_keys(self):
--        class MyClass: pass
--
--        # Subclass str to enable us to create an object during the
--        # dict.update() call.
--        class MyStr(str):
--            def __hash__(self):
--                return super().__hash__()
--
--            def __eq__(self, other):
--                # Create an object that shares the same PyDictKeysObject as
--                # obj.__dict__.
--                obj2 = MyClass()
--                obj2.a = "a"
--                obj2.b = "b"
--                obj2.c = "c"
--                return super().__eq__(other)
--
--        obj = MyClass()
--        obj.a = "a"
--        obj.b = "b"
--
--        x = {}
--        x[MyStr("a")] = MyStr("a")
--
--        # gh-132617: this previously raised "dict mutated during update" error
--        x.update(obj.__dict__)
--
--        self.assertEqual(x, {
--            MyStr("a"): "a",
--            "b": "b",
--        })
--
 +    @unittest.skip("test hangs")
      def test_fromkeys(self):
          self.assertEqual(dict.fromkeys('abc'), {'a':None, 'b':None, 'c':None})
          d = {}
-@@ -510,7 +535,7 @@ class DictTest(unittest.TestCase):
+@@ -276,38 +346,43 @@ class DictTest(unittest.TestCase):
+             yield 1
+         self.assertEqual(d.fromkeys(g()), {1:None})
+         self.assertRaises(TypeError, {}.fromkeys, 3)
+-        class dictlike(dict): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class dictlike(dict): pass
+         self.assertEqual(dictlike.fromkeys('a'), {'a':None})
+         self.assertEqual(dictlike().fromkeys('a'), {'a':None})
+         self.assertIsInstance(dictlike.fromkeys('a'), dictlike)
+         self.assertIsInstance(dictlike().fromkeys('a'), dictlike)
+-        class mydict(dict):
+-            def __new__(cls):
+-                return collections.UserDict()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class mydict(dict):
++                def __new__(cls):
++                    return collections.UserDict()
+         ud = mydict.fromkeys('ab')
+         self.assertEqual(ud, {'a':None, 'b':None})
+         self.assertIsInstance(ud, collections.UserDict)
+         self.assertRaises(TypeError, dict.fromkeys)
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+-        class baddict1(dict):
+-            def __init__(self):
+-                raise Exc()
++            class baddict1(dict):
++                def __init__(self):
++                    raise Exc()
+ 
+         self.assertRaises(Exc, baddict1.fromkeys, [1])
+ 
+-        class BadSeq(object):
+-            def __iter__(self):
+-                return self
+-            def __next__(self):
+-                raise Exc()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class BadSeq(object):
++                def __iter__(self):
++                    return self
++                def __next__(self):
++                    raise Exc()
+ 
+         self.assertRaises(Exc, dict.fromkeys, BadSeq())
+ 
+-        class baddict2(dict):
+-            def __setitem__(self, key, value):
+-                raise Exc()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class baddict2(dict):
++                def __setitem__(self, key, value):
++                    raise Exc()
+ 
+         self.assertRaises(Exc, baddict2.fromkeys, [1])
+ 
+@@ -323,18 +398,20 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(dict.fromkeys(d, 0), res)
+ 
+         # test fast path when object's constructor returns large non-empty dict
+-        class baddict3(dict):
+-            def __new__(cls):
+-                return d
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class baddict3(dict):
++                def __new__(cls):
++                    return d
+         d = {i : i for i in range(1000)}
+         res = d.copy()
+         res.update(a=None, b=None, c=None)
+         self.assertEqual(baddict3.fromkeys({"a", "b", "c"}), res)
+ 
+         # test slow path when object is a proper subclass of dict
+-        class baddict4(dict):
+-            def __init__(self):
+-                dict.__init__(self, d)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class baddict4(dict):
++                def __init__(self):
++                    dict.__init__(self, d)
+         d = {i : i for i in range(1000)}
+         res = d.copy()
+         res.update(a=None, b=None, c=None)
+@@ -370,8 +447,9 @@ class DictTest(unittest.TestCase):
+                 self.assertEqual(len(d2), len(d) + 1)
+ 
+     def test_copy_maintains_tracking(self):
+-        class A:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                pass
+ 
+         key = A()
+ 
+@@ -416,15 +494,17 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(len(d['key']), 2)
+         self.assertRaises(TypeError, d.setdefault)
+ 
+-        class Exc(Exception): pass
+ 
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
++
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+ 
+         x = BadHash()
+         d[x] = 42
+@@ -433,16 +513,17 @@ class DictTest(unittest.TestCase):
+ 
+     def test_setdefault_atomic(self):
+         # Issue #13521: setdefault() calls __hash__ and __eq__ only once.
+-        class Hashed(object):
+-            def __init__(self):
+-                self.hash_count = 0
+-                self.eq_count = 0
+-            def __hash__(self):
+-                self.hash_count += 1
+-                return 42
+-            def __eq__(self, other):
+-                self.eq_count += 1
+-                return id(self) == id(other)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Hashed(object):
++                def __init__(self):
++                    self.hash_count = 0
++                    self.eq_count = 0
++                def __hash__(self):
++                    self.hash_count += 1
++                    return 42
++                def __eq__(self, other):
++                    self.eq_count += 1
++                    return id(self) == id(other)
+         hashed1 = Hashed()
+         y = {hashed1: 5}
+         hashed2 = Hashed()
+@@ -452,16 +533,17 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(hashed1.eq_count + hashed2.eq_count, 1)
+ 
+     def test_setitem_atomic_at_resize(self):
+-        class Hashed(object):
+-            def __init__(self):
+-                self.hash_count = 0
+-                self.eq_count = 0
+-            def __hash__(self):
+-                self.hash_count += 1
+-                return 42
+-            def __eq__(self, other):
+-                self.eq_count += 1
+-                return id(self) == id(other)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Hashed(object):
++                def __init__(self):
++                    self.hash_count = 0
++                    self.eq_count = 0
++                def __hash__(self):
++                    self.hash_count += 1
++                    return 42
++                def __eq__(self, other):
++                    self.eq_count += 1
++                    return id(self) == id(other)
+         hashed1 = Hashed()
+         # 5 items
+         y = {hashed1: 5, 0: 0, 1: 1, 2: 2, 3: 3}
+@@ -477,7 +559,7 @@ class DictTest(unittest.TestCase):
          for copymode in -1, +1:
              # -1: b has same structure as a
              # +1: b is a.copy()
@@ -122,7 +449,248 @@ index 4c095464cbb..fcda6484ea6 100644
                  size = 2**log2size
                  a = {}
                  b = {}
-@@ -1039,18 +1064,6 @@ class DictTest(unittest.TestCase):
+@@ -517,15 +599,16 @@ class DictTest(unittest.TestCase):
+ 
+         self.assertRaises(TypeError, d.pop)
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+ 
+         x = BadHash()
+         d[x] = 42
+@@ -569,22 +652,23 @@ class DictTest(unittest.TestCase):
+ 
+     def test_mutating_lookup(self):
+         # changing dict during a lookup (issue #14417)
+-        class NastyKey:
+-            mutate_dict = None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class NastyKey:
++                mutate_dict = None
+ 
+-            def __init__(self, value):
+-                self.value = value
++                def __init__(self, value):
++                    self.value = value
+ 
+-            def __hash__(self):
+-                # hash collision!
+-                return 1
++                def __hash__(self):
++                    # hash collision!
++                    return 1
+ 
+-            def __eq__(self, other):
+-                if NastyKey.mutate_dict:
+-                    mydict, key = NastyKey.mutate_dict
+-                    NastyKey.mutate_dict = None
+-                    del mydict[key]
+-                return self.value == other.value
++                def __eq__(self, other):
++                    if NastyKey.mutate_dict:
++                        mydict, key = NastyKey.mutate_dict
++                        NastyKey.mutate_dict = None
++                        del mydict[key]
++                    return self.value == other.value
+ 
+         key1 = NastyKey(1)
+         key2 = NastyKey(2)
+@@ -602,11 +686,12 @@ class DictTest(unittest.TestCase):
+         d[1] = d
+         self.assertEqual(repr(d), '{1: {...}}')
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+-        class BadRepr(object):
+-            def __repr__(self):
+-                raise Exc()
++            class BadRepr(object):
++                def __repr__(self):
++                    raise Exc()
+ 
+         d = {1: BadRepr()}
+         self.assertRaises(Exc, repr, d)
+@@ -621,13 +706,14 @@ class DictTest(unittest.TestCase):
+         self.assertEqual({}, {})
+         self.assertEqual({1: 2}, {1: 2})
+ 
+-        class Exc(Exception): pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
+ 
+-        class BadCmp(object):
+-            def __eq__(self, other):
+-                raise Exc()
+-            def __hash__(self):
+-                return 1
++            class BadCmp(object):
++                def __eq__(self, other):
++                    raise Exc()
++                def __hash__(self):
++                    return 1
+ 
+         d1 = {BadCmp(): 1}
+         d2 = {1: 1}
+@@ -684,9 +770,10 @@ class DictTest(unittest.TestCase):
+         self.assertFalse(larger == larger3)
+ 
+     def test_errors_in_view_containment_check(self):
+-        class C:
+-            def __eq__(self, other):
+-                raise RuntimeError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def __eq__(self, other):
++                    raise RuntimeError
+ 
+         d1 = {1: C()}
+         d2 = {1: C()}
+@@ -766,9 +853,10 @@ class DictTest(unittest.TestCase):
+         # (E) subclass defines __missing__ method raising RuntimeError
+         # (F) subclass sets __missing__ instance variable (no effect)
+         # (G) subclass doesn't define __missing__ at all
+-        class D(dict):
+-            def __missing__(self, key):
+-                return 42
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class D(dict):
++                def __missing__(self, key):
++                    return 42
+         d = D({1: 2, 3: 4})
+         self.assertEqual(d[1], 2)
+         self.assertEqual(d[3], 4)
+@@ -776,25 +864,28 @@ class DictTest(unittest.TestCase):
+         self.assertNotIn(2, d.keys())
+         self.assertEqual(d[2], 42)
+ 
+-        class E(dict):
+-            def __missing__(self, key):
+-                raise RuntimeError(key)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class E(dict):
++                def __missing__(self, key):
++                    raise RuntimeError(key)
+         e = E()
+         with self.assertRaises(RuntimeError) as c:
+             e[42]
+         self.assertEqual(c.exception.args, (42,))
+ 
+-        class F(dict):
+-            def __init__(self):
+-                # An instance variable __missing__ should have no effect
+-                self.__missing__ = lambda key: None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class F(dict):
++                def __init__(self):
++                    # An instance variable __missing__ should have no effect
++                    self.__missing__ = lambda key: None
+         f = F()
+         with self.assertRaises(KeyError) as c:
+             f[42]
+         self.assertEqual(c.exception.args, (42,))
+ 
+-        class G(dict):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class G(dict):
++                pass
+         g = G()
+         with self.assertRaises(KeyError) as c:
+             g[42]
+@@ -809,17 +900,18 @@ class DictTest(unittest.TestCase):
+ 
+     def test_bad_key(self):
+         # Dictionary lookups should fail if __eq__() raises an exception.
+-        class CustomException(Exception):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class CustomException(Exception):
++                pass
+ 
+-        class BadDictKey:
+-            def __hash__(self):
+-                return hash(self.__class__)
++            class BadDictKey:
++                def __hash__(self):
++                    return hash(self.__class__)
+ 
+-            def __eq__(self, other):
+-                if isinstance(other, self.__class__):
+-                    raise CustomException
+-                return other
++                def __eq__(self, other):
++                    if isinstance(other, self.__class__):
++                        raise CustomException
++                    return other
+ 
+         d = {}
+         x1 = BadDictKey()
+@@ -855,13 +947,14 @@ class DictTest(unittest.TestCase):
+         # Another dict resizing bug (SF bug #1456209).
+         # This caused Segmentation faults or Illegal instructions.
+ 
+-        class X(object):
+-            def __hash__(self):
+-                return 5
+-            def __eq__(self, other):
+-                if resizing:
+-                    d.clear()
+-                return False
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X(object):
++                def __hash__(self):
++                    return 5
++                def __eq__(self, other):
++                    if resizing:
++                        d.clear()
++                    return False
+         d = {}
+         resizing = False
+         d[X()] = 1
+@@ -884,8 +977,9 @@ class DictTest(unittest.TestCase):
+     def test_container_iterator(self):
+         # Bug #3680: tp_traverse was not implemented for dictiter and
+         # dictview objects.
+-        class C(object):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                pass
+         views = (dict.items, dict.values, dict.keys)
+         for v in views:
+             obj = C()
+@@ -938,8 +1032,10 @@ class DictTest(unittest.TestCase):
+     @support.cpython_only
+     def test_track_dynamic(self):
+         # Test GC-optimization of dynamically-created dicts
+-        class MyObject(object):
+-            pass
++
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class MyObject(object):
++                pass
+         x, y, z, w, o = 1.5, "a", (1, object()), [], MyObject()
+ 
+         d = dict()
+@@ -1006,21 +1102,10 @@ class DictTest(unittest.TestCase):
              pass
          self._tracked(MyDict())
  
@@ -139,9 +707,371 @@ index 4c095464cbb..fcda6484ea6 100644
 -        self._tracked(d)
 -
      def make_shared_key_dict(self, n):
-         class C:
+-        class C:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                pass
+ 
+         dicts = []
+         for i in range(n):
+@@ -1109,12 +1194,13 @@ class DictTest(unittest.TestCase):
+     @support.cpython_only
+     def test_splittable_update(self):
+         """dict.update(other) must preserve order in other."""
+-        class C:
+-            def __init__(self, order):
+-                if order:
+-                    self.a, self.b, self.c = 1, 2, 3
+-                else:
+-                    self.c, self.b, self.a = 1, 2, 3
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def __init__(self, order):
++                    if order:
++                        self.a, self.b, self.c = 1, 2, 3
++                    else:
++                        self.c, self.b, self.a = 1, 2, 3
+         o = C(True)
+         o = C(False)  # o.__dict__ has reversed order.
+         self.assertEqual(list(o.__dict__), ["c", "b", "a"])
+@@ -1126,8 +1212,9 @@ class DictTest(unittest.TestCase):
+     @support.cpython_only
+     def test_splittable_to_generic_combinedtable(self):
+         """split table must be correctly resized and converted to generic combined table"""
+-        class C:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                pass
+ 
+         a = C()
+         a.x = 1
+@@ -1249,17 +1336,20 @@ class DictTest(unittest.TestCase):
+             self.assertEqual(sorted(values), sorted(data.values()))
+ 
+     def test_instance_dict_getattr_str_subclass(self):
+-        class Foo:
+-            def __init__(self, msg):
+-                self.msg = msg
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Foo:
++                def __init__(self, msg):
++                    self.msg = msg
+         f = Foo('123')
+-        class _str(str):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class _str(str):
++                pass
+         self.assertEqual(f.msg, getattr(f, _str('msg')))
+         self.assertEqual(f.msg, f.__dict__[_str('msg')])
+ 
+     def test_object_set_item_single_instance_non_str_key(self):
+-        class Foo: pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Foo: pass
+         f = Foo()
+         f.__dict__[1] = 1
+         f.a = 'a'
+@@ -1269,9 +1359,10 @@ class DictTest(unittest.TestCase):
+         # This object will trigger mutation of the dict when replaced
+         # by another value.  Note this relies on refcounting: the test
+         # won't achieve its purpose on fully-GCed Python implementations.
+-        class Mutating:
+-            def __del__(self):
+-                mutate(d)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Mutating:
++                def __del__(self):
++                    mutate(d)
+ 
+         d = {k: Mutating() for k in 'abcdefghijklmnopqr'}
+         for k in list(d):
+@@ -1294,13 +1385,14 @@ class DictTest(unittest.TestCase):
+         self.check_reentrant_insertion(mutate)
+ 
+     def test_merge_and_mutate(self):
+-        class X:
+-            def __hash__(self):
+-                return 0
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X:
++                def __hash__(self):
++                    return 0
+ 
+-            def __eq__(self, o):
+-                other.clear()
+-                return False
++                def __eq__(self, o):
++                    other.clear()
++                    return False
+ 
+         l = [(i,0) for i in range(1, 1337)]
+         other = dict(l)
+@@ -1316,26 +1408,28 @@ class DictTest(unittest.TestCase):
+ 
+     def test_equal_operator_modifying_operand(self):
+         # test fix for seg fault reported in bpo-27945 part 3.
+-        class X():
+-            def __del__(self):
+-                dict_b.clear()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X():
++                def __del__(self):
++                    dict_b.clear()
+ 
+-            def __eq__(self, other):
+-                dict_a.clear()
+-                return True
++                def __eq__(self, other):
++                    dict_a.clear()
++                    return True
+ 
+-            def __hash__(self):
+-                return 13
++                def __hash__(self):
++                    return 13
+ 
+         dict_a = {X(): 0}
+         dict_b = {X(): X()}
+         self.assertTrue(dict_a == dict_b)
+ 
+         # test fix for seg fault reported in bpo-38588 part 1.
+-        class Y:
+-            def __eq__(self, other):
+-                dict_d.clear()
+-                return True
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Y:
++                def __eq__(self, other):
++                    dict_d.clear()
++                    return True
+ 
+         dict_c = {0: Y()}
+         dict_d = {0: set()}
+@@ -1343,14 +1437,15 @@ class DictTest(unittest.TestCase):
+ 
+     def test_fromkeys_operator_modifying_dict_operand(self):
+         # test fix for seg fault reported in issue 27945 part 4a.
+-        class X(int):
+-            def __hash__(self):
+-                return 13
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X(int):
++                def __hash__(self):
++                    return 13
+ 
+-            def __eq__(self, other):
+-                if len(d) > 1:
+-                    d.clear()
+-                return False
++                def __eq__(self, other):
++                    if len(d) > 1:
++                        d.clear()
++                    return False
+ 
+         d = {}  # this is required to exist so that d can be constructed!
+         d = {X(1): 1, X(2): 2}
+@@ -1361,14 +1456,15 @@ class DictTest(unittest.TestCase):
+ 
+     def test_fromkeys_operator_modifying_set_operand(self):
+         # test fix for seg fault reported in issue 27945 part 4b.
+-        class X(int):
+-            def __hash__(self):
+-                return 13
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X(int):
++                def __hash__(self):
++                    return 13
+ 
+-            def __eq__(self, other):
+-                if len(d) > 1:
+-                    d.clear()
+-                return False
++                def __eq__(self, other):
++                    if len(d) > 1:
++                        d.clear()
++                    return False
+ 
+         d = {}  # this is required to exist so that d can be constructed!
+         d = {X(1), X(2)}
+@@ -1378,40 +1474,44 @@ class DictTest(unittest.TestCase):
              pass
-@@ -1655,7 +1668,7 @@ class DictTest(unittest.TestCase):
+ 
+     def test_dictitems_contains_use_after_free(self):
+-        class X:
+-            def __eq__(self, other):
+-                d.clear()
+-                return NotImplemented
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X:
++                def __eq__(self, other):
++                    d.clear()
++                    return NotImplemented
+ 
+         d = {0: set()}
+         (0, X()) in d.items()
+ 
+     def test_dict_contain_use_after_free(self):
+         # bpo-40489
+-        class S(str):
+-            def __eq__(self, other):
+-                d.clear()
+-                return NotImplemented
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class S(str):
++                def __eq__(self, other):
++                    d.clear()
++                    return NotImplemented
+ 
+-            def __hash__(self):
+-                return hash('test')
++                def __hash__(self):
++                    return hash('test')
+ 
+         d = {S(): 'value'}
+         self.assertFalse('test' in d)
+ 
+     def test_init_use_after_free(self):
+-        class X:
+-            def __hash__(self):
+-                pair[:] = []
+-                return 13
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X:
++                def __hash__(self):
++                    pair[:] = []
++                    return 13
+ 
+         pair = [X(), 123]
+         dict([pair])
+ 
+     def test_oob_indexing_dictiter_iternextitem(self):
+-        class X(int):
+-            def __del__(self):
+-                d.clear()
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X(int):
++                def __del__(self):
++                    d.clear()
+ 
+         d = {i: X(i) for i in range(8)}
+ 
+@@ -1445,10 +1545,11 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(list(reversed(dict().keys())), [])
+ 
+     def test_reverse_iterator_for_shared_shared_dicts(self):
+-        class A:
+-            def __init__(self, x, y):
+-                if x: self.x = x
+-                if y: self.y = y
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                def __init__(self, x, y):
++                    if x: self.x = x
++                    if y: self.y = y
+ 
+         self.assertEqual(list(reversed(A(1, 2).__dict__)), ['y', 'x'])
+         self.assertEqual(list(reversed(A(1, 0).__dict__)), ['x'])
+@@ -1464,22 +1565,24 @@ class DictTest(unittest.TestCase):
+         self.assertEqual(list(copy.items()), expected)
+ 
+         # dict subclass doesn't override __iter__
+-        class CustomDict(dict):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class CustomDict(dict):
++                pass
+ 
+         pairs = [('a', 1), ('b', 2), ('c', 3)]
+ 
+         d = CustomDict(pairs)
+         self.assertEqual(pairs, list(dict(d).items()))
+ 
+-        class CustomReversedDict(dict):
+-            def keys(self):
+-                return reversed(list(dict.keys(self)))
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class CustomReversedDict(dict):
++                def keys(self):
++                    return reversed(list(dict.keys(self)))
+ 
+-            __iter__ = keys
++                __iter__ = keys
+ 
+-            def items(self):
+-                return reversed(dict.items(self))
++                def items(self):
++                    return reversed(dict.items(self))
+ 
+         d = CustomReversedDict(pairs)
+         self.assertEqual(pairs[::-1], list(dict(d).items()))
+@@ -1504,17 +1607,18 @@ class DictTest(unittest.TestCase):
+         self.assertTrue(gc.is_tracked(next(it)))
+ 
+     def test_store_evilattr(self):
+-        class EvilAttr:
+-            def __init__(self, d):
+-                self.d = d
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class EvilAttr:
++                def __init__(self, d):
++                    self.d = d
+ 
+-            def __del__(self):
+-                if 'attr' in self.d:
+-                    del self.d['attr']
+-                gc.collect()
++                def __del__(self):
++                    if 'attr' in self.d:
++                        del self.d['attr']
++                    gc.collect()
+ 
+-        class Obj:
+-            pass
++            class Obj:
++                pass
+ 
+         obj = Obj()
+         obj.__dict__ = {}
+@@ -1526,21 +1630,23 @@ class DictTest(unittest.TestCase):
+         # `str` keys. Make sure the unoptimized path is used when a non-`str`
+         # key appears.
+ 
+-        class StrSub(str):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class StrSub(str):
++                pass
+ 
+         eq_count = 0
+         # This class compares equal to the string 'key3'
+-        class Key3:
+-            def __hash__(self):
+-                return hash('key3')
+-
+-            def __eq__(self, other):
+-                nonlocal eq_count
+-                if isinstance(other, Key3) or isinstance(other, str) and other == 'key3':
+-                    eq_count += 1
+-                    return True
+-                return False
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Key3:
++                def __hash__(self):
++                    return hash('key3')
++
++                def __eq__(self, other):
++                    nonlocal eq_count
++                    if isinstance(other, Key3) or isinstance(other, str) and other == 'key3':
++                        eq_count += 1
++                        return True
++                    return False
+ 
+         key3_1 = StrSub('key3')
+         key3_2 = Key3()
+@@ -1622,7 +1728,7 @@ class DictTest(unittest.TestCase):
                  self.assertGreaterEqual(eq_count, 1)
  
  
@@ -150,7 +1080,27 @@ index 4c095464cbb..fcda6484ea6 100644
  
      # Test _PyDict_GetItem_KnownHash()
      @support.cpython_only
-@@ -1699,4 +1712,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1640,12 +1746,13 @@ class CAPITest(unittest.TestCase):
+         # key does not exist
+         self.assertRaises(KeyError, dict_getitem_knownhash, {}, 1, hash(1))
+ 
+-        class Exc(Exception): pass
+-        class BadEq:
+-            def __eq__(self, other):
+-                raise Exc
+-            def __hash__(self):
+-                return 7
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Exc(Exception): pass
++            class BadEq:
++                def __eq__(self, other):
++                    raise Exc
++                def __hash__(self):
++                    return 7
+ 
+         k1, k2 = BadEq(), BadEq()
+         d = {k1: 1}
+@@ -1666,4 +1773,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
  
  
  if __name__ == "__main__":

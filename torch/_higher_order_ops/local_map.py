@@ -6,7 +6,7 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -50,7 +50,7 @@ local_map_hop_backward = LocalMapBackwardHOP()
 def create_hop_fw_bw(
     fw_gm: GraphModule,
     *_args: Any,
-) -> tuple[GraphModule, GraphModule, int]:
+) -> tuple[GraphModule, GraphModule, int, int]:
     """
     Traces a joint, applies passes and partitions it
     """
@@ -168,7 +168,7 @@ def create_hop_fw_bw(
         local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
 
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
-        new_bw_gm.meta["local_map_kwargs"] = local_map_kwargs
+        new_bw_gm.meta["local_map_kwargs"] = {**local_map_kwargs}
         # Okay because Autoparallel assumes same sharding between param and grads
         new_bw_gm.meta["local_map_kwargs"]["in_placements"] = local_map_kwargs[
             "out_placements"
@@ -177,7 +177,7 @@ def create_hop_fw_bw(
             "in_placements"
         ]
 
-        return new_fw_gm, new_bw_gm, num_fw_outputs
+        return new_fw_gm, new_bw_gm, num_fw_inputs, num_fw_outputs
 
 
 class LocalMapAutogradOp(torch.autograd.Function):
@@ -186,11 +186,13 @@ class LocalMapAutogradOp(torch.autograd.Function):
         ctx: Any,
         fw_gm: GraphModule,
         bw_gm: GraphModule,
+        num_fw_ins: int,
         num_fw_outs: int,
         *args: Any,
         **kwargs: Any,
     ) -> tuple[Optional[torch.Tensor], ...]:
         ctx.bw_gm = bw_gm
+        ctx.num_fw_ins = num_fw_ins
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outs_with_saved_activations = local_map_hop(fw_gm, *args, **kwargs)
@@ -208,7 +210,11 @@ class LocalMapAutogradOp(torch.autograd.Function):
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             grad_ins = local_map_hop_backward(ctx.bw_gm, *saved_activations, *grads)
-        return None, None, None, *grad_ins
+            if len(grad_ins) != ctx.num_fw_ins:
+                raise RuntimeError(
+                    f"Expected {ctx.num_fw_ins} grad_ins, got {len(grad_ins)}"
+                )
+        return None, None, None, None, *grad_ins
 
 
 @local_map_hop.py_impl(torch._C.DispatchKey.Autograd)
@@ -218,8 +224,10 @@ def autograd_key(
     **kwargs: Any,
 ) -> Any:
     if _DEFER_INLINING:
-        fw_gm, bw_gm, num_fw_outs = create_hop_fw_bw(fw_gm, *args)
-        return LocalMapAutogradOp.apply(fw_gm, bw_gm, num_fw_outs, *args, **kwargs)
+        fw_gm, bw_gm, num_fw_ins, num_fw_outs = create_hop_fw_bw(fw_gm, *args)
+        return LocalMapAutogradOp.apply(
+            fw_gm, bw_gm, num_fw_ins, num_fw_outs, *args, **kwargs
+        )
 
     return fw_gm(*args, **kwargs)
 
@@ -248,7 +256,6 @@ def fake_mode_key(
 
 
 def proxy_mode_key_common(
-    hop: Union[LocalMapHOP, LocalMapBackwardHOP],
     call_hop: Callable[..., Any],
     proxy_mode: ProxyTorchDispatchMode,
     gm: GraphModule,
@@ -260,7 +267,7 @@ def proxy_mode_key_common(
     )
     assert len(kwargs) == 0
 
-    example_out = hop(gm, *args, **kwargs)
+    example_out = call_hop(*args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
 
     out_proxy = proxy_mode.tracer.create_proxy(
@@ -289,9 +296,7 @@ def proxy_mode_key(
     def call_local_map(*_args: Any, **_kwargs: Any) -> Any:
         return functools.partial(local_map_hop, fw_gm)(*_args, **_kwargs)
 
-    return proxy_mode_key_common(
-        local_map_hop, call_local_map, proxy_mode, fw_gm, *args, **kwargs
-    )
+    return proxy_mode_key_common(call_local_map, proxy_mode, fw_gm, *args, **kwargs)
 
 
 @local_map_hop_backward.py_impl(torch._C.DispatchKey.Autograd)
@@ -340,7 +345,6 @@ def bw_proxy_mode_key(
         return functools.partial(local_map_hop_backward, bw_gm)(*_args, **_kwargs)
 
     return proxy_mode_key_common(
-        local_map_hop_backward,
         call_local_map_backward,
         proxy_mode,
         bw_gm,

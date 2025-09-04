@@ -755,7 +755,15 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
+    "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
+]
+
+libtorch_nvshmem_sources = [
+    "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources

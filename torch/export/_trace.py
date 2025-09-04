@@ -384,7 +384,9 @@ def _get_param_buffer_mapping(
     param_lookup: dict[int, str] = {}
     buffer_lookup: dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup[id(param)] = name
+        if param_lookup.get(id(param)) is None:
+            # we only want to keep the first occurrence of a parameter to guarantee parity of original and traced module.
+            param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup[id(buffer)] = name
 
@@ -810,7 +812,7 @@ def _export_to_torch_ir(
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
                     # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
@@ -2035,6 +2037,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    allow_complex_guards_as_runtime_asserts: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2059,7 +2062,7 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
@@ -2196,6 +2199,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep

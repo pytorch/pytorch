@@ -291,8 +291,12 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
 // - This map has also to be maintained as global variable since the register
 //   hooks are called outside the scope of any PG, thus we need traverse
 //   communicators in all PGs.
-using MemPoolSet = std::
-    unordered_set<c10::cuda::MempoolId_t, c10::hash<c10::cuda::MempoolId_t>>;
+
+// MemPoolSet has ids of mempools used with this communicator, and whether they
+// were registered with window APIs or not
+using MemPoolSet = std::unordered_set<
+    std::tuple<c10::cuda::MempoolId_t, bool>,
+    c10::hash<std::tuple<c10::cuda::MempoolId_t, bool>>>;
 static std::unordered_map<std::shared_ptr<NCCLComm>, MemPoolSet>
     ncclCommMemPoolMap;
 static std::mutex ncclCommMemPoolMapMutex;
@@ -310,10 +314,23 @@ static void cacheAllocatorRegisterHook(
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
   for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors() ||
-          memPools.find(te.mempool_) != memPools.end()) {
+      bool symm = false;
+      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
+      auto it =
+          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
+            return std::get<0>(tup) == te.mempool_;
+          });
+      if (it != memPools.end()) {
+        should_register = true;
+        symm = std::get<1>(*it);
+      }
+      if (should_register) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+        ncclComm->registerSegment(
+            reinterpret_cast<void*>(te.addr_),
+            te.size_,
+            /*errorOnRereg*/ false,
+            /*window*/ symm);
       }
     }
   }
@@ -330,10 +347,19 @@ static void cacheAllocatorDeregisterHook(
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
   for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors() ||
-          memPools.find(te.mempool_) != memPools.end()) {
+      bool symm = false;
+      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
+      auto it =
+          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
+            return std::get<0>(tup) == te.mempool_;
+          });
+      if (it != memPools.end()) {
+        should_register = true;
+        symm = std::get<1>(*it);
+      }
+      if (should_register) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_), symm);
       }
     }
   }
@@ -968,8 +994,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "size: " << size << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix()
+            << "ProcessGroupNCCL initialization options: " << "size: " << size
+            << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -1089,7 +1116,7 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
-void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
+void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
@@ -1101,24 +1128,15 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         DistBackendError,
         "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
-  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
   {
     std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     auto iter = ncclCommMemPoolMap.find(ncclComm);
-    iter->second.insert(pool->id());
+    iter->second.insert(std::make_tuple(pool->id(), symm));
   }
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
-  // TODO:
-  // if(pool->is_symmetric()) {
-  //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
-  //   Allgather to verify mempool.alloc_request_counter matches across GPUs
-  //   add alloc_request_counter per mempool (How many allocations a mempool has
-  //   served during its lifetime) this should guarantee pool is used in a
-  //   symmetric/SPMD manner
-  // }
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1128,31 +1146,35 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
         /*errorOnRereg=*/false, // ignores reregistration error
-        /*window=*/pool->is_symmetric()); // whether to use NCCL symmetric
-                                          // memory
+        /*window*/ symm); // whether to use NCCL symmetric memory
   }
 }
 
 void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
-  auto device = at::Device(at::DeviceType::CUDA, pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer deregistration for all buffers in "
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
-    // HACK: currently we are using this function for NVLS
-    // reductions, and that's why using OpType::ALLREDUCE.
-    // If we end up using this API for zero-copy P2P, we might
-    // need to refactor and account for different OpType.
-    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+    C10_THROW_ERROR(
+        DistBackendError,
+        "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
-  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  bool symm;
   {
     std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     auto iter = ncclCommMemPoolMap.find(ncclComm);
-    iter->second.erase(pool->id());
+    auto mempool_it = std::find_if(
+        iter->second.begin(), iter->second.end(), [&](const auto& tup) {
+          return std::get<0>(tup) == pool->id();
+        });
+    TORCH_CHECK(
+        mempool_it != iter->second.end(),
+        "Trying to unregister not previously registered pool");
+    symm = std::get<1>(*mempool_it);
+    iter->second.erase(mempool_it);
   }
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
@@ -1161,7 +1183,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     ncclComm->deregisterSegment(
-        reinterpret_cast<void*>(segmentInfo.address), pool->is_symmetric());
+        reinterpret_cast<void*>(segmentInfo.address), symm);
   }
 }
 
@@ -5749,7 +5771,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
     // Pool is created
     memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
     // Register so that we call ncclCommRegister on all new allocations
-    registerMemPool(memPool_.get());
+    registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 
