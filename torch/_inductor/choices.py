@@ -125,9 +125,6 @@ class InductorChoices:
         Yields:
             ChoiceCaller objects from the templates
         """
-        # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
-        # the max-autotune bool, rather than inferring it here
-        max_autotune = config.max_autotune or config.max_autotune_gemm
         if kwarg_overrides is None:
             kwarg_overrides = {}
         input_tensors = kernel_inputs.nodes()
@@ -148,7 +145,9 @@ class InductorChoices:
             heuristic = get_template_heuristic(template_name, device_type, op_name)
 
             cs = heuristic.get_template_configs(
-                kernel_inputs, layout, op_name, max_autotune
+                kernel_inputs,
+                layout,
+                op_name,
             )
             extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
 

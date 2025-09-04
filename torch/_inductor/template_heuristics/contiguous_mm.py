@@ -48,7 +48,6 @@ class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get all the valid k_splits for the given m, n, k.
@@ -56,9 +55,6 @@ class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs), (
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
-        if not max_autotune:
-            # max-autotune only optimization
-            return
         # Check for unbacked symbols - if found, yield nothing
         unbacked_symbols = any(
             len(get_free_symbols(itr, unbacked_only=True)) > 0
