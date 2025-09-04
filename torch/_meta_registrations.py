@@ -7399,192 +7399,6 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
     return out
 
 
-def _meta_scaled_grouped_mm_fp8(
-    mat_a: Tensor,
-    mat_b: Tensor,
-    scale_a: Tensor,
-    scale_b: Tensor,
-    offs: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
-    scale_result: Optional[Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: bool = False,
-):
-    torch._check(
-        scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-        lambda: "For fp8 rowwise torch._scaled_grouped_mm, both scale_a and scale_b must be float (fp32) tensors, but got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
-    )
-
-    def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
-        if mat.dim() == 2:
-            torch._check(
-                scale.dim() == 1,
-                lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
-            )
-            torch._check(
-                scale.is_contiguous(),
-                lambda: f"Expected {scale_name} to be contiguous.",
-            )
-            torch._check(
-                scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
-                lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
-            )
-        else:
-            torch._check(
-                scale.dim() == 2,
-                lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
-            )
-            torch._check(
-                scale.stride(1) == 1,
-                lambda: f"Expected {scale_name} to be contiguous in the last dimension.",
-            )
-            torch._check(
-                scale.shape[0] == mat.shape[0],
-                lambda: f"Expected {scale_name} batch dimension to be {mat.shape[0]}, got {scale.shape[0]}.",
-            )
-            torch._check(
-                scale.shape[1] == mat.shape[1 + scaled_dim],
-                lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
-            )
-
-    mat_a_is_2d = mat_a.dim() == 2
-    mat_b_is_2d = mat_b.dim() == 2
-    scale_multiplier = (
-        offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
-    )
-    check_scale("scale_a", scale_a, mat_a, 0, scale_multiplier)
-    check_scale("scale_b", scale_b, mat_b, 1, scale_multiplier)
-
-
-def _meta_scaled_grouped_mm_mxfp8(
-    mat_a: Tensor,
-    mat_b: Tensor,
-    scale_a: Tensor,
-    scale_b: Tensor,
-    offs: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
-    scale_result: Optional[Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: bool = False,
-):
-    is_2d_2d = mat_a.ndim == 2 and mat_b.ndim == 2
-    is_2d_3d = mat_a.ndim == 2 and mat_b.ndim == 3
-    if is_2d_2d:
-        _meta_scaled_grouped_mm_mxfp8_2d2d(
-            mat_a,
-            mat_b,
-            scale_a,
-            scale_b,
-            offs,
-        )
-    elif is_2d_3d:
-        _meta_scaled_grouped_mm_mxfp8_2d3d(
-            mat_a,
-            mat_b,
-            scale_a,
-            scale_b,
-            offs,
-        )
-    else:
-        raise ValueError(
-            "Only 2D-2D and 2D-3D inputs are supported for MXFP8 torch._scaled_grouped_mm."
-        )
-
-
-def round_up(x, y):
-    """Rounds up x to nearest multiple of y"""
-    return ((x + y - 1) // y) * y
-
-
-def _meta_scaled_grouped_mm_mxfp8_2d2d(
-    mat_a: Tensor,
-    mat_b: Tensor,
-    scale_a: Tensor,
-    scale_b: Tensor,
-    offs: Tensor,
-):
-    # For 2d-2d grouped gemm, groups are along the K (contracting) dim
-    torch._check(
-        scale_a.ndim == mat_a.ndim,
-        lambda: f"Expected scale_a to have same number of dims as target tensor, but got scale_a.ndim()={scale_a.dim()}, mat_a.ndim()={mat_a.ndim}.",
-    )
-    torch._check(
-        scale_b.ndim == mat_b.ndim,
-        lambda: f"Expected scale_b to have same number of dims as target tensor, but got scale_b.ndim()={scale_b.dim()}, mat_b.ndim()={mat_b.ndim}.",
-    )
-
-    # For 2d-2d, groups are along K dim.
-    # Calculate total size of scale K dim after per group blocked format is applied
-    padded_per_group_scale_K = 0
-    for i, group_end_off in enumerate(offs.tolist()):
-        group_start_off = 0 if i == 0 else offs[i - 1]
-        group_size = group_end_off - group_start_off
-        expected_group_size = round_up(group_size / 32, 4)
-        padded_per_group_scale_K += expected_group_size
-
-    # Check scale_a has shape (padded_M, padded_per_group_scale_K)
-    M, total_K = mat_a.shape
-    padded_scale_M = round_up(M, 128)
-    torch._check(
-        scale_a.shape[0] == padded_scale_M
-        and scale_a.shape[1] == padded_per_group_scale_K,
-        lambda: f"For 2d-2d MXFP8 grouped gemm, for mat_a.shape={mat_a.shape} with offs={offs}, expected scale_a to have shape ({M}, {padded_per_group_scale_K}), but got {scale_a.shape}.",
-    )
-
-    # Check scale_b has shape (padded_N, padded_per_group_scale_K)
-    N = mat_b.shape[-1]
-    padded_scale_N = round_up(N, 128)
-    torch._check(
-        scale_b.shape[0] == padded_scale_N
-        and scale_b.shape[1] == padded_per_group_scale_K,
-        lambda: f"For 2d-2d MXFP8 grouped gemm, for mat_b.shape={mat_b.shape} with offs={offs}, expected scale_b to have shape ({padded_scale_N}, {padded_per_group_scale_K}), but got {scale_b.shape}.",
-    )
-
-
-def _meta_scaled_grouped_mm_mxfp8_2d3d(
-    mat_a: Tensor,
-    mat_b: Tensor,
-    scale_a: Tensor,
-    scale_b: Tensor,
-    offs: Tensor,
-):
-    # For 2d-2d grouped gemm, groups are along the K (contracting) dim
-    torch._check(
-        scale_a.ndim == mat_a.ndim,
-        lambda: f"Expected scale_a to have same number of dims as target tensor, but got scale_a.ndim()={scale_a.dim()}, mat_a.ndim()={mat_a.ndim}.",
-    )
-    torch._check(
-        scale_b.ndim == mat_b.ndim,
-        lambda: f"Expected scale_b to have same number of dims as target tensor, but got scale_b.ndim()={scale_b.dim()}, mat_b.ndim()={mat_b.ndim}.",
-    )
-
-    # For 2d-3d, groups are along M dim.
-    # Calculate total size of scale M dim after per group blocked format is applied
-    padded_per_group_scale_M = 0
-    for i, group_end_off in enumerate(offs.tolist()):
-        group_start_off = 0 if i == 0 else offs[i - 1]
-        group_size = group_end_off - group_start_off
-        expected_group_size = round_up(group_size, 128)
-        padded_per_group_scale_M += expected_group_size
-
-    # Check scale_a has shape (padded_per_group_scale_M, padded_scale_K)
-    total_M, K = mat_a.shape
-    padded_scale_K = round_up(K / 32, 4)
-    torch._check(
-        scale_a.shape[0] == padded_per_group_scale_M
-        and scale_a.shape[1] == padded_scale_K,
-        lambda: f"For 2d-3d MXFP8 grouped gemm, for mat_a.shape={mat_a.shape} with offs={offs}, expected scale_a to have shape ({padded_per_group_scale_M}, {padded_scale_K}), but got {scale_a.shape}.",
-    )
-
-    # Check scale_b has shape (..., padded_scale_N, padded_scale_K)
-    N = mat_b.shape[-1]
-    padded_scale_N = round_up(N, 128)
-    torch._check(
-        scale_b.shape[-2] == padded_scale_N and scale_b.shape[1] == padded_scale_K,
-        lambda: f"For 2d-2d MXFP8 grouped gemm, for mat_b.shape={mat_b.shape} expected scale_b to have shape ({padded_scale_N}, {padded_scale_K}), but got {scale_b.shape}.",
-    )
-
-
 def _meta_grouped_mm_common(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -7651,11 +7465,6 @@ def _meta_grouped_mm_common(
             lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
         )
 
-        torch._check(
-            scale_result is None,
-            lambda: "Scale result tensor provided, but it is not supported yet.",
-        )
-
     def check_valid_strides(mat_name, mat):
         end_dim = mat.dim() - 1
         alignment = 16 // mat.element_size()
@@ -7682,6 +7491,94 @@ def _meta_grouped_mm_common(
 
     check_valid_strides("mat_a", mat_a)
     check_valid_strides("mat_b", mat_b)
+
+    if scale_a is not None and scale_b is not None:
+        torch._check(
+            (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+            or (
+                scale_a.dtype == torch.float8_e8m0fnu
+                and scale_b.dtype == torch.float8_e8m0fnu
+            ),
+            lambda: "For FP8, scale_a and scale_b must both float32. For MXFP8 both must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
+        )
+        is_mxfp8 = (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        )
+
+        def round_up(x, y):
+            """Rounds up x to nearest multiple of y"""
+            return ((x + y - 1) // y) * y
+
+        def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
+            if mat.dim() == 2:
+                torch._check(
+                    scale.is_contiguous(),
+                    lambda: f"Expected {scale_name} to be contiguous.",
+                )
+                # For MXFP8, 2d tensors have variable size groups represented as subtensors,
+                # that are converted to blocked padded format individually. At compile time we don't know
+                # the group sizes yet, so we don't know the expecte size of the blocked format scale.
+                # This limits what we can check here.
+                if is_mxfp8:
+                    torch._check(
+                        scale.dim() == mat.dim(),
+                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
+                    )
+                else:
+                    torch._check(
+                        scale.dim() == 1,
+                        lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
+                    )
+                    torch._check(
+                        scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
+                        lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
+                    )
+            else:
+                torch._check(
+                    scale.stride(-1) == 1,
+                    lambda: f"Expected {scale_name} to be contiguous in the last dimension.",
+                )
+                torch._check(
+                    scale.shape[0] == mat.shape[0],
+                    lambda: f"Expected {scale_name} batch dimension to be {mat.shape[0]}, got {scale.shape[0]}.",
+                )
+                # For MXFP8, 3d tensors have static 'groups' (stack of 2d tensors) so we can know the expected blocked
+                # scale sizes at compile time.
+                if is_mxfp8:
+                    torch._check(
+                        mat.ndim == scale.ndim,
+                        lambda: f"For MXFP8, scale should have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
+                    )
+                    # TODO: This logic only holds for RHS tensor in 2d-3d case. We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
+                    G, K, N = scale.shape
+                    block_size = 32
+                    blocked_K = round_up(K / block_size, 4)
+                    blocked_N = round_up(N, 128)
+                    torch._check(
+                        mat.shape[-2] == blocked_K and mat.shape[-1] == blocked_N,
+                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K},{blocked_N}), but got {scale.shape}",
+                    )
+                else:
+                    torch._check(
+                        scale.dim() == 2,
+                        lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
+                    )
+                    torch._check(
+                        scale.shape[1] == mat.shape[1 + scaled_dim],
+                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
+                    )
+
+        scale_multiplier = (
+            offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
+        )
+        check_scale("scale_a", scale_a, mat_a, 0, scale_multiplier)
+        check_scale("scale_b", scale_b, mat_b, 1, scale_multiplier)
+
+        torch._check(
+            scale_result is None,
+            lambda: "Scale result tensor provided, but it is not supported yet.",
+        )
 
     if mat_a_is_2d or mat_b_is_2d:
         torch._check(
@@ -7749,47 +7646,6 @@ def meta_scaled_grouped_mm(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
-    is_mxfp8 = (
-        scale_a is not None
-        and scale_a.dtype == torch.float8_e8m0fnu
-        and scale_b is not None
-        and scale_b.dtype == torch.float8_e8m0fnu
-    )
-
-    is_fp8 = mat_a.dtype in (
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-    ) and mat_b.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
-
-    if is_mxfp8:
-        _meta_scaled_grouped_mm_mxfp8(
-            mat_a,
-            mat_b,
-            scale_a,
-            scale_b,
-            offs,
-            bias,
-            scale_result,
-            out_dtype,
-            use_fast_accum,
-        )
-    elif is_fp8:
-        _meta_scaled_grouped_mm_fp8(
-            mat_a,
-            mat_b,
-            scale_a,
-            scale_b,
-            offs,
-            bias,
-            scale_result,
-            out_dtype,
-            use_fast_accum,
-        )
-    else:
-        raise ValueError(
-            "Only FP8 and MXFP8 are supported for torch._scaled_grouped_mm."
-        )
-
     return _meta_grouped_mm_common(
         mat_a,
         mat_b,
