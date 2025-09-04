@@ -1756,7 +1756,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
-    @unittest.expectedFailure
     @make_test
     def test_set_in_frozenset(x):
         var = set("abc")
@@ -3529,7 +3528,6 @@ class GraphModule(torch.nn.Module):
             return a + b
         return a - b
 
-    @unittest.expectedFailure
     @make_test
     def test_range_iterator_2(a, b):
         # should pass once we stop having three different paths on call_iter
