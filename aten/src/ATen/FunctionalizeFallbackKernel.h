@@ -6,7 +6,7 @@ namespace at::functionalization {
 
 // `ViewMeta` implementation for `resize_` operation.
 struct TORCH_API resize__ViewMeta : public ViewMeta {
-  FUNCTIONALIZATION_VIEWMETA_NAME(resize__ViewMeta);
+  FUNCTIONALIZATION_VIEWMETA_NAME(resize__ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* reapply_views */,
       const std::vector<int64_t>&);
@@ -32,7 +32,7 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
 
 // `ViewMeta` implementation for `_unsafe_view` operation.
 struct TORCH_API _unsafe_view_ViewMeta : public ViewMeta {
-  FUNCTIONALIZATION_VIEWMETA_NAME(_unsafe_view_ViewMeta);
+  FUNCTIONALIZATION_VIEWMETA_NAME(_unsafe_view_ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* has_symbolic_inputs */,
       const std::vector<c10::SymInt>&);
