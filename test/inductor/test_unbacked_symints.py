@@ -546,6 +546,24 @@ class TestUnbackedSymints(InductorTestCase):
         expected = model(*inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_to_int_with_unbacked_size(self, device):
+        def fn(x):
+            unbacked = x.item()
+            torch._check_is_size(unbacked)
+
+            # Transpose to avoid contig short-circuit.
+            unbacked_size = torch.ones(
+                size=(unbacked // 4, 10), device=device
+            ).transpose(0, 1)
+            return unbacked_size.int()
+
+        example_inputs = (torch.tensor(16, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

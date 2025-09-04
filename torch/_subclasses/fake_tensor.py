@@ -940,6 +940,21 @@ class FakeTensor(Tensor):
                 if any(map(check_cpu_device, (common_device, t.device))):
                     return
 
+            # if prefer_device_type is set, prefer that device type over others
+            prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
+            if prefer_device_type is not None:
+                common_has_preferred = prefer_device_type in common_device.type
+                t_has_preferred = prefer_device_type in t.device.type
+
+                if not common_has_preferred and t_has_preferred:
+                    # Switch to the preferred device type
+                    common_device = t.device
+                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                    return
+                elif common_has_preferred and not t_has_preferred:
+                    # Keep the existing preferred device type
+                    return
+
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
@@ -2598,7 +2613,11 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if (
+            func not in meta_table
+            and not self.cpp_meta_supports_symint(func)
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+        ):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2904,6 +2923,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

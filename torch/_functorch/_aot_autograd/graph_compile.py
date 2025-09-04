@@ -20,6 +20,10 @@ from collections import defaultdict
 from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -51,6 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
+from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -73,6 +78,8 @@ from .schemas import (
     AOTConfig,
     AOTGraphCapture,
     AOTState,
+    FlatFn,
+    FxValue,
     MutationType,
     ViewAndMutationMeta,
 )
@@ -82,13 +89,11 @@ from .utils import (
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
+    simple_wraps,
     strict_zip,
     unlift_tokens,
 )
 
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 zip = strict_zip
 
@@ -113,18 +118,38 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
 
 def aot_stage1_graph_capture(
     aot_state: AOTState,
-    flat_fn: Callable,
+    orig_flat_fn: FlatFn,
 ) -> AOTGraphCapture:
+    # NB: flat_fn at this point coincides with the initial info from forward
+    # metadata collection returning a list[Tensor].  We are now going to
+    # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
+    # then preserve this convention through the rest of the passes.
+
+    # TODO: We could test for consistency with fw_metadata, but this is not a
+    # big deal
+    @simple_wraps(orig_flat_fn)
+    def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
+        out = orig_flat_fn(*args)
+        out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
+            PlainAOTOutput(i)  # type: ignore[misc]
+            for i in range(len(out))  # type: ignore[misc]
+        )
+        return out, out_descs
+
     aot_config = aot_state.aot_config
 
     wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
-    flat_fn, aot_state.flat_args, aot_state.fw_metadata = pre_compile(
-        wrappers,
-        flat_fn,
-        aot_state.flat_args,
-        aot_config,
-        fw_metadata=aot_state.fw_metadata,
+    flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
+        pre_compile(
+            wrappers,
+            orig_flat_fn2,
+            aot_state.flat_args,
+            aot_state.flat_args_descs,
+            aot_config,
+            fw_metadata=aot_state.fw_metadata,
+        )
     )
+
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
@@ -132,21 +157,31 @@ def aot_stage1_graph_capture(
     if aot_state.needs_autograd and not aot_config.pre_dispatch:
         # FYI: this being moved to trigger in export is new, seems fine!
         with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-            graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+                aot_dispatch_autograd_graph(
+                    flat_fn,
+                    aot_state.flat_args,
+                    aot_state.flat_args_descs,
+                    aot_config,
+                    fw_metadata=aot_state.fw_metadata,
+                )
+            )
+    else:
+        graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+            aot_dispatch_base_graph(  # type: ignore[assignment]
                 flat_fn,
                 aot_state.flat_args,
+                aot_state.flat_args_descs,
                 aot_config,
                 fw_metadata=aot_state.fw_metadata,
             )
-    else:
-        graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
-            flat_fn, aot_state.flat_args, aot_config, fw_metadata=aot_state.fw_metadata
         )
 
     return AOTGraphCapture(
         wrappers=wrappers,
-        graph=graph,
+        graph_module=graph,
         updated_flat_args=updated_flat_args,
+        updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
     )
 
@@ -154,7 +189,7 @@ def aot_stage1_graph_capture(
 def aot_stage2_export(
     aot_state: AOTState, aot_graph_capture: AOTGraphCapture
 ) -> DispatchReturn:
-    graph = aot_graph_capture.graph
+    graph = aot_graph_capture.graph_module
     aot_config = aot_state.aot_config
     wrappers = aot_graph_capture.wrappers
 
@@ -217,7 +252,7 @@ def aot_stage2_inference(
 
     aot_config = aot_state.aot_config
     fw_metadata = aot_state.fw_metadata
-    fw_module = aot_graph_capture.graph
+    fw_module = aot_graph_capture.graph_module
     wrappers = aot_graph_capture.wrappers
     updated_flat_args = aot_graph_capture.updated_flat_args
     maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
@@ -233,6 +268,7 @@ def aot_stage2_inference(
             include_stride=True,
             include_device=True,
             fast_sympy_print=True,
+            expanded_def=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
@@ -480,6 +516,48 @@ class InvokeSubgraphHopGraphs:
     new_num_saved_nodes: Optional[int] = None
 
 
+def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
+    # min-cut partitioner requires the placeholders to have primals and
+    # tangents string in the node.name. The signature of the joint graph is
+    # (*primals, *tangents)
+
+    # We also have to update the output signature which is right now
+    # (*grads, *fw_outs) and we have to change to (*fw_outs, *grads) for the
+    # partitioner to work.
+    new_graph = torch.fx.Graph()
+    env = {}
+
+    primals_counter = itertools.count(0)
+    tangents_counter = itertools.count(0)
+
+    for idx, node in enumerate(mod.graph.nodes):
+        if node.op == "placeholder":
+            if idx < num_primals:
+                env[node] = new_graph.placeholder(f"primals_{next(primals_counter)}")
+            else:
+                env[node] = new_graph.placeholder(f"tangents_{next(tangents_counter)}")
+            env[node].meta = copy.copy(node.meta)
+        elif node.op == "output":
+            # Reverse the (*grads, *fw_outs) to (*fw_outs, *grads)
+            # The reason for having the reversed signature in the first
+            # place is to simplify step 3.
+            old_outputs = node.args[0]
+            new_outputs = (
+                *old_outputs[-num_fw_outputs:],
+                *old_outputs[:-num_fw_outputs],
+            )
+            new_outputs = [env[n] if n else None for n in new_outputs]
+            new_graph.output(tuple(new_outputs))
+        else:
+            env[node] = new_graph.node_copy(node, lambda n: env[n])
+            env[node].meta = copy.copy(node.meta)
+
+    new_graph.lint()
+
+    out = torch.fx.GraphModule(mod, new_graph)
+    return out
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -516,51 +594,6 @@ def run_joint_graph_passes_on_hops(
 
     def num_inputs(mod):
         return len(mod.graph.find_nodes(op="placeholder"))
-
-    def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
-        # min-cut partitioner requires the placeholders to have primals and
-        # tangents string in the node.name. The signature of the joint graph is
-        # (*primals, *tangents)
-
-        # We also have to update the output signature which is right now
-        # (*grads, *fw_outs) and we have to change to (*fw_outs, *grads) for the
-        # partitioner to work.
-        new_graph = torch.fx.Graph()
-        env = {}
-
-        primals_counter = itertools.count(0)
-        tangents_counter = itertools.count(0)
-
-        for idx, node in enumerate(mod.graph.nodes):
-            if node.op == "placeholder":
-                if idx < num_primals:
-                    env[node] = new_graph.placeholder(
-                        f"primals_{next(primals_counter)}"
-                    )
-                else:
-                    env[node] = new_graph.placeholder(
-                        f"tangents_{next(tangents_counter)}"
-                    )
-                env[node].meta = copy.copy(node.meta)
-            elif node.op == "output":
-                # Reverse the (*grads, *fw_outs) to (*fw_outs, *grads)
-                # The reason for having the reversed signature in the first
-                # place is to simplify step 3.
-                old_outputs = node.args[0]
-                new_outputs = (
-                    *old_outputs[-num_fw_outputs:],
-                    *old_outputs[:-num_fw_outputs],
-                )
-                new_outputs = [env[n] if n else None for n in new_outputs]
-                new_graph.output(tuple(new_outputs))
-            else:
-                env[node] = new_graph.node_copy(node, lambda n: env[n])
-                env[node].meta = copy.copy(node.meta)
-
-        new_graph.lint()
-
-        out = torch.fx.GraphModule(mod, new_graph)
-        return out
 
     new_hop_graphs: dict[str, InvokeSubgraphHopGraphs] = defaultdict(
         lambda: InvokeSubgraphHopGraphs()
@@ -844,7 +877,10 @@ def maybe_log_graph(
 
     def gm_str_fn() -> str:
         return gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
         )
 
     if out_structured_logs is not None:
@@ -857,8 +893,6 @@ def maybe_log_graph(
 
 
 def create_wrap_fn(fn, args):
-    from functools import wraps
-
     from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 
     from .functional_utils import from_fun, has_data_mutation, to_fun
@@ -868,7 +902,7 @@ def create_wrap_fn(fn, args):
             "Saved tensors hooks with inputs mutations are not allowed"
         )
 
-    @wraps(fn)
+    @simple_wraps(fn)
     def _wrapper(*args):
         with maybe_enable_thunkify():
             disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -899,8 +933,8 @@ def prepare_hook_gm(aot_config, fn, args):
 # All tensors to save for backward will be grouped together at front.
 # Sym scalars grouped on another end. Constants are inlined in the graph.
 def maybe_inline_graph_saved_tensors_hooks(
-    fw_module,
-    bw_module,
+    fw_module,  # torch.fx.GraphModule
+    bw_module,  # torch.fx.GraphModule
     num_inner_fwd_outputs,
     inner_meta,
     aot_config,
@@ -1289,7 +1323,7 @@ def aot_stage2_autograd(
     """
 
     wrappers = aot_graph_capture.wrappers
-    fx_g = aot_graph_capture.graph
+    fx_g = aot_graph_capture.graph_module
     flat_args = aot_state.flat_args
     joint_inputs = aot_graph_capture.updated_flat_args
     maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
@@ -1314,7 +1348,10 @@ def aot_stage2_autograd(
             ),
         )
         joint_graph_str = fx_g.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
         )
         trace_structured(
             "aot_joint_graph",
@@ -1563,10 +1600,16 @@ def aot_stage2_autograd(
                 ),
             )
             fw_module_str = fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
             )
             bw_module_str = bw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
             )
 
             trace_structured(
@@ -1716,7 +1759,10 @@ def aot_stage2_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
-            if num_symints_saved_for_bw > 0:
+            if (
+                num_symints_saved_for_bw > 0
+                or aot_config.force_non_lazy_backward_lowering
+            ):
                 try:
                     # See Note: [Backward graph lazy lowering]
                     with torch._subclasses.fake_tensor.unset_fake_temporarily():
@@ -1729,6 +1775,8 @@ def aot_stage2_autograd(
                     )
                     del bw_module_copy
                 except Exception as e:
+                    if aot_config.force_non_lazy_backward_lowering:
+                        raise
                     exc = e
                     trace_structured(
                         "artifact",

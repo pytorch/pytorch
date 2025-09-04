@@ -87,7 +87,7 @@ struct nansum_functor_complex {
 #else
   void operator()(TensorIterator& iter) {
     using acc_t = at::opmath_type<scalar_t>;
-    gpu_reduce_kernel<scalar_t, acc_t>(
+    gpu_reduce_kernel<scalar_t, scalar_t>(
         iter, NanSumOps<acc_t, acc_t>{});
   }
 #endif

@@ -47,6 +47,7 @@ torch_openreg/
 │       ├── OpenRegHostAllocator.cpp
 │       ├── OpenRegHostAllocator.h
 │       └── ...
+├── pyproject.toml
 ├── README.md
 ├── setup.py
 ├── third_party
@@ -59,6 +60,7 @@ torch_openreg/
     ├── __init__.py
     └── openreg
         ├── __init__.py
+        ├── meta.py
         └── random.py
 ```
 
@@ -75,10 +77,20 @@ graph LR
     A --> B --> C --> D --> E
 ```
 
-- `_C.so`: torch\_openreg/csrc/stub.c
-- `libtorch_bindings.so`: torch\_openreg/csrc/\*.cpp
-- `libtorch_openreg.so`: csrc
-- `libopenreg.so`: third\_party/openreg
+There are 4 DSOs in torch_openreg, and the dependencies between them are as follows:
+
+- `_C.so`:
+  - **sources**: torch_openreg/csrc/stub.c
+  - **description**: Python C module entry point.
+- `libtorch_bindings.so`: The bridging code between Python and C++ should go here.
+  - **sources**: torch_openreg/csrc
+  - **description**: A thin glue layer between Python and C++.
+- `libtorch_openreg.so`: All core implementations should go here.
+  - **sources**: csrc
+  - **description**: All core functionality, such as device runtime, operators, etc.
+- `libopenreg.so`: A DSO that uses the CPU to emulate a CUDA-like device, you can ignore it.
+  - **sources**: third_party/openreg
+  - **description**: Provides low-level device functionality similar to libcudart.so.
 
 **Key Directories**:
 
@@ -99,44 +111,26 @@ graph LR
 
 - Operator Implementation
 
-  - `TORCH_LIBRARY` form
-    - Registering a specific operator for an existing schema: See `empty.memory_format`
-    - Registering an operator with a custom schema
-      - Extending an existing namespace: (TODO)
-      - Custom namespace: See `custom_autograd_fn_returns_self`
-    - Autograd: See `custom_autograd_fn_returns_self`
-  - STUB form: See `abs_stub`
-
-  - Fallback
+  - Register for builtin PyTorch Operators
+    - `TORCH_LIBRARY_IMPL` form: See `empty.memory_format
+    - `STUB` form: See `abs_stub`
+  - Register for custom operators
+    - Schema Registration: See `custom_abs`
+    - Kernel Registration: See `custom_abs`
+    - Fallback Registration for `AutogradPriavateUse1`: See `custom_abs`
+    - Meta Registration: See `custom_abs`
+    - `torch.autograd.Function`: See `custom_autograd_fn_aliasing`
+  - Register for fallback
+    - Per-operator Fallback: See `sub.Tensor`
     - Global Fallback: See `wrapper_cpu_fallback`
-    - Per-operator Fallback: (TODO)
-
-  - AMP (TODO)
-
-### Memory Management
-
-- Device Memory Management (TODO)
-- Host Memory Management (TODO)
-
-### Custom Storage
-
-- Adding custom device descriptions (TODO)
-- Serialization support (TODO)
-
-### Autoload
-
-- (TODO)
-
-...
 
 ## Installation and Usage
 
 ### Installation
 
 ```python
-pip3 install -r requirements.txt
-
-python setup.py develop/install
+pip3 install --no-build-isolation -e . # for develop
+pip3 install --no-build-isolation . # for install
 ```
 
 ### Usage Example
@@ -155,23 +149,27 @@ print("OpenReg backend is available!")
 
 device = torch.device("openreg")
 
-try:
-    x = torch.tensor([[1., 2.], [3., 4.]], device=device)
-    y = x + 2
-    print("Result y:\n", y)
-    print(f"Device of y: {y.device}")
+x = torch.tensor([[1., 2.], [3., 4.]], device=device)
+y = x + 2
+print("Result y:\n", y)
+print(f"Device of y: {y.device}")
 
-    z = y.cpu()
-    print("Result z:\n", z)
-    print(f"Device of z: {z.device}")
-
-except Exception as e:
-    print(f"\nAn error occurred: {e}")
+z = y.cpu()
+print("Result z:\n", z)
+print(f"Device of z: {z.device}")
 ```
 
 ## Future Plans
 
-- **Enhance Features**: AMP, memory management, generators, distributed computing, etc. (to reiterate, the fundamental goal is to verify the integration mechanism).
+- **Enhance Features**:
+  - Autoload
+  - AMP
+  - Device-agnostic APIs
+  - Memory Management
+  - Generator
+  - Distrubuted
+  - Custom Tensor&Storage
+  - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.
 - **Improve Documentation**: Add a new chapter on third-party device integration in the `Developer Notes` section of the PyTorch documentation.
 - **Real-time Synchronization**: Keep the code and documentation updated iteratively and in sync.

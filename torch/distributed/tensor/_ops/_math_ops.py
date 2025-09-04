@@ -556,11 +556,22 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
             mesh=grad_out_strategy.mesh,
             placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
         )
+        new_grad_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=grad_out_src_spec.tensor_meta,
+        )
+        new_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=out_src_spec.tensor_meta,
+        )
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
         grad_in_strategy.strategies.append(
             OpSpec(
                 output_specs=tgt_spec,
+                input_specs=(new_grad_out_spec, new_out_spec),
                 redistribute_cost=[redist_grad_out_cost, redist_out_cost],
             )
         )
@@ -807,27 +818,38 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     return grad_in_strategy
 
 
-@register_op_strategy(
-    [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+def _common_norm_forward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common forward strategy logic for layer_norm and rms_norm."""
     mesh = op_schema.get_mesh_from_args()
 
-    # args must be: input, normalized_shape, weight, bias, eps
-    # for None weight and bias, their corresponding objects will
-    # be None as well. layer_norm_strategy returns one OpStrategy
-    # for the triple return values (out, mean, rstd).
-    assert len(op_schema.args_schema) == 5
-    (
-        input_strategy,
-        normalized_shape,
-        weight_strategy,
-        bias_strategy,
-        _,
-    ) = op_schema.args_schema
+    if not rms_norm:
+        # layer_norm args: input, normalized_shape, weight, bias, eps
+        # for None weight and bias, their corresponding objects will
+        # be None as well. layer_norm_strategy returns one OpStrategy
+        # for the triple return values (out, mean, rstd).
+        assert len(op_schema.args_schema) == 5
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            bias_strategy,
+            _,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: input, normalized_shape, weight, eps
+        assert len(op_schema.args_schema) == 4
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            _,
+        ) = op_schema.args_schema
+        bias_strategy = None
 
-    # the current layer norm implementation requires that all
+    # the current norm implementation requires that all
     # input DTensor's sharding must be in form of OpStrategy
     assert isinstance(input_strategy, OpStrategy)
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
@@ -836,7 +858,7 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
 
-    # we use OpStrategy because the output (out, mean, rstd)
+    # we use OpStrategy because the output values (out, mean, rstd)
     # should have the same placements
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -902,6 +924,22 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return output_strategy
+
+
+@register_op_strategy(
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema)
+
+
+@register_op_strategy(
+    [aten._fused_rms_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fused_rms_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema, rms_norm=True)
 
 
 def _common_norm_backward_strategy(
@@ -1103,34 +1141,63 @@ def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     return _common_norm_backward_strategy(op_schema, rms_norm=True)
 
 
+def sort_strategy(op_schema: OpSchema, sort_dim: int) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
+    single_mesh_dim_strategies = []
+    all_replicate: PlacementList = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+    for dim in range(input_strategy.ndim):
+        if dim != sort_dim:
+            dim_shardings: PlacementList = [Shard(dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
 @register_op_strategy(
     [aten.topk.default],
     schema_info=RuntimeSchemaInfo(2),
 )
 def topk_strategy(op_schema: OpSchema) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )
-    topk_dim = normalize_dim(topk_dim, input_strategy.ndim)
+    return sort_strategy(op_schema, topk_dim)
 
-    single_mesh_dim_strategies = []
 
-    # two outputs (values, indices), 1 input
-    # replicate always works
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
+@register_op_strategy(
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(
+        1,
+    ),
+)
+def sort_default_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    sort_dim = -1
+    if len(op_schema.args_schema) > 1:
+        sort_dim = cast(int, op_schema.args_schema[1])
+    return sort_strategy(op_schema, sort_dim)
 
-    # every dim except topk dim should work
-    for dim in range(input_strategy.ndim):
-        if dim != topk_dim:
-            dim_shardings: PlacementList = [Shard(dim)] * 3
-            single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requires non-trival reduction, address it later
 
-    return expand_to_full_mesh_op_strategy(
-        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
-    )
+@register_op_strategy(
+    aten.sort.stable,
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+)
+def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    sort_dim = -1
+    if "dim" in op_schema.kwargs_schema:
+        sort_dim = cast(int, op_schema.kwargs_schema["dim"])
+    return sort_strategy(op_schema, sort_dim)
 
 
 @register_op_strategy(

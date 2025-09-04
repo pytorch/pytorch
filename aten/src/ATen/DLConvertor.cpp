@@ -132,6 +132,9 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
     case DeviceType::PrivateUse1:
       ctx.device_type = DLDeviceType::kDLExtDev;
       break;
+    case DeviceType::MPS:
+      ctx.device_type = DLDeviceType::kDLMetal;
+      break;
     default:
       TORCH_CHECK_BUFFER(false, "Cannot pack tensors on " + device.str());
   }
@@ -164,6 +167,8 @@ static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* dat
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:
       return at::Device(DeviceType::PrivateUse1, index);
+    case DLDeviceType::kDLMetal:
+      return at::Device(DeviceType::MPS, index);
     default:
       TORCH_CHECK_BUFFER(
           false, "Unsupported device_type: ", std::to_string(type));

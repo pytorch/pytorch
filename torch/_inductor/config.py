@@ -81,6 +81,11 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Configurable compile worker logging path for subproc_pool
+worker_log_path = (
+    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+)
+
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
@@ -90,6 +95,8 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
+
+remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -138,12 +145,8 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = Config(
-    justknob="pytorch/remote_cache:force_disable_caches",
-    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
-    default=False,
-)
+# See torch.compiler.config.force_disable_caches
+force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -183,6 +186,8 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
+
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
@@ -384,6 +389,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -428,8 +443,23 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
+# Report the autotune choices and their benchmark results. Default is True.
+max_autotune_report_choices_stats = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
+)
+
+# Prune configs that require more shared memory than the hardware limit
+max_autotune_prune_choices_based_on_shared_mem = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    == "1"
+)
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
+    == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -449,11 +479,12 @@ force_same_precision: bool = Config(
 multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
+# CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
@@ -525,6 +556,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -677,7 +713,7 @@ combo_kernels_autotune = 1
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
-combo_kernel_foreach_dynamic_shapes = False
+combo_kernel_foreach_dynamic_shapes = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -737,6 +773,12 @@ worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
     env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
     default=True,
+)
+
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
 )
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
@@ -878,6 +920,9 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Control if we will do padding on dynamic shapes
+pad_dynamic_shapes = False
+
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
 
@@ -999,6 +1044,24 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
+
+def get_worker_log_path() -> Optional[str]:
+    log_loc = None
+    if is_fbcode():
+        mast_job_name = os.environ.get("MAST_HPC_JOB_NAME", None)
+        global_rank = os.environ.get("ROLE_RANK", "0")
+
+        if mast_job_name is not None:
+            log_loc = f"/logs/dedicated_log_torch_compile_worker_rank{global_rank}"
+
+    return log_loc
+
+
+torchinductor_worker_logpath: str = Config(
+    env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
+    default="",
+)
 
 
 # config specific to codegen/cpp.py
@@ -1125,6 +1188,11 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
 
 
@@ -1353,6 +1421,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
+
 
 class aot_inductor:
     """
@@ -1448,6 +1519,11 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
+    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    weight_use_caching_allocator: bool = (
+        os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
+    )
+
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
@@ -1458,12 +1534,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1629,7 +1705,11 @@ class rocm:
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: list[str] = ["gfx90a", "gfx942"]
+    ck_supported_arch: list[Literal["gfx90a", "gfx942", "gfx950"]] = [
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
 
     # Optimization level, use to balance compilation speed and runtime performance.
     # The type will not necessarily be comprehensive and won't be enforced at runtime.
@@ -1786,10 +1866,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
+    # Levels:
+    #   0 - disabled (default)
+    #   1 - normal
+    #   2 - basic
+    # Backward compatibility:
+    #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
+    #   If INDUCTOR_PROVENANCE is set, use its integer value.
+    provenance_tracking_level: int = int(
+        os.environ.get(
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+        )
     )
 
 
@@ -1849,6 +1937,12 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
+
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
+    use_libtorch = False
 
 
 if TYPE_CHECKING:

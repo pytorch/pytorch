@@ -26,12 +26,18 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <utility>
 
 namespace py = pybind11;
 
 namespace torch::impl::dispatch {
+
+// Global storage for leaked Python filenames to ensure they remain valid
+// for the lifetime of Library objects
+static std::vector<std::string> leaked_python_filenames_;
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -209,12 +215,10 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
+// @todo sahanp: Afait only register is used in the codebase. This can be
+// removed / simplified
 static torch::_RegisterOrVerify register_or_verify() {
-  if (isMainPyInterpreter()) {
-    return torch::_RegisterOrVerify::REGISTER;
-  } else {
-    return torch::_RegisterOrVerify::VERIFY;
-  }
+  return torch::_RegisterOrVerify::REGISTER;
 }
 
 static py::object ophandle_call_boxed(
@@ -287,7 +291,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "reset",
           [](const py::object& self) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().reset();
             return;
           },
@@ -297,7 +300,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)));
             return self;
@@ -311,7 +313,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_legacy",
           [](py::object self, const char* schema) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
             return self;
           },
@@ -331,7 +332,6 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -349,7 +349,6 @@ void initDispatchBindings(PyObject* module) {
              const char* dispatch,
              const char* alias,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)),
                 dispatch_str(dispatch, [](const at::Tensor& a) {
@@ -370,7 +369,6 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().impl(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -465,7 +463,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().fallback(
                 dispatch_str(dispatch, CppFunction::makeFallthrough()));
             return self;
@@ -480,7 +477,6 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             if (func.is(py::module::import("torch.library")
                             .attr("fallthrough_kernel"))) {
               lib.fallback(
@@ -507,13 +503,18 @@ void initDispatchBindings(PyObject* module) {
          const char* file,
          uint32_t linenum) {
         HANDLE_TH_ERRORS
+        // Store the file string in global storage to ensure it remains valid
+        // for the lifetime of the Library object
+        leaked_python_filenames_.emplace_back(file);
+        const char* leaked_file = leaked_python_filenames_.back().c_str();
+
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
             std::string(dispatch).empty()
                 ? std::nullopt
                 : std::make_optional(c10::parseDispatchKey(dispatch)),
-            "/dev/null", // temporary workaround
+            leaked_file,
             linenum);
         END_HANDLE_TH_ERRORS_PYBIND
       },
@@ -523,6 +524,12 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch"),
       py::arg("file") = "/dev/null",
       py::arg("linenum") = 0);
+
+  m.def(
+      "_dispatch_clear_leaked_python_filenames",
+      []() { leaked_python_filenames_.clear(); },
+      "Clear the global storage of leaked Python filenames. "
+      "WARNING: Only call this if you're sure no Library objects are still using the filenames.");
 
   m.def(
       "_dispatch_find_schema_or_throw",
@@ -610,6 +617,43 @@ void initDispatchBindings(PyObject* module) {
         TORCH_CHECK(op, "operator ", name, " does not exist");
         return op->hasComputedKernelForDispatchKey(
             c10::parseDispatchKey(dispatch));
+      });
+
+  // Bind SafeKernelFunction class
+  py::class_<c10::SafeKernelFunction>(m, "_SafeKernelFunction")
+      .def(
+          "call_boxed",
+          [](const c10::SafeKernelFunction& self,
+             c10::DispatchKeySet keyset,
+             py::args args,
+             const py::kwargs& kwargs) {
+            const auto& op = self.opHandle();
+            auto stack = torch::jit::createStackForSchema(
+                op.schema(),
+                std::move(args),
+                kwargs,
+                /*self=*/std::nullopt);
+            self.callBoxed(op, keyset, &stack);
+            return torch::jit::createPyObjectForStack(std::move(stack));
+          })
+      .def(
+          "__repr__",
+          [](const c10::SafeKernelFunction& self) {
+            return "SafeKernelFunction(debug='" + self.debug() + "')";
+          })
+      .def_property_readonly(
+          "op_handle", [](const c10::SafeKernelFunction& self) -> py::object {
+            return py::cast(self.opHandle());
+          });
+
+  m.def(
+      "_dispatch_get_computed_kernel_for_dispatch_key",
+      [](const char* name,
+         c10::DispatchKey dispatch) -> c10::SafeKernelFunction {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->getComputedKernelForDispatchKey(dispatch);
       });
 
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
@@ -913,8 +957,6 @@ void initDispatchBindings(PyObject* module) {
         handle.setReportErrorCallback_(std::move(callback_obj));
       });
 
-  m.def(
-      "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
   m.def("_dispatch_pystub", [](const char* name, const char* overload) {
     return c10::Dispatcher::singleton().getPyStub(
         c10::OperatorName(name, overload));

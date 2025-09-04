@@ -47,6 +47,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
     std::string group_name;
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   explicit Backend(int rank, int size);
@@ -391,6 +392,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<Options>& opts) {
     TORCH_CHECK(

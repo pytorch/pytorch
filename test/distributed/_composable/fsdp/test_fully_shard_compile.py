@@ -299,12 +299,20 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
 
     def _reinplace_all_gather_with_optional_checks(self, fwd_fullgraph):
         def _run_with_checks(graph, orig_fn):
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
+            elif self.world_size == 1:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
 
             orig_fn(graph)
 
@@ -315,12 +323,22 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
+            else:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
 
         if fwd_fullgraph:
             return mock.patch.object(
@@ -548,7 +566,8 @@ Unsupported Tensor.backward() call
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
 
   Developer debug context: call_method TensorVariable() backward () {}
-""",  # noqa: B950
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)

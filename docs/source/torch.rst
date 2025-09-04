@@ -806,7 +806,6 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-.. py:module:: torch.functional
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
 .. py:module:: torch.serialization
@@ -816,3 +815,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
+   be visible only.
+.. toctree::
+    :hidden:
+
+    torch.aliases.md

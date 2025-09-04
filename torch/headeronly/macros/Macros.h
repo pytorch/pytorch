@@ -259,7 +259,8 @@ using namespace c10::xpu;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || \
+    __CUDA_ARCH__ == 1200
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -411,6 +412,13 @@ extern SYCL_EXTERNAL void __assert_fail(
     const char* expr,
     const char* file,
     unsigned int line,
+    const char* func);
+#elif (defined(__EMSCRIPTEN__))
+// As defined in assert.h in the Emscripten stdlib
+_Noreturn void __assert_fail(
+    const char* expr,
+    const char* file,
+    int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))

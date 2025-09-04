@@ -855,6 +855,45 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
 }
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
+void test_cuda_alloc_test() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "cuda_alloc_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchActive = stats.active_bytes[0].current;
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+  size_t torchActive = stats.active_bytes[0].current;
+
+  ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
+
+  auto actual_output_tensors =
+      runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+#endif
+
 class ThreadPool {
  private:
   struct Task {
@@ -1072,6 +1111,11 @@ TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
 
 TEST(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
+}
+
+// TODO: ENABLE CUDACachingAllocator Test
+TEST(DISABLED_AotInductorTest, CudaAllocTestCuda) {
+  test_cuda_alloc_test();
 }
 #endif
 

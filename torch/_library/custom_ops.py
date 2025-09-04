@@ -210,6 +210,7 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
+        self._used_triton_kernels: list[Any] = list()
         OPDEFS[self._qualname] = self
 
     @property
@@ -403,7 +404,7 @@ class CustomOpDef:
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        Please see :func:`torch.library.impl_abstract` for more details.
+        Please see :func:`torch.library.register_fake` for more details.
 
         Args:
             fn (Callable): The function to register as the FakeTensor

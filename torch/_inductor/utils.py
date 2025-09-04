@@ -18,6 +18,7 @@ import re
 import shutil
 import statistics
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import time
@@ -60,6 +61,7 @@ import sympy
 import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
@@ -69,13 +71,20 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -86,7 +95,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
@@ -123,6 +132,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -714,6 +725,20 @@ def get_kernel_metadata(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
+    """
+    Retrieves metadata information for a kernel.
+    Args:
+        node_schedule (Union[Sequence[BaseSchedulerNode], ExternKernel]):
+            Either a sequence of BaseSchedulerNode objects or an ExternKernel instance.
+        wrapper (PythonWrapperCodegen):
+            An instance of PythonWrapperCodegen, used to define the code comment format.
+    Returns:
+        tuple[str, str]:
+            A tuple containing two strings:
+                - The first string represents the kernel's metadata.
+                - The second string represent the kernel's detailed metadata.
+    """
+
     all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
@@ -758,11 +783,85 @@ def get_kernel_metadata(
 
     # print the aot_autograd graph fragment
     if single_graph is not None:
+        from . import ir
+
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-        for n in inductor_nodes:
-            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
-            # generate python code for graph fragments
-            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+        all_reads: OrderedSet[str] = OrderedSet()
+        all_writes: list[str] = []
+        if not isinstance(node_schedule, ir.ExternKernel):
+            from .virtualized import V
+
+            def get_buffer_info(
+                buffer: Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject], rw_name: str
+            ) -> tuple[str, ir.Layout | None]:
+                if isinstance(buffer, ir.TensorBox) and isinstance(
+                    buffer.data, ir.StorageBox
+                ):
+                    origin_node = buffer.data.data.origin_node
+                else:
+                    origin_node = buffer.origin_node
+                if origin_node is None:
+                    # use the read/write name if no origin node is found
+                    name = rw_name
+                else:
+                    name = origin_node.name
+                try:
+                    layout = buffer.get_layout()
+                except NotImplementedError:
+                    layout = None
+                return name, layout
+
+            def stringify_shape(shape: Iterable[int]) -> str:
+                return f"[{', '.join([str(x) for x in shape])}]"
+
+            def stringfy_layout(layout: ir.Layout | None) -> str:
+                if layout is None:
+                    return ""
+                shape_annotation = f"{stringify_shape(layout.size)}"
+                stride_annotation = f"{stringify_shape(layout.stride)}"
+                device_annotation = f"{layout.device}"
+
+                return (
+                    f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
+                    f'{stride_annotation}{device_annotation}"'
+                )
+
+            for n in node_schedule:
+                if not hasattr(n, "read_writes") or n.read_writes is None:
+                    continue
+                if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
+                    for r in n.read_writes.reads:
+                        # Remove the dupricated inputs
+                        if r.name in all_reads:
+                            continue
+                        all_reads.add(r.name)
+                        buffer = V.graph.try_get_buffer(r.name)
+                        if buffer is None:
+                            continue
+                        input_name, layout = get_buffer_info(buffer, r.name)
+                        detailed_metadata.append(
+                            f"{wrapper.comment}   %{input_name} : Tensor "
+                            f"{stringfy_layout(layout)} = PlaceHolder[target={input_name}]"
+                        )
+
+                if (
+                    hasattr(n.read_writes, "writes")
+                    and n.read_writes.writes is not None
+                ):
+                    for w in n.read_writes.writes:
+                        buffer = V.graph.try_get_buffer(w.name)
+                        if buffer is None:
+                            continue
+                        output_name, _ = get_buffer_info(buffer, w.name)
+
+                        all_writes.append("%" + output_name)
+
+        for node in inductor_nodes:
+            detailed_metadata.append(
+                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
+            )
+
+        detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
     return metadata, "\n".join(detailed_metadata)
 
@@ -797,7 +896,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and not ir.IRNode.is_realized_node(n)
+        return isinstance(n, ir.IRNode) and not isinstance(
+            n,
+            (
+                ir.ComputedBuffer,
+                ir.InputsKernel,
+                ir.InputBuffer,
+                ir.TemplateBuffer,
+            ),
+        )
 
     # kwargs and args may include a container of node, for example torch.cat([t1, t2])
     # flatten them before search the unrealized nodes
@@ -1124,6 +1231,7 @@ def fresh_cache(
                 # Let's not fail if we can't clean up the temp dir. Also note that for
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
+                ignore_errors=is_windows(),
                 onerror=lambda func, path, exc_info: log.warning(
                     "Failed to remove temporary cache dir at %s",
                     inductor_cache_dir,
@@ -1453,12 +1561,26 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 @functools.lru_cache
 def get_max_num_sms() -> int:
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10
 
 
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
+    if torch.xpu.is_available():
+        return get_max_num_sms()
     carveout = torch._C._get_sm_carveout_experimental()
     return get_max_num_sms() - (carveout if carveout is not None else 0)
 
@@ -1535,7 +1657,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1617,10 +1739,14 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
 
         return True
 
+    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+
+
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
-        and all(_is_tma_compatible(m) for m in matrices)
+        all(len(m.get_size()) == 2 for m in matrices)
+        and can_use_tma(*matrices, add_guards=add_guards)
+        and config.triton.enable_persistent_tma_matmul
     )
 
 
@@ -2719,10 +2845,9 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
         return contextlib.nullcontext()
 
     # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
-    shape_env = tracing_context.fake_mode.shape_env
-    if not shape_env:
+    if not tracing_context.fake_mode or not tracing_context.fake_mode.shape_env:
         return contextlib.nullcontext()
-
+    shape_env = tracing_context.fake_mode.shape_env
     return shape_env.suppress_guards()
 
 
@@ -2866,6 +2991,26 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
+    # in case the hinted value is < 2**32, but the allowed range is larger.
+    # However, to prevent possible perf regressions on pre-existing AOTI models
+    # which don't set an upper bound on the valid range, we'll skip the check.
+    # To recap:
+    # - If using AOTI:
+    #   - If allowed range has no upper bound, then check the hint to determine
+    #       whether this fits in int32
+    #   - If allowed range does have an upper bound, then obey the upper bound
+    #       (check whether upper bound < int32_max) without checking the hint.
+
+    if V.aot_compilation:
+        # check whether value has an upper bound (1e20 is > INT64_MAX, assume
+        # there is no upper bound if it can be larger than 1e20)
+        if V.graph.sizevars.statically_known_true(e < 1e20):
+            # if so, then assume int_max < upper bound < inf
+            # so this could potentially have int64 values
+            return False
+
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max
 
@@ -3200,6 +3345,13 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
+def is_using_cudagraph_partition() -> bool:
+    return (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    )
+
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -3305,20 +3457,36 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     Returns:
         dict[str, Any]: The possibly-updated `config_patches` dictionary.
     """
+
+    def patch_config(
+        config_patches: dict[str, Any], config_name: str, config_value: Any
+    ) -> None:
+        value = config_patches.get(config_name, getattr(config, config_name))
+        if value is None:
+            config_patches[config_name] = config_value
+        elif not value and value != config_value:
+            raise RuntimeError(
+                f"Invalid config: {config_name}={config_value} when aot_inductor.compile_standalone is True."
+            )
+
     compile_standalone = config_patches.get(
         "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
     )
+    # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
+    config_patches = config_patches.copy()
     if compile_standalone:
-        package_cpp_only = config_patches.get(
-            "aot_inductor.package_cpp_only", config.aot_inductor.package_cpp_only
+        # Standlaone AOTInductor means only generate cpp project for building a standalone binary
+        patch_config(config_patches, "aot_inductor.package_cpp_only", True)
+        # Standlaone AOTInductor needs to embed the kernel code in the binary
+        patch_config(config_patches, "aot_inductor.embed_kernel_binary", True)
+        # Default to use multi-arch kernel codegen for non-rocm GPU
+        patch_config(
+            config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
         )
-        if package_cpp_only is None:
-            config_patches = {**config_patches, "aot_inductor.package_cpp_only": True}
-        elif not package_cpp_only:
-            raise RuntimeError(
-                "compile_standalone=True requires package_cpp_only=True. "
-                "Please set aot_inductor.package_cpp_only=True in your inductor config."
-            )
+        patch_config(
+            config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
+        )
+
     return config_patches
 
 
@@ -3349,9 +3517,60 @@ def is_valid_aoti_model_name() -> bool:
     return True
 
 
-def aoti_model_name_from_config() -> str:
-    from torch._inductor import config
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)
 
-    model_name = config.aot_inductor.model_name_for_generated_files
-    model_name = "aoti_model" if model_name is None else model_name
-    return model_name
+
+def maybe_log_cudagraph_partition(
+    msg: str,
+    prefix: Optional[str] = "cudagraph partition due to ",
+    node: Optional[BaseSchedulerNode] = None,
+) -> None:
+    """
+    Cudagraph partition may lead to extra memory overhead so we
+    log partition reasons to help users understand the overhead.
+    """
+    if not config.triton.cudagraphs:
+        return
+
+    warning_msg = f"{prefix}{msg}"
+
+    if (
+        node
+        and (ir_node := node.node)
+        and (fx_node := ir_node.get_origin_node())
+        and (stack_trace := fx_node.meta.get("stack_trace", None))
+    ):
+        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+
+    perf_hint_log.warning(warning_msg)
+
+
+def python_subprocess_env() -> dict[str, str]:
+    """
+    Get a base environment for running Python subprocesses.
+    """
+
+    env = {
+        # Inherit the environment of the current process.
+        **os.environ,
+        # Set the PYTHONPATH so the subprocess can find torch.
+        "PYTHONPATH": os.environ.get(
+            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+        ),
+    }
+
+    # Set PYTHONHOME for internal builds, to account for builds that bundle the
+    # runtime.  Otherwise they will use the libraries and headers from the
+    # platform runtime instead.
+    #
+    # This can't be done for external builds.  The process can be run from a
+    # venv and that won't include Python headers.  The process needs to be able
+    # to search for and find the platform runtime.
+    if config.is_fbcode():
+        env["PYTHONHOME"] = sysconfig.get_path("data")
+
+    return env
