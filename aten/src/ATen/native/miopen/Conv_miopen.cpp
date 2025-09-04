@@ -762,7 +762,7 @@ Tensor miopen_convolution_forward(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor output_t = at::detail::empty_cuda(
@@ -870,7 +870,7 @@ Tensor miopen_depthwise_convolution_forward(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor output_t = at::detail::empty_cuda(
@@ -1070,7 +1070,7 @@ Tensor miopen_depthwise_convolution_backward_weight(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *grad_output)) {
-    memory_format = (input->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (input->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_output_contig_t = grad_output->contiguous(memory_format);
@@ -1123,7 +1123,7 @@ Tensor miopen_convolution_backward_weight(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*input, *grad_output)) {
-    memory_format = (input->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (input->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_output_contig_t = grad_output->contiguous(memory_format);
@@ -1196,7 +1196,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1276,7 +1276,7 @@ Tensor miopen_convolution_backward_input(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*grad_output, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_input_t = at::detail::empty_cuda(
@@ -1383,7 +1383,7 @@ Tensor miopen_depthwise_convolution_backward_input(
 
   auto memory_format = at::MemoryFormat::Contiguous;
   if (miopen_conv_use_channels_last(*grad_output, *weight)) {
-    memory_format = (weight->ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+    memory_format = (weight->ndimension() == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
   Tensor grad_input_t = at::detail::empty_cuda(
@@ -1446,7 +1446,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {

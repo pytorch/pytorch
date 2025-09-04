@@ -14,8 +14,8 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._pytree import tree_flatten
 
 
@@ -269,29 +269,29 @@ class ForeachTests(TestCase):
         )
 
     # called in test_cuda_cpp_wrapper.py
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_single_list(self, op):
         self._test_single_list(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_tensor_bin_ops
     def test_single_scalar_tensor(self, op):
         self._test_single_scalar_tensor(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_scheduler_fusion_list(self, op):
         if op in un_ops_under_test:
@@ -319,7 +319,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_scheduler_fusion_scalar(self, op):
         def fn(a0, a1):
@@ -336,7 +336,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_broadcasting(self, op):
         def fn(a0, a1, b0, b1):
@@ -355,7 +355,7 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_singleton_lists(self, op):
         if op in un_ops_under_test:
@@ -392,7 +392,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     def test_type_promotion(self, op):
         def fn(a0, a1, b0, b1):
@@ -413,7 +413,7 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_kernel_split_arg_limit_list(self, op):
         # NB: foeach_copy won't pass this test because it will dce one set of buffers
@@ -435,7 +435,7 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     @unittest.skip(
         "Triton recursion depth exceeded: https://github.com/triton-lang/triton/issues/1763"
@@ -455,7 +455,7 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     def test_fusion_duplicate_buffer_list(self, op):
         def fn(a0, a1, b0, b1):
@@ -479,7 +479,7 @@ class ForeachTests(TestCase):
             kernel_count = 2
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, kernel_count)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_non_foreach_consumer_list(self, op):
         if op in un_ops_under_test:
@@ -507,7 +507,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_non_foreach_consumer_scalar(self, op):
         def fn(a0, a1):
@@ -524,7 +524,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_non_foreach_producer_list(self, op):
         if op in un_ops_under_test:
@@ -554,7 +554,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_non_foreach_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
@@ -574,7 +574,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @all_ops
     def test_non_foreach_consumer_producer_list(self, op):
         if op in un_ops_under_test:
@@ -616,7 +616,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @scalar_bin_ops
     def test_non_foreach_consumer_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
@@ -641,7 +641,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -661,7 +661,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
@@ -680,7 +680,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
@@ -715,7 +715,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @decomp_ops
     def test_decomp(self, op):
         def fn(a0, a1, b0, b1, c0, c1):
@@ -735,7 +735,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_fuse_concat(self):
         def fn(x1, x2, x3, w1, w2, w3):
             x = torch.stack([x1, x2, x3])
@@ -758,7 +758,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -775,7 +775,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     def test_2d_blocking(self, op):
         def fn(a0, a1, b0, b1):
@@ -793,7 +793,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     def test_2d_blocking_partitioning(self, op):
         def fn(a0, a1, b0, b1):
@@ -811,7 +811,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     def test_2d_blocking_partitioning_elems(self, op):
         """2D blocking should be grouped by number of yelems"""
@@ -833,7 +833,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @bin_ops
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
     def test_2d_blocking_partitioning_mixed_sizes(self, op):
@@ -856,7 +856,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inplace_bin_ops
     def test_reinplacing(self, op):
         def fn(a0, a1, b0, b1):
@@ -874,7 +874,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inplace_bin_ops
     def test_reinplacing_mut_before(self, op):
         def fn(a0, a1, b0, b1):
@@ -893,7 +893,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inplace_bin_ops
     def test_reinplacing_mut_after(self, op):
         def fn(a0, a1, b0, b1):
@@ -912,7 +912,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_multi_device(self):
         def test_foreach_add(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -930,7 +930,7 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_aliasing(self):
         def test_foreach_add(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add_([a0, a1, a2], [b0, b1, b2])
@@ -952,7 +952,7 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
     def test_2d_block_no_mixed_sizes_no_mask(self):
         """2D blocking with no mixed sizes constant mask"""
@@ -974,7 +974,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
     def test_2d_block_mixed_sizes_with_mask(self):
         """2D blocking with mixed sizes should have mask"""
@@ -996,7 +996,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @foreach_map_bin_ops
     def test_foreach_map_backward_binary(self, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1037,7 +1037,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_foreach_map_input_mutation(self):
         def fn(xs, ys):
             outs = foreach_map_add_inplace(xs, ys)
@@ -1073,7 +1073,7 @@ class ForeachTests(TestCase):
             ):
                 _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @foreach_map_un_ops
     def test_foreach_map_backward_unary(self, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1109,5 +1109,5 @@ class ForeachTests(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

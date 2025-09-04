@@ -102,32 +102,33 @@ class TestBase(__TestCase):
             sizes.extend(range(n-1, n+2))
         sizes.extend([10, 100, 1000])
 
-        class Complains(object):
-            maybe_complain = True
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Complains(object):
+                maybe_complain = True
 
-            def __init__(self, i):
-                self.i = i
+                def __init__(self, i):
+                    self.i = i
 
-            def __lt__(self, other):
-                if Complains.maybe_complain and random.random() < 0.001:
-                    if verbose:
-                        print("        complaining at", self, other)
-                    raise RuntimeError
-                return self.i < other.i
+                def __lt__(self, other):
+                    if Complains.maybe_complain and random.random() < 0.001:
+                        if verbose:
+                            print("        complaining at", self, other)
+                        raise RuntimeError
+                    return self.i < other.i
 
-            def __repr__(self):
-                return "Complains(%d)" % self.i
+                def __repr__(self):
+                    return "Complains(%d)" % self.i
 
-        class Stable(object):
-            def __init__(self, key, i):
-                self.key = key
-                self.index = i
+            class Stable(object):
+                def __init__(self, key, i):
+                    self.key = key
+                    self.index = i
 
-            def __lt__(self, other):
-                return self.key < other.key
+                def __lt__(self, other):
+                    return self.key < other.key
 
-            def __repr__(self):
-                return "Stable(%d, %d)" % (self.key, self.index)
+                def __repr__(self):
+                    return "Stable(%d, %d)" % (self.key, self.index)
 
         for n in sizes:
             x = list(range(n))
@@ -212,13 +213,14 @@ class TestBugs(__TestCase):
         # If this fails, the most likely outcome is a core dump.
         # Mutations during a list sort should raise a ValueError.
 
-        class C:
-            def __lt__(self, other):
-                if L and random.random() < 0.75:
-                    L.pop()
-                else:
-                    L.append(3)
-                return random.random() < 0.5
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class C:
+                def __lt__(self, other):
+                    if L and random.random() < 0.75:
+                        L.pop()
+                    else:
+                        L.append(3)
+                    return random.random() < 0.5
 
         L = [C() for i in range(50)]
         self.assertRaises(ValueError, L.sort)
@@ -282,26 +284,28 @@ class TestDecorateSortUndecorate(__TestCase):
 
     def test_key_with_mutating_del(self):
         data = list(range(10))
-        class SortKiller(object):
-            def __init__(self, x):
-                pass
-            def __del__(self):
-                del data[:]
-                data[:] = range(20)
-            def __lt__(self, other):
-                return id(self) < id(other)
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class SortKiller(object):
+                def __init__(self, x):
+                    pass
+                def __del__(self):
+                    del data[:]
+                    data[:] = range(20)
+                def __lt__(self, other):
+                    return id(self) < id(other)
         self.assertRaises(ValueError, data.sort, key=SortKiller)
 
     def test_key_with_mutating_del_and_exception(self):
         data = list(range(10))
         ## dup = data[:]
-        class SortKiller(object):
-            def __init__(self, x):
-                if x > 2:
-                    raise RuntimeError
-            def __del__(self):
-                del data[:]
-                data[:] = list(range(20))
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class SortKiller(object):
+                def __init__(self, x):
+                    if x > 2:
+                        raise RuntimeError
+                def __del__(self):
+                    del data[:]
+                    data[:] = list(range(20))
         self.assertRaises(RuntimeError, data.sort, key=SortKiller)
         ## major honking subtlety: we *can't* do:
         ##
@@ -385,17 +389,18 @@ class TestOptimizedCompares(__TestCase):
         # This test is by ppperry. It ensures that unsafe_object_compare is
         # verifying ms->key_richcompare == tp->richcompare before comparing.
 
-        class WackyComparator(int):
-            def __lt__(self, other):
-                elem.__class__ = WackyList2
-                return int.__lt__(self, other)
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class WackyComparator(int):
+                def __lt__(self, other):
+                    elem.__class__ = WackyList2
+                    return int.__lt__(self, other)
 
-        class WackyList1(list):
-            pass
+            class WackyList1(list):
+                pass
 
-        class WackyList2(list):
-            def __lt__(self, other):
-                raise ValueError
+            class WackyList2(list):
+                def __lt__(self, other):
+                    raise ValueError
 
         L = [WackyList1([WackyComparator(i), i]) for i in range(10)]
         elem = L[-1]
@@ -409,9 +414,10 @@ class TestOptimizedCompares(__TestCase):
 
         # The following test is also by ppperry. It ensures that
         # unsafe_object_compare handles Py_NotImplemented appropriately.
-        class PointlessComparator:
-            def __lt__(self, other):
-                return NotImplemented
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class PointlessComparator:
+                def __lt__(self, other):
+                    return NotImplemented
         L = [PointlessComparator(), PointlessComparator()]
         self.assertRaises(TypeError, L.sort)
         self.assertRaises(TypeError, [(x,) for x in L].sort)

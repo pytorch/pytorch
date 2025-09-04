@@ -199,7 +199,24 @@ class ShardingPropagator:
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        """
+        Cached version of _propagate_tensor_meta_non_cached
+        This is a private API. Use propagate_tensor_meta instead.
+        """
         return self._propagate_tensor_meta_non_cached(op_schema)
+
+    def propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        """
+        Propagate the tensor metadata, it could either return a TensorMeta
+        or a list/tuple of TensorMetas. This is a public API that should be
+        used if cache should be used.
+        """
+        if _are_we_tracing():
+            return self._propagate_tensor_meta_non_cached(op_schema)
+        else:
+            return self._propagate_tensor_meta(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,
@@ -302,9 +319,8 @@ class ShardingPropagator:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
-        # and compile autograd initial tracing, which do not need to be as fast as
-        # eager mode DTensor usages.
-        if _are_we_tracing():
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        if op_info.schema.has_symints:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(

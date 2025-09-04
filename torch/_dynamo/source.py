@@ -106,6 +106,13 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
+def _get_source_debug_name(source: Source) -> str:
+    try:
+        return source.name()
+    except NotImplementedError:
+        return "<unknown source>"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
@@ -266,6 +273,38 @@ class GenericAttrSource(ChainedSource):
         return f"object.__getattribute__({self.base.name()}, {self.member!r})"
 
 
+# Represents obj.__dict__ where obj is a type object
+@dataclasses.dataclass(frozen=True)
+class TypeDictSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        # type(ob).__dict__ can return a proxy of the dict. But in the C++
+        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # forcefully pass a dict object to ensure that the GuardManager
+        # registers that its working on a dict object.
+        return f"dict({self.base.name()}.__dict__)"
+
+
+# Represents obj.__mro__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class TypeMROSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__mro__"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """
@@ -283,6 +322,34 @@ class LocalCellSource(Source):
 
     # All the other methods are intentionally unimplemented because e.g., a
     # local cell object should never be used for guards.
+
+
+# Represents obj.__code__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class CodeSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__code__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__code__"
+
+
+# Represents obj.__closure__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class ClosureSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__closure__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__closure__"
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
@@ -340,6 +407,18 @@ class EphemeralSource(Source):
 
     def is_ephemeral(self) -> bool:
         return True
+
+
+@dataclasses.dataclass(frozen=True)
+class SkipGuardSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.base.reconstruct(codegen)
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return self.base.name()
 
 
 class TensorProperty(enum.Enum):
@@ -752,6 +831,19 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class NamedTupleFieldsSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("_fields"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"___namedtuple_fields({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class DataclassFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -1006,6 +1098,14 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+def is_from_closure_source(source: Source) -> bool:
+    if isinstance(source, ClosureSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_closure_source(source.base)
+    return False
+
+
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
@@ -1082,4 +1182,15 @@ def is_from_defaults(source: Source) -> bool:
 
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
+    return False
+
+
+@functools.lru_cache
+def is_from_skip_guard_source(source: Source) -> bool:
+    if isinstance(source, SkipGuardSource):
+        return True
+
+    if isinstance(source, ChainedSource):
+        return is_from_skip_guard_source(source.base)
+
     return False
