@@ -2373,9 +2373,10 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    from torch.fx.experimental.symbolic_shapes import sym_or
 
     torch._check(
-        any(x > 0 for x in ret_shape[2:]),
+        sym_or(*[x > 0 for x in ret_shape[2:]]),
         lambda: f"Given input size per channel: {list(dims)}. "
         f"Calculated output size per channel: {ret_shape[2:]}. "
         f"Output size is too small",
