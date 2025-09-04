@@ -2991,6 +2991,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_torch_device_split(self):
+        def fn(x):
+            return x.split(2)
+
+        x = torch.rand(10)
+
+        with x.device:
+            out = torch.compile(fn)(x)
+            ref = fn(x)
+            for a, b in zip(out, ref):
+                self.assertTrue(torch.allclose(a, b))
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
