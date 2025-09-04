@@ -263,7 +263,6 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         self.start_dim = start_dim
         self.eps = eps
         self.elementwise_affine = elementwise_affine
-        self.bias = bias
 
         if self.elementwise_affine:
             self.weight = UninitializedParameter(**factory_kwargs)
