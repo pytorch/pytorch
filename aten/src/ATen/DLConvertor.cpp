@@ -65,14 +65,22 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     // TODO(#146647): use macro here instead of spelling out each shell dtype
     case ScalarType::Float8_e5m2:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2;
+      break;
     case ScalarType::Float8_e5m2fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2fnuz;
+      break;
     case ScalarType::Float8_e4m3fn:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fn;
+      break;
     case ScalarType::Float8_e4m3fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fnuz;
+      break;
     case ScalarType::Float8_e8m0fnu:
-      TORCH_CHECK_BUFFER(false, "float8 types are not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
       break;
     case ScalarType::Float4_e2m1fn_x2:
-      TORCH_CHECK_BUFFER(false, "float4 types are not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:

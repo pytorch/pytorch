@@ -95,7 +95,19 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bfloat16,
+            torch.bool,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e8m0fnu,
+            torch.float4_e2m1fn_x2,
+        )
+    )
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
         stream = torch.cuda.Stream()
@@ -172,7 +184,19 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bfloat16,
+            torch.bool,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e8m0fnu,
+            torch.float4_e2m1fn_x2,
+        )
+    )
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
@@ -484,8 +508,8 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCPU
     def test_dlpack_unsupported_dtype_error(self, device):
-        inp = make_tensor((5,), dtype=torch.float32, device=device).to(
-            torch.float8_e4m3fn
+        inp = make_tensor((5,), dtype=torch.int32, device=device).to(
+            torch.qint8
         )
 
         with self.assertRaisesRegex(

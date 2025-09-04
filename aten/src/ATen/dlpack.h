@@ -19,7 +19,7 @@
 #define DLPACK_MAJOR_VERSION 1
 
 /*! \brief The current minor version of dlpack */
-#define DLPACK_MINOR_VERSION 0
+#define DLPACK_MINOR_VERSION 1
 
 /*! \brief DLPACK_DLL prefix for windows */
 #ifdef _WIN32
