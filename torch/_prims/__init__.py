@@ -1384,12 +1384,17 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
+# If must_be_valid is not None, do a torch._check that the collapse is valid else
+# return None, None.
+# When must_be_valid is False, this function returns None when validity is not decided.
+# When must_be_valid is True, this function generates a runtime assertion for validity
+# when it is not decided.
 def _collapse_view_helper(
-    a: TensorLikeType, start: int, end: int
+    a: TensorLikeType, start: int, end: int, must_be_valid: Optional[str]
 ) -> tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and, sym_or
 
     _validate_collapse_args(a, start, end)
 
@@ -1406,50 +1411,57 @@ def _collapse_view_helper(
 
     length = shape[end]
     stride = strides[end]
+
+    valid_op = True
     for idx in range(end - 1, start - 1, -1):
-        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
-            shape[idx + 1] == 0
-        ):
+        valid_op = sym_and(
+            valid_op,
+            sym_or(
+                shape[idx + 1] == 1, strides[idx] == strides[idx + 1] * shape[idx + 1]
+            ),
+        )  # type: ignore[assignment]
+
+    valid_op = sym_or(valid_op, a.numel() == 0)
+
+    if must_be_valid:
+        torch._check(valid_op, lambda: must_be_valid)
+    else:
+        if not guard_or_false(valid_op):
+            return None, None
+
+    # compute stride which is the min dimension in the collapsed range.
+    for idx in range(end - 1, start - 1, -1):
+        stride = min(stride, strides[idx])
+
+    # compute length
+    for idx in range(end - 1, start - 1, -1):
+        # those are just show circuits, mm except
+        if guard_or_false(shape[idx] == 0) or guard_or_false(shape[idx + 1] == 0):
             length = 0
-            stride = 0
             break
 
-        if guard_size_oblivious(shape[idx] == 1):
+        if guard_or_false(shape[idx] == 1):
             continue
 
         length = length * shape[idx]
-        if guard_size_oblivious(stride < strides[idx]):
-            stride = stride
-        else:
-            stride = strides[idx]
-
-        if (
-            guard_size_oblivious(a.numel() > 0)
-            and guard_size_oblivious(shape[idx + 1] != 1)
-            and not guard_size_oblivious(
-                strides[idx] == strides[idx + 1] * shape[idx + 1]
-            )
-        ):
-            return None, None
 
     new_shape = shape[:start] + (length,) + shape[end + 1 :]
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if guard_size_oblivious(a.numel() == 0):
+    # except for unbacked.
+    if guard_or_false(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
 
 
 def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
-    new_shape, new_strides = _collapse_view_helper(a, start, end)
-
-    if new_shape is None:
-        msg = "Attempting to view a collapsed tensor, but no such view exists!"
-        raise ValueError(msg)
-
+    new_shape, new_strides = _collapse_view_helper(
+        a, start, end, "Attempting to view a collapsed tensor, but no such view exists!"
+    )
     assert new_strides is not None
+    assert new_shape is not None
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
