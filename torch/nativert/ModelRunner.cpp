@@ -152,6 +152,11 @@ std::vector<c10::IValue> ModelRunner::runWithFlatInputsAndOutputs(
   return executor_->execute(std::move(flatInputs));
 }
 
+uint64_t ModelRunner::numOutputs() const {
+  TORCH_CHECK(executor_, "ModelRunner not initialized");
+  return executor_->graphSignature().userOutputs().size();
+}
+
 ModelRunnerHandle::ModelRunnerHandle(
     const std::string& packagePath,
     const std::string& modelName)
