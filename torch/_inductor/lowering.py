@@ -946,8 +946,7 @@ def broadcast_tensors(*inputs):
         sizes = x.get_size()
 
         if len(sizes) != len(target) or any(
-            V.graph.sizevars.is_size_one(a)
-            != V.graph.sizevars.is_size_one(b)
+            V.graph.sizevars.is_size_one(a)!= V.graph.sizevars.is_size_one(b))
             for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
