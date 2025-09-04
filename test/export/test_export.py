@@ -7,10 +7,12 @@ import functools
 import logging
 import math
 import operator
+import os
 import re
 import traceback
 import unittest
 import warnings
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
@@ -63,10 +65,7 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    xfailIfDistributedNotSupported,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -419,28 +418,6 @@ graph():
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \>\= 4"
         ):
             ep.module()(torch.tensor([3]))
-
-    def test_container_leak(self):
-        class Bar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self._cache = {}
-
-            def forward(self, x):
-                self._cache["leaky"] = x.sum()
-                return x.sum()
-
-        class Foo(torch.nn.Module):
-            def __init__(self, bar):
-                super().__init__()
-                self.bar = bar
-
-            def forward(self, x):
-                return self.bar(x)
-
-        foo = Foo(Bar())
-        with self.assertRaisesRegex(ValueError, "self.bar._cache"):
-            export(foo, (torch.randn(4, 4),), strict=False)
 
     def test_export_assume_static_by_default(self):
         class Module(torch.nn.Module):
@@ -4363,79 +4340,6 @@ def forward(self, x):
         x = torch.tensor([1, 2])
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
 
-    def test_nested_module_fake_tensor_leak(self):
-        class Bar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self._tensor_cache = None
-
-            def forward(self, x):
-                if self._tensor_cache is None:
-                    self._tensor_cache = x + 2
-                return self._tensor_cache.sum() + x.sum()
-
-        class Foo(torch.nn.Module):
-            def __init__(self, bar):
-                super().__init__()
-                self.bar = bar
-
-            def forward(self, x):
-                return self.bar(x)
-
-        foo = Foo(Bar())
-        _ = export(foo, (torch.ones(4, 4),), strict=False)
-        self.assertTrue(foo.bar._tensor_cache is None)
-
-    def test_export_leak_compile(self):
-        class BaseModule(torch.nn.Module):
-            def forward(self, *args, **kwargs):
-                raise NotImplementedError
-
-        class CacheModule(BaseModule):
-            def __init__(self, cache: torch.Tensor):
-                super().__init__()
-                assert cache.ndim == 3
-                self.cache = torch.nn.Parameter(cache, requires_grad=False)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                n_tokens = x.size(1)
-                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
-                rolled_cache[:, -n_tokens:, :] = x
-                self.cache.data = rolled_cache
-                return self.cache
-
-        class LinearBlock(torch.nn.Module):
-            def __init__(self, in_features, out_features, activation=None):
-                super().__init__()
-                self.linear = torch.nn.Linear(in_features, out_features)
-                self.activation = activation
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.activation(x) if self.activation else x
-
-        class MyModel(BaseModule):
-            def __init__(self):
-                super().__init__()
-                default_cache = torch.zeros(1, 10, 5)
-                self.cache_layer = CacheModule(default_cache)
-                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
-                self.fc2 = LinearBlock(10, 5)
-
-            def forward(self, x):
-                cached = self.cache_layer(x)
-                out = self.fc1(cached)
-                out = self.fc2(out)
-                return out
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "cached = self.cache_layer\(x\)",
-        ):
-            # Intentionally using training IR here because it will crash in inference IR
-            # anyways.
-            _ = torch.export.export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
-
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -4463,6 +4367,186 @@ def forward(self, x):
                 eager_model(([torch.ones(4, 4), torch.ones(4, 4)])),
             )
         )
+
+    def test_function_holding_tensor(self):
+        global_storage = []
+
+        class FunctionClosureLeak(torch.nn.Module):
+            def forward(self, x):
+                fake_tensor = x + 1  # In real export, this would be a FakeTensor
+
+                def closure():
+                    return fake_tensor.shape  # Captures fake_tensor
+
+                # Store closure globally - this creates the leak
+                global_storage.append(closure)
+                return x.sin()
+
+        prev_os_env = os.environ.copy()
+        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
+
+        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
+
+        with (
+            patch.dict(
+                os.environ,
+                prev_os_env,
+                clear=True,
+            ),
+            self.assertWarnsRegex(
+                UserWarning, "Detected 1 fake tensors that are still alive after export"
+            ),
+        ):
+            export(FunctionClosureLeak(), (torch.randn(4, 4),), strict=False)
+
+    def test_detect_leak_nonstrict(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        global_list = []
+
+        class ReferenceControl:
+            def __init__(self, mod):
+                self.bank = []
+                self.bank_dict = {}
+                self.mod = mod
+
+                def hacked_up_forward(self_, x, y):
+                    self.bank.append(x.clone())
+                    self.bank_dict["x"] = x.clone()
+                    global_list.append(x.clone())
+                    return x + y
+
+                self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
+
+            def __call__(self, x, y):
+                ep = export(self.mod, (x, y), strict=False).module()
+                out = ep(x, y)
+                return out
+
+            def update(self):
+                return self.bank
+
+        foo = Foo()
+        ref = ReferenceControl(foo)
+        ref(torch.randn(4, 4), torch.randn(4, 4))
+        self.assertTrue(
+            isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
+        )
+
+        prev_os_env = os.environ.copy()
+        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
+
+        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
+
+        with (
+            patch.dict(
+                os.environ,
+                prev_os_env,
+                clear=True,
+            ),
+            self.assertWarnsRegex(
+                UserWarning, "Detected 3 fake tensors that are still alive after export"
+            ),
+        ):
+            ref(torch.randn(4, 4), torch.randn(4, 4))
+
+    def test_detect_leak_nonstrict_with_stacktrace(self):
+        global_list = []
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                nonlocal global_list
+                global_list.append(x + y)
+                return x + y
+
+        foo = Foo()
+        ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
+        self.assertTrue(
+            isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
+        )
+
+        prev_os_env = os.environ.copy()
+        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
+
+        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
+
+        with patch.dict(
+            os.environ,
+            prev_os_env,
+            clear=True,
+        ):
+            warn_re = re.compile(
+                r"Detected\s+\d+\s+fake\s+tensors?"
+                r".*test_export\.py.*global_list\.append\(x \+ y\)",
+                re.S,
+            )
+            with self.assertWarnsRegex(UserWarning, warn_re):
+                ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
+
+    def test_export_cyclic_reference_leak(self):
+        class Node:
+            def __init__(self, tag):
+                self.tag = tag
+                self.ref = None
+                self.tensor = None
+
+        bank = []
+
+        class LeakyCycle(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x + y
+                node1 = Node("A")
+                node2 = Node("B")
+                node1.ref = node2
+                node2.ref = node1
+                node1.tensor = z
+                # Keep the cycle alive intentionally -> leak
+                nonlocal bank
+                bank.append(node1)
+                return (z.sin()).cos()
+
+        lc = LeakyCycle()
+        ep = export(lc, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
+
+        node1_ref = weakref.ref(bank[0])
+        node2_ref = weakref.ref(bank[0].ref)
+
+        bank.clear()
+        del bank
+        bank = []
+
+        self.assertIsNotNone(node1_ref(), "node1 should still be alive due to cycle")
+        self.assertIsNotNone(node2_ref(), "node2 should still be alive due to cycle")
+
+        prev_os_env = os.environ.copy()
+        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
+
+        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
+
+        with patch.dict(
+            os.environ,
+            prev_os_env,
+            clear=True,
+        ):
+            warn_re = re.compile(
+                r"Detected\s+\d+\s+fake\s+tensors?"
+                r'.*?[/\\]test_export\.py",\s+line\s+\d+,\s+in\s+forward'
+                r"(?:\\n|\n)\s*z\s*=\s*x\s*\+\s*y",
+                re.S,
+            )
+            with self.assertWarnsRegex(UserWarning, warn_re):
+                ep = export(lc, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
 
     def test_export_for_training_run_decomp(self):
         class Foo(torch.nn.Module):
@@ -15471,7 +15555,6 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15489,7 +15572,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15505,7 +15587,6 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15519,7 +15600,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15537,7 +15617,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
