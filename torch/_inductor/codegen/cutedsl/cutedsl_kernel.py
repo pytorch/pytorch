@@ -155,6 +155,7 @@ class CuteDSLTemplateKernel(Kernel):
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
+            "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
         }
 
@@ -273,6 +274,27 @@ class CuteDSLTemplateKernel(Kernel):
     def get_tensor_buffers(self):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
+
+    def unpack_buffers(self):
+        """Generate buffer unpacking code via render hook."""
+
+        def hook():
+            tensor_buffers = self.get_tensor_buffers()
+            if not tensor_buffers:
+                return ""
+
+            # Generate unpacking assignments: in_ptr4 = buffers[0], etc.
+            unpacking_lines = []
+            for i, buffer_name in enumerate(tensor_buffers):
+                unpacking_lines.append(f"{buffer_name} = buffers[{i}]")
+
+            return "\n        ".join(unpacking_lines)
+
+        # Register the hook and return placeholder
+        placeholder = "<UNPACK_BUFFERS>"
+        assert placeholder not in self.render_hooks
+        self.render_hooks[placeholder] = hook
+        return placeholder
 
     def call_kernel(self, name: str, node=None):
         """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""

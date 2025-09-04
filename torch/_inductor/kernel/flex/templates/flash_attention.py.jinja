@@ -8,7 +8,8 @@
     v_transposed = V.transpose(1, 2)
 
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx):
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, buffers):
+        {{unpack_buffers()}}
         {{ modification(
             subgraph_number=0,
             output_name="tSrS_ssa",
@@ -29,10 +30,10 @@
     {% set tensor_buffers = get_tensor_buffers() -%}
     {% if tensor_buffers -%}
     buffers = [{% for buffer in tensor_buffers %}{{buffer}}{% if not loop.last %}, {% endif %}{% endfor %}]
-    {% else -%}
-    buffers = []
-    {% endif -%}
     buffers = list(buffers)
+    {% else -%}
+    buffers = None
+    {% endif -%}
 
     # Out and LSE filled inplace
     _flash_attn_fwd(
