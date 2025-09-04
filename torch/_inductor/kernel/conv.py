@@ -573,7 +573,6 @@ def convolution(
 
     if (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
-        and (config.max_autotune or config.max_autotune_gemm)
         and use_triton_template(layout)
         # templates only support these:
         and is_ones(dilation)
