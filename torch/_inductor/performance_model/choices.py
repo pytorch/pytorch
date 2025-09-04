@@ -60,7 +60,6 @@ class PerformanceModelChoices(LookupTableChoices):
         assert hardware_name is not None, (
             f"hardware_name must not be None, got {hardware_name}"
         )
-
         for template_uid, generator in template_choices.items():
             # Check if performance model exists for this template
             model_function = get_model_function_for_key(
@@ -79,6 +78,7 @@ class PerformanceModelChoices(LookupTableChoices):
                 # Create exhaustive generator by patching config
                 with config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
                     # Get the template heuristic for exhaustive generation
+                    assert kernel_inputs.device_type is not None, "device_type is None"
                     heuristic = get_template_heuristic(
                         template_uid, kernel_inputs.device_type, op_name
                     )
@@ -142,6 +142,10 @@ class PerformanceModelChoices(LookupTableChoices):
         3. Handle topk normalization
         4. Call predict_and_filter_choices with actualized choices
         """
+        # Validate topk configuration
+        topk = config.performance_model.topk
+        assert topk >= -1, "performance_model.topk must be >= -1, got " + str(topk)
+        enabled = True
         # Early validation - check if performance model is enabled
         # Check if max_autotune flags are enabled
         if not (config.max_autotune or config.max_autotune_gemm):
@@ -149,25 +153,15 @@ class PerformanceModelChoices(LookupTableChoices):
                 "Performance model disabled: max_autotune and max_autotune_gemm both False. "
                 "Falling back to parent implementation."
             )
-            return super()._fallback(
-                template_choices,
-                kernel_inputs,
-                layout,
-                templates,
-                op_name,
-                kwarg_overrides,
-                max_autotune,
-            )
-        # Validate topk configuration
-        topk = config.performance_model.topk
-        assert topk >= -1, "performance_model.topk must be >= -1, got " + str(topk)
-
+            enabled = False
         # If topk == 0, performance model is disabled
         if topk == 0:
             log.debug(
                 "Performance model disabled: topk=0. "
                 "Falling back to parent implementation."
             )
+            enabled = False
+        if not enabled:
             return super()._fallback(
                 template_choices,
                 kernel_inputs,
@@ -187,7 +181,7 @@ class PerformanceModelChoices(LookupTableChoices):
         # Handle topk normalization: if topk == -1, set to total original size
         if topk == -1:
             topk = original_sizes
-            log.debug("Set topk=-1 to original size")
+            log.debug("Set topk=-1 to original size %d", original_sizes)
 
         # Create template_uid_to_ktc mapping for predict_and_filter_choices
         template_uid_to_ktc: dict[str, list[KernelTemplateChoice]] = {}
@@ -195,7 +189,6 @@ class PerformanceModelChoices(LookupTableChoices):
             if choice.template.uid not in template_uid_to_ktc:
                 template_uid_to_ktc[choice.template.uid] = []
             template_uid_to_ktc[choice.template.uid].append(choice)
-
         # Apply performance model prediction and filtering
         filtered_choices = predict_and_filter_choices(
             ktc_stack=actualized_choices,
@@ -204,7 +197,6 @@ class PerformanceModelChoices(LookupTableChoices):
             topk=topk,
             discard_unranked=config.performance_model.discard_unranked,
         )
-
         log.info(
             "Performance model complete: orig=%d exp=%d filt=%d topk=%d",
             original_sizes,

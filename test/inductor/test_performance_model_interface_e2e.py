@@ -16,7 +16,7 @@ from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
     clear_preprocessing_fns,
 )
-from torch._inductor.test_case import run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
@@ -71,7 +71,7 @@ class SimpleModel(nn.Module):
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support performance model interface")
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
-class TestPerformanceModelInterfaceE2E(unittest.TestCase):
+class TestPerformanceModelInterfaceE2E(TestCase):
     """E2E tests for performance model interface functionality"""
 
     def setUp(self):

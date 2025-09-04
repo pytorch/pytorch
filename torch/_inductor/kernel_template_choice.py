@@ -45,7 +45,7 @@ class KernelTemplateChoice:
         """
         Lazily evaluate and return the ChoiceCaller for this template choice.
 
-        On first access, calls template.choice_or_None() with the stored parameters.
+        On first access, calls template.choice_or_none() with the stored parameters.
         If successful, caches and returns the ChoiceCaller. If it fails, caches
         and returns None. Subsequent accesses return the cached value.
 
@@ -54,7 +54,7 @@ class KernelTemplateChoice:
         """
         if not hasattr(self, "_choice"):
             # First time accessing choice - try to generate it
-            self._choice = self.template.choice_or_None(
+            self._choice = self.template.choice_or_none(
                 **self.kwargs,
                 layout=self.layout,
                 input_nodes=self.inputs.nodes(),
