@@ -106,6 +106,7 @@ class KernelInputs:
         """
         return self._input_nodes[0].get_device()
 
+    @property
     def device_name(self) -> Optional[str]:
         """
         Get the device name information.
