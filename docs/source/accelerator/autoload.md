@@ -17,7 +17,6 @@ The first step is to define an initialization hook for your backend. This hook w
     :linenos:
 ```
 
-:::
 
 ::::
 
