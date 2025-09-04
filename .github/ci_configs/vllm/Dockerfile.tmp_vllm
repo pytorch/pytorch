@@ -25,19 +25,15 @@ ARG PYTHON_VERSION
 ARG GET_PIP_URL
 
 # Install Python and other dependencies
-RUN if command -v apt-get >/dev/null; then \
-        apt-get update -y \
-        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
-        && add-apt-repository -y ppa:deadsnakes/ppa \
-        && apt-get update -y \
-        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-        && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
-    else \
-        dnf install -y git curl wget sudo vim; \
-    fi \
+RUN apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
     && python3 --version && python3 -m pip --version
 
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
@@ -80,6 +76,15 @@ ARG PYTHON_VERSION
 
 # TODO (huydhn): Only work with PyTorch manylinux builder
 ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
+
+# Install some system dependencies and double check python version
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+    else \
+        dnf install -y git curl wget sudo vim; \
+    fi \
+    && python3 --version && python3 -m pip --version
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
