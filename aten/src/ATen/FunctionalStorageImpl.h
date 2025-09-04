@@ -27,7 +27,7 @@ enum class InverseReturnMode {
   }
 
 #define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
-  using SerializableTuple = std::tuple<__VA_ARGS__>;
+  using SerializableTuple = std::tuple<__VA_ARGS__>
 
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
