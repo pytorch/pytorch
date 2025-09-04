@@ -1,20 +1,12 @@
 # Owner(s): ["module: PrivateUse1"]
 
-import os
 import types
 import unittest
 
-import psutil
-
 import torch
+
 import torch_openreg  # noqa: F401
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfMPS,
-    skipIfTorchDynamo,
-    skipIfWindows,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestBackendModule(TestCase):
@@ -42,7 +34,7 @@ class TestBackendModule(TestCase):
         )
 
 
-class TestMethodGeneration(TestCase):
+class TestBackendProperty(TestCase):
     def test_backend_generate_methods(self):
         with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
             torch.utils.generate_methods_for_privateuse1_backend()
@@ -165,42 +157,6 @@ class TestTensorType(TestCase):
             self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
         finally:
             torch.openreg.FloatStorage = None
-
-
-class TestAutograd(TestCase):
-    # Support MPS and Windows platform later and fix torchdynamo issue
-    @skipIfMPS
-    @skipIfWindows()
-    @skipIfTorchDynamo()
-    def test_autograd_init(self):
-        # Make sure autograd is initialized
-        torch.ones(2, requires_grad=True, device="openreg").sum().backward()
-
-        pid = os.getpid()
-        task_path = f"/proc/{pid}/task"
-        all_threads = psutil.Process(pid).threads()
-
-        all_thread_names = set()
-
-        for t in all_threads:
-            with open(f"{task_path}/{t.id}/comm") as file:
-                thread_name = file.read().strip()
-            all_thread_names.add(thread_name)
-
-        for i in range(torch.accelerator.device_count()):
-            self.assertIn(f"pt_autograd_{i}", all_thread_names)
-
-
-class TestDLPack(TestCase):
-    def test_open_device_dlpack(self):
-        x_in = torch.randn(2, 3).to("openreg")
-        capsule = torch.utils.dlpack.to_dlpack(x_in)
-        x_out = torch.from_dlpack(capsule)
-        self.assertTrue(x_out.device == x_in.device)
-
-        x_in = x_in.to("cpu")
-        x_out = x_out.to("cpu")
-        self.assertEqual(x_in, x_out)
 
 
 if __name__ == "__main__":

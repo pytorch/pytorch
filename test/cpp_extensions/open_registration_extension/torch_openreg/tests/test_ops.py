@@ -10,48 +10,57 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestOperators(TestCase):
-    @skipIfTorchDynamo()
-    def test_operator_registration(self):
-        self.assertTrue(
-            torch._C._dispatch_has_kernel_for_dispatch_key(
-                "aten::empty.memory_format", torch.DispatchKey.PrivateUse1
-            )
-        )
-
-    def test_factory(self):
+class TestFactory(TestCase):
+    def test_empty(self):
         x = torch.empty(3, device="openreg")
         self.assertEqual(x.device.type, "openreg")
         self.assertEqual(x.shape, torch.Size([3]))
 
+        x = torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
+        self.assertEqual(x.device.type, "openreg")
+        self.assertEqual(x.shape, torch.Size([2, 3, 4, 5]))
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.empty(3, 3, device="openreg")
+            y = torch.empty(3, 3, device="openreg:0")
+            z = x + y
+            self.assertEqual(z.device.type, "openreg")
+            self.assertEqual(z.shape, torch.Size([3, 3]))
+
+    def test_zeros(self):
         y = torch.zeros(3, device="openreg")
         self.assertEqual(y.device.type, "openreg")
         self.assertEqual(y.shape, torch.Size([3]))
 
+    def test_tensor(self):
         z = torch.tensor((), device="openreg")
         self.assertEqual(z.device.type, "openreg")
         self.assertEqual(z.shape, torch.Size([0]))
 
-    def test_fake_tensor(self):
-        with torch._subclasses.fake_tensor.FakeTensorMode():
-            a = torch.empty(1, device="openreg")
-            b = torch.empty(1, device="openreg:0")
-            result = a + b  # noqa: F841
 
-    def test_named_tensor(self):
-        return torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
+class TestCopy(TestCase):
+    def test_copy_same_device(self):
+        a = torch.ones(10, device="openreg").clone()
+        self.assertEqual(a, torch.ones(10, device="openreg"))
 
-    def test_printing(self):
-        a = torch.ones(20, device="openreg")
-        print(a)
+    def test_cross_device_copy(self):
+        a = torch.rand(10)
+        b = a.to(device="openreg").add(2).to(device="cpu")
+        self.assertEqual(b, a + 2)
 
-    def test_data_dependent_output(self):
-        cpu_a = torch.randn(10)
-        a = cpu_a.to(device="openreg")
-        mask = a.gt(0)
-        out = torch.masked_select(a, mask)
+    def test_cross_diff_devices_copy(self):
+        a = torch.ones(10, device="openreg:0").to(device="openreg:1").to(device="cpu")
+        self.assertEqual(a, torch.ones(10))
 
-        self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
+
+class TestOps(TestCase):
+    def test_masked_select(self):
+        tensor_cpu = torch.randn(10)
+        tensor_openreg = tensor_cpu.to(device="openreg")
+        mask = tensor_openreg.gt(0)
+        out = torch.masked_select(tensor_openreg, mask)
+
+        self.assertEqual(out, tensor_cpu.masked_select(tensor_cpu.gt(0)))
 
     def test_expand(self):
         x = torch.tensor([[1], [2], [3]], device="openreg")
@@ -73,6 +82,10 @@ class TestOperators(TestCase):
 
         storage_openreg = tensor_openreg.storage()
         self.assertTrue(storage_openreg.size() == 16)
+
+    def test_printing(self):
+        a = torch.ones(20, device="openreg")
+        print(a)
 
 
 class TestSTUB(TestCase):

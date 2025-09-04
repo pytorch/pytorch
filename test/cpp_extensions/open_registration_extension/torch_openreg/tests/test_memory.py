@@ -28,20 +28,5 @@ class TestPinMemory(TestCase):
         self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
 
 
-class TestCopy(TestCase):
-    def test_copy_same_device(self):
-        a = torch.ones(10, device="openreg").clone()
-        self.assertEqual(a, torch.ones(10, device="openreg"))
-
-    def test_cross_device_copy(self):
-        a = torch.rand(10)
-        b = a.to(device="openreg").add(2).to(device="cpu")
-        self.assertEqual(b, a + 2)
-
-    def test_cross_diff_devices_copy(self):
-        a = torch.ones(10, device="openreg:0").to(device="openreg:1").to(device="cpu")
-        self.assertEqual(a, torch.ones(10))
-
-
 if __name__ == "__main__":
     run_tests()
