@@ -214,7 +214,8 @@ if(USE_FLASH_ATTENTION)
         -amdgpu-internalize-symbols
         -fvisibility=hidden
         -Wno-float-equal
-        -fgpu-flush-denormals-to-zero)
+        -fgpu-flush-denormals-to-zero
+        -Wno-unused-parameter)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
