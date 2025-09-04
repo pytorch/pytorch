@@ -21,11 +21,11 @@ TORCH_API bool is_nvshmem_available();
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
 
-TORCH_API void nvshmem_put(at::Tensor& tensor, int64_t peer);
+TORCH_API void nvshmem_put(at::Tensor& tensor, const int64_t peer);
 
-TORCH_API void nvshmem_get(at::Tensor& tensor, int64_t peer);
+TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
 
-at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
+at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name);
 
 at::Tensor nvshmem_all_to_all(
     at::Tensor& input,
@@ -38,7 +38,7 @@ at::Tensor all_to_all_vdev(
     at::Tensor& in_out_splits,
     std::string group_name);
 
-at::Tensor all_to_all_vdev_2d(
+void all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits,
@@ -46,7 +46,7 @@ at::Tensor all_to_all_vdev_2d(
     std::string group_name,
     std::optional<int64_t> major_align = std::nullopt);
 
-at::Tensor all_to_all_vdev_2d_offset(
+void all_to_all_vdev_2d_offset(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits_offsets,

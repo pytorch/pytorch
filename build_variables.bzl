@@ -593,11 +593,13 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/ModelRunner.cpp",
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/graph/GraphUtils.cpp",
     "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
@@ -629,6 +631,10 @@ libtorch_nativert_sources = [
     "torch/nativert/kernels/NativeKernels.cpp",
     "torch/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
     "torch/nativert/kernels/GeneratedNativeStaticDispatchKernels.cpp",
+    "torch/nativert/graph/passes/SubgraphRewriter.cpp",
+    "torch/nativert/graph/passes/pass_manager/GraphPasses.cpp",
+    "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
+    "torch/nativert/kernels/KernelHandlerRegistry.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -749,7 +755,15 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
+    "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
+]
+
+libtorch_nvshmem_sources = [
+    "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -864,6 +878,7 @@ libtorch_python_core_sources = [
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/PyInterpreter.cpp",
+    "torch/csrc/PyInterpreterHooks.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
@@ -986,6 +1001,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
+    "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [

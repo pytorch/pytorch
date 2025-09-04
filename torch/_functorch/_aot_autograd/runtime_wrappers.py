@@ -1949,12 +1949,11 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            # When we're inside compiled autograd's AOTDispatcher step,
-            # regular Tensors look like FunctionalTensors.
-            # Tensor subclasses still look like Tensor subclasses though.
-            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
-                runtime_type = torch.Tensor
+        # When we're inside compiled autograd's AOTDispatcher step,
+        # regular Tensors look like FunctionalTensors.
+        # Tensor subclasses still look like Tensor subclasses though.
+        if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+            runtime_type = torch.Tensor
 
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []

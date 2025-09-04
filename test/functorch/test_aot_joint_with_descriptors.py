@@ -739,6 +739,28 @@ class inner_f(torch.nn.Module):
 
             self.assertEqual(param_count, len(param_nodes))
 
+    def test_export_and_compile(self):
+        class SimpleModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleModule()
+        inputs = (torch.randn(4, 3),)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs
+            )
+            model_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
+
+        compiled_fn = torch.compile(fullgraph=True)(model_fn)
+        compiled_fn(*dict(model.named_parameters()).values(), inputs).sum().backward()
+        self.assertIsNotNone(model.linear.weight.grad)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/ATen.h>
+
 #include <torch/nativert/executor/OpKernel.h>
 #include <torch/nativert/graph/Graph.h>
 #include <torch/nativert/kernels/PrimKernelRegistry.h>

@@ -528,16 +528,16 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
-  auto rv = gethostname(hostname.get(), hostNameMax);
+  std::string hostname(hostNameMax, '\0');
+  auto rv = gethostname(hostname.data(), hostNameMax);
   if (rv != 0) {
     C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
     return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.get(), lazyInit);
+        hostname.data(), lazyInit);
   }
 
   // Otherwise, use the loopback address.
@@ -698,6 +698,7 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
+    const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
@@ -717,12 +718,8 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
   glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto store = std::dynamic_pointer_cast<GlooStore>(store_);
-  TORCH_CHECK(
-      store != nullptr,
-      "store inside ProcessGroupGloo not a ProcessGroupGloo::GlooStore.");
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
-      store->_getStore()->clone(), groupRank, ranks.size(), glooOpts);
+      store->clone(), groupRank, ranks.size(), glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
@@ -1778,7 +1775,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     }
 
     // Set single input tensor on all processes.
-    GENERATE_ALL_TYPES(scalarType, setInput, opts, inputs[0]);
+    at::Tensor flatInputTensor = flattenDenseTensors(inputs[0]);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
     gloo::gather(opts);
 
     // Unflatten into output tensors on root process.

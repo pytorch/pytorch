@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
@@ -12,13 +13,15 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._logging._internal
 import torch.utils._pytree as pytree
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.passes.insert_custom_op_guards import (
     get_op_profiles,
     insert_custom_op_guards,
     OpProfile,
 )
+from torch._utils_internal import log_draft_export_usage
 
-from ._trace import _export
+from ._trace import _export, get_ep_stats
 from .dynamic_shapes import _DimHint, _DimHintType, Dim
 from .exported_program import ExportedProgram
 
@@ -369,9 +372,11 @@ def draft_export(
     strict: bool = False,
     pre_dispatch: bool = True,
 ) -> ExportedProgram:
+    start_time = time.time()
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
+    constraint_violation_msg = None
     capture_structured_log = CaptureStructuredTrace()
 
     with (
@@ -392,25 +397,39 @@ def draft_export(
                 pre_dispatch=pre_dispatch,
                 preserve_module_call_signature=preserve_module_call_signature,
             )
-        except torch._dynamo.exc.UserError:
+        except Exception as exc:
+            if (
+                isinstance(exc, UserError)
+                and exc.error_type == UserErrorType.CONSTRAINT_VIOLATION
+            ):
+                constraint_violation_msg = exc.msg
 
-            def convert_dim_to_auto(dim: Any) -> Any:
-                if isinstance(dim, Dim):
-                    return Dim.AUTO(min=dim.min, max=dim.max)
-                elif isinstance(dim, _DimHint) and dim.type == _DimHintType.DYNAMIC:
-                    return Dim.AUTO(min=dim.min, max=dim.max)
-                return dim
+                def convert_dim_to_auto(dim: Any) -> Any:
+                    if isinstance(dim, Dim):
+                        return Dim.AUTO(min=dim.min, max=dim.max)
+                    elif isinstance(dim, _DimHint) and dim.type == _DimHintType.DYNAMIC:
+                        return Dim.AUTO(min=dim.min, max=dim.max)
+                    return dim
 
-            new_shapes = pytree.tree_map(convert_dim_to_auto, dynamic_shapes)
-            ep = _export(
-                mod,
-                args,
-                kwargs,
-                dynamic_shapes=new_shapes,
-                strict=strict,
-                pre_dispatch=pre_dispatch,
-                preserve_module_call_signature=preserve_module_call_signature,
-            )
+                new_shapes = pytree.tree_map(convert_dim_to_auto, dynamic_shapes)
+                ep = _export(
+                    mod,
+                    args,
+                    kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=strict,
+                    pre_dispatch=pre_dispatch,
+                    preserve_module_call_signature=preserve_module_call_signature,
+                )
+            else:
+                log_draft_export_usage(
+                    error=True,
+                    export_time=time.time() - start_time,
+                    strict=strict,
+                    message=str(exc),
+                    type=f"{type(exc).__name__}.{type(exc).__qualname__}",
+                )
+                raise exc
 
         torch._logging.dtrace_structured("exported_program", payload_fn=lambda: str(ep))
 
@@ -509,4 +528,12 @@ You can now change back to torch.export.export()
     """
         )
 
+    log_draft_export_usage(
+        error=False,
+        export_time=time.time() - start_time,
+        strict=strict,
+        constraint_violations=constraint_violation_msg,
+        report=ep._report,
+        **get_ep_stats(ep),
+    )
     return ep

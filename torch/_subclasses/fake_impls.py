@@ -514,6 +514,8 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
 def _view_has_unbacked_input(a, shape):
     from torch.fx.experimental.symbolic_shapes import has_hint
 
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+
     return (
         any(not has_hint(s) for s in a.size())
         or any(not has_hint(s) for s in a.stride())
@@ -599,6 +601,18 @@ def _view_meta(fake_mode, func, a, *shape):
         return _view_unbacked_meta(a, shape)
     else:
         return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+
+
+@register_op_impl(aten.view_copy.default)
+def _view_meta_copy(fake_mode, func, a, *shape, out=None):
+    result = _view_meta(fake_mode, func, a, *shape)
+    if out is not None:
+        return result
+
+    return pytree.tree_map(
+        lambda x: x.clone(memory_format=torch.contiguous_format),
+        result,
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)

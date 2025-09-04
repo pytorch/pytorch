@@ -21,6 +21,10 @@
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
+#ifdef USE_FBGEMM_GENAI
+#include <fbgemm_gpu/torch_ops.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -1216,7 +1220,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 //    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
-//    - `use_fast_accum`: if true, enables fast float8 accumulation
+//    - `use_fast_accum`: if true, enables fast float8 accumulation. Backends may ignore this option if not applicable.
 //    - `out`: a reference to the output tensor
 
 Tensor&
@@ -1279,15 +1283,35 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (use_fast_accum) {
     TORCH_CHECK(mat1.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat2.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat1` or `mat2` tensors have the `Float4_e2m1fn_x2` dtype.");
   }
+#ifdef USE_ROCM
+  if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(ROCM_VERSION >= 70000, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+  }
+#endif
   if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+    TORCH_CHECK(out.scalar_type() != kFloat,
+        "Bias is not supported when out_dtype is set to Float32");
+
+    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
+                bias->scalar_type() == ScalarType::Half,
+        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
+
+    TORCH_CHECK((out.scalar_type() != kFloat &&
+                 out.scalar_type() != ScalarType::BFloat16) ||
+                bias->scalar_type() == ScalarType::BFloat16,
+        "Bias must be BFloat16 to compute ", out.scalar_type(),
+        " output, but got ", bias->scalar_type());
+
+    TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
+                bias->scalar_type() == ScalarType::Half,
+        "Bias must be Float16 to compute ", out.scalar_type(),
+        " output, but got ", bias->scalar_type());
   }
   {
     auto bias_ = bias.value_or(Tensor());
@@ -1323,7 +1347,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // We are doing row-wise scaling
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise
-      && (dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)) {
+      && ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
+      // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
+      ||  (dprops->major >= 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
@@ -1348,6 +1374,22 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // Until more than bf16 is supported.
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+  }
+  else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
+    #if ROCM_VERSION >= 70000
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+                "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
   }
 #endif
 
@@ -1426,12 +1468,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.k = args.k;
       params.a = args.mata->data_ptr();
       params.a_scale_ptr = args.scale_mata_ptr;
+      params.a_scale_dtype = args.scale_mata_dtype.value();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.a_scale_dtype = args.scale_mata_dtype.value();
       params.a_scaling_type = args.scaling_mata_type.value();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
+      params.b_scale_dtype = args.scale_matb_dtype.value();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.b_scale_dtype = args.scale_matb_dtype.value();
@@ -1525,6 +1569,7 @@ namespace {
     const auto out_dtype_ = out_dtype.value_or(kBFloat16);
     TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
+    #ifndef USE_ROCM
     // For TMA transfers, strides of output tensor have to be either
     // 1, or aligned to 16 bytes.
     const auto last_dim = out_size.size() - 1;
@@ -1536,9 +1581,10 @@ namespace {
     } else {
       out_stride = {out_size[1] * size_padded, size_padded, 1};
     }
-    auto out = at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
-
-    return out;
+    return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
+    #else
+    return at::empty(out_size, mat_a.options().dtype(out_dtype_));
+    #endif
   }
 
   bool check_valid_strides_and_return_transposed(const Tensor& mat) {
@@ -1619,18 +1665,18 @@ const std::optional<at::Tensor>& bias,
 const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
-#ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
-  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/false);
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0, or ROCm MI300+");
 
-  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
   TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
   TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+  }
   TORCH_CHECK(
     mat_a.size(-1) % 16 == 0,
     "Expected trailing dimension of mat_a to be divisible by 16 ",
@@ -1664,6 +1710,10 @@ bool use_fast_accum) {
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
 
+#ifndef USE_ROCM
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
       mat_b,
@@ -1674,12 +1724,23 @@ bool use_fast_accum) {
       use_fast_accum,
       out);
     return out;
-
-
-
-
 #else
-  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#ifdef USE_FBGEMM_GENAI
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+
+  fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
+      mat_a,
+      // FBGEMM expects B matrix shape to be (.., N, K)
+      mat_b.transpose(-2, -1),
+      scale_a,
+      scale_b,
+      offs,
+      out);
+  return out;
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+#endif
 #endif
 
 }
@@ -1698,6 +1759,9 @@ std::optional<c10::ScalarType> out_dtype) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+  }
 
   // check that the strides are valid, the fn will throw an error if not
   check_valid_strides_and_return_transposed(mat_a);

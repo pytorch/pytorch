@@ -59,11 +59,36 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
+pgo_extra_read_key: Optional[str] = Config(
+    env_name_default="TORCH_COMPILE_STICKY_PGO_READ", default=None
+)
+pgo_extra_write_key: Optional[str] = Config(
+    env_name_default="TORCH_COMPILE_STICKY_PGO_WRITE", default=None
+)
+"""
+Additional read/write keys for PGO.
+Write key: Besides writing to the default local/remote PGO state, this also writes to the specified key.
+Read key: Besides reading from the default state, this also reads from the specified key (if written to before)
+and merges it with the default state.
+"""
+
 
 cache_key_tag: str = Config(env_name_default="TORCH_COMPILE_CACHE_KEY_TAG", default="")
 """
 Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
+"""
+
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force=[
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+        "TORCH_COMPILE_FORCE_DISABLE_CACHES",
+    ],
+    default=False,
+)
+"""
+Force disables all caching -- This will take precedence over and override any other caching flag
 """
 
 dynamic_sources: str = Config(
@@ -89,7 +114,7 @@ and force_parameter_static_shapes.
 """
 
 # force a python GC before recording cudagraphs
-force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default=True)
+force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default=False)
 """
 If True (the backward-compatible behavior) then gc.collect() before recording
 any cudagraph.

@@ -149,6 +149,19 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function detect_cuda_arch() {
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    if command -v nvidia-smi; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+      # There won't be nvidia-smi in nogpu tests, so just set TORCH_CUDA_ARCH_LIST to the default
+      # minimum supported value here
+      TORCH_CUDA_ARCH_LIST=8.0
+    fi
+    export TORCH_CUDA_ARCH_LIST
+  fi
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
@@ -244,7 +257,7 @@ function install_torchrec_and_fbgemm() {
     if [ "${found_whl}" == "0" ]; then
       git clone --recursive https://github.com/pytorch/fbgemm
       pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}"
+      git checkout "${fbgemm_commit}" --recurse-submodules
       python setup.py bdist_wheel \
         --build-variant=rocm \
         -DHIP_ROOT_DIR="${ROCM_PATH}" \
