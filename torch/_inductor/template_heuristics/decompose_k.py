@@ -12,6 +12,7 @@ from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -21,14 +22,25 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
+@register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
+class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
+    """empty heuristics to skip decompose k on anything not cuda"""
+
+
+# on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="mm",
 )
-class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
-    def get_template_configs(
+# TODO(coconutruben): enable decompose k on AMD by removing the register bool
+# and benchmarking it for performance and stability
+# TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
+# by either adding specific register_template_heuristic tags, or setting the
+# device to None (enabled on all devices)
+class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
@@ -54,10 +66,7 @@ class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        k_splits = []
-        if max_autotune:
-            # only valid when max-autotuning
-            k_splits = get_k_splits(m, n, k)
+        k_splits = get_k_splits(m, n, k)
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
