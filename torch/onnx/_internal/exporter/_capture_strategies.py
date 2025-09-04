@@ -12,7 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.export import _draft_export
+from torch.onnx import _flags
 
 
 if TYPE_CHECKING:
@@ -251,7 +251,7 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        ep = _draft_export.draft_export(
+        ep = torch.export.draft_export(
             model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
         )
         report = ep._report  # type: ignore[attr-defined]
@@ -284,3 +284,6 @@ CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrictStrategy,
 )
+
+if _flags.ENABLE_DRAFT_EXPORT:
+    CAPTURE_STRATEGIES = (*CAPTURE_STRATEGIES, TorchExportDraftExportStrategy)
