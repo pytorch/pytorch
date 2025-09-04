@@ -162,7 +162,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_mm_plus_mm)
 
-    if use_triton_template(layout1):
+    if use_triton_template(layout1, check_max_autotune=False):
         templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates

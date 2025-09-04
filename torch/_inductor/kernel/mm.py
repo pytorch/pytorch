@@ -754,7 +754,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_mm)
 
-    if is_nonzero and use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=True):
         templates_to_use.append(mm_template)
 
         if use_triton_tma_template(mat1, mat2):
@@ -795,7 +795,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if (
         is_nonzero
         and use_triton_template(layout)
-        and (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
         and torch._inductor.config.run_autoheuristic(name)
         and is_triton(mat1)
     ):
@@ -892,7 +891,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     if use_aten_gemm_kernels():
         templates_to_use.append(aten__int_mm)
 
-    if is_nonzero and use_triton_template(layout, enable_int32=True):
+    if is_nonzero and use_triton_template(
+        layout, enable_int32=True, check_max_autotune=False
+    ):
         templates_to_use.append(mm_template)
 
     # Single unified call for all templates
@@ -942,7 +943,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if use_aten_gemm_kernels():
         templates_to_use.extend([aten_bias_addmm, aten_addmm])
 
-    if is_nonzero and use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
         if use_triton_tma_template(mat1, mat2):
@@ -1119,11 +1120,11 @@ def tuned_scaled_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    # We dont have triton lowerings for the MX variants yet
     if (
+        # We dont have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
-        and use_triton_template(layout, enable_float8=True)
+        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
