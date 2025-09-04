@@ -562,6 +562,34 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    def test_interaction_with_triton_template(self):
+        """
+        Make sure the dependency prefix for TritonTempalate and its
+        prologue match.
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.randn([1, 1], device=GPU_TYPE)
+        y = torch.randn([64, 128], device=GPU_TYPE)
+
+        out, code = run_and_get_code(f, x, y)
+
+        # well when benchmark_kernel flag is on, we have one more .run
+        # call in the benchmarking code.
+        FileCheck().check("def call(").check_count(
+            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
+        ).run(code[0])
+
 
 @inductor_config.patch(
     {
