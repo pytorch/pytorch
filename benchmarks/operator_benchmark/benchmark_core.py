@@ -371,11 +371,13 @@ class BenchmarkRunner:
         device = sample_input.device
         device_module = torch.get_device_module(device.type)
         while True:
-            device_module.reset_peak_memory_stats(device)
+            if hasattr(device_module, "reset_peak_memory_stats"):
+                device_module.reset_peak_memory_stats(device)
             run_time_sec = launch_test(test_case, iters, print_per_iter)
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize(device)
-            peak_bytes = device_module.max_memory_allocated(device)
+            if hasattr(device_module, "max_memory_allocated"):
+                peak_bytes = device_module.max_memory_allocated(device)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(

@@ -1,6 +1,7 @@
 import operator_benchmark as op_bench
 
 import torch
+import torch.nn as nn
 
 
 """Microbenchmarks for torch.mm."""
@@ -26,7 +27,7 @@ mm_long_configs = op_bench.cross_product_configs(
     M=[8, 128],
     N=[32, 64],
     K=[256, 512],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     dtype=[torch.float, torch.bfloat16],
     tags=["long"],
 )
@@ -35,8 +36,14 @@ mm_long_configs = op_bench.cross_product_configs(
 class MmOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_one": torch.randn(M, N, device=device).to(dtype=dtype),
-            "input_two": torch.randn(N, K, device=device).to(dtype=dtype),
+            "input_one": nn.Parameter(
+                torch.randn(M, N, device=device, dtype=dtype),
+                requires_grad=self.auto_set()
+            ),
+            "input_two": nn.Parameter(
+                torch.randn(N, K, device=device, dtype=dtype),
+                requires_grad=self.auto_set()
+            ),
         }
         self.op_func = op_func
 
@@ -44,7 +51,7 @@ class MmOpBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(input_one, input_two)
 
 
-op_bench.generate_pt_tests_from_op_list(
+op_bench.generate_pt_gradient_tests_from_op_list(
     ops_list, mm_short_configs + mm_long_configs, MmOpBenchmark
 )
 
