@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from typing import cast, Optional
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
