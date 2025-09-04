@@ -10,7 +10,7 @@ from datetime import timedelta
 from typing import Protocol, Union
 
 import torch
-from torch.distributed._distributed_c10d import (
+from torch._C._distributed_c10d import (
     _current_process_group,
     _set_process_group,
     ProcessGroup,
