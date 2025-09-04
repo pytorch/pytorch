@@ -45,21 +45,18 @@ class CompileArtifacts:
     compiled_fn: SerializableCallable
     original_code: types.CodeType
 
-    def compiled_function(self) -> Any:
+    def guard_check(self, *args: Any, **kwargs: Any) -> bool:
+        f_locals = bind_locals(self.signature, *args, **kwargs)
+        assert self.guard_manager is not None
+        return self.guard_manager.check(f_locals)
+
+    def __post_init__(self) -> None:
         import_sources = {
             alias: importlib.import_module(module_name)
             for alias, module_name in self.import_sources.items()
         }
         f_globals = {**import_sources, self.backend_id: self.compiled_fn}
-        core = types.FunctionType(self.bytecode, f_globals)
-
-        def optimized_call(*args: Any, **kwargs: Any) -> Any:
-            f_locals = bind_locals(self.signature, *args, **kwargs)
-            assert self.guard_manager is not None
-            if not self.guard_manager.check(f_locals):
-                reason = str(self.guard_manager.check_verbose(f_locals))
-                raise RuntimeError(f"GuardManager check failed, reason: {reason}")
-            return core(*args, **kwargs)
+        self.fn = types.FunctionType(self.bytecode, f_globals)
 
         if self.guard_manager is None:
             guards_state = pickle.loads(self.guards_state)
@@ -70,12 +67,17 @@ class CompileArtifacts:
                 runtime_global_scope=f_globals,
             ).guard_manager
 
-        def save_compiled_function(path: str) -> None:
-            with open(path, "wb") as f:
-                f.write(type(self).serialize(self))
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        assert self.guard_manager is not None
+        if not self.guard_check(*args, **kwargs):
+            f_locals = bind_locals(self.signature, *args, **kwargs)
+            reason = str(self.guard_manager.check_verbose(f_locals))
+            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+        return self.fn(*args, **kwargs)
 
-        optimized_call.save_compiled_function = save_compiled_function  # type: ignore[attr-defined]
-        return optimized_call
+    def save_compiled_function(self, path: str) -> None:
+        with open(path, "wb") as f:
+            f.write(type(self).serialize(self))
 
     @classmethod
     def serialize(cls, artifacts: "CompileArtifacts") -> bytes:
@@ -83,6 +85,7 @@ class CompileArtifacts:
 
         state = artifacts.__dict__.copy()
         state["guard_manager"] = None
+        del state["fn"]
         state["bytecode"] = SerializedCode.from_code_object(state["bytecode"])
         compiled_fn = state["compiled_fn"]
         state["compiled_fn"] = (
@@ -109,7 +112,7 @@ def aot_compile_fullgraph(
     example_inputs: tuple[tuple[Any, ...], dict[str, Any]],
     hooks: Hooks,
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
-) -> Any:
+) -> CompileArtifacts:
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import compile_context, CompileContext, TracingContext
 
@@ -168,4 +171,4 @@ def aot_compile_fullgraph(
         compiled_fn=compiled_fn,
         original_code=fn.__code__,
     )
-    return compile_artifacts.compiled_function()
+    return compile_artifacts

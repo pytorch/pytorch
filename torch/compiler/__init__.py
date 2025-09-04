@@ -660,4 +660,4 @@ def load_compiled_function(file: io.IOBase):
     from torch._dynamo.aot_compile import CompileArtifacts
 
     data = file.read()
-    return CompileArtifacts.deserialize(data).compiled_function()
+    return CompileArtifacts.deserialize(data)
