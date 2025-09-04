@@ -11,35 +11,14 @@ from itertools import chain, zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
-from torch.distributed import is_available
 from torch.utils._typing_utils import not_none
 
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
 
-if not is_available():
-    import sys
-
-    # We need to create the stubs when distributed is not available.
-    # Otherwise, we would fail the doc tests (```./.ci/pytorch/docs-test.sh```),
-    # since it would try to import ``torch.distributed.device_mesh`` or
-    # ``torch.distributed.init_device_mesh`` but cannot find them.
-
-    class _DeviceMeshStub:
-        pass
-
-    def _init_device_mesh_stub():
-        pass
-
-    sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
-    sys.modules[
-        "torch.distributed.device_mesh"
-    ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
-
-
-else:
-    from torch._C._distributed_c10d import Backend as C10dBackend
+if True:  # just to temporarily avoid reindentation
+    from torch.distributed._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -188,7 +167,7 @@ else:
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = chain(
-                *list(not_none(root_mesh.mesh_dim_names)),
+                list(not_none(root_mesh.mesh_dim_names)),
                 *self.flatten_name_to_root_dims[root_mesh].keys(),
             )
             if mesh_dim_name in invalid_dim_names:
@@ -526,15 +505,16 @@ else:
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
                     num_devices_per_host = device_handle.device_count()
-                    if (
-                        world_size > num_devices_per_host
-                        and world_size % num_devices_per_host != 0
-                    ):
-                        raise RuntimeError(
-                            f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                        )
-                    device_handle.set_device(get_rank() % num_devices_per_host)
+                    if num_devices_per_host:
+                        if (
+                            world_size > num_devices_per_host
+                            and world_size % num_devices_per_host != 0
+                        ):
+                            raise RuntimeError(
+                                f"DeviceMesh only support homogeneous hardware, but found "
+                                f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                            )
+                        device_handle.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
@@ -703,18 +683,17 @@ else:
             return self._hash
 
         def __eq__(self, other: object) -> bool:
+            if self is other:
+                return True
             if not isinstance(other, DeviceMesh):
                 return False
-            if id(self) == id(other):
-                return True
-            else:
-                return (
-                    self._flatten_mesh_list == other._flatten_mesh_list
-                    and self.mesh.shape == other.mesh.shape
-                    and self.device_type == other.device_type
-                    and self.mesh_dim_names == other.mesh_dim_names
-                    and self._thread_id == other._thread_id
-                )
+            return (
+                self._flatten_mesh_list == other._flatten_mesh_list
+                and self.mesh.shape == other.mesh.shape
+                and self.device_type == other.device_type
+                and self.mesh_dim_names == other.mesh_dim_names
+                and self._thread_id == other._thread_id
+            )
 
         def __getitem__(
             self, mesh_dim_names: Union[str, tuple[str, ...]]
