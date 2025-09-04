@@ -172,7 +172,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
 
-  # Copied from build-triton-wheel (mostly)
+  # Copied from build-triton-wheel workflow (mostly)
   upload-wheel:
     name: "Upload ${{ matrix.device }} vLLM wheel"
     needs:
