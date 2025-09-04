@@ -122,9 +122,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
-        uv pip install --system "${vision_whl}"; \
-        uv pip install --system "${audio_whl}"; \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
@@ -323,9 +321,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
-        uv pip install --system "${vision_whl}"; \
-        uv pip install --system "${audio_whl}"; \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
         uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
