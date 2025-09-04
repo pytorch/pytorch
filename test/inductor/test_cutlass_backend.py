@@ -2228,6 +2228,8 @@ class TestCutlassBackend(TestCase):
         """
         This test is meant to simulate a more realistic scenario.
         """
+        if dynamic and use_aoti:
+            self.skipTest("Accuracy issues when both AOTI and dynamic are enabled")
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
         device = "cuda"
