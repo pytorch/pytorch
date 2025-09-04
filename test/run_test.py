@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections import defaultdict
@@ -250,6 +251,7 @@ XPU_BLOCKLIST = [
     "profiler/test_profiler_tree",
     "profiler/test_record_function",
     "profiler/test_torch_tidy",
+    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -647,27 +649,33 @@ def run_test(
     return ret_code
 
 
-def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+def install_cpp_extensions(extensions_dir, env=os.environ):
     # Wipe the build folder, if it exists already
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
+    build_dir = os.path.join(extensions_dir, "build")
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     # Build the test cpp extensions modules
-    # FIXME: change setup.py command to pip command
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    return_code = shell(cmd, cwd=extensions_dir, env=env)
     if return_code != 0:
         return None, return_code
 
-    install_directory = ""
-    # install directory is the one that is named site-packages
-    for root, directories, _ in os.walk(
-        os.path.join(cpp_extensions_test_dir, "install")
-    ):
-        for directory in directories:
-            if "-packages" in directory:
-                install_directory = os.path.join(root, directory)
+    # Get the site-packages directory prepared for PYTHONPATH
+    platlib_path = sysconfig.get_paths()["platlib"]
+    platlib_rel = os.path.relpath(
+        platlib_path, os.path.splitdrive(platlib_path)[0] + os.sep
+    )
+    install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
     assert install_directory, "install_directory must not be empty"
     return install_directory, 0
@@ -814,8 +822,17 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    install_cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
