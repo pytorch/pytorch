@@ -350,10 +350,12 @@ class Backend(str):  # noqa: SLOT000
             # assume default devices "cpu" and "cuda", but warn
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
-                "`cuda`. Please specify it via the `devices` argument of "
+                "`cuda` or `xpu`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            Backend.backend_capability[name.lower()] = (
+                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
+            )
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -4867,9 +4869,11 @@ def barrier(
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
         opts.device = device
-        warnings.warn(  # warn only once
-            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
-        )
+        if group.rank() == 0:
+            warnings.warn(  # warn only once
+                "barrier(): using the device under current context. "
+                "You can specify `device_id` in `init_process_group` to mute this warning."
+            )
 
     work = group.barrier(opts=opts)
 
