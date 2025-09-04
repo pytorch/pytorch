@@ -234,7 +234,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="t",  # type: ignore[arg-type]
+            prefix="p",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
@@ -246,21 +246,15 @@ class LoopBody:
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
             iter_idx = [iter_idx[i] for i in inverse_order]
-            return old_body(iter_idx, reduce_idx)
+            return old_body(iter_idx, reduce_idx, allow_same_symbol_in_index=True)
 
-        loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        return LoopBody(
+            new_body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
         )
-
-        # use the original symbol prefix so we can do multiple round of reordering
-        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
-        )
-        new_body = LoopBody(
-            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
-        )
-        return new_body
 
     @property
     def vars(self):
@@ -414,8 +408,8 @@ class LoopBody:
             for name, expr in self.indexing_exprs.items()
         }
 
-    def __call__(self, *indices):
-        self.indexing = self.indexing_from_args(indices)
+    def __call__(self, *indices, allow_same_symbol_in_index=False):
+        self.indexing = self.indexing_from_args(indices, allow_same_symbol_in_index)
         result = self.root_block()
         self.indexing = None
         return result
