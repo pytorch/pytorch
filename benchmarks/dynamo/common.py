@@ -2708,7 +2708,7 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if True:
+            if os.getenv("CALL_TORCH_COMPILE_DIRECTLY", "0") == "1":
                 @torch.compile
                 def f(x):
                     out = model(**x)[0]
@@ -3576,7 +3576,7 @@ def process_entry(rank, runner, original_dir, args):
 
 
 def maybe_fresh_cache(args):
-    if True:
+    if os.getenv("CLEAR_CACHE", "1") == "1":
         return fresh_cache()
     cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
     if not cache_dir_assigned and (
