@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/jit/serialization/pickler.h>
 
 #define REGISTER_PRIVATEUSE1_SERIALIZATION(                                    \
