@@ -364,4 +364,3 @@ struct DLManagedTensorVersioned {
 }  // DLPACK_EXTERN_C
 #endif
 #endif  // DLPACK_DLPACK_H_
-
