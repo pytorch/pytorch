@@ -685,8 +685,7 @@ instantiate_parametrized_tests(RedistributeTest)
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        device_count = torch.accelerator.device_count() if torch.accelerator.is_available() else 8
-        return min(8, device_count)
+        return 8
 
     @with_comms
     @skip_if_lt_x_gpu(8)
