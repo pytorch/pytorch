@@ -85,7 +85,7 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 # Create an isolated directory to store this builds pytorch checkout and conda
 # installation
 if [[ -z "$MAC_PACKAGE_WORK_DIR" ]]; then
-    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_conda_${DESIRED_PYTHON}_$(date +%H%M%S)"
+    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_${DESIRED_PYTHON}_$(date +%H%M%S)"
 fi
 mkdir -p "$MAC_PACKAGE_WORK_DIR" || true
 if [[ -n ${GITHUB_ACTIONS} ]]; then
@@ -125,7 +125,6 @@ popd
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export MACOSX_DEPLOYMENT_TARGET=10.15
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 SETUPTOOLS_PINNED_VERSION="==70.1.0"
 PYYAML_PINNED_VERSION="==5.3"
@@ -138,9 +137,6 @@ case $desired_python in
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
     3.14)
@@ -148,8 +144,6 @@ case $desired_python in
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
     3.13t)
@@ -157,9 +151,6 @@ case $desired_python in
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-        desired_python="3.13"
         RENAME_WHEEL=false
         ;;
     3.13)
@@ -197,11 +188,6 @@ case $desired_python in
         NUMPY_PINNED_VERSION="==1.11.3"
         ;;
 esac
-
-# Install into a fresh env
-tmp_env_name="wheel_py$python_nodot"
-conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
-source activate "$tmp_env_name"
 
 PINNED_PACKAGES=(
     "setuptools${SETUPTOOLS_PINNED_VERSION}"
