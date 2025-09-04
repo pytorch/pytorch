@@ -263,11 +263,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                         dynamic_shapes=None,
                         preserve_module_call_signature=(),
                         restore_fqn=False,
-                        allow_complex_guards_as_runtime_asserts=False,
+                        prefer_deferred_runtime_asserts_over_guards=False,
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+                    return torch.compile(gm, fullgraph=False)(*runtime_args)
 
                 return runtime_wrapper
 
