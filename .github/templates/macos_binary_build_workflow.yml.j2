@@ -26,7 +26,7 @@ name: !{{ build_environment }}
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "!{{ py_ver.strip('t') }}.0!{{ '-rc2' if '3.14' in py_ver else '' }}"
+          python-version: "!{{ py_ver.strip('t') }}.!{{0 if py_ver != '3.10' else 4}}!{{ '-rc.2' if '3.14' in py_ver else '' }}"
           freethreaded: !{{ "true" if py_ver.endswith('t') else "false" }}
 {%- endmacro %}
 

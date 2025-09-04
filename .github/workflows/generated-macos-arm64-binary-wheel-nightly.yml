@@ -59,7 +59,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10.0"
+          python-version: "3.10.4"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -599,7 +599,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14.0-rc2"
+          python-version: "3.14.0-rc.2"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -707,7 +707,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14.0-rc2"
+          python-version: "3.14.0-rc.2"
           freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
