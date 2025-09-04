@@ -3626,9 +3626,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             # randint with dtype=torch.cfloat fails with
             # RuntimeError: check_random_bounds handles only integral, floating-point and boolean types
             # must create randint and randint_like using default int64, then cast to desired
-            input = torch.randint(-3, 3, (n, c, h, w), dtype=torch.int64, device=device).to(
-                dtype, memory_format=torch.channels_last
-            )
+            input = torch.randint(
+                -3, 3, (n, c, h, w), dtype=torch.int64, device=device
+            ).to(dtype, memory_format=torch.channels_last)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).to(
                 device="cuda", dtype=dtype, memory_format=torch.channels_last
