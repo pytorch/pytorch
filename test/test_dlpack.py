@@ -508,9 +508,7 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCPU
     def test_dlpack_unsupported_dtype_error(self, device):
-        inp = make_tensor((5,), dtype=torch.int32, device=device).to(
-            torch.qint8
-        )
+        inp = make_tensor((5,), dtype=torch.int32, device=device).to(torch.qint8)
 
         with self.assertRaisesRegex(
             BufferError, ".* types are not supported by dlpack"

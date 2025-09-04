@@ -362,8 +362,8 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
-  atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
-  atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
+  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(view.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(view.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
 
