@@ -167,7 +167,9 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
                 "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13"
                 "/usr/local/cuda/lib64/libibverbs.so.1"
                 "/usr/local/cuda/lib64/librdmacm.so.1"
-                "/usr/local/cuda/lib64/libmlx5.so.1")
+                "/usr/local/cuda/lib64/libmlx5.so.1"
+                "/usr/local/cuda/lib64/libnl-3.so.200"
+                "/usr/local/cuda/lib64/libnl-genl-3.so.200")
             DEPS_SONAME+=(
                 "libcublas.so.13"
                 "libcublasLt.so.13"
@@ -176,7 +178,9 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
                 "libcupti.so.13"
                 "libibverbs.so.1"
                 "librdmacm.so.1"
-                "libmlx5.so.1")
+                "libmlx5.so.1"
+                "libnl-3.so.200"
+                "libnl-genl-3.so.200")
             export USE_CUPTI_SO=1
             export ATEN_STATIC_CUDA=0
             export USE_CUDA_STATIC_LINK=0
