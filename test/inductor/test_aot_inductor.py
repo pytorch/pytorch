@@ -6894,12 +6894,19 @@ class AOTInductorTestsTemplate:
                 },
             )
 
+        def get_module_ext_type():
+            if IS_WINDOWS:
+                return "pyd"
+            else:
+                return "so"
+
         with zipfile.ZipFile(package_path, "r") as zip_ref:
             all_files = zip_ref.namelist()
             base_dir = "test_model.wrapper/data/aotinductor/model/test_model"
+            ext_type = get_module_ext_type()
             self.assertTrue(f"{base_dir}.wrapper.cpp" in all_files)
             self.assertTrue(f"{base_dir}.kernel.cpp" in all_files)
-            self.assertTrue(f"{base_dir}.wrapper.so" in all_files)
+            self.assertTrue(f"{base_dir}.wrapper.{ext_type}" in all_files)
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))

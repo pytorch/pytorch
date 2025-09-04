@@ -555,10 +555,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
         assert outputs[0].stride() == outputs[1].stride()
-        assert torch.allclose(outputs[0], outputs[1], rtol=1e-3, atol=1e-3), (
-            outputs[0],
-            outputs[1],
-        )
+        self.assertEqual(outputs[0], outputs[1])
 
     @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
