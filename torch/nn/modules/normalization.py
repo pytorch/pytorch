@@ -246,7 +246,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
     def __init__(
         self,
-        dim: Union[int, list[int], tuple[int, ...]],
+        start_dim: int,
         eps: float = 1e-5,
         elementwise_affine: bool = True,
         bias: bool = True,
@@ -259,17 +259,11 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         # that will soon be overwritten.
         super().__init__(0, eps, False, False)
 
-        if isinstance(dim, numbers.Integral):
-            # mypy error: incompatible types in assignment
-            dim = (dim,)  # type: ignore[assignment]
 
-        self.dim = tuple(sorted(set(dim)))  # type: ignore[assignment]
+        self.start_dim = start_dim
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         self.bias = bias
-
-        if not all(d2 == d1 + 1 for d1, d2 in zip(self.dim, self.dim[1:])):
-            raise ValueError(f"dim must be consecutive got {self.dim}")
 
         if self.elementwise_affine:
             self.weight = UninitializedParameter(**factory_kwargs)
