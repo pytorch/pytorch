@@ -1518,6 +1518,11 @@ class FakeTensorOperatorInvariants(TestCase):
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             return
+        
+        cpu_tensor = torch.ones(2, device="cpu")
+        meta_tensor = torch.ones(2, device="meta")
+        linear = torch.nn.Linear(2, 2)
+
         with FakeTensorMode():
             torch.empty(10, device=GPU_TYPE)
             torch.ones(10, device=GPU_TYPE)
@@ -1525,6 +1530,12 @@ class FakeTensorOperatorInvariants(TestCase):
             torch.rand(10, device=GPU_TYPE)
             torch.tensor(3.14, device=GPU_TYPE)
             torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
+
+            self.assertEqual(cpu_tensor.to(device=GPU_TYPE).device, GPU_TYPE)
+            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device, GPU_TYPE)
+            linear.to(device=GPU_TYPE)
+            for name, param in linear.named_parameters():
+                self.assertEqual(param.device, GPU_TYPE)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
