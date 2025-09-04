@@ -3774,7 +3774,6 @@ class TestAutograd(TestCase):
             f.metadata
 
     @unittest.expectedFailure
-    @skipIfTorchDynamo("Passes due to dynamo skipping GC")
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod

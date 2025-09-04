@@ -13,8 +13,6 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-python -mpip install -r requirements.txt
-
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
@@ -199,7 +197,7 @@ torchbench_setup_macos() {
   git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
   python setup.py clean
-  python setup.py develop
+  python -m pip install -e . -v --no-build-isolation
   popd
 
   pushd torchaudio
@@ -208,7 +206,7 @@ torchbench_setup_macos() {
   git submodule update --init --recursive
   python setup.py clean
   #TODO: Remove me, when figure out how to make TorchAudio find brew installed openmp
-  USE_OPENMP=0 python setup.py develop
+  USE_OPENMP=0 python -m pip install -e . -v --no-build-isolation
   popd
 
   checkout_install_torchbench
