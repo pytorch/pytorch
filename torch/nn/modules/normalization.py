@@ -259,7 +259,6 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         # that will soon be overwritten.
         super().__init__(0, eps, False, False)
 
-
         self.start_dim = start_dim
         self.eps = eps
         self.elementwise_affine = elementwise_affine
@@ -314,11 +313,12 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         if self.has_uninitialized_params():
             with torch.no_grad():
                 if self.elementwise_affine:
+                    assert isinstance(self.weight, UninitializedParameter)
                     self.weight.materialize(self.normalized_shape)
                     if self.bias is not None:
+                        assert isinstance(self.bias, UninitializedParameter)
                         self.bias.materialize(self.normalized_shape)
             self.reset_parameters()
-
 
 
 class GroupNorm(Module):
