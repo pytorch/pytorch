@@ -2233,6 +2233,8 @@ class Scheduler:
             }
         )
 
+        self._can_fuse.cache_clear()
+
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
         for name in V.graph.graph_inputs_original:
@@ -3885,7 +3887,12 @@ class Scheduler:
 
         return True
 
-    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    def can_fuse(self, node1, node2):
+        return self._can_fuse(self, node1, node2)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
