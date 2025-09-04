@@ -2667,6 +2667,12 @@ from torch.func import vmap as vmap
 if not TYPE_CHECKING:
     from torch import _meta_registrations
 
+    if torch.distributed.is_available():
+        # register python metas for distributed ops
+        import torch.distributed._meta_registrations as coll_meta_registrations
+
+        del coll_meta_registrations
+
 # Enable CUDA Sanitizer
 if "TORCH_CUDA_SANITIZER" in os.environ:
     import torch.cuda._sanitizer as csan
