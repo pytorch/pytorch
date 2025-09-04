@@ -2227,10 +2227,19 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        valid_shape = a.ndim == 0 or builtins.all(
+            guard_or_true(a.shape[i] > 0) for i in dims
+        )
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
+            )
+        for i in dims:
+            torch._check(
+                a.shape[i] > 0,
+                "found empty reduction axis with reduction op without an identity",
             )
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype

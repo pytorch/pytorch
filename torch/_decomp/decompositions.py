@@ -1173,6 +1173,8 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1182,7 +1184,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1196,6 +1198,8 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1205,7 +1209,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         shifted = x
     else:
         x_max = torch.amax(x, dim, keepdim=True)
