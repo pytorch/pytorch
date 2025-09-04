@@ -308,8 +308,8 @@ Vectorized<c10::BFloat16> inline operator/(
 }
 
 inline Vectorized<BFloat16>::Vectorized() {
-  const short zero = 0;
-  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
+  auto vals_f = svdup_n_f32(0);
+  values = convert_float_bfloat16(vals_f, vals_f);
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {
