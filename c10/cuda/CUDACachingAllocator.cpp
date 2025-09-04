@@ -1809,7 +1809,9 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
         {handle,
          MemHandleCacheEntry(curr_device, handle, *impls_[curr_device])});
     auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [handle, this](void* ptr) {
+        // NOLINTNEXTLINE(performance-unnecessary-value-param)
+        inserted->second.ptr(),
+        [handle, this](void* ptr) {
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
 
           auto it = ipcMemHandle_to_devptr.find(handle);

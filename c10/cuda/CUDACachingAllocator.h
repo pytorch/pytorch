@@ -255,7 +255,7 @@ inline void raw_delete(void* ptr) {
   return get()->raw_delete(ptr);
 }
 
-inline void init(int device_count) {
+inline void init(c10::DeviceIndex device_count) {
   return get()->init(device_count);
 }
 
