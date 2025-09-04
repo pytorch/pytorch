@@ -290,6 +290,17 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         if not self.has_uninitialized_params():
             super().reset_parameters()
 
+    def initialize_parameters(self, input) -> None:
+        """
+        Infers ``normalized_shape`` based on ``dim`` and ``input`` also initializes parameters.
+        """
+
+        input_shape = input.shape
+
+        if self.dim[-1] >= len(input_shape):
+            raise ValueError(
+                f"Invalid dim the highest specified dim is {self.dim[-1]}, but the input tensor has only rank {len(input_shape)}"
+            )
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
 
