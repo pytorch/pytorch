@@ -513,7 +513,36 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     return sub
 
 
-def _correct_storage_aliasing(func, schema_info, args, outs):
+# This abstracts over the fact that in return_and_correct_aliasing,
+# we sometimes use torchgen schema parsing (for aten ops, since torchscript's schema parsing is sometimes buggy),
+# and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
+@dataclass
+class AliasInfo:
+    alias_set: set[str]
+    is_write: bool
+    name: Optional[str]
+
+
+@dataclass
+class SchemaInfo:
+    args: list[AliasInfo]
+    outs: list[AliasInfo]
+
+    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
+    # advantage of our existing caching of data for each OpOverload to paper over an
+    # efficiency problem with pybind11::enum_ (which currently is used to implement
+    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
+    # each element must be converted to int with the __int__ method, which incurs a lot
+    # of overhead. Converting to int once and caching removes this per-op overhead.
+    int_tags: list[int]
+
+
+def _correct_storage_aliasing(
+    func: torch._ops.OpOverload,
+    schema_info: SchemaInfo,
+    args: tuple,
+    outs: Union[list, tuple],
+):
     """
     Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),
     and the inputs/outputs to the OpOverload,
@@ -573,30 +602,6 @@ and output of type {type(ret)}. But expected types to match."""
             ) and not schema_arg.is_write
             if is_read_only_alias_match:
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
-
-
-# This abstracts over the fact that in return_and_correct_aliasing,
-# we sometimes use torchgen schema parsing (for aten ops, since torchscript's schema parsing is sometimes buggy),
-# and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
-@dataclass
-class AliasInfo:
-    alias_set: set[str]
-    is_write: bool
-    name: Optional[str]
-
-
-@dataclass
-class SchemaInfo:
-    args: list[AliasInfo]
-    outs: list[AliasInfo]
-
-    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
-    # advantage of our existing caching of data for each OpOverload to paper over an
-    # efficiency problem with pybind11::enum_ (which currently is used to implement
-    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
-    # each element must be converted to int with the __int__ method, which incurs a lot
-    # of overhead. Converting to int once and caching removes this per-op overhead.
-    int_tags: list[int]
 
 
 # Given an OpOverload, returns schema information on it.
