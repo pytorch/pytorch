@@ -413,6 +413,32 @@ class OptimizedModule(torch.nn.Module):
             )
         return super().__call__(*args, **kwargs)
 
+    def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
+        """
+        Experimental: AOT Compile a set of inputs and use that as the forward function
+        """
+        model = self._orig_mod
+        hooks = self.dynamo_ctx._hooks
+        assert hooks is not None
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        if not self.dynamo_ctx.error_on_graph_break:
+            raise RuntimeError(
+                "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+            )
+
+        if not callable(self.dynamo_ctx.callback):
+            raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+        backend = innermost_fn(
+            self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+        )
+        from torch._dynamo.aot_compile import aot_compile_module
+
+        self.forward = aot_compile_module(model, inputs, hooks, backend)
+
     def __reduce__(
         self,
     ) -> tuple[type[OptimizedModule], tuple[torch.nn.Module, _TorchDynamoContext]]:

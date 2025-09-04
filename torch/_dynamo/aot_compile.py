@@ -5,6 +5,7 @@ import inspect
 import logging
 import pickle
 import types
+from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -216,7 +217,12 @@ def aot_compile_fullgraph(
     import_sources = output_graph.import_sources
     with (
         torch._guards.tracing(TracingContext(backend_input.fake_mode)),
-        torch._functorch.config.patch("bundled_autograd_cache", True),
+        torch._functorch.config.patch(
+            {
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+            }
+        ),
     ):
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
 
@@ -247,3 +253,75 @@ def aot_compile_fullgraph(
         original_code=fn.__code__,
     )
     return compile_artifacts
+
+
+@dataclass
+class ModelInput:
+    """
+    WIP type: represents a single model input
+    Which consists of a tuple of arguments and a set of contexts in which to run the model.
+
+    For each ModelInput, we'll compile one full graph of the model, and then use the guards generated
+    to dispatch between the compiled graphs.
+
+
+    """
+
+    args: tuple[Any]
+    kwargs: dict[str, Any]
+    contexts: list[AbstractContextManager[Any]]
+
+
+@dataclass
+class AOTCompiledModel:
+    # Represents a single forward function of a model along with dispatch
+    # compiled_results is serializable. We require the model to deserialize again.
+    model: torch.nn.Module
+    compiled_results: list[CompileArtifacts]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        for result in self.compiled_results:
+            if result.guard_check(self.model, *args, **kwargs):
+                return result(self.model, *args, **kwargs)
+        # All guards failed, just run one of them and throw the guard check error.
+        return self.compiled_results[0](self.model, *args, **kwargs)
+
+    def serialize(self) -> bytes:
+        return pickle.dumps(self.compiled_results)
+
+    @classmethod
+    def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
+        return cls(model, pickle.loads(data))
+
+
+def aot_compile_module(
+    model: torch.nn.Module,
+    inputs: list[ModelInput],
+    hooks: Hooks,
+    backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
+) -> AOTCompiledModel:
+    """
+    Compiles a single nn.Module with any number of inputs, and returns a compiled forward function.
+    """
+
+    def compile_single_graph(model_input: ModelInput) -> CompileArtifacts:
+        example_inputs = (model_input.args, model_input.kwargs)
+        orig_forward = model.forward
+        with ExitStack() as stack:
+            for ctx in model_input.contexts:
+                stack.enter_context(ctx)
+            return aot_compile_fullgraph(
+                orig_forward,
+                example_inputs,
+                hooks=hooks,
+                backend=backend,
+            )
+
+    compiled_results = []
+    for model_input in inputs:
+        log.info("Compiling input %s..", model_input)
+        compiled_results.append(compile_single_graph(model_input))
+
+    assert len(compiled_results) > 0
+
+    return AOTCompiledModel(model, compiled_results)
