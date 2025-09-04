@@ -204,7 +204,7 @@ class TestFallback(TestCase):
         self.assertEqual(z_cpu, z[1])
 
 
-class TestSDPAPrivateUse1Only(NNTestCase):
+class TestSDPA(NNTestCase):
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_privateuseone(self):
         batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
