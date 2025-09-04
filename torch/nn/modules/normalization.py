@@ -240,7 +240,7 @@ class LayerNorm(Module):
 
 
 class LazyLayerNorm(LazyModuleMixin, LayerNorm):
-    cls_to_become: LayerNorm  # type: ignore[assignment]
+    cls_to_become = LayerNorm  # type: ignore[assignment]
     weight: UninitializedParameter  # type: ignore[assignment]
     bias: UninitializedParameter  # type: ignore[assignment]
 
