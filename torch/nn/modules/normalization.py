@@ -268,6 +268,9 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         self.elementwise_affine = elementwise_affine
         self.bias = bias
 
+        if not all(d2 == d1 + 1 for d1, d2 in zip(self.dim, self.dim[1:])):
+            raise ValueError(f'dim must be consecutive got {self.dim}')
+
         if self.elementwise_affine:
             self.weight = UninitializedParameter(**factory_kwargs)
             if bias:
