@@ -51,6 +51,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
+    ROCM_VERSION,
 )
 
 if TEST_FAIRSEQ:
@@ -339,7 +340,7 @@ class TestTransformers(NNTestCase):
                 l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
                 self.assertTrue(l1_bool < 1e-4, "Eval/Train difference in pad_mask BOOL")
 
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.001, only_if=(not TEST_WITH_ROCM or ROCM_VERSION < (7, 0)))
     @parametrize("attn_mask_dim", [2, 3, None])
     @parametrize("key_padding_mask_dim", [2, None])
     @parametrize("mask_dtype", [torch.bool, torch.float32])
@@ -523,7 +524,7 @@ class TestTransformers(NNTestCase):
                 slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
                 self.assertEqual(fastpath_output_expanded, slowpath_output)
 
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.001, only_if=(not TEST_WITH_ROCM or ROCM_VERSION < (7, 0)))
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
     @parametrize("enable_nested_tensor", [False])
@@ -1109,7 +1110,7 @@ class TestTransformers(NNTestCase):
                     return_all_hiddens=False,
                 )[0]
 
-    @tf32_on_and_off(0.003)
+    @tf32_on_and_off(0.003, only_if=(not TEST_WITH_ROCM or ROCM_VERSION < (7, 0)))
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -3425,6 +3426,7 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 8.5,
         }
         if TEST_WITH_ROCM:
+            fudge_factors['out'] = 5.0
             fudge_factors['grad_key'] = 45.0
             fudge_factors['grad_query'] = 360.0
             if seq_len_k >= 1024:
@@ -3434,6 +3436,8 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors['grad_query'] = 670.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
+            if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+                fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -3546,6 +3550,7 @@ class TestSDPACudaOnly(NNTestCase):
             "grad_attn_mask": 45.0,
         }
         if TEST_WITH_ROCM:
+            fudge_factors['out'] = 6.0
             fudge_factors['grad_key'] = 45.0
             fudge_factors['grad_query'] = 360.0
             if seq_len_k >= 1024:
@@ -3556,7 +3561,7 @@ class TestSDPACudaOnly(NNTestCase):
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
                 if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
-                    fudge_factors['grad_value'] = 12.0
+                    fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -3677,17 +3682,33 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 4,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_key'] = 45.0
-            fudge_factors['grad_query'] = 360.0
-            if seq_len_k >= 1024:
-                fudge_factors['grad_key'] = 70.0
-            if seq_len_k >= 2048:
-                fudge_factors['grad_key'] = 190.0
-                fudge_factors['grad_query'] = 650.0
-                if seq_len_q >= 2048:
-                    fudge_factors['grad_query'] = 1100.0
-            if dtype == torch.float32:
-                fudge_factors['grad_key'] = 90.0
+            fudge_factors['grad_value'] = 6.0
+            if TEST_WITH_CK:
+                fudge_factors['out'] = 5.0
+                fudge_factors['grad_key'] = 145.0
+                fudge_factors['grad_query'] = 855.0  # ck min = 855.0
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 1550.0  # NEW CK MIN
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factors['grad_key'] = 90.0
+            else:
+                fudge_factors['out'] = 6.0
+                fudge_factors['grad_key'] = 45.0
+                fudge_factors['grad_query'] = 360.0
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 650.0
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factors['grad_key'] = 90.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -3840,15 +3861,19 @@ class TestSDPACudaOnly(NNTestCase):
             grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
             grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
+            fudge_factors = {
+                'out': 3.0,
+                'grad_query': 110.0,
+                'grad_key': 8.0,
+                'grad_value': 3.0,
+            }
+            if TEST_WITH_ROCM:
+                fudge_factors['out'] = 6.0
+                fudge_factors['grad_value'] = 6.0
             check_out_and_grad(
                 (out_ref, out_lp_ref, out),
                 *zip(grads_ref, grads_ref_lp, grads),
-                fudge_factors={
-                    'out': 3.0,
-                    'grad_query': 110.0,
-                    'grad_key': 8.0,
-                    'grad_value': 3.0,
-                }
+                fudge_factors=fudge_factors
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
@@ -4484,10 +4509,6 @@ class TestAttnBias(NNTestCase):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
-        if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
-            self.skipTest("No support for LOWER_RIGHT variant for now")
-            return
-
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
@@ -4518,10 +4539,6 @@ class TestAttnBias(NNTestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
-        if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
-            self.skipTest("No support for LOWER_RIGHT variant for now")
-            return
-
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True

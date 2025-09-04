@@ -12,6 +12,7 @@ from ..kernel.mm import (
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import use_contiguous
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -41,8 +42,8 @@ class EmptyContiguousMMConfigHeuristics(TemplateConfigHeuristics):
     register=torch.version.hip is not None,
     op_name="addmm",
 )
-class ContiguousMMHeuristics(TemplateConfigHeuristics):
-    def get_template_configs(
+class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
