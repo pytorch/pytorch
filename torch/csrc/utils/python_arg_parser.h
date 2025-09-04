@@ -241,10 +241,9 @@ struct TORCH_PYTHON_API PythonArgs {
   template <int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
-  inline c10::SymDimVector symintlist(int i);
+  inline std::vector<c10::SymInt> symintlist(int i);
   inline c10::OptionalArray<int64_t> intlistOptional(int i);
-  inline c10::OptionalArray<c10::SymInt, c10::SymDimVector> symintlistOptional(
-      int i);
+  inline c10::OptionalArray<c10::SymInt> symintlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
@@ -548,31 +547,29 @@ inline void throw_intlist_exception(
           error));
 }
 
-inline c10::SymDimVector PythonArgs::symintlist(int i) {
+inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (!args[i]) {
-    c10::SymDimVector result;
-    result.reserve(signature.params[i].default_intlist.size());
-    for (const int64_t di : signature.params[i].default_intlist) {
-      result.emplace_back(di);
-    }
-    return result;
+    return c10::fmap(signature.params[i].default_intlist, [](int64_t di) {
+      return c10::SymInt(di);
+    });
   }
 
   const auto size1 = signature.params[i].size;
   if (size1 > 0 && THPUtils_checkLong(args[i])) {
-    return c10::SymDimVector(size1, c10::SymInt(THPUtils_unpackLong(args[i])));
+    return std::vector<c10::SymInt>(
+        size1, c10::SymInt(THPUtils_unpackLong(args[i])));
   }
 
   if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
     auto si = py::handle(args[i]).cast<c10::SymInt>();
-    return c10::SymDimVector(size1, si);
+    return std::vector<c10::SymInt>(size1, si);
   }
 
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  c10::SymDimVector res;
+  std::vector<c10::SymInt> res;
   res.reserve(size2);
   for (const auto idx : c10::irange(size2)) {
     PyObject* obj =
@@ -702,8 +699,7 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
   return intlist(i);
 }
 
-inline c10::OptionalArray<c10::SymInt, c10::SymDimVector> PythonArgs::
-    symintlistOptional(int i) {
+inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
   if (!args[i]) {
     return {};
   }
