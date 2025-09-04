@@ -168,9 +168,9 @@ def max_with_index(value, index, dim):
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
-        return libdevice.exp2(x * _LOG_2_E)
-    else:
         return math.exp(x)
+    else:
+        return libdevice.exp(x)
 
 
 @triton.jit
