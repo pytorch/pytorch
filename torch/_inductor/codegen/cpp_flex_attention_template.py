@@ -770,18 +770,16 @@ FLEX_DECODING_TEMPLATE = r"""
       // 1) calculate the matmul(query, key) for this partition
       int64_t token_num = 0;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = kvblock_offset;
-          n_idx < std::min(
-              kvblock_offset + num_kvblocks_per_partition,
-              kv_indice_num + full_kv_indice_num);
-          n_idx += 1) {
+      for (int64_t n_idx : c10::irange(
+          kvblock_offset,
+          std::min(kvblock_offset + num_kvblocks_per_partition,
+            kv_indice_num + full_kv_indice_num))) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = kvblock_offset;
-          n_idx < std::min(
-              kvblock_offset + num_kvblocks_per_partition,
-              kv_indice_num);
-          n_idx += 1) {
+      for (int64_t n_idx : c10::irange(
+          kvblock_offset,
+          std::min(kvblock_offset + num_kvblocks_per_partition,
+            kv_indice_num))) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
 
@@ -791,7 +789,7 @@ FLEX_DECODING_TEMPLATE = r"""
         auto k_addr =
             k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
 
-        {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
+        {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<false>(
             q_data + i * qStrideB + j * qStrideH,
             k_addr,
             logits + token_num,
@@ -821,10 +819,10 @@ FLEX_DECODING_TEMPLATE = r"""
 
         accum_t* in_ptr0 = logits + token_num;
 
-        auto in_ptr1 = b_idx.data();
-        auto in_ptr2 = h_idx.data();
-        auto in_ptr3 = q_idx.data();
-        auto in_ptr4 = kv_idx.data();
+        const auto in_ptr1 = b_idx.data();
+        const auto in_ptr2 = h_idx.data();
+        const auto in_ptr3 = q_idx.data();
+        const auto in_ptr4 = kv_idx.data();
 
         // apply score mod function
         {
@@ -874,18 +872,16 @@ FLEX_DECODING_TEMPLATE = r"""
       token_num = 0;
       bool skipped_partition = true;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = kvblock_offset;
-          n_idx < std::min(
-              kvblock_offset + num_kvblocks_per_partition,
-              kv_indice_num + full_kv_indice_num);
-          n_idx += 1) {
+      for (int64_t n_idx : c10::irange(
+          kvblock_offset,
+          std::min(kvblock_offset + num_kvblocks_per_partition,
+            kv_indice_num + full_kv_indice_num))) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = kvblock_offset;
-          n_idx < std::min(
-              kvblock_offset + num_kvblocks_per_partition,
-              kv_indice_num);
-          n_idx += 1) {
+      for (int64_t n_idx : c10::irange(
+          kvblock_offset,
+          std::min(kvblock_offset + num_kvblocks_per_partition,
+            kv_indice_num))) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
         skipped_partition = false;
@@ -895,7 +891,7 @@ FLEX_DECODING_TEMPLATE = r"""
             v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
         // Fallback Half brgemm is slower than micro gemm
 
-        if (!std::is_same_v<scalar_t, at::Half>) {
+        if constexpr (!std::is_same_v<scalar_t, at::Half>) {
           at::native::cpublas::brgemm(
                 cur_qSplitSize,
                 headSize_v,
@@ -944,7 +940,7 @@ FLEX_DECODING_TEMPLATE = r"""
       at::native::data_index_step(i, batchSize, j, num_head, partition_id, num_partitions);
     }
 
-    if (!std::is_same_v<scalar_t, at::Half>) {
+    if constexpr (!std::is_same_v<scalar_t, at::Half>) {
       at::native::cpublas::brgemm_release();
     }
   });
@@ -1322,9 +1318,7 @@ class CppFlexAttentionTemplate(CppTemplate):
     ):
         # choose from FLEX_ATTENTION or FLEX_DECODING
         FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
-        q_batch_size = query.data.data.layout.size[0]  # type: ignore[attr-defined]
-        q_num_heads = query.data.data.layout.size[1]  # type: ignore[attr-defined]
-        q_seq_len = query.data.data.layout.size[2]  # type: ignore[attr-defined]
+        q_batch_size, q_num_heads, q_seq_len, _ = query.data.data.layout.size  # type: ignore[attr-defined]
         k_seq_len = key.data.data.layout.size[2]  # type: ignore[attr-defined]
         if all(
             sympy.sympify(val).is_number
