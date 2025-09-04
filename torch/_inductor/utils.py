@@ -109,7 +109,7 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
-from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -1561,6 +1561,8 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 @functools.lru_cache
 def get_max_num_sms() -> int:
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
@@ -1577,6 +1579,8 @@ def using_b200() -> bool:
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
+    if torch.xpu.is_available():
+        return get_max_num_sms()
     carveout = torch._C._get_sm_carveout_experimental()
     return get_max_num_sms() - (carveout if carveout is not None else 0)
 
@@ -1630,7 +1634,11 @@ def _use_conv_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(
-    layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1647,6 +1655,8 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
+        # some callers handle max-autotune checking externally
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1804,6 +1814,30 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
             )
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        and not V.graph.cpp_wrapper
+    )
+
+
+@functools.cache
+def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    """
+    Check if we should use the contiguous subgraph transform.
+    This transform makes the second matrix contiguous before the matmul.
+    """
+    decompose_k_threshold = config.triton.decompose_k_threshold
+
+    # Similar conditions to decompose_k but for contiguous transform
+    from torch._inductor.virtualized import V
+
+    return (
+        bool(torch.version.hip)  # Only relevant on AMD
+        and V.graph.sizevars.statically_known_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode
         and not V.graph.cpp_wrapper
     )
 
@@ -3163,16 +3197,15 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
 
 
 def get_current_backend() -> str:
-    """Get the codegen backend for the current graph, or throw."""
     from torch._inductor.virtualized import V
 
-    device: torch.device = V.graph.get_current_device_or_throw()
-    device_interface: type[DeviceInterface] = get_interface_for_device(device.type)
-
-    device_inductor_backend: Optional[str] = device_interface.inductor_backend()
-    if device_inductor_backend is None:
-        raise ValueError(f"Couldn't get an Inductor backend for device {device.type}")
-    return device_inductor_backend
+    device_str = V.graph.get_current_device_or_throw().type
+    if device_str == "cpu":
+        return config.cpu_backend
+    elif device_str == "mps":
+        return "mps"
+    else:
+        return config.cuda_backend
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
