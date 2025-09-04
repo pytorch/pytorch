@@ -1963,6 +1963,16 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly("arguments", &FunctionSchema::arguments)
       .def_property_readonly("returns", &FunctionSchema::returns)
       .def(
+          "_is_view_op",
+          [](const FunctionSchema& self) -> bool {
+            for (const auto& arg : self.arguments()) {
+              if (arg.alias_info() && !arg.alias_info()->isWrite()) {
+                return true;
+              }
+            }
+            return false;
+          })
+      .def(
           "is_backward_compatible_with",
           // FunctionSchema::isBackwardCompatibleWith has an extra
           // defaulted argument, so we can't just use a
