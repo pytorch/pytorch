@@ -2287,7 +2287,6 @@ class Scheduler:
                     self.nodes, self.name_to_buf
                 )
 
-            runtime_estimations = None
             if (
                 used_non_deterministic_runtime_estimations()
                 and config_comms.runtime_estimations_align_across_all_distributed_ranks
@@ -2297,27 +2296,6 @@ class Scheduler:
                 )
 
                 align_runtime_estimations_across_all_distributed_ranks(self.nodes)
-                runtime_estimations = {}
-                for snode in self.nodes:
-                    runtime_estimations[snode] = snode.get_estimated_runtime()
-                import torch.distributed as dist
-                from torch.distributed.distributed_c10d import _get_default_group
-
-                world_size = dist.get_world_size()
-                pg = _get_default_group()
-                gathered_runtime_estimations: list[list[float]] = [
-                    [] for _ in range(world_size)
-                ]
-                dist.all_gather_object(
-                    gathered_runtime_estimations, list(runtime_estimations.values()), pg
-                )
-                median_runtime_estimations = torch.median(
-                    torch.tensor(gathered_runtime_estimations), dim=0
-                ).values.tolist()
-                for idx, (key, value) in enumerate(runtime_estimations.items()):
-                    self.nodes[
-                        idx
-                    ].override_estimated_runtime = median_runtime_estimations[idx]
 
             from torch._logging import trace_structured
 
