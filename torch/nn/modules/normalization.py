@@ -259,7 +259,11 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         # that will soon be overwritten.
         super().__init__(0, eps, False, False)
 
-        self.dim = dim
+        if isinstance(dim, numbers.Integral):
+            # mypy error: incompatible types in assignment
+            dim = (dim,)  # type: ignore[assignment]
+
+        self.dim = sorted(set(dim))
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         self.bias = bias
