@@ -1424,12 +1424,12 @@ if(USE_PRIORITIZED_TEXT_FOR_LD)
     $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
     $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
   )
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_BINARY_DIR}/linker_script.ld")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
   set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
 
   add_custom_command(
     OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py --file-in "${LINKER_SCRIPT_FILE_IN}" --file-out "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py --filein "${LINKER_SCRIPT_FILE_IN}" --fout "${LINKER_SCRIPT_FILE_OUT}"
     DEPENDS ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py "${LINKER_SCRIPT_FILE_IN}"
     COMMENT "Generating prioritized text linker files"
     VERBATIM
