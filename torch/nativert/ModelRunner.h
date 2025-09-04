@@ -32,8 +32,6 @@ class TORCH_API ModelRunner {
   std::vector<c10::IValue> runWithFlatInputsAndOutputs(
       std::vector<c10::IValue> flatInputs);
 
-  uint64_t numOutputs() const;
-
  private:
   // original non-delegated graph from torch.export()
   std::shared_ptr<Graph> graph_;
