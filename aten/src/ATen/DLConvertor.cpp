@@ -308,17 +308,44 @@ void fillVersion<DLManagedTensorVersioned>(
 // constructed out of ATen tensor
 template <class T>
 T* toDLPackImpl(const Tensor& src) {
-  // create a new tensor with possibly normalized strides
-  // gh-83069
-  auto shape = src.sizes();
-  auto strides = src.strides().vec();
-  for (int i = 0; i < src.dim(); i++) {
-    if (shape[i] < 2) {
-      strides[i] = 1;
+  auto view = src;
+
+  // Detect whether there is need to normalize the strides
+  // Background: gh-83069
+  //
+  // However, normalizing strides can come at a high-cost
+  // to slow down toDLPack conversion 3x, so we
+  // only normalize if needed.
+  //
+  // The following code detects whether the src follows
+  // a continuous pattern. If the src follows such pattern (common-case)
+  // then we do not need to normalize the strides.
+  bool need_normalize_strides = false;
+  int64_t expected_stride = 1;
+  for (int i = src.dim() - 1; i >= 0; i--) {
+    // detect if we do not meet continuous pattern
+    // and the size is 1, so there is opportunity to normalize
+    if (src.stride(i) != expected_stride && src.size(i) == 1) {
+      need_normalize_strides = true;
+      break;
     }
+    expected_stride *= src.size(i);
   }
 
-  auto view = src.as_strided(shape, strides, src.storage_offset());
+  // less common case, try normalizing the strides
+  if (need_normalize_strides) {
+    // create a new tensor with possibly normalized strides
+    // gh-83069
+    auto shape = src.sizes();
+    auto strides = src.strides().vec();
+    for (int i = 0; i < src.dim(); i++) {
+      if (shape[i] < 2) {
+        strides[i] = 1;
+      }
+    }
+    view = src.as_strided(shape, strides, src.storage_offset());
+  }
+
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
   atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
