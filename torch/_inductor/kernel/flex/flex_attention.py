@@ -311,9 +311,6 @@ def flex_attention(
         # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
 
-        if torch.xpu.is_available() and can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = True
-
         if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = True
 
