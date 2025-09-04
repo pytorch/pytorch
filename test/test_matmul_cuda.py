@@ -1799,10 +1799,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_a size to be {expected_a_size} "
-                f"but got {expected_a_size - 1}"
-            ),
+            f".*For Block[W,w]ise.*scaling.*scale_a should have {expected_a_size} "
+            f"elements.*"
+            ,
         ):
             incorrect_size_a = torch.ones(expected_a_size - 1, device=device, dtype=scale_dtype)
             correct_size_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
@@ -1817,10 +1816,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_b with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_b size to be {expected_b_size} "
-                f"but got {expected_b_size + 1}"
-            ),
+            f"For Block[W,w]ise.*scaling.*scale_b should have {expected_b_size} "
+            f"elements.*"
+            ,
         ):
             correct_size_a = torch.ones(expected_a_size, device=device, dtype=scale_dtype)
             incorrect_size_b = torch.ones(expected_b_size + 1, device=device, dtype=scale_dtype)
@@ -1835,9 +1833,8 @@ class TestFP8Matmul(TestCase):
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                "For BlockWise scaling: Both scale_a and scale_b must be contiguous"
-            ),
+            "For Block[W,w]ise.*scaling.*both should be contiguous"
+            ,
         ):
             non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=scale_dtype)[::2]
             contiguous_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
