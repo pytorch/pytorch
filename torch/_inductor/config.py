@@ -413,9 +413,7 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
 
-runtime_estimations_use_nccl_lib_estimations: bool = False
 runtime_estimations_mms_benchmark: bool = False
-runtime_estimations_align_across_all_distributed_ranks: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
@@ -924,6 +922,9 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Control if we will do padding on dynamic shapes
+pad_dynamic_shapes = False
+
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
 
@@ -1243,15 +1244,6 @@ class triton:
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
 
-    # If False (default), torch.compile skips cudagraph for a graph if it
-    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
-    # be captured into cudagraph. If this is not possible, this will raise
-    # an error.
-    cudagraph_or_error: bool = Config(
-        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
-        default=False,
-    )
-
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -1430,6 +1422,9 @@ class triton:
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
+
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
 
 
 class aot_inductor:

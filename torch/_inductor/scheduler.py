@@ -11,7 +11,6 @@ import operator
 import os
 import pprint
 import textwrap
-import time
 import traceback
 import typing
 from collections import Counter, defaultdict
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 import sympy
+from triton.testing import do_bench
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -33,12 +33,11 @@ from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics
+from . import comms, config, config_comms, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import (
@@ -838,13 +837,21 @@ class BaseSchedulerNode:
         if is_collective(self.node):
             assert isinstance(self.node, ir.IRNode)
             try:
-                if config.runtime_estimations_use_nccl_lib_estimations:
-                    est = estimate_nccl_collective_runtime_nccl_estimator(self)
-                    if est is None:
-                        # NCCL estimations fail: fallback to in-tree algorithmic estimation.
-                        est = estimate_nccl_collective_runtime(self.node)
+                if config_comms.runtime_estimations_use_nccl_lib_estimations:
+                    cache_key = get_estimate_runtime_cache_key_from_snode(self)
+                    cache = get_estimate_runtime_cache()
+                    cache_val = cache.lookup(cache_key)
+                    if cache_val is not None:
+                        assert isinstance(cache_val, float)
+                        return cache_val
 
-                    return est
+                    ms = estimate_nccl_collective_runtime_nccl_estimator(self)
+                    if ms is None:
+                        # NCCL estimations fail: fallback to in-tree algorithmic estimation.
+                        ms = estimate_nccl_collective_runtime(self.node)
+
+                    cache.set_value(cache_key, value=ms)
+                    return ms
                 return estimate_nccl_collective_runtime(self.node)
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
@@ -863,10 +870,9 @@ class BaseSchedulerNode:
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
 
-        if config.runtime_estimations_mms_benchmark:
-            ret = estimate_runtime_benchmark(self)
-            if ret is not None:
-                return ret
+        ret = maybe_estimate_runtime_benchmark(self)
+        if ret is not None:
+            return ret
 
         dtype = buf.node.maybe_get_dtype()
         try:
@@ -948,8 +954,7 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     return cache_key
 
 
-def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
-    # Extern Kernels(e.g. mm) perf will depend on backends.
+def _get_mm_like_fn(snode: BaseSchedulerNode) -> Optional[Callable[[Any], Any]]:
     if not isinstance(snode, ExternKernelSchedulerNode):
         return None
     mms_fns = {
@@ -962,6 +967,20 @@ def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
         return None
     if not isinstance(snode.node, ir.ExternKernel):
         return None
+    return mms_fns[python_kernel_name]
+
+
+def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
+    bench_fn = None
+    args_kwargs_fn = None
+    if config.runtime_estimations_mms_benchmark:
+        mm_fn = _get_mm_like_fn(snode)
+        if mm_fn is None:
+            return None
+        bench_fn = mm_fn
+        args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
+    else:
+        return None
 
     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
     cache = get_estimate_runtime_cache()
@@ -970,29 +989,13 @@ def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
         assert isinstance(cache_val, float)
         return cache_val
 
-    with no_dispatch():
-        from .utils import snode_args_kwargs
+    from .utils import snode_args_kwargs
 
-        args, kwargs = snode_args_kwargs(snode)
-        fn = mms_fns[python_kernel_name]
-        fn(*args, **kwargs)
+    args, kwargs = args_kwargs_fn()
+    ms = do_bench(lambda: bench_fn(*args, **kwargs))
 
-        num_iters = 3
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        cpu_start = time.time()
-        start_event.record(torch.cuda.current_stream())
-        for _ in range(num_iters):
-            fn(*args, **kwargs)
-        end_event.record(torch.cuda.current_stream())
-        cpu_end = time.time()
-        torch.cuda.synchronize()
-        cpu_time = cpu_end - cpu_start
-        total_op_time = start_event.elapsed_time(end_event) - cpu_time
-        mean_op_time_ms = total_op_time / num_iters
-        mean_op_time_ns = mean_op_time_ms * 1e6
-        cache.set_value(cache_key, value=mean_op_time_ns)
-        return mean_op_time_ns
+    cache.set_value(cache_key, value=ms)
+    return ms
 
 
 class WhyNoFuse:
@@ -2159,6 +2162,10 @@ class NodeUser:
 _post_grad_graph_counter = itertools.count()
 
 
+def used_non_deterministic_runtime_estimations() -> bool:
+    return config.runtime_estimations_mms_benchmark
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -2281,7 +2288,15 @@ class Scheduler:
                 )
 
             runtime_estimations = None
-            if config.runtime_estimations_align_across_all_distributed_ranks:
+            if (
+                used_non_deterministic_runtime_estimations()
+                and config_comms.runtime_estimations_align_across_all_distributed_ranks
+            ):
+                from .comms import (
+                    align_runtime_estimations_across_all_distributed_ranks,
+                )
+
+                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
                 runtime_estimations = {}
                 for snode in self.nodes:
                     runtime_estimations[snode] = snode.get_estimated_runtime()
