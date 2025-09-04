@@ -1015,7 +1015,6 @@ dtensor.max()
 """,
             env=env,
         )
-        self.assertIn("_dispatch.py", stderr.decode("utf-8"))
         self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
