@@ -28,9 +28,11 @@ def make_relative_rpath_args(path):
 
 
 def get_pytorch_dir():
-    # Disable autoload of device backends.
-    # This is necessary to avoid issues with the backend being loaded
-    # before the extension is built.
+    # Disable autoload of the accelerator
+
+    # We must do this for two reasons:
+    # We only need to get the PyTorch installation directory, so whether the accelerator is loaded or not is irrelevant
+    # If the accelerator has been previously built and not uninstalled, importing torch will cause a circular import error
     os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
 
