@@ -73,13 +73,6 @@ struct TORCH_API GraphFunction : public Function {
     return get_executor().getDebugState();
   }
 
-  bool is_optimized() const {
-    TORCH_WARN(
-        "GraphFunction::is_optimized() is deprecated and always returns true. "
-        "Please use getGraphExecutorOptimize()");
-    return true;
-  }
-
   void check_single_output() {
     TORCH_CHECK(
         graph()->outputs().size() == 1,
