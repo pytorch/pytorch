@@ -5902,6 +5902,8 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
         )
     elif mode == 'constant':
         cases = (
+            ((), ()),
+            ((0, 1), (1, 1, 0, 0)),
             ((1, 3), (1, 2)),
             ((1, 3), (0, 1)),
             ((1, 3), (0, 2, 0, 1)),
