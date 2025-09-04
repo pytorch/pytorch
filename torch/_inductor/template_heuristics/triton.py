@@ -1453,7 +1453,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         layout: Any,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Convert config lists to template kwargs.
@@ -1466,9 +1465,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
         if not self._valid(kernel_inputs):
-            return
-        # All the Triton config heuristics are for max-autotune only.
-        if not max_autotune:
             return
 
         # Extract M, N, K from kernel_inputs
@@ -1568,12 +1564,11 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         kernel_inputs: KernelInputs,
         layout: Any,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
         m, n, k = kernel_inputs.mnk_symbolic()
         for kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name, max_autotune
+            kernel_inputs, layout, op_name
         ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
@@ -1621,7 +1616,6 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         kernel_inputs: KernelInputs,
         layout: Any,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
@@ -1639,7 +1633,9 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name, max_autotune
+            kernel_inputs,
+            layout,
+            op_name,
         ):
             yield {**template_kwargs, **tma_opts}
 
@@ -1690,7 +1686,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs: KernelInputs,
         layout: Any,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled MM template configs with scaled MM-specific options.
@@ -1739,7 +1734,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name, max_autotune
+            kernel_inputs, layout, op_name
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
@@ -1799,14 +1794,15 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         kernel_inputs: KernelInputs,
         layout: Any,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled TMA template configs with both scaled MM and TMA-specific options.
         """
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name, max_autotune
+            kernel_inputs,
+            layout,
+            op_name,
         ):
             # Add TMA-specific options for device TMA scaled MM
             template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE

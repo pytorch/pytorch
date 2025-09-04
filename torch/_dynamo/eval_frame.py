@@ -858,7 +858,9 @@ class _TorchDynamoContext:
 
         # hooks to properly handle inlining
         compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
+            external_utils.wrap_inline_with_error_on_graph_break(
+                fn, self.error_on_graph_break
+            )
         )
 
         # Save the function pointer to find the original callable while nesting

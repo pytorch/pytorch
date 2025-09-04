@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -113,7 +113,6 @@ class InductorChoices:
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
-        max_autotune: bool = False,
     ) -> list[KernelTemplateChoice]:
         """
         This method can be subclassed to perform any override/modification of the choices.
@@ -131,7 +130,6 @@ class InductorChoices:
             templates: List of template objects (KernelTemplate or ExternKernelChoice) in use
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm")
             kwarg_overrides: Optional dict of kwargs to override for each template heuristic
-            max_autotune: Whether to use max autotune
 
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
@@ -162,9 +160,6 @@ class InductorChoices:
         Returns:
             List of ChoiceCaller objects from the templates
         """
-        # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
-        # the max-autotune bool, rather than inferring it here
-        max_autotune = config.max_autotune or config.max_autotune_gemm
         if kwarg_overrides is None:
             kwarg_overrides = {}
         input_tensors = kernel_inputs.nodes()
@@ -185,7 +180,9 @@ class InductorChoices:
             heuristic = get_template_heuristic(template_name, device_type, op_name)
 
             cs = heuristic.get_template_configs(
-                kernel_inputs, layout, op_name, max_autotune
+                kernel_inputs,
+                layout,
+                op_name,
             )
             extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
 
@@ -218,7 +215,6 @@ class InductorChoices:
             templates,
             op_name,
             kwarg_overrides,
-            max_autotune,
         )
         choices = []
         # Third pass: Get adjusted choices and collect non-None ChoiceCaller objects
