@@ -1753,11 +1753,16 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
-            )
-            store, rank, world_size = next(rendezvous_iterator)
-            store.set_timeout(timeout)
+            if backend == "fake":
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
+            else:
+                rendezvous_iterator = rendezvous(
+                    not_none(init_method), rank, world_size, timeout=timeout
+                )
+                store, rank, world_size = next(rendezvous_iterator)
+                store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.

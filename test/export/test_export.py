@@ -15529,13 +15529,10 @@ class GraphModule(torch.nn.Module):
     @contextmanager
     def distributed_env(self, world_size):
         try:
-            from torch.testing._internal.distributed.fake_pg import FakeStore
-
             torch.distributed.init_process_group(
                 backend="fake",
                 world_size=world_size,
                 rank=0,
-                store=FakeStore(),
             )
             yield
 
