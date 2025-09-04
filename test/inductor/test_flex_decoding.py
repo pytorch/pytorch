@@ -93,7 +93,7 @@ else:
         LONG_COMPILATION_ON_CPU = True
 
     test_dtypes = (
-        [torch.float32, torch.bfloat16]
+        [torch.float32, torch.bfloat16, torch.float16]
         if torch.backends.mkldnn.is_available()
         and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
@@ -1715,13 +1715,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skipCUDAIf(True, "Not supported on CUDA")
     @skipXPUIf(True, "Not supported on XPU")
+    @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("partition_size", [128, 256, 1024])
-    def test_flash_decoding_partition_size(self, device, partition_size):
+    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
         def score_mod(score, b, h, m, n):
             return score * 2
 
         self.run_test_with_paged_attention(
-            score_mod, device=device, kernel_options={"PARTITION_SIZE": partition_size}
+            score_mod, dtype, device=device,
+            kernel_options={"PARTITION_SIZE": partition_size}
         )
 
     @supported_platform
