@@ -14,6 +14,17 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
+    try:
+        import triton  # noqa: F401
+
+        major, minor = tuple(int(v) for v in triton.__version__.split(".")[:2])
+        return (major, minor)
+    except ImportError:
+        return fallback
+
+
+@functools.cache
 def _device_supports_tma() -> bool:
     import torch
 
@@ -71,7 +82,7 @@ def has_triton_tma_device() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -103,7 +114,7 @@ def has_triton_stable_tma_api() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 

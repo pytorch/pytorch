@@ -448,6 +448,12 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
+# Prune configs that require more shared memory than the hardware limit
+max_autotune_prune_choices_based_on_shared_mem = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    == "1"
+)
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
@@ -914,6 +920,9 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Control if we will do padding on dynamic shapes
+pad_dynamic_shapes = False
+
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
 
@@ -1035,6 +1044,27 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
+
+class performance_model:
+    """
+    Settings for performance model interface in inductor.
+
+    The performance model interface allows using machine learning models or
+    heuristics to predict kernel performance and guide kernel selection.
+
+    see README.md in performance_model for more details.
+    """
+
+    # 0 means the model is off
+    # -1 means the model filters down to default set of configs (from exhaustive)
+    # > 0 means the model filters down to topk
+    # anything else results in the model being off
+    topk: int = 0
+
+    # whether to discard choices that no model was able to make a prediction on
+    # or to keep them in the set of autotuning configs
+    discard_unranked: bool = False
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -1383,7 +1413,6 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
-    inject_log1p_bug_TESTING_ONLY: Optional[str] = None
 
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
@@ -1413,6 +1442,9 @@ class triton:
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
+
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
 
 
 class aot_inductor:
