@@ -367,6 +367,7 @@ class TestFlexDecoding(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
         device="cuda",
+        kernel_options=None,
     ):
         assert score_mod is not None or block_mask is not None, (
             "Must provide score_mod or block_mask"
@@ -397,7 +398,10 @@ class TestFlexDecoding(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         sdpa_partial = create_attention(
-            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+            score_mod,
+            block_mask,
+            enable_gqa=(not Q_H == KV_H),
+            kernel_options=kernel_options,
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         if not self.test_inference_only:
@@ -834,50 +838,21 @@ class TestFlexDecoding(InductorTestCase):
     def test_tma_decoding(self, device, dtype: torch.dtype):
         n_heads, head_dim, seq_len = 4, 16, 128
 
-        q = torch.randn(
-            1,
-            n_heads,
-            1,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-        )
-        k = torch.randn(
-            1,
-            n_heads,
-            seq_len,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-        )
-        v = torch.randn(
-            1,
-            n_heads,
-            seq_len,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-        )
-
         score_mod = _generate_alibi_bias(n_heads)
         kernel_options = {"USE_TMA": True}
-        sdpa_partial = create_attention(
+        self.run_test(
             score_mod=score_mod,
-            block_mask=None,
-            enable_gqa=(not Hq == Hkv),
+            dtype=dtype,
+            Q_B=1,
+            Q_H=n_heads,
+            Q_S=1,
+            Q_D=head_dim,
+            KV_B=1,
+            KV_H=n_heads,
+            KV_S=seq_len,
+            V_D=head_dim,
+            device=device,
             kernel_options=kernel_options,
-        )
-
-        compiled_sdpa = torch.compile(sdpa_partial)
-
-        ref_out = sdpa_partial(q, k, v)
-        compiled_out = compiled_sdpa(q, k, v)
-        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
-        torch.testing.assert_close(
-            ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
     @supported_platform
