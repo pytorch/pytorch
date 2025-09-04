@@ -12397,6 +12397,24 @@ Keyword args:
     {device}
     {requires_grad}
     {memory_format}
+
+Example::
+
+    >>> x = torch.ones(2, 3)
+    >>> torch.full_like(x, 3.141592)
+    tensor([[ 3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416]])
+    >>> torch.full_like(x, 7)
+    tensor([[7., 7., 7.],
+            [7., 7., 7.]])
+    >>> torch.full_like(x, 0.5, dtype=torch.int32)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], dtype=torch.int32)
+    >>> y = torch.randn(3, 4, dtype=torch.float64)
+    >>> torch.full_like(y, -1.0)
+    tensor([[-1., -1., -1., -1.],
+            [-1., -1., -1., -1.],
+            [-1., -1., -1., -1.]], dtype=torch.float64)
 """.format(**factory_like_common_args),
 )
 

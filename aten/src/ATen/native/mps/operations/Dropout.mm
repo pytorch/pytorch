@@ -25,28 +25,21 @@ static Tensor native_dropout_mask_and_scale(const Tensor& input, const Tensor& m
 }
 
 std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std::optional<bool> train) {
-  if (input.numel() == 0) {
-    return std::make_tuple(input, at::empty_like(input, input.options()));
+  if (input.numel() == 0 || !train.value_or(false) || p == 0) {
+    return {input.clone(), at::ones_like(input, input.options().dtype(c10::kBool))};
   }
 
-  Tensor mask;
-  Tensor output;
-
-  if (!train.has_value() || *train) {
-    float p_comp = 1.0f - p;
-    mask = at::empty_like(input, input.options().dtype(c10::kBool));
-    mask.bernoulli_(p_comp);
-    auto scale = p_comp == 0 ? 0.0f : 1.0f / p_comp;
-    output = native_dropout_mask_and_scale(input, mask, scale);
-  } else {
-    mask = at::ones_like(input, input.options().dtype(c10::kBool));
-    output = input.clone();
-  }
-  return std::make_tuple(output, mask);
+  float p_comp = 1.0f - p;
+  Tensor mask = at::empty_like(input, input.options().dtype(c10::kBool));
+  mask.bernoulli_(p_comp);
+  auto scale = p_comp == 0 ? 0.0f : 1.0f / p_comp;
+  Tensor output = native_dropout_mask_and_scale(input, mask, scale);
+  return {output, mask};
 }
 
 Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, double scale) {
-  return native_dropout_mask_and_scale(grad, mask, scale);
+  auto grad_float = isFloatingType(grad.scalar_type()) ? grad : grad.to(c10::kFloat);
+  return native_dropout_mask_and_scale(grad_float, mask, scale);
 }
 
 } // namespace at::native
