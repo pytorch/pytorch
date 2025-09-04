@@ -264,6 +264,11 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
 
+        if start_dim == 0:
+            raise ValueError(
+                "start dim is 0 but layer norm is not indented to normalize over batch dimension"
+            )
+
         if self.elementwise_affine:
             self.weight = UninitializedParameter(**factory_kwargs)
             if bias:
