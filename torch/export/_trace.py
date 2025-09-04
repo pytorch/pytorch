@@ -757,7 +757,7 @@ def _export_to_torch_ir(
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental=False,
+    _use_new_tracer_experimental: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -2053,7 +2053,7 @@ def _export_for_training(
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental=False,
+    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2204,7 +2204,7 @@ def _export(
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental=False,
+    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
