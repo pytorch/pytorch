@@ -22,9 +22,8 @@ import torch
 import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
-from .hipify import hipify_python
-from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Optional, Union
+from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -280,6 +279,17 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-fms-extensions')
     # Suppress warnings about dllexport.
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
+
+
+def _get_icpx_version() -> str:
+    icpx = 'icx' if IS_WINDOWS else 'icpx'
+    compiler_info = subprocess.check_output([icpx, '--version'])
+    match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
+    version = ['0', '0', '0'] if match is None else list(match.groups())
+    version = list(map(int, version))
+    assert len(version) == 3, "Failed to parse DPC++ compiler version"
+    # Aligning version format with what torch.version.xpu() returns
+    return f"{version[0]}{version[1]:02}{version[2]:02}"
 
 
 def _get_sycl_arch_list():
@@ -542,6 +552,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
 
+
 # Specify Visual Studio C runtime library for hipcc
 def _set_hipcc_runtime_lib(is_standalone, debug):
     if is_standalone:
@@ -677,15 +688,6 @@ class BuildExtension(build_ext):
                 # min supported CPython version.
                 # See https://docs.python.org/3/c-api/stable.html#c.Py_LIMITED_API
                 self._add_compile_flag(extension, f'-DPy_LIMITED_API={min_supported_cpython}')
-            else:
-                # pybind11 is not CPython API stable so don't add these flags used when
-                # compiling pybind11 when pybind11 is not even used. otherwise, the build
-                # logs are confusing.
-                # See note [Pybind11 ABI constants]
-                for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-                    val = getattr(torch._C, f"_PYBIND11_{name}")
-                    if val is not None and not IS_WINDOWS:
-                        self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
 
             if 'nvcc_dlink' in extension.extra_compile_args:
@@ -846,7 +848,11 @@ class BuildExtension(build_ext):
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
                 # escaping quoted arguments to pass them thru SYCL compiler
-                host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
+                icpx_version = _get_icpx_version()
+                if int(icpx_version) >= 20250200:
+                    host_cflags = [item.replace('"', '\\"') for item in host_cflags]
+                else:
+                    host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
                 host_cflags = ' '.join(host_cflags)
                 # Note the order: shlex.quote sycl_flags first, _wrap_sycl_host_flags
                 # second. Reason is that sycl host flags are quoted, space containing
@@ -1361,6 +1367,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     include_dirs = kwargs.get('include_dirs', [])
 
     if IS_HIP_EXTENSION:
+        from .hipify import hipify_python
         build_dir = os.getcwd()
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
@@ -1698,25 +1705,9 @@ def load(name,
         is_standalone,
         keep_intermediates=keep_intermediates)
 
-def _get_pybind11_abi_build_flags():
-    # Note [Pybind11 ABI constants]
-    #
-    # Pybind11 before 2.4 used to build an ABI strings using the following pattern:
-    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_BUILD_TYPE}__"
-    # Since 2.4 compier type, stdlib and build abi parameters are also encoded like this:
-    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_COMPILER_TYPE}{PYBIND11_STDLIB}{PYBIND11_BUILD_ABI}{PYBIND11_BUILD_TYPE}__"
-    #
-    # This was done in order to further narrow down the chances of compiler ABI incompatibility
-    # that can cause a hard to debug segfaults.
-    # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
-    # captured during PyTorch native library compilation in torch/csrc/Module.cpp
-
-    abi_cflags = []
-    for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-        pval = getattr(torch._C, f"_PYBIND11_{pname}")
-        if pval is not None and not IS_WINDOWS:
-            abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
-    return abi_cflags
+@deprecated("PyBind11 ABI handling is internal to PyBind11; this will be removed after PyTorch 2.9.0")
+def _get_pybind11_abi_build_flags() -> list[str]:
+    return []
 
 def check_compiler_is_gcc(compiler):
     if not IS_LINUX:
@@ -1847,7 +1838,6 @@ def _check_and_build_extension_h_precompiler_headers(
         common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
 
     common_cflags += ['-std=c++17', '-fPIC']
-    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
@@ -2118,6 +2108,8 @@ def _jit_compile(name,
     if baton.try_acquire():
         try:
             if version != old_version:
+                from .hipify import hipify_python
+                from .hipify.hipify_python import GeneratedFileCleaner
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(
@@ -2682,8 +2674,6 @@ def _write_ninja_file_to_build_library(path,
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
         common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
 
-    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
-
     # Windows does not understand `-isystem` and quotes flags later.
     if IS_WINDOWS:
         common_cflags += [f'-I{include}' for include in user_includes + system_includes]
@@ -2730,7 +2720,9 @@ def _write_ninja_file_to_build_library(path,
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
-        host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
+        icpx_version = _get_icpx_version()
+        if int(icpx_version) < 20250200:
+            host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()

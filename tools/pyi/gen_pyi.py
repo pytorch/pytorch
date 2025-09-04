@@ -422,6 +422,19 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "Tensor",
                     )
                 ],
+                f"max_pool{d}d_with_indices": [
+                    defs(
+                        f"max_pool{d}d_with_indices",
+                        [
+                            INPUT,
+                            KERNEL_SIZE,
+                            *STRIDE_PADDING,
+                            "dilation: _int | _size = 1",
+                            "ceil_mode: bool = False",
+                        ],
+                        "tuple[Tensor, Tensor]",
+                    )
+                ],
             }
         )
 
@@ -547,6 +560,52 @@ def gen_nn_functional(fm: FileManager) -> None:
                         KERNEL_SIZE,
                         "dilation: _int | _size",
                         *STRIDE_PADDING,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "elu": [
+                defs(
+                    "elu",
+                    [
+                        INPUT,
+                        "alpha: float = 1.0",
+                        "scale: float = 1.0",
+                        "input_scale: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "glu": [
+                defs(
+                    "glu",
+                    [
+                        INPUT,
+                        "dim: int = -1",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "max_unpool2d": [
+                defs(
+                    "max_unpool2d",
+                    [
+                        INPUT,
+                        "indices: Tensor",
+                        "output_size: Sequence[int] | None",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "max_unpool3d": [
+                defs(
+                    "max_unpool3d",
+                    [
+                        INPUT,
+                        "indices: Tensor",
+                        "output_size: Sequence[int] | None",
+                        "stride: _int | _size",
+                        "padding: _int | _size",
                     ],
                     "Tensor",
                 )

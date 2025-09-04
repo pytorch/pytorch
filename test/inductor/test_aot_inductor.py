@@ -21,6 +21,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
@@ -38,7 +39,9 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     tf32_on_and_off,
 )
@@ -149,6 +152,13 @@ except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+
+def get_module_ext_type():
+    if IS_WINDOWS:
+        return "pyd"
+    else:
+        return "so"
 
 
 class AOTInductorTestsTemplate:
@@ -304,7 +314,11 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
+        expected_path = normalize_path_separator(
+            os.path.join(
+                tempfile.mkdtemp(dir=cache_dir()), f"model.{get_module_ext_type()}"
+            )
+        )
         actual_path = AOTIRunnerUtil.legacy_compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
@@ -1451,6 +1465,12 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(
+        # for archs where this isn't lowered to flash attention, the math
+        # backend will be used and it doesn't work for bfloat16
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Some archs don't support SDPA with bfloat16",
+    )
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1723,6 +1743,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
+    )
     def test_fallback_kernel_with_symexpr_output(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -2470,7 +2493,6 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
         class Model(nn.Module):
@@ -4197,7 +4219,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    # @skipIfXpu(msg="torch.xpu.memory_allocated not supported yet")
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != GPU_TYPE:
@@ -4293,6 +4314,9 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
+    )
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6885,9 +6909,10 @@ class AOTInductorTestsTemplate:
         with zipfile.ZipFile(package_path, "r") as zip_ref:
             all_files = zip_ref.namelist()
             base_dir = "test_model.wrapper/data/aotinductor/model/test_model"
+            ext_type = get_module_ext_type()
             self.assertTrue(f"{base_dir}.wrapper.cpp" in all_files)
             self.assertTrue(f"{base_dir}.kernel.cpp" in all_files)
-            self.assertTrue(f"{base_dir}.wrapper.so" in all_files)
+            self.assertTrue(f"{base_dir}.wrapper.{ext_type}" in all_files)
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))

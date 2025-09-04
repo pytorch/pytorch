@@ -340,8 +340,8 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: abs
-    SparseCPU, SparseCUDA: abs_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr
+    SparseCPU, SparseCUDA, SparseMPS: abs_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: abs_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_abs
   tags: [core, pointwise]
 
@@ -350,16 +350,16 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: abs_
-    SparseCPU, SparseCUDA: abs_sparse_
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr_
+    SparseCPU, SparseCUDA, SparseMPS: abs_sparse_
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: abs_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS, MTIA: abs_out
-    SparseCPU, SparseCUDA: abs_sparse_out
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr_out
+    SparseCPU, SparseCUDA, SparseMPS: abs_sparse_out
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: abs_sparse_csr_out
   tags: pointwise
 
 # Note [Adding an alias]
@@ -428,7 +428,7 @@
   variants: function, method
   structured_delegate: sgn.out
   dispatch:
-    SparseCPU, SparseCUDA: sgn_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sgn_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sgn_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_sgn
   tags: pointwise
@@ -437,7 +437,7 @@
   variants: method
   structured_delegate: sgn.out
   dispatch:
-    SparseCPU, SparseCUDA: sgn_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sgn_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sgn_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_sgn_
   tags: pointwise
@@ -448,7 +448,7 @@
   dispatch:
     CPU, CUDA: sgn_out
     MPS: sgn_out_mps
-    SparseCPU, SparseCUDA: sgn_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sgn_sparse_csr_out
   tags: pointwise
 
@@ -476,7 +476,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _conj_physical
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: conj_physical_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: conj_physical_sparse_csr
   autogen: _conj_physical.out
 
 - func: conj_physical(Tensor self) -> Tensor
@@ -487,8 +487,8 @@
   dispatch:
     CPU, CUDA: conj_physical_out
     MPS: conj_physical_out_mps
-    SparseCPU, SparseCUDA: conj_physical_out_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: conj_physical_sparse_csr_out
+    SparseCPU, SparseCUDA, SparseMPS: conj_physical_out_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: conj_physical_sparse_csr_out
   tags: pointwise
 
 - func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
@@ -554,7 +554,7 @@
   structured_delegate: add.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: add_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: add_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
@@ -566,7 +566,7 @@
   variants: method
   structured_delegate: add.out
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: add_sparse_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: add_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_add__Tensor
@@ -582,6 +582,7 @@
   dispatch:
     SparseCPU, SparseMeta: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
+    SparseMPS: add_out_sparse_mps
     SparseCsrCPU, SparseCsrMeta: add_out_sparse_compressed_cpu
     SparseCsrCUDA: add_out_sparse_compressed_cuda
     MkldnnCPU: mkldnn_add_out
@@ -874,7 +875,7 @@
   variants: function, method
   structured_delegate: asinh.out
   dispatch:
-    SparseCPU, SparseCUDA: asinh_sparse
+    SparseCPU, SparseCUDA, SparseMPS: asinh_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asinh_sparse_csr
   tags: [core, pointwise]
 
@@ -882,7 +883,7 @@
   variants: function, method
   structured_delegate: asinh.out
   dispatch:
-    SparseCPU, SparseCUDA: asinh_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: asinh_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asinh_sparse_csr_
   tags: pointwise
 
@@ -892,7 +893,7 @@
   dispatch:
     CPU, CUDA: asinh_out
     MPS: asinh_out_mps
-    SparseCPU, SparseCUDA: asinh_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: asinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asinh_sparse_csr_out
   tags: pointwise
 
@@ -909,7 +910,7 @@
   structured_delegate: atanh.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: atanh_sparse
+    SparseCPU, SparseCUDA, SparseMPS: atanh_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atanh_sparse_csr
   tags: [core, pointwise]
 
@@ -917,7 +918,7 @@
   structured_delegate: atanh.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: atanh_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: atanh_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atanh_sparse_csr_
   tags: pointwise
 
@@ -927,7 +928,7 @@
   dispatch:
     CPU, CUDA: atanh_out
     MPS: atanh_out_mps
-    SparseCPU, SparseCUDA: atanh_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: atanh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atanh_sparse_csr_out
   tags: pointwise
 # arctanh, alias for atanh
@@ -964,7 +965,7 @@
   variants: function, method
   structured_delegate: asin.out
   dispatch:
-    SparseCPU, SparseCUDA: asin_sparse
+    SparseCPU, SparseCUDA, SparseMPS: asin_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr
   tags: [core, pointwise]
 
@@ -973,7 +974,7 @@
   variants: function, method
   structured_delegate: asin.out
   dispatch:
-    SparseCPU, SparseCUDA: asin_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: asin_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr_
   tags: pointwise
 
@@ -983,7 +984,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: asin_out
-    SparseCPU, SparseCUDA: asin_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: asin_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr_out
   tags: pointwise
 
@@ -1001,7 +1002,7 @@
   structured_delegate: atan.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: atan_sparse
+    SparseCPU, SparseCUDA, SparseMPS: atan_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atan_sparse_csr
   tags: [core, pointwise]
 
@@ -1010,7 +1011,7 @@
   structured_delegate: atan.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: atan_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: atan_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atan_sparse_csr_
   tags: pointwise
 
@@ -1020,7 +1021,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: atan_out
-    SparseCPU, SparseCUDA: atan_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: atan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: atan_sparse_csr_out
   tags: pointwise
 
@@ -1411,7 +1412,7 @@
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
   dispatch:
-    SparseCPU, SparseCUDA: cat_sparse
+    SparseCPU, SparseCUDA, SparseMPS: cat_sparse
     QuantizedCPU: cat_quantized_cpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: cat_nested
   tags: core
@@ -1459,7 +1460,7 @@
   structured_delegate: ceil.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: ceil_sparse
+    SparseCPU, SparseCUDA, SparseMPS: ceil_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: ceil_sparse_csr
   tags: [core, pointwise]
 
@@ -1468,7 +1469,7 @@
   structured_delegate: ceil.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: ceil_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: ceil_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: ceil_sparse_csr_
   tags: pointwise
 
@@ -1478,7 +1479,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: ceil_out
-    SparseCPU, SparseCUDA: ceil_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: ceil_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: ceil_sparse_csr_out
   tags: pointwise
 
@@ -2406,7 +2407,7 @@
     MPS: empty_mps
     Meta: empty_meta_symint
     MkldnnCPU: empty_mkldnn
-    SparseCPU, SparseCUDA: empty_sparse
+    SparseCPU, SparseCUDA, SparseMPS: empty_sparse
     SparseMeta: empty_sparse_symint
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     SparseCsrMeta: empty_sparse_compressed_symint
@@ -2534,7 +2535,7 @@
   structured_delegate: erf.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: erf_sparse
+    SparseCPU, SparseCUDA, SparseMPS: erf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erf_sparse_csr
   tags: [core, pointwise]
 
@@ -2543,7 +2544,7 @@
   structured_delegate: erf.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: erf_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: erf_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erf_sparse_csr_
   tags: pointwise
 
@@ -2553,7 +2554,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: erf_out
-    SparseCPU, SparseCUDA: erf_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: erf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erf_sparse_csr_out
   tags: pointwise
 
@@ -2619,7 +2620,7 @@
   structured_delegate: expm1.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: expm1_sparse
+    SparseCPU, SparseCUDA, SparseMPS: expm1_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: expm1_sparse_csr
   tags: [core, pointwise]
 
@@ -2628,7 +2629,7 @@
   structured_delegate: expm1.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: expm1_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: expm1_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: expm1_sparse_csr_
   tags: pointwise
 
@@ -2638,7 +2639,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: expm1_out
-    SparseCPU, SparseCUDA: expm1_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: expm1_sparse_csr_out
   tags: pointwise
 
@@ -2737,7 +2738,7 @@
   structured_delegate: floor.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: floor_sparse
+    SparseCPU, SparseCUDA, SparseMPS: floor_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: floor_sparse_csr
   tags: [core, pointwise]
 
@@ -2746,7 +2747,7 @@
   structured_delegate: floor.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: floor_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: floor_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: floor_sparse_csr_
   tags: pointwise
 
@@ -2756,7 +2757,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: floor_out
-    SparseCPU, SparseCUDA: floor_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: floor_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: floor_sparse_csr_out
   tags: pointwise
 
@@ -2764,7 +2765,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, MPS: floor_divide
+    CPU, CUDA, MPS, MTIA: floor_divide
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2798,7 +2799,7 @@
   structured_delegate: frac.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: frac_sparse
+    SparseCPU, SparseCUDA, SparseMPS: frac_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: frac_sparse_csr
   tags: pointwise
 
@@ -2807,7 +2808,7 @@
   structured_delegate: frac.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: frac_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: frac_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: frac_sparse_csr_
   tags: pointwise
 
@@ -2818,7 +2819,7 @@
   dispatch:
     CPU, CUDA: frac_out
     MPS: frac_out_mps
-    SparseCPU, SparseCUDA: frac_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: frac_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: frac_sparse_csr_out
   tags: pointwise
 
@@ -3208,7 +3209,7 @@
   dispatch:
     CPU, CUDA, MPS, MTIA: isnan
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_isnan
-    SparseCPU, SparseCUDA: isnan_sparse
+    SparseCPU, SparseCUDA, SparseMPS: isnan_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isnan_sparse_csr
   autogen: isnan.out
   tags: [core, pointwise]
@@ -3289,6 +3290,7 @@
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
+    MPS: kthvalue_out_mps
 
 - func: kthvalue.dimname(Tensor self, SymInt k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -3336,21 +3338,21 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: nan_to_num
-    SparseCPU, SparseCUDA: nan_to_num_sparse
+    SparseCPU, SparseCUDA, SparseMPS: nan_to_num_sparse
   tags: pointwise
 
 - func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: nan_to_num_
-    SparseCPU, SparseCUDA: nan_to_num_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: nan_to_num_sparse_
   tags: pointwise
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA, MTIA: nan_to_num_out
     MPS: nan_to_num_out_mps
-    SparseCPU, SparseCUDA: nan_to_num_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: nan_to_num_sparse_out
   tags: pointwise
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
@@ -3553,7 +3555,7 @@
   structured_delegate: log1p.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: log1p_sparse
+    SparseCPU, SparseCUDA, SparseMPS: log1p_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: log1p_sparse_csr
   tags: [core, pointwise]
 
@@ -3562,7 +3564,7 @@
   structured_delegate: log1p.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: log1p_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: log1p_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: log1p_sparse_csr_
   tags: pointwise
 
@@ -3572,7 +3574,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: log1p_out
-    SparseCPU, SparseCUDA: log1p_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: log1p_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: log1p_sparse_csr_out
   tags: pointwise
 
@@ -4664,7 +4666,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: rad2deg
-    SparseCPU, SparseCUDA: rad2deg_sparse
+    SparseCPU, SparseCUDA, SparseMPS: rad2deg_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr
   tags: pointwise
 
@@ -4672,14 +4674,14 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: rad2deg_
-    SparseCPU, SparseCUDA: rad2deg_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: rad2deg_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_
   tags: pointwise
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: rad2deg_out
-    SparseCPU, SparseCUDA: rad2deg_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: rad2deg_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: rad2deg_sparse_csr_out
   tags: pointwise
 
@@ -4687,7 +4689,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad
-    SparseCPU, SparseCUDA: deg2rad_sparse
+    SparseCPU, SparseCUDA, SparseMPS: deg2rad_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: deg2rad_sparse_csr
   tags: pointwise
 
@@ -4695,14 +4697,14 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad_
-    SparseCPU, SparseCUDA: deg2rad_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: deg2rad_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: deg2rad_sparse_csr_
   tags: pointwise
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: deg2rad_out
-    SparseCPU, SparseCUDA: deg2rad_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: deg2rad_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: deg2rad_sparse_csr_out
   tags: pointwise
 
@@ -4928,7 +4930,7 @@
   structured_delegate: neg.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: neg_sparse
+    SparseCPU, SparseCUDA, SparseMPS: neg_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_neg
   tags: [core, pointwise]
@@ -4938,7 +4940,7 @@
   structured_delegate: neg.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: neg_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: neg_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_neg_
   tags: pointwise
@@ -4949,7 +4951,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: neg_out
-    SparseCPU, SparseCUDA: neg_out_sparse
+    SparseCPU, SparseCUDA, SparseMPS: neg_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_out
   tags: pointwise
 # Alias for neg
@@ -5033,7 +5035,7 @@
   structured_delegate: round.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: round_sparse
+    SparseCPU, SparseCUDA, SparseMPS: round_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: round_sparse_csr
   tags: [core, pointwise]
 
@@ -5042,7 +5044,7 @@
   structured_delegate: round.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: round_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: round_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: round_sparse_csr_
   tags: pointwise
 
@@ -5052,7 +5054,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: round_out
-    SparseCPU, SparseCUDA: round_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: round_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: round_sparse_csr_out
   tags: pointwise
 
@@ -5095,7 +5097,7 @@
     QuantizedCPU: relu_quantized_cpu
     QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_relu
-    SparseCPU, SparseCUDA: relu_sparse
+    SparseCPU, SparseCUDA, SparseMPS: relu_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: relu_sparse_csr
   tags: [core, pointwise]
 
@@ -5110,7 +5112,7 @@
     QuantizedCPU: relu_quantized_cpu_
     QuantizedCUDA: relu_quantized_cuda_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_relu_
-    SparseCPU, SparseCUDA: relu_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: relu_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: relu_sparse_csr_
   autogen: relu.out
   tags: pointwise
@@ -5397,7 +5399,7 @@
   variants: function, method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr
-    SparseCPU, SparseCUDA: sin_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sin_sparse
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_sin
   tags: [core, pointwise]
 
@@ -5407,7 +5409,7 @@
   variants: function, method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr_
-    SparseCPU, SparseCUDA: sin_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sin_sparse_
   tags: pointwise
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -5417,7 +5419,7 @@
   dispatch:
     CPU, CUDA, MPS, MTIA: sin_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr_out
-    SparseCPU, SparseCUDA: sin_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: sin_sparse_out
   tags: pointwise
 
 - func: sinc(Tensor self) -> Tensor
@@ -5442,7 +5444,7 @@
   structured_delegate: sinh.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sinh_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sinh_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr
   tags: [core, pointwise]
 
@@ -5451,7 +5453,7 @@
   structured_delegate: sinh.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sinh_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sinh_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr_
   tags: pointwise
 
@@ -5461,7 +5463,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: sinh_out
-    SparseCPU, SparseCUDA: sinh_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: sinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr_out
 
 # Returns a copy of this `Variable` that is detached from its autograd graph.
@@ -5904,7 +5906,7 @@
   variants: function, method
   dispatch:
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_sqrt
-    SparseCPU, SparseCUDA: sqrt_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sqrt_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr
   tags: [core, pointwise]
 
@@ -5913,7 +5915,7 @@
   structured_delegate: sqrt.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sqrt_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sqrt_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr_
   tags: pointwise
 
@@ -5923,7 +5925,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: sqrt_out
-    SparseCPU, SparseCUDA: sqrt_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: sqrt_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr_out
   tags: pointwise
 
@@ -6061,7 +6063,7 @@
   structured_delegate: tan.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: tan_sparse
+    SparseCPU, SparseCUDA, SparseMPS: tan_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tan_sparse_csr
   tags: [core, pointwise]
 
@@ -6070,7 +6072,7 @@
   structured_delegate: tan.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: tan_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: tan_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tan_sparse_csr_
   tags: pointwise
 
@@ -6080,7 +6082,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: tan_out
-    SparseCPU, SparseCUDA: tan_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: tan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tan_sparse_csr_out
   tags: pointwise
 
@@ -6091,7 +6093,7 @@
   dispatch:
     QuantizedCPU: tanh_quantized_cpu
     MkldnnCPU: mkldnn_tanh
-    SparseCPU, SparseCUDA: tanh_sparse
+    SparseCPU, SparseCUDA, SparseMPS: tanh_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_tanh
   tags: [core, pointwise]
@@ -6102,7 +6104,7 @@
   variants: function, method
   dispatch:
     MkldnnCPU: mkldnn_tanh_
-    SparseCPU, SparseCUDA: tanh_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: tanh_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_tanh_
   tags: pointwise
@@ -6113,7 +6115,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: tanh_out
-    SparseCPU, SparseCUDA: tanh_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: tanh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr_out
   tags: pointwise
 
@@ -6385,8 +6387,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: trunc_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: trunc_sparse_csr
+    SparseCPU, SparseCUDA, SparseMPS: trunc_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: trunc_sparse_csr
   tags: [core, pointwise]
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
@@ -6394,8 +6396,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: trunc_sparse_
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: trunc_sparse_csr_
+    SparseCPU, SparseCUDA, SparseMPS: trunc_sparse_
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: trunc_sparse_csr_
   tags: pointwise
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -6404,8 +6406,8 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS: trunc_out
-    SparseCPU, SparseCUDA: trunc_sparse_out
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: trunc_sparse_csr_out
+    SparseCPU, SparseCUDA, SparseMPS: trunc_sparse_out
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: trunc_sparse_csr_out
   tags: pointwise
 # Alias for trunc
 
@@ -6915,7 +6917,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clone
-    SparseCPU, SparseCUDA: clone_sparse
+    SparseCPU, SparseCUDA, SparseMPS: clone_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
@@ -6950,7 +6952,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
-    SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: zero_nested_
@@ -7367,8 +7369,8 @@
 - func: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_to_dense
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_dense
+    SparseCPU, SparseCUDA, SparseMPS: sparse_to_dense
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: sparse_compressed_to_dense
     MkldnnCPU: mkldnn_to_dense
   autogen: _to_dense.out
 
@@ -7394,8 +7396,8 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: dense_dim_sparse_csr
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: dense_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: dense_dim_sparse_csr
     CompositeExplicitAutograd: dense_dim_default
   device_check: NoCheck
   device_guard: False
@@ -7528,7 +7530,7 @@
   device_check: NoCheck  # Allows copy into different device
   variants: function
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: copy_sparse_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: copy_sparse_
   autogen: copy_sparse_to_sparse, copy_sparse_to_sparse.out
 
 # By adding the AutogradNestedTensor this makes this function CompositeImplicit-like for nested tensors
@@ -9719,7 +9721,7 @@
   structured_delegate: sign.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sign_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sign_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sign_sparse_csr
   tags: [core, pointwise]
 
@@ -9728,7 +9730,7 @@
   structured_delegate: sign.out
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sign_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sign_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sign_sparse_csr_
   tags: pointwise
 
@@ -9739,7 +9741,7 @@
   dispatch:
     CPU, CUDA: sign_out
     MPS: sign_out_mps
-    SparseCPU, SparseCUDA: sign_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: sign_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sign_sparse_csr_out
   tags: pointwise
 
@@ -9747,7 +9749,7 @@
   variants: function, method
   structured_delegate: signbit.out
   dispatch:
-    SparseCPU, SparseCUDA: signbit_sparse
+    SparseCPU, SparseCUDA, SparseMPS: signbit_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: signbit_sparse_csr
   tags: pointwise
 
@@ -9758,7 +9760,7 @@
     CPU: signbit_out
     CUDA: signbit_out
     MPS: signbit_out_mps
-    SparseCPU, SparseCUDA: signbit_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: signbit_sparse_csr_out
   tags: pointwise
 
@@ -9941,7 +9943,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: igamma_out
+    CPU, CUDA, MPS: igamma_out
   tags: pointwise
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
@@ -9958,7 +9960,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: igammac_out
+    CPU, CUDA, MPS: igammac_out
   tags: pointwise
 
 - func: igammac(Tensor self, Tensor other) -> Tensor
@@ -13262,7 +13264,7 @@
   dispatch:
     CompositeExplicitAutograd: isinf
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_isinf
-    SparseCPU, SparseCUDA: isinf_sparse
+    SparseCPU, SparseCUDA, SparseMPS: isinf_sparse
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isinf_sparse_csr
   autogen: isinf.out
@@ -13278,7 +13280,7 @@
   structured_delegate: isposinf.out
   dispatch:
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_isposinf
-    SparseCPU, SparseCUDA: isposinf_sparse
+    SparseCPU, SparseCUDA, SparseMPS: isposinf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isposinf_sparse_csr
   tags: pointwise
 
@@ -13287,7 +13289,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: isposinf_out
-    SparseCPU, SparseCUDA: isposinf_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: isposinf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isposinf_sparse_csr_out
   tags: pointwise
 
@@ -13296,7 +13298,7 @@
   structured_delegate: isneginf.out
   dispatch:
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_isneginf
-    SparseCPU, SparseCUDA: isneginf_sparse
+    SparseCPU, SparseCUDA, SparseMPS: isneginf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isneginf_sparse_csr
   tags: pointwise
 
@@ -13305,7 +13307,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: isneginf_out
-    SparseCPU, SparseCUDA: isneginf_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: isneginf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isneginf_sparse_csr_out
   tags: pointwise
 
