@@ -216,7 +216,7 @@ file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention
 if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   add_library(flash_attention OBJECT EXCLUDE_FROM_ALL ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
 
-  target_include_directories(flash_attention PUBLIC
+  target_include_directories(flash_attention SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc
     ${PROJECT_SOURCE_DIR}/third_party/flash-attention/include
     ${PROJECT_SOURCE_DIR}/third_party/cutlass/include
@@ -252,11 +252,6 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
-IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
-  set(USE_FBGEMM_GENAI off)
-endif()
-
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
@@ -279,10 +274,19 @@ IF(USE_FBGEMM_GENAI)
       -greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
 
+    # Only compile for gfx942 for now.
+    # This is rather hacky, I could not figure out a clean solution :(
+    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
+    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
+    list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
+    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
+
     hip_add_library(
       fbgemm_genai STATIC
       ${fbgemm_genai_native_rocm_hip}
-      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+      HIPCC_OPTIONS ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
+
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
 

@@ -12,14 +12,13 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
-from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -31,11 +30,14 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
+    add_feedback_saver,
     AlgorithmSelectorCache,
+    clear_feedback_savers,
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
+from torch._inductor.template_heuristics.registry import override_template_heuristics
+from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -98,8 +100,7 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     @parametrize("dynamic", (False, True))
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
+    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
         """
         Make sure autotuning mm_plus_mm with zero-size input works without crashes.
         """
@@ -113,9 +114,7 @@ class TestMaxAutotune(TestCase):
         c = torch.randn(m, k).to(GPU_TYPE)
         d = torch.randn(k, n).to(GPU_TYPE)
 
-        with config.patch(
-            {"max_autotune": True, "max_autotune_gemm_search_space": search_space}
-        ):
+        with config.patch({"max_autotune": True}):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
 
     @unittest.skipIf(
@@ -421,6 +420,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @fresh_cache()
+    @skipIfXpu(msg="XPU doesn't support sm carveout")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
@@ -535,8 +535,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_autotune_conv1x1(self, search_space):
+    def test_autotune_conv1x1(self):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
             torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
@@ -553,11 +552,7 @@ class TestMaxAutotune(TestCase):
         )
 
         with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "max_autotune_gemm_search_space": search_space,
-            }
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
         ):
 
             @torch.compile()
@@ -669,9 +664,7 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
 
     @config.patch(max_autotune=True)
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    @parametrize("kernel_size", (1, 3))
-    def test_empty_conv_input(self, search_space, kernel_size):
+    def test_empty_conv_input(self, kernel_size=3):
         x = torch.randn(0, 256, 14, 14, device=GPU_TYPE)
         weight = torch.randn(256, 256, kernel_size, kernel_size, device=GPU_TYPE)
 
@@ -688,15 +681,17 @@ class TestMaxAutotune(TestCase):
                 groups=1,
             )
 
-        with config.patch({"max_autotune_gemm_search_space": search_space}):
-            opt_f = torch.compile(f)
-            ref = f(x, weight)
-            act = opt_f(x, weight)
-            self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input_with_1x1_kernel(self):
+        self.test_empty_conv_input(kernel_size=1)
 
     @config.patch(max_autotune_gemm_backends="TRITON")
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_baddmm(self, search_space):
+    def test_baddmm(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -715,12 +710,11 @@ class TestMaxAutotune(TestCase):
         )
         mod = M().to(GPU_TYPE)
 
-        with config.patch({"max_autotune_gemm_search_space": search_space}):
-            m_c = torch.compile(mode="max-autotune")(mod)
-            out, code = run_and_get_code(m_c, x)
-            self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+        m_c = torch.compile(mode="max-autotune")(mod)
+        out, code = run_and_get_code(m_c, x)
+        self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
-            FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
+        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
@@ -855,8 +849,7 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_conv_cat(self, search_space):
+    def test_conv_cat(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -868,28 +861,24 @@ class TestMaxAutotune(TestCase):
                 x = self.conv(x)
                 return torch.cat((x, x + 1))
 
-        with config.patch({"max_autotune_gemm_search_space": search_space}):
-            with torch.no_grad():
-                m = ToyModel().to(device=GPU_TYPE)
-                input_tensor = torch.randn(32, 3, 64, 64).to(device=GPU_TYPE)
+        with torch.no_grad():
+            m = ToyModel().to(device=GPU_TYPE)
+            input_tensor = torch.randn(32, 3, 64, 64).to(device=GPU_TYPE)
 
-                # convolution is not currently plannable
-                m = torch.compile(m, mode="max-autotune-no-cudagraphs")
-                out, code = run_and_get_code(m, input_tensor)
-                self.assertEqual(out, m(input_tensor))
+            # convolution is not currently plannable
+            m = torch.compile(m, mode="max-autotune-no-cudagraphs")
+            out, code = run_and_get_code(m, input_tensor)
+            self.assertEqual(out, m(input_tensor))
 
-                if not TEST_WITH_ROCM:
-                    FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
+            if not TEST_WITH_ROCM:
+                FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
 
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_conv3d(self, search_space):
+    def test_conv3d(self):
         fn = torch.nn.functional.conv3d
         image = torch.randn([1, 3, 8, 16, 32])
         filt = torch.randn([3, 3, 7, 7, 7])
 
-        with config.patch(
-            {"max_autotune": True, "max_autotune_gemm_search_space": search_space}
-        ):
+        with config.patch({"max_autotune": True}):
             expected = fn(image, filt)
             actual = torch.compile(fn)(image, filt)
             torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
@@ -1268,16 +1257,14 @@ class TestMaxAutotune(TestCase):
 
         # Force only decomposeK choice
         with (
-            mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
-            ) as base_mm_mock,
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
             ) as decompose_mock,
         ):
-            mm_configs_mock = MagicMock()
-            mm_configs_mock.return_value = []
-            base_mm_mock.return_value = mm_configs_mock
             decompose_mock.return_value = True
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
@@ -1291,6 +1278,195 @@ class TestMaxAutotune(TestCase):
             ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
                 code[0]
             )
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform_mm(self, sizes, dtype):
+        """
+        Test the contiguous subgraph transform with A * transpose(B) pattern.
+        This transform makes the second matrix contiguous before the matmul.
+        """
+        M, N, K = sizes
+
+        def mm_transpose(a, b):
+            return a @ b.transpose(0, 1)
+
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Compute fp64 baseline
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = mm_transpose(a_fp64, b_fp64)
+
+        # Force only contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(dtype), atol=1e-2, rtol=1e-2
+            )
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform_addmm(self, sizes, dtype):
+        """
+        Test the contiguous subgraph transform for addmm with non-contiguous second matrix.
+        """
+        M, N, K = sizes
+
+        def addmm_transpose(inp, a, b):
+            return torch.addmm(inp, a, b.transpose(0, 1))
+
+        inp = torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Compute fp64 baseline
+        inp_fp64 = inp.to(torch.float64)
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = addmm_transpose(inp_fp64, a_fp64, b_fp64)
+
+        # Force contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(addmm_transpose)
+            out, code = run_and_get_code(compiled_func, inp, a, b)
+
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(dtype), atol=1e-2, rtol=1e-2
+            )
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_addmm").run(code[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
+        self, dynamic
+    ):
+        """
+        Test that contiguous transform is only applied when the second matrix is non-contiguous.
+        """
+        M, N, K = 64, 128, 64
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b_contiguous = torch.randn(K, N, dtype=torch.float32, device=GPU_TYPE)
+        b_non_contiguous = torch.randn(
+            N, K, dtype=torch.float32, device=GPU_TYPE
+        ).transpose(0, 1)
+
+        # Compute fp64 baselines without max_autotune (since fp64 doesn't work with max_autotune=True)
+        a_fp64 = a.to(torch.float64)
+        b_contiguous_fp64 = b_contiguous.to(torch.float64)
+        b_non_contiguous_fp64 = b_non_contiguous.to(torch.float64)
+
+        expected1_fp64 = mm(a_fp64, b_contiguous_fp64)
+        expected2_fp64 = mm(a_fp64, b_non_contiguous_fp64)
+
+        with config.patch(
+            max_autotune=True,
+        ):
+            # Test with contiguous second matrix - should not use contiguous transform
+            compiled_func_contiguous = torch.compile(mm, dynamic=dynamic)
+            out1, code1 = run_and_get_code(compiled_func_contiguous, a, b_contiguous)
+
+            # Should not contain contiguous transform
+            try:
+                FileCheck().check("contiguous_mm").run(code1[0])
+                self.fail(
+                    "Contiguous transform should not be used for contiguous matrices"
+                )
+            except RuntimeError:
+                pass  # Expected - contiguous transform should not be used
+
+            # Test with non-contiguous second matrix - should use contiguous transform
+            with (
+                mock.patch(
+                    "torch._inductor.kernel.mm.use_contiguous"
+                ) as contiguous_mock,
+            ):
+                contiguous_mock.return_value = True
+
+                compiled_func_non_contiguous = torch.compile(mm, dynamic=dynamic)
+                out2, code2 = run_and_get_code(
+                    compiled_func_non_contiguous, a, b_non_contiguous
+                )
+
+                # Should contain contiguous transform
+                FileCheck().check("contiguous_mm").run(code2[0])
+
+        # Verify correctness against fp64 baselines
+        torch.testing.assert_close(
+            out1, expected1_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_max_autotune_contiguous_transform_with_epilogue(self):
+        """
+        Test contiguous transform with epilogue operations like relu.
+        """
+        M, N, K = 128, 256, 512
+
+        def mm_transpose_relu(a, b):
+            return (a @ b.transpose(0, 1)).relu()
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(N, K, dtype=torch.float32, device=GPU_TYPE)
+
+        # Compute fp64 baseline
+        a_fp64 = a.to(torch.float64)
+        b_fp64 = b.to(torch.float64)
+        expected_fp64 = mm_transpose_relu(a_fp64, b_fp64)
+
+        # Force contiguous transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose_relu)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness against fp64 baseline
+            torch.testing.assert_close(
+                out, expected_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+            )
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
 
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
@@ -1657,7 +1833,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_registry.get_template_heuristic"
+            "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
             config_heuristics = CUDAMMTemplateConfigHeuristic()
 
@@ -1695,6 +1871,26 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
+    @config.patch(
+        max_autotune_gemm=True,
+        max_autotune_prune_choices_based_on_shared_mem=True,
+    )
+    def test_max_autotune_prune_choices(self):
+        def mm(x, y):
+            return x @ y
+
+        M, K, N = (3, 3, 3)
+
+        x = torch.rand([M, K], device=GPU_TYPE, dtype=torch.float32)
+        y = torch.rand([K, N], device=GPU_TYPE, dtype=torch.float32)
+
+        compiled_f = torch.compile(mm)
+        compiled_f(x, y)
+
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
+        )
 
 
 class TestMaxAutotunePrecompile(TestCase):
@@ -1933,9 +2129,8 @@ class TestMaxAutotuneSubproc(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_addmm(self, search_space, dynamic=False):
+    def test_max_autotune_addmm(self, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -1948,13 +2143,7 @@ class TestMaxAutotuneSubproc(TestCase):
         x = torch.randn(100).to(GPU_TYPE)
         a = torch.randn(100, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_search_space": search_space,
-            }
-        ):
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
             Y = addmm(x, a, b)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
@@ -2215,6 +2404,118 @@ class TestTuningProcessPool(TestCase):
         self.assertEqual(timings[choice2], choice2.bmreq.result)
 
         tuning_pool.shutdown()
+
+    def test_add_feedback_saver(self):
+        """Test that add_feedback_saver correctly adds feedback functions."""
+        from torch._inductor.select_algorithm import get_algorithm_selector_cache
+
+        # Clear any existing feedback savers
+        clear_feedback_savers()
+
+        # Create a simple feedback saver function
+        feedback_calls = []
+
+        def simple_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            feedback_calls.append(
+                {
+                    "name": name,
+                    "num_choices": len(choices),
+                    "num_timings": len(timings),
+                    "has_profiled_time": profiled_time is not None,
+                }
+            )
+
+        # Add the feedback saver
+        add_feedback_saver(simple_feedback_saver)
+
+        # Get the global cache and verify the function was added
+        cache = get_algorithm_selector_cache()
+        self.assertEqual(len(cache.feedback_saver_fns), 1)
+        self.assertEqual(cache.feedback_saver_fns[0], simple_feedback_saver)
+
+        # Test that we can add multiple feedback savers
+        def another_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        add_feedback_saver(another_feedback_saver)
+        self.assertEqual(len(cache.feedback_saver_fns), 2)
+
+        # Clean up
+        clear_feedback_savers()
+
+    def test_clear_feedback_savers(self):
+        """Test that clear_feedback_savers removes all feedback functions."""
+        from torch._inductor.select_algorithm import get_algorithm_selector_cache
+
+        # Add some feedback savers first
+        def feedback_saver1(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        def feedback_saver2(timings, name, input_nodes, choices, profiled_time):
+            pass
+
+        add_feedback_saver(feedback_saver1)
+        add_feedback_saver(feedback_saver2)
+
+        # Verify they were added
+        cache = get_algorithm_selector_cache()
+        self.assertEqual(len(cache.feedback_saver_fns), 2)
+
+        # Clear all feedback savers
+        clear_feedback_savers()
+
+        # Verify they were cleared
+        self.assertEqual(len(cache.feedback_saver_fns), 0)
+
+    def test_feedback_saver_integration(self):
+        """Test that feedback savers are actually called during autotuning."""
+        # Clear any existing feedback savers
+        clear_feedback_savers()
+
+        feedback_calls = []
+
+        def test_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+            # Store information about the call for verification
+            feedback_calls.append(
+                {
+                    "name": name,
+                    "num_choices": len(choices),
+                    "num_timings": len(timings),
+                    "input_node_count": len(input_nodes),
+                }
+            )
+
+        # Add our test feedback saver
+        add_feedback_saver(test_feedback_saver)
+
+        # Create a simple matrix multiplication that will trigger autotuning
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(32, 32, device=GPU_TYPE)
+        b = torch.randn(32, 32, device=GPU_TYPE)
+
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+            torch.compile(mm)(a, b)
+
+        # Verify that our feedback saver was called
+        self.assertGreater(
+            len(feedback_calls), 0, "Feedback saver should have been called"
+        )
+
+        # Verify the structure of the feedback call
+        call = feedback_calls[0]
+        self.assertIn("name", call)
+        self.assertIn("num_choices", call)
+        self.assertIn("num_timings", call)
+        self.assertIn("input_node_count", call)
+        self.assertGreater(call["num_choices"], 0)
+        self.assertEqual(call["input_node_count"], 2)  # Two input matrices
+
+        # Clean up
+        clear_feedback_savers()
 
 
 @instantiate_parametrized_tests

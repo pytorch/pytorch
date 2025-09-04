@@ -73,6 +73,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    is_in_any_mode_without_ignore_compile_internals,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -855,6 +856,7 @@ class DynamoOutput:
         hooks: Optional[Hooks] = None,
         save: bool = False,
         cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
     ) -> CheckFunctionManager:
         assert self.tracer_output.output_graph is not None
         return CheckFunctionManager(
@@ -864,6 +866,7 @@ class DynamoOutput:
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
+            strict_error=strict_error,
         )
 
 
@@ -943,16 +946,29 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         )
         return gm
 
-    dynamo_output = compile_frame(
-        frame.code,
-        frame.globals,
-        frame.locals,
-        frame.builtins,
-        frame.closure,
-        compiler_fn=fullgraph_compiler,
-        one_graph=True,
-        restart_reasons=set(),
-    )
+    try:
+        dynamo_output = compile_frame(
+            frame.code,
+            frame.globals,
+            frame.locals,
+            frame.builtins,
+            frame.closure,
+            compiler_fn=fullgraph_compiler,
+            one_graph=True,
+            restart_reasons=set(),
+        )
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
+    except Unsupported as e:
+        augment_exc_message(e)
+        if config.verbose:
+            raise
+        # strip internal tracebacks from causes
+        cur_exn: BaseException = e
+        while cur_exn.__cause__ is not None:
+            cur_exn.__cause__.with_traceback(None)
+            cur_exn = cur_exn.__cause__
+        raise e.with_traceback(None) from e.__cause__  # User compiler error
+
     assert backend_input is not None
     return CaptureOutput(dynamo_output, backend_input)
 
@@ -1432,7 +1448,12 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
-            log_frame_dynamic_whitelist(code)
+            if (
+                tracer_output
+                and (output_graph := tracer_output.output_graph)
+                and output_graph.has_outputs()
+            ):
+                log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1456,15 +1477,7 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if tracer_output and tracer_output.is_tracing_resume_prologue:
-                # Do not allow any errors to be suppressed if tracer is currently tracing
-                # through resume function.
-                raise ResumePrologueTracingError(
-                    "Error while tracing through a Dynamo-generated resume function prologue. "
-                    "Errors are not allowed when tracing resume function prologues.\n"
-                    f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
-            elif isinstance(
+            if isinstance(
                 e,
                 (
                     Unsupported,
@@ -1478,6 +1491,7 @@ def _compile(
                     BisectValidationException,
                     ShortenTraceback,
                     PackageError,
+                    ResumePrologueTracingError,
                 ),
             ):
                 raise
@@ -1733,7 +1747,7 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    with decorators.set_fullgraph(fullgraph=False):
+    with decorators.error_on_graph_break(False):
         try:
             _compile(
                 record.code,
@@ -1777,6 +1791,10 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
+def should_skip_due_to_torch_dispatch_mode() -> bool:
+    return is_in_any_mode_without_ignore_compile_internals()
+
+
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -1804,7 +1822,7 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False)
+                should_skip_due_to_torch_dispatch_mode()
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
