@@ -23,10 +23,10 @@ class EmptyContiguousMMConfigHeuristics(TemplateConfigHeuristics):
 
 
 @register_template_heuristic(
-    "contiguous_mm", "hip", register=torch.version.hip is not None, op_name="mm"
+    "contiguous_mm", "cuda", register=torch.version.hip is not None, op_name="mm"
 )
 @register_template_heuristic(
-    "contiguous_addmm", "hip", register=torch.version.hip is not None, op_name="addmm"
+    "contiguous_addmm", "cuda", register=torch.version.hip is not None, op_name="addmm"
 )
 class ContiguousMMHeuristics(TemplateConfigHeuristics):
     def get_template_configs(

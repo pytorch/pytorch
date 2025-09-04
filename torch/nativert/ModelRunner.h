@@ -32,6 +32,8 @@ class TORCH_API ModelRunner {
   std::vector<c10::IValue> runWithFlatInputsAndOutputs(
       std::vector<c10::IValue> flatInputs);
 
+  uint64_t numOutputs() const;
+
   std::shared_ptr<Weights> loadWeightsDefault(
       Graph& graph,
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>& reader);
