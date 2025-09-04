@@ -77,6 +77,38 @@ class KernelInputs:
         return self._views
 
     @property
+    def key(self) -> str:
+        """
+        Generate a key based on input node properties and scalars.
+        The key includes dtype, size, and stride information for each input node,
+        plus scalar values as key=value pairs separated by & signs.
+        """
+        # Get node information using existing methods
+        dtypes = self.dtypes()
+        shapes = self.shapes_hinted()
+        strides = self.strides_hinted()
+
+        # Create tuple of (dtype, shape_list, stride_list) for each node
+        node_info = tuple(
+            (dtype, list(shape), list(stride))
+            for dtype, shape, stride in zip(dtypes, shapes, strides)
+        )
+
+        # Create base key from node information
+        fmt_key = f"{self.device_name}+{str(node_info)}"
+
+        # Add scalar information if present
+        if self._scalars:
+            # Sort scalars for consistent key generation and join with &
+            scalar_parts = [
+                f"{key}={value}" for key, value in sorted(self._scalars.items())
+            ]
+            scalars_key = "&".join(scalar_parts)
+            fmt_key = f"{fmt_key}+{scalars_key}"
+
+        return f"{fmt_key}"
+
+    @property
     def count(self) -> int:
         """
         Get the number of input nodes.
