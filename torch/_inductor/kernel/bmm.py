@@ -243,9 +243,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
 @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    """
-    Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
-    """
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
