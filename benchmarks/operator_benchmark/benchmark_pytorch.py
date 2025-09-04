@@ -8,7 +8,7 @@ try:
     import benchmark_cpp_extension  # noqa: F401
 except ImportError:
     # If the extension isn't built, define a simple Python fallback
-    print("Failed to import C++ extension, please build it using \ncd pt_extension \npython -m pip install .")
+    raise ImportError("Failed to import C++ extension, please build it using \ncd pt_extension \npython -m pip install .")
 
 """PyTorch performance microbenchmarks.
 

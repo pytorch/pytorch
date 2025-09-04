@@ -339,10 +339,8 @@ class BenchmarkRunner:
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        elif self.use_compile:
+        if self.use_compile:
             func = test_case.run_compile_forward
-        else:
-            pass
         forward_time = timeit.timeit(
             functools.partial(func, iters, print_per_iter, cuda_sync), number=1
         )
