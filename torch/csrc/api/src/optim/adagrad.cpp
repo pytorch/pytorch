@@ -45,6 +45,28 @@ void AdagradOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void AdagradOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_adagrad = static_cast<const AdagradOptions&>(source);
+  const AdagradOptions default_ctor_opts;
+
+  if (source_adagrad.lr() != default_ctor_opts.lr()) {
+    this->lr(source_adagrad.lr());
+  }
+  if (source_adagrad.lr_decay() != default_ctor_opts.lr_decay()) {
+    this->lr_decay(source_adagrad.lr_decay());
+  }
+  if (source_adagrad.weight_decay() != default_ctor_opts.weight_decay()) {
+    this->weight_decay(source_adagrad.weight_decay());
+  }
+  if (source_adagrad.initial_accumulator_value() !=
+      default_ctor_opts.initial_accumulator_value()) {
+    this->initial_accumulator_value(source_adagrad.initial_accumulator_value());
+  }
+  if (source_adagrad.eps() != default_ctor_opts.eps()) {
+    this->eps(source_adagrad.eps());
+  }
+}
+
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
   return (lhs.step() == rhs.step()) && torch::equal(lhs.sum(), rhs.sum());
 }

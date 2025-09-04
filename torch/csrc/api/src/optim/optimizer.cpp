@@ -94,17 +94,32 @@ void OptimizerOptions::serialize(
       "You must override it in your subclass of torch::optim::OptimizerCloneableOptions<YourOptimizerOptions>.");
 }
 
+void OptimizerOptions::overwrite_from(const OptimizerOptions& source) {
+  TORCH_CHECK(
+      false,
+      "overwrite_from() has not been implemented for torch::optim::OptimizerOptions. ",
+      "You must override it in your subclass of torch::optim::OptimizerCloneableOptions<YourOptimizerOptions>.");
+}
+
 void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   for (const auto& param : param_group.params()) {
     TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
   }
   TORCH_INTERNAL_ASSERT(defaults_ != nullptr);
-  OptimizerParamGroup param_group_(param_group.params());
-  if (!param_group.has_options()) {
-    param_group_.set_options(defaults_->clone());
-  } else {
-    param_group_.set_options(param_group.options().clone());
+
+  // 1. Start with a clone of the defaults
+  auto final_options = defaults_->clone();
+
+  // 2. If the user provided options, overwrite defaults with user-specified
+  // values
+  if (param_group.has_options()) {
+    final_options->overwrite_from(param_group.options());
   }
+
+  // 3. Create the new group with the final, merged options
+  OptimizerParamGroup param_group_(
+      param_group.params(), std::move(final_options));
+
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
         state_.count(p.unsafeGetTensorImpl()) == 0,
