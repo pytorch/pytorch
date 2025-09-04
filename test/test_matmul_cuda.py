@@ -1833,7 +1833,7 @@ class TestFP8Matmul(TestCase):
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            f"For Block[W,w]ise.*scaling.*both should be contiguous"
+            "For Block[W,w]ise.*scaling.*both should be contiguous"
             ,
         ):
             non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=scale_dtype)[::2]
