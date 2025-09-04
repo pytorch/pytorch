@@ -116,6 +116,60 @@ When source hash checking is enabled:
 }
 ```
 
+## Recording Lookup Tables
+
+The system can record autotuning results to build lookup tables for future use.
+
+### How to Record
+
+1. **Set recording directory:**
+   ```bash
+   export TORCH_INDUCTOR_LOOKUP_TABLE_RECORD_DIR="/path/to/output"
+   ```
+
+2. **Configure recording parameters:**
+   ```python
+   config_patch = {
+       "template_config_lookup_table.recorder_topk": 10,  # Record top 10 choices
+   }
+   with torch._inductor.config.patch(config_patch):
+       # Run your model with torch.compile
+       compiled_model = torch.compile(model, mode="max-autotune")
+       result = compiled_model(inputs)
+   ```
+
+3. **Dump recorded data:**
+   ```python
+   from torch._inductor.lookup_table import recorder
+   recorder.dump()  # Saves timestamped JSON files
+   ```
+
+### Adding Custom Recorders
+
+Extend the recording system by creating custom backends:
+
+A EmitBackend is responsible for processing a single entry. A RecordBackend is
+responsible for accumulating entries and processing them all at once when `dump()` is called.
+
+```python
+from torch._inductor.lookup_table.recorder import EmitBackend, RecordBackend, emit_backend, record_backend
+
+@emit_backend()  # For immediate logging/processing
+class CustomEmitBackend(EmitBackend):
+    def emit(self, entry):
+        # Process entry immediately
+        pass
+
+@record_backend(custom_param="value")  # For batch saving
+class CustomRecordBackend(RecordBackend):
+    def __init__(self, custom_param):
+        self.param = custom_param
+
+    def dump(self, data):
+        # Save accumulated data
+        pass
+```
+
 ## Performance Impact
 
 - **Lookup Hit**: Eliminates heuristic choice generation and autotuning overhead (if a single choice)
