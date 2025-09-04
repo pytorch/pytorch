@@ -210,48 +210,50 @@ def aot_compile_fullgraph(
         check_fn = dynamo_output.build_guards(fn.__code__, hooks=hooks, save=True)
         assert check_fn.guards_state is not None
 
-    backend_input = capture_output.backend_input
-    backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-    output_graph = dynamo_output.tracer_output.output_graph
-    assert output_graph is not None
-    import_sources = output_graph.import_sources
-    with (
-        torch._guards.tracing(TracingContext(backend_input.fake_mode)),
-        torch._functorch.config.patch(
-            {
-                "bundled_autograd_cache": True,
-                "force_non_lazy_backward_lowering": True,
-            }
-        ),
-    ):
-        compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
+        backend_input = capture_output.backend_input
+        backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
+        output_graph = dynamo_output.tracer_output.output_graph
+        assert output_graph is not None
+        import_sources = output_graph.import_sources
+        with (
+            torch._guards.tracing(TracingContext(backend_input.fake_mode)),
+            torch._functorch.config.patch(
+                {
+                    "bundled_autograd_cache": True,
+                    "force_non_lazy_backward_lowering": True,
+                }
+            ),
+        ):
+            compiled_fn = backend(
+                backend_input.graph_module, backend_input.example_inputs
+            )
 
-    # If Inductor backend is used, grab the compiled_fn from PrecompileContext
-    # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-    if isinstance(backend, torch._TorchCompileInductorWrapper):
-        compiled_fn = BundledAOTAutogradSerializableCallable.from_backend_id(
-            backend_input.backend_id
-        )
+        # If Inductor backend is used, grab the compiled_fn from PrecompileContext
+        # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
+        if isinstance(backend, torch._TorchCompileInductorWrapper):
+            compiled_fn = BundledAOTAutogradSerializableCallable.from_backend_id(
+                backend_input.backend_id
+            )
 
-    if not isinstance(compiled_fn, SerializableCallable):
-        if hasattr(backend, "compiler_fn"):
-            compiler_fn = backend.compiler_fn
-        else:
-            compiler_fn = backend
-        raise RuntimeError(
-            f"Compiled function type {type(compiled_fn)} (produced "
-            + f"from backend {compiler_fn}) does not implement SerializableCallable."
+        if not isinstance(compiled_fn, SerializableCallable):
+            if hasattr(backend, "compiler_fn"):
+                compiler_fn = backend.compiler_fn
+            else:
+                compiler_fn = backend
+            raise RuntimeError(
+                f"Compiled function type {type(compiled_fn)} (produced "
+                + f"from backend {compiler_fn}) does not implement SerializableCallable."
+            )
+        compile_artifacts = CompileArtifacts(
+            signature=signature,
+            bytecode=dynamo_output.bytecode,
+            guard_manager=check_fn.guard_manager,
+            guards_state=check_fn.guards_state,
+            import_sources=import_sources,
+            backend_id=backend_input.backend_id,
+            compiled_fn=compiled_fn,
+            original_code=fn.__code__,
         )
-    compile_artifacts = CompileArtifacts(
-        signature=signature,
-        bytecode=dynamo_output.bytecode,
-        guard_manager=check_fn.guard_manager,
-        guards_state=check_fn.guards_state,
-        import_sources=import_sources,
-        backend_id=backend_input.backend_id,
-        compiled_fn=compiled_fn,
-        original_code=fn.__code__,
-    )
     return compile_artifacts
 
 
@@ -294,10 +296,17 @@ class AOTCompiledModel:
 
     @classmethod
     def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
-        data: list[bytes] = pickle.loads(data)
+        from torch._dynamo.utils import get_metrics_context
+        from torch._guards import compile_context, CompileContext
+
+        results: list[bytes] = pickle.loads(data)
         compiled_results = []
-        for result in data:
-            compiled_results.append(CompileArtifacts.deserialize(result))
+        for result in results:
+            with (
+                compile_context(CompileContext(convert_frame.get_compile_id({}))),
+                get_metrics_context(),
+            ):
+                compiled_results.append(CompileArtifacts.deserialize(result))
         return cls(model, compiled_results)
 
 
