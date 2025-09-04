@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def gen_linker_script(
-    filein: str = "cmake/prioritized_text.txt", fileout: str = "linker_script.ld"
+    filein: str = "cmake/prioritized_text.txt", fout: str = "cmake/linker_script.ld"
 ) -> None:
     with open(filein) as f:
         prioritized_text = f.readlines()
@@ -31,10 +31,10 @@ def gen_linker_script(
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing
-    fileout = Path(fileout)
-    fileout.parent.mkdir(parents=True, exist_ok=True)
+    fout = Path(fout)
+    fout.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(fileout, "w") as f:
+    with open(fout, "w") as f:
         for lineid, line in enumerate(linker_script_lines):
             if lineid == text_line_start + 2:
                 f.write("    *(\n")
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--fileout", help="Output path for linker ld file", default=argparse.SUPPRESS
+        "--fout", help="Output path for linker ld file", default=argparse.SUPPRESS
     )
     # convert args to a dict to pass to gen_linker_script
     kwargs = vars(parser.parse_args())
