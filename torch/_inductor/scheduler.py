@@ -902,8 +902,10 @@ class BaseSchedulerNode:
         compute_time = (factor * flops_est / gpu_flops) * 1e9
         transfer_time = counted_bytes / gpu_memory_bandwidth
 
-        # Return estimated runtime in nanoseconds
-        return max(compute_time, transfer_time)
+        # Return estimated runtime in milliseconds
+        ns = max(compute_time, transfer_time)
+        ms = ns / 1e6
+        return ms
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
