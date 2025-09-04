@@ -92,9 +92,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def backend(gm, example_inputs):
             return CustomCompiledFunction(gm, example_inputs)
 
-        def guard_filter_fn(guards):
-            return [g.guard_type != "FUNCTION_MATCH" for g in guards]
-
         compiled_fn = torch.compile(
             mod,
             fullgraph=True,
@@ -113,6 +110,25 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             with open(self.path(), "rb") as f:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(mod, *inputs)
+            self.assertEqual(expected, actual)
+
+    def test_aot_compile_basic_fn_inductor(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
 
