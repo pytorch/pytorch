@@ -47,6 +47,7 @@ from torch.autograd.profiler_util import (
     FunctionEvent,
     FunctionEventAvg,
 )
+from torch.overrides import TorchFunctionMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -7567,6 +7568,39 @@ for shape in [(1,), ()]:
             model_checkpoint_without_reentrant.parameters(),
         ):
             self.assertEqual(param.grad, checkpoint_param.grad)
+
+    @skipIfTorchDynamo("Test eager only for now")
+    def test_checkpointing_preserves_torch_function_mode_stack(self):
+        log = [""]
+
+        def get_mode_class(n):
+            class Func(TorchFunctionMode):
+                def __torch_function__(self, func, types, args, kwargs=None):
+                    kwargs = {} if kwargs is None else kwargs
+                    log[0] += f" mode{n} {func.__name__}"
+                    return func(*args, **kwargs)
+
+            return Func
+
+        Mode1 = get_mode_class(1)
+        Mode2 = get_mode_class(2)
+        Mode3 = get_mode_class(3)
+
+        def func(x):
+            return x.sin().cos()
+
+        def context_fn():
+            return Mode3(), Mode3()
+
+        with Mode1():
+            with Mode2():
+                a = torch.tensor(1.0, requires_grad=True)
+                log = [""]
+                out = checkpoint(func, a, use_reentrant=False, context_fn=context_fn)
+                self.assertTrue("mode3 cos mode2 cos mode1 cos" in log[0])
+                log = [""]
+                out.backward()
+                self.assertTrue("mode3 cos mode2 cos mode1 cos" in log[0])
 
     def test_callback_adds_callback(self):
         called = [0]

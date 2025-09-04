@@ -15,6 +15,7 @@ from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
+
 __all__ = [
     "checkpoint",
     "checkpoint_sequential",
@@ -820,7 +821,7 @@ class _NoopSaveInputs(torch.autograd.Function):
 
 
 class _CheckpointFrame:
-    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn):
+    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn, tls_state):
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -844,6 +845,7 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+        self.tls_state = tls_state
 
     def check_recomputed_tensors_match(self, gid):
         if self.ignore_saved_mismatch:
@@ -1145,15 +1147,20 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             if not frame.is_recomputed[gid]:
                 ctx = frame.input_saver.grad_fn
                 args = ctx.get_args(ctx.saved_tensors)
+                current_state = None
 
                 try:
-                    with _recomputation_hook(
-                        weakref.ref(frame), gid
-                    ), torch.autograd.enable_grad():
+                    current_state = torch._C._stash_tls_state()
+                    torch._C._restore_tls_state(frame.tls_state)
+                    with _recomputation_hook(weakref.ref(frame), gid):
                         # See Note: [compiled autograd and checkpoint unpack hook]
                         _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
+                finally:
+                    assert current_state is not None
+                    torch._C._restore_tls_state(current_state)
+
                 frame.is_recomputed[gid] = True
                 frame.check_recomputed_tensors_match(gid)
 
@@ -1518,8 +1525,6 @@ def _checkpoint_without_reentrant_generator(
         ), \
             "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` " + \
             "must generate a tuple of two `TorchDispatchMode`s."
-    # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-    device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device_type=device_type)
 
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
@@ -1532,6 +1537,8 @@ def _checkpoint_without_reentrant_generator(
         if getattr(device_module, "_initialized", False):
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
+
+    tls_state = torch._C._stash_tls_state()
 
     def recompute_fn(*inputs):
         kwargs, *args = inputs
@@ -1548,17 +1555,15 @@ def _checkpoint_without_reentrant_generator(
                 if had_device_in_fwd:
                     set_device_states(fwd_devices, fwd_device_states, device_type=device_type)
 
-            device_autocast_ctx = torch.amp.autocast(
-                device_type=device_type, **device_autocast_kwargs
-            ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            with recompute_context:
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
         recompute_fn,
         _enable_checkpoint_early_stop if _enable_checkpoint_early_stop is not None else early_stop,
         unpack_error_cb,
-        metadata_fn
+        metadata_fn,
+        tls_state,
     )
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
