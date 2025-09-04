@@ -311,6 +311,15 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
         self.normalized_shape = input_shape[self.start_dim :]
 
+        if self.has_uninitialized_params():
+            with torch.no_grad():
+                if self.elementwise_affine:
+                    self.weight.materialize(self.normalized_shape)
+                    if self.bias is not None:
+                        self.bias.materialize(self.normalized_shape)
+            self.reset_parameters()
+
+
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
