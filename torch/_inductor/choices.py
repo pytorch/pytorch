@@ -123,9 +123,6 @@ class InductorChoices:
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
         """
-        # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
-        # the max-autotune bool, rather than inferring it here
-        max_autotune = config.max_autotune or config.max_autotune_gemm
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
@@ -139,9 +136,7 @@ class InductorChoices:
         # Get the appropriate template-specific heuristic
         heuristic = get_template_heuristic(template_name, device_type, op_name)
 
-        cs = heuristic.get_template_configs(
-            kernel_inputs, layout, op_name, max_autotune
-        )
+        cs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
         extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
         # We also return the layout and the input_nodes as part of the extra_kwargs
         extra_kwargs["layout"] = layout
