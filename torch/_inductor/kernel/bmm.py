@@ -207,7 +207,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
         templates_to_use.append(bmm_template)
@@ -287,7 +287,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
