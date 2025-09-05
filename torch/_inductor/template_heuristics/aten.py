@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor import config as inductor_config
-from torch._inductor.kernel_inputs import MMKernelInputs
 
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
@@ -11,6 +10,7 @@ from ..kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
+from .triton_addmm import AddMMBiasExpansionConfigMixin
 
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
-class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
+class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -73,25 +73,12 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         # and it yields sometimes slightly different numerics
         # TODO: figure out if this can be handled cleaner e.g. through a subgraph or
         # through a different decomposition
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"MMKernelInputs expected for {op_name}"
-        )
-        nodes = kernel_inputs.nodes()
         max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
         if op_name == "addmm" and not max_autotune:
-            from ..ir import ReinterpretView
-
-            inp = nodes[0]
-            if isinstance(inp, ReinterpretView):
-                # remove the view
-                inp_unexpanded = inp.data
-                nodes = [inp_unexpanded, *nodes[1:]]
-        return MMKernelInputs(
-            nodes,
-            scalars=kernel_inputs.scalars(),
-            mat1_idx=kernel_inputs._mat1_idx,
-            mat2_idx=kernel_inputs._mat2_idx,
-        )
+            # nothing to do in that case
+            return kernel_inputs
+        # do the regular bias expansion
+        return super().adjust_kernel_inputs(kernel_inputs, op_name)
 
 
 @register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")
