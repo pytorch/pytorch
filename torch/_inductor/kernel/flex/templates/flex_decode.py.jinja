@@ -1,0 +1,242 @@
+    {{def_kernel("Q", "K", "V", "M", "L", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+    # Sub notation for this kernel:
+    # Q: Query, K: Key, V: Value
+    # reduction buffers: M rowmax across local KV split, L local sumexp across local KV split
+    # M: Number of queries, N: Number of keys/values
+    # QK_HEAD_DIM: The dimension of the query and key embeddings
+    # V_HEAD_DIM: The dimension of the value embeddings
+    # BLOCK_M, QK_HEAD_DIM: M, and D dimemsion are always assigned to the same block
+    # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head t: Number of kv splits
+    # (Modifiable) Config options:
+    # SPLIT_KV: number of blocks K & V are split into
+    # TILE_KV: length of each local KV split
+    # BLOCK_M: block size that Q is padded along seqlen dim.
+    # BLOCK_N: block size of K & V along N dimension.
+    # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
+    #
+    # change of base out of the loop
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # is not masked out? If so, we can skip an extra safety check
+    # SAFE_M_BOUNDARY: Is Q seqlen a multiple of BLOCK_M? If so, we can skip an extra boundary check for loading query.
+    # SAFE_N_BOUNDARY: Is KV seqlen a multiple of BLOCK_N? If so, we can skip an extra boundary check for loading key/value.
+
+    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base.
+    #
+    # SPARSE_KV_BLOCK_SIZE: sparse mask block size along KV seqlen dim.
+    # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
+    # KV_IDX: The indices of KV blocks (that may or may not require masking) for each query.
+    #
+    #
+    # Output: ACC output accumulated across local KV split.
+
+    tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
+
+    # Define Q Strides
+    stride_qz, stride_qh, stride_qg, stride_qm, stride_qk = {{stride("Q")}}
+    stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
+    stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
+    stride_mz, stride_mt, stride_mh, stride_mm = {{stride("M")}}
+    stride_lz, stride_lt, stride_lh, stride_lm = {{stride("L")}}
+
+
+    Z = {{size("Q", 0)}}
+    ZKV = {{size("K", 0)}}
+    HKV = {{size("Q", 1)}}
+    G: tl.constexpr = GQA_SHARED_HEADS
+    HQ = HKV * G
+    Q_LEN = {{size("Q", 3)}}
+    KV_LEN = {{size("K", 2)}}
+
+    MATMUL_PRECISION = Q.dtype.element_ty
+
+    # Make sure each split is a multiple of BLOCK_N
+    TILE_KV_OG = tl.cdiv(KV_LEN, SPLIT_KV)
+    TILE_KV = tl.cdiv(TILE_KV_OG, BLOCK_N) * BLOCK_N
+    TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
+
+    off_z = tl.program_id(0).to(INDEX_DTYPE) // HKV
+    off_zkv = off_z % ZKV
+    off_hkv = tl.program_id(0).to(INDEX_DTYPE) % HKV
+    off_t = tl.program_id(1).to(INDEX_DTYPE)
+
+    q_offset = off_z * stride_qz + off_hkv * stride_qh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
+
+    K = K + k_offset
+    V = V + v_offset
+
+    SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
+    SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
+
+    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_h = off_hkv % SPARSE_HQ
+
+    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
+    SPARSE_KV_BLOCK_CNT = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
+
+    # initialize pointer to m and l
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
+
+    # initialize offsets
+    tl.device_assert(BLOCK_M % G == 0)
+    BLOCK_M_PER_HQ: tl.constexpr = BLOCK_M // G
+    off_g = tl.arange(0, G)                                                 # [G]
+    offs_g = tl.ravel(tl.broadcast_to(off_g[:, None], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
+    offs_hq = offs_g + off_hkv * G
+    off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
+    offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
+    offs_d = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
+
+    # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
+    sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
+    stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
+    sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
+
+    # Calculate KV blocks that belong this CTA.
+    block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
+    block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
+
+    q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
+
+    if not SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=(offs_d[None, None, :] < QK_HEAD_DIM) & (off_m[None, :, None] < Q_LEN))
+    elif SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=offs_d[None, None, :] < QK_HEAD_DIM)
+    elif not SAFE_M_BOUNDARY and SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=off_m[None, :, None] < Q_LEN)
+    else:
+        q = tl.load(Q + q_offset + q_range)
+
+    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_ROUNDED])
+
+
+    # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # find first kv block we are loading and the number of blocks we are loading
+    # Offset the kv_indices tensor by the correct batch and head
+    kv_indices = KV_IDX + sparse_idx_hz_offset
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
+    MAX_KV_IDX = {{size("KV_IDX", -1)}}
+    indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
+    off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
+    off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
+    # first kv block we're loading
+
+    # last valid block according to sparse mask
+    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+    offs_n = tl.arange(0, BLOCK_N) + off_n
+
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
+
+    acc, l_i, m_i = forward_inner(
+        {{gen_argdefs()}},
+        q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+        # accumulatd values
+        acc, l_i, m_i,
+        #offsets
+        off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+        off_n,
+        #block sparse data
+        kv_indices, kv_num_blocks,
+        block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
+        MATMUL_PRECISION,
+        stride_kk, stride_kn, stride_vn, stride_vk,
+        IS_FULL_BLOCKS=False,
+    )
+
+
+    # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # We know these blocks are guaranteed to be "full", so we don't need to
+    # apply mask_mod to them - only score_mod
+    if HAS_FULL_BLOCKS:
+        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
+        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
+        block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
+        block_n_end = block_n_start + TILE_KV_MULTIPLE
+        indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
+        off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
+        off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
+
+        # last valid block according to sparse mask
+        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+        offs_n = tl.arange(0, BLOCK_N) + off_n
+
+        acc, l_i, m_i = forward_inner(
+            {{gen_argdefs()}},
+            q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+            # accumulatd values
+            acc, l_i, m_i,
+            #offsets
+            off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+            off_n,
+            #block sparse data
+            kv_indices, kv_num_blocks,
+            block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
+            MATMUL_PRECISION,
+            stride_kk, stride_kn, stride_vn, stride_vk,
+            IS_FULL_BLOCKS=True,
+        )
+
+    m_offset = off_t * stride_mt + off_z * stride_mz
+    l_offset = off_t * stride_lt + off_z * stride_lz
+
+    M_block_ptr = tl.make_block_ptr(
+        base=M + m_offset,
+        shape=(G, Q_LEN),                   # (G, M)
+        strides=(stride_mh, stride_mm),
+        offsets=(off_hkv*G, 0),
+        block_shape=(G, BLOCK_M_PER_HQ),
+        order=(1, 0)
+    )
+    L_block_ptr = tl.make_block_ptr(
+        base=L + l_offset,
+        shape=(G, Q_LEN),                   # (G, M)
+        strides=(stride_lh, stride_lm),
+        offsets=(off_hkv*G, 0),
+        block_shape=(G, BLOCK_M_PER_HQ),
+        order=(1, 0)
+    )
+
+    # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
+    m_i = m_i.reshape(G, BLOCK_M_PER_HQ)
+    l_i = l_i.reshape(G, BLOCK_M_PER_HQ)
+    if SAFE_M_BOUNDARY:
+        tl.store(M_block_ptr, m_i)
+        tl.store(L_block_ptr, l_i)
+    else:
+        tl.store(M_block_ptr, m_i, boundary_check=(1,))
+        tl.store(L_block_ptr, l_i, boundary_check=(1,))
+
+    # -- store output
+    idx_z = off_z
+    idx_t = off_t
+    idx_hq = off_hkv*G + off_g[:, None, None]
+    idx_m = off_m[None, :, None]
+    idx_d = offs_vd[None, None, :]
+
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
+    acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
+    {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}

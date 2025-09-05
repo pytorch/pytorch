@@ -23,6 +23,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
+)
 from torch.overrides import TorchFunctionMode
 
 
@@ -42,16 +47,6 @@ class _RotateMethod(Enum):
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
-
-_is_hip: bool = hasattr(torch.version, "hip") and torch.version.hip is not None
-if _is_hip:
-    gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
-    _is_ck_supported = False
-    for arch in ["gfx942", "gfx950"]:
-        if arch in gcn_arch_name:
-            _is_ck_supported = True
-    _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
-    _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
 
 
 class _DispatchMode(Enum):
@@ -74,6 +69,25 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
+
+
+@dataclass
+class _ContextParallelGlobalVars:
+    # The current context parallel impl requires a record of some info
+    # as global vars. This dataclass stores those variables.
+    # TODO: this var should be able to stored in CP context
+    cp_shard_dim: int = 0
+    # This variable stores the TorchFunctionMode singleton because using multiple TF
+    # instances for dispatching may trigger recompilations
+    torch_function_mode: Optional[TorchFunctionMode] = None
+
+
+_cp_global_vars = _ContextParallelGlobalVars()
+
+
+def _set_cp_global_var(name: str, value: Any) -> None:
+    """Set a global variable for context parallelism."""
+    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -249,7 +263,7 @@ class _AllToAllRotater(_RingRotater):
 
 class _AllGatherRotater(_RingRotater):
     """
-    Allgather the kv and return the only the requried kv.
+    Allgather the kv and return the only the required kv.
     Only one communication will be done.
     """
 
@@ -287,7 +301,7 @@ def _create_rotater(
     elif method == _RotateMethod.ALL_GATHER:
         return _AllGatherRotater(pg, seq_dim)
     else:
-        raise NotImplementedError(f"Unkonwn method {method}")
+        raise NotImplementedError(f"Unknown method {method}")
 
 
 def _templated_ring_attention(
@@ -349,12 +363,12 @@ def _templated_ring_attention(
 
     First Iteration: Both ranks perform SDPA with their local qkv pairs, similar to the
     no-load-balance case. This iteration corresponds to the `if` of the
-    (`if, `elif`, `else`) in the implemementation.
+    (`if, `elif`, `else`) in the implementation.
 
     Second Iteration: Rank0 now has (q0, q3) and (k1, k2); rank1 has (q1, q2) and
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
-    `else` of the (`if`, `elif`, `else`) in the implemementation.
+    `else` of the (`if`, `elif`, `else`) in the implementation.
     For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
@@ -456,14 +470,6 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
-        if _is_hip:  # See: https://github.com/pytorch/pytorch/issues/156012
-            need_scaling = True
-            # Note: it is possible that CK is seleted but not compiled in the binary.
-            if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
-                # Unsure about CK's behavior, keep logsumexp untouched
-                need_scaling = False
-            if need_scaling:
-                logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
@@ -650,6 +656,7 @@ def _scaled_dot_product_ring_flash_attention(
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -684,6 +691,7 @@ def _scaled_dot_product_ring_efficient_attention(
         # CP requires compute_log_sumexp to be True because it always merges LSE
         compute_log_sumexp = True
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -721,6 +729,7 @@ def _scaled_dot_product_ring_cudnn_attention(
         # CP requires compute_log_sumexp to be True because it always merges LSE
         compute_log_sumexp = True
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -758,6 +767,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -800,6 +810,7 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -843,6 +854,7 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -934,7 +946,7 @@ def _distribute_function(
     the inputs and outputs of a function. Similar to ``distribute_module``, this API
     installs hooks to the ``fn`` to convert the inputs and outputs. There are two
     major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parammeters and buffers, as a result,
+    First, a function does not have parameters and buffers, as a result,
     ``distribute_function`` itself won't convert any parameters/buffers but simply
     install the input and output hooks.  The tensor conversion will happen in the hooks.
     Another difference is an nn.Module subclass can have several instances and each
@@ -950,9 +962,9 @@ def _distribute_function(
             ``fn_module`` is ``torch.nn.functional``.
         device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
             input and output hooks to distribute the tensors.
-        input_fn (Optioinal[Callable]): the hook to distribute or convert the input
+        input_fn (Optional[Callable]): the hook to distribute or convert the input
             arguments of ``fn``.
-        output_fn (Optioinal[Callable]): the hook to distribute or convert the output
+        output_fn (Optional[Callable]): the hook to distribute or convert the output
             arguments of ``fn``.
     """
 
@@ -1007,7 +1019,7 @@ class _AttentionContextParallel(ParallelStyle):
     Applies context parallel optimizations to the attention layer.
 
     This will work for nn.MultiHeadedAttention and custom attention layers that
-    call F.scaled_dotproduct_attention with a simliar signature.
+    call F.scaled_dotproduct_attention with a similar signature.
 
     This expects the `forward` method consumes either:
 
@@ -1104,6 +1116,92 @@ class _AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
+def create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+) -> BlockMask:
+    """
+    This API creates a special BlockMask for Context Parallel FlexAttention:
+    1. This BlockMask is masking on the attention of Q shard and KV global views, by
+    mapping the local q_idx to the global q_idx before sending to mask_mod.
+    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
+    the sequence length of KV shard instead of KV global. This is to pass the shape check
+    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
+    used in flex_attention once the shape check passes.
+
+    Args:
+        mask_mod (Callable): Function to modify the mask over the global attention result.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Sequence length of query (global view).
+        KV_LEN (int): Sequence length of key/value (global view).
+        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+
+    Return:
+        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
+        context_parallel() context.
+
+    .. warning::
+        This function cannot generate correct block_mask if the BLOCK_SIZE is not
+        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
+        size is smaller than 128. Please do not use context_parallel() when the
+        FlexAttention size is small.
+    """
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
+
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        B,
+        H,
+        Q_SHARD_LEN,
+        KV_LEN,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
+    )
+    # flex_attention function checks the following shape so we need to rewrite:
+    # key.size(-2) == block_mask.seq_lengths[1]
+    seq_lengths = block_mask.seq_lengths
+    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
+    return block_mask
+
+
 @contextlib.contextmanager
 def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
@@ -1135,6 +1233,12 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
+    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
+        x = x.contiguous()
+        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_xs, x, mesh)
+        return torch.cat(all_xs, dim=shard_dim)
+
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
@@ -1156,6 +1260,38 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             kwargs: Optional[dict[str, Any]] = None,
         ) -> Any:
             kwargs = kwargs or {}
+
+            # special handler for flex_attention
+            if func == torch._higher_order_ops.flex_attention:
+                query, key, value, score_mod, block_mask = args[:5]
+                assert isinstance(query, torch.Tensor)
+                assert isinstance(key, torch.Tensor)
+                assert isinstance(value, torch.Tensor)
+                assert isinstance(block_mask, tuple)
+
+                global_key = ft_c.all_gather_tensor_autograd(
+                    key, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
+                global_value = ft_c.all_gather_tensor_autograd(
+                    value, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
+
+                # shape rewrite: because torch.nn.flex_attention() checks
+                # the QKV shape against the block_mask object, we need to
+                # manually rewrite the shape info in block_mask tuple to
+                # make it compatible with q_shard, k_global, v_global
+                if block_mask[1] != global_key.size(-2):
+                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
+
+                return func(
+                    query,
+                    global_key,
+                    global_value,
+                    score_mod,
+                    block_mask,
+                    *args[5:],
+                    **kwargs,
+                )
 
             if func != self._fn:
                 return func(*args, **kwargs)
@@ -1179,12 +1315,17 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             yield
         _restore_function(F.scaled_dot_product_attention, F)
     elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        with DistributeFunction(
-            F.scaled_dot_product_attention,
-            mesh,
-            attention_input_fn,
-            attention_output_fn,
-        ):
+        tf_mode = _cp_global_vars.torch_function_mode
+        if tf_mode is None:
+            tf_mode = DistributeFunction(
+                F.scaled_dot_product_attention,
+                mesh,
+                attention_input_fn,
+                attention_output_fn,
+            )
+            _set_cp_global_var("torch_function_mode", tf_mode)
+
+        with tf_mode:
             with _enable_cp_dispatcher():
                 yield
     else:

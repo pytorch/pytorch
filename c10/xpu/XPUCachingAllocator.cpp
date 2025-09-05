@@ -540,7 +540,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public Allocator {
+class XPUAllocator : public DeviceAllocator {
  private:
   std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -574,6 +574,10 @@ class XPUAllocator : public Allocator {
         device_allocators[i] = std::make_unique<DeviceCachingAllocator>(i);
       }
     }
+  }
+
+  bool initialized() override {
+    return !device_allocators.empty();
   }
 
   void malloc(
@@ -610,13 +614,13 @@ class XPUAllocator : public Allocator {
     }
   }
 
-  void emptyCache() {
+  void emptyCache(MempoolId_t mempool_id [[maybe_unused]] = {0, 0}) override {
     for (auto& da : device_allocators) {
       da->emptyCache();
     }
   }
 
-  void recordStream(const DataPtr& ptr, XPUStream stream) {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     if (!ptr.get()) {
       return;
     }
@@ -626,7 +630,8 @@ class XPUAllocator : public Allocator {
 
     Block* block = get_allocated_block(ptr.get());
     TORCH_CHECK(block, "No allocated block can be found.");
-    device_allocators[block->device]->recordStream(block, stream);
+    c10::xpu::XPUStream xpu_stream{stream};
+    device_allocators[block->device]->recordStream(block, xpu_stream);
   }
 
   DataPtr allocate(size_t size) override {
@@ -679,17 +684,17 @@ class XPUAllocator : public Allocator {
         ": did you call init?");
   }
 
-  DeviceStats getDeviceStats(DeviceIndex device) {
+  DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
   }
 
-  void resetPeakStats(DeviceIndex device) {
+  void resetPeakStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetPeakStats();
   }
 
-  void resetAccumulatedStats(DeviceIndex device) {
+  void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
   }

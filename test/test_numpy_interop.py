@@ -488,7 +488,7 @@ class TestNumPyInterop(TestCase):
             )  # type: ignore[call-overload]
         else:
             self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "(Overflow|an integer is required)",
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]

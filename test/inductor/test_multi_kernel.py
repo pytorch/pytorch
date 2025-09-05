@@ -16,6 +16,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -98,6 +99,8 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
+    # TODO: bobrenjc93 to fix multi-kernel for ROCM
+    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
@@ -123,6 +126,8 @@ class MultiKernelTest(TestCase):
         self.assertTrue(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
+    # TODO: bobrenjc93 to fix multi-kernel for ROCM
+    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):

@@ -78,9 +78,9 @@ def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
         if prefix is None:
             prefix = _determine_prefix(files)
         for f in files:
-            if f.find(prefix) != 0:
+            if (offset := f.find(prefix)) == -1:
                 continue
-            details[f] = read_dump(prefix, os.path.join(root, f))
+            details[f] = read_dump(f[:offset] + prefix, os.path.join(root, f))
             filecount += 1
             if not version:
                 version = str(details[f]["version"])

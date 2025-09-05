@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+import unittest
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
@@ -1122,6 +1123,7 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
+@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1187,7 +1189,7 @@ class FSDPTest(MultiProcessTestCase):
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.cuda.device_count() < self.world_size:
+        if torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
@@ -1285,10 +1287,10 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert (
-                    loss.dtype == torch.float32
-                ), "loss data type should be float32, as the original \
+                assert loss.dtype == torch.float32, (
+                    "loss data type should be float32, as the original \
                     parameter data type is float32."
+                )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
@@ -1354,9 +1356,9 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert (
-            fsdp_init_mode != FSDPInitMode.NO_FSDP
-        ), "Expects an FSDP init mode that wraps with FSDP"
+        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
+            "Expects an FSDP init mode that wraps with FSDP"
+        )
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2

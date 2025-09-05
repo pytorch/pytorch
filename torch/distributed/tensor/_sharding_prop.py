@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -101,7 +102,49 @@ class ShardingPropagator:
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
-        Register a sharding strategy generator for an operator.
+        Register a :class:`OpStrategy` generator for an operator.
+
+        During the sharding propagation, DTensor wants to enumerate all
+        acceptable sharding specs (:class:`OpSpec`) for an operator,
+        and by "acceptable" we mean that the operator can be executed on
+        the ``_local_tensor`` of DTensor args/kwargs (with ``OpSpec.input_specs``)
+        and the output(s) constitute valid DTensor(s) (with ``OpSpec.output_specs``).
+
+        ``strategy_func`` is the function that enumerates such acceptable specs
+        for the operator ``op_overload``. One general approach to write ``strategy_func``
+        is, if the operator has simple arguments structure (e.g. mm, bmm), first enumerating
+        all sharding specs for the operands, and then filtering out the ones that
+        are not valid. For example, for ``mm``, the operands are two 2D tensors, and
+        if both ``input`` and ``mat2`` have sharding placements ``[Shard(0)]``, then this
+        is not an acceptable ``input_specs``.
+
+        Once we have a way to enumerate all acceptable sharding specs, we can use each
+        of them to construct a :class:`OpSpec`. The ``OpSpec.input_specs`` directly comes
+        from the sharding spec, and the ``OpSpec.output_specs`` is therefore determined
+        (e.g. ``[Shard(1)]`` @ ``[Shard(0)]`` yields ``[Partial()]``). In addition,
+        :class:`OpSpec` also contains ``redistribute_cost`` which records the redistribution
+        cost from each :class:`OpSpec` in the source :class:`OpStrategy.strategies` to
+        the target sharding spec, for each operand.
+
+        The ``strategy_func`` should return a :class:`OpStrategy` which contains a list of
+        all the :class:`OpSpec`s generated in the above.
+
+        The optional ``schema_info`` tells which non-DTensor args/kwargs could affect the
+        cache and whether ``pytree`` is needed to flatten the nested args. ``static_argnum``
+        marks the starting index of the non-DTensor args that should be hashed into the
+        sharding propagation hash key, and ``static_kwargkey`` marks the keys of the
+        non-DTensor kwargs that should be hashed. ``needs_pytree`` should be used when
+        the input arg has :class:`list` or :class:`dict` structure.
+
+        For example, ``aten.cat.default`` op has a ``List[Tensor]`` argument ``tensors``
+        and an ``int`` argument ``dim``. Because ``dim`` affects the sharding propagation
+        result, we want to pass ``RuntimeSchemaInfo(static_argnum=1)`` because the argument
+        index of ``dim`` is 1. Besides, we also want to set ``needs_pytree=True`` because
+        ``tensors`` needs be flattened in sharding propagation. Another example is
+        ``aten.histc.default``. ``histc`` has 4 arguments (self, bins, min, max) and the
+        last two would affect sharding propagation along with the :class:`DTensor` argument
+        ``self``. Since the argument index of ``min`` is 2, the `schema_info` should be
+        `RuntimeSchemaInfo(static_argnum=2)`.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
@@ -153,10 +196,27 @@ class ShardingPropagator:
             return None
 
     @lru_cache  # noqa: B019
+    def _propagate_tensor_meta_cached(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        """
+        Cached version of _propagate_tensor_meta_non_cached
+        Use _propagate_tensor_meta instead to make compile-safe.
+        """
+        return self._propagate_tensor_meta_non_cached(op_schema)
+
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
-        return self._propagate_tensor_meta_non_cached(op_schema)
+        """
+        Propagate the tensor metadata, it could either return a TensorMeta
+        or a list/tuple of TensorMetas. Uses the cached version if not
+        actively tracing. Use this method if you need caching.
+        """
+        if _are_we_tracing():
+            return self._propagate_tensor_meta_non_cached(op_schema)
+        else:
+            return self._propagate_tensor_meta_cached(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,
@@ -252,6 +312,7 @@ class ShardingPropagator:
             op=op_schema.op,
             args_schema=tuple(args_op_strategy),
             kwargs_schema=kwargs_op_strategy,
+            schema_info=op_schema.schema_info,
         )
 
     def propagate(self, op_info: OpInfo) -> None:
@@ -287,10 +348,12 @@ class ShardingPropagator:
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
-                output_strategy = self._select_strategy(op_strategy)
+                output_strategy = self._select_strategy(op_strategy, op_schema)
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
+                # check if we want to use args value from redistribute_schema
+                use_val_from_redistribute_schema = False
                 expected_input_specs: list[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
@@ -333,6 +396,7 @@ class ShardingPropagator:
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
                         needs_redistribute = True
+                        use_val_from_redistribute_schema = True
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -365,6 +429,7 @@ class ShardingPropagator:
                     output_specs,
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
+                    use_val_from_redistribute_schema=use_val_from_redistribute_schema,
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
@@ -433,6 +498,7 @@ class ShardingPropagator:
                     tuple(out_spec_list) if out_tensor_meta is not None else None,
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
+                    use_val_from_redistribute_schema=False,
                 )
             else:
                 raise ValueError("Unsupported op strategy type")
@@ -490,21 +556,56 @@ class ShardingPropagator:
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
 
-    def _select_strategy(self, strategy: OpStrategy) -> OpSpec:
+    def _select_strategy(
+        self, strategy: OpStrategy, op_schema: Optional[OpSchema] = None
+    ) -> OpSpec:
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
             return strategy.strategies[0]
 
         op_spec_costs: list[float] = []
-        for op_spec in strategy.strategies:
+        no_redistribute_strategy_index: int = -1
+        for strategy_idx, op_spec in enumerate(strategy.strategies):
             assert op_spec.redistribute_cost is not None, (
                 "must set redistribute cost each OpSpec!"
             )
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
+            # If there's no redistribute cost, we record the index of the strategy
+            # which doesn't need redistribute.
+            # TODO: Currently this only applies to OpStrategy selection. Requires extra
+            # logic to make it work for TupleStrategy, if needed.
+            if op_schema is not None and redistribute_cost == 0:
+                needs_redistribute = False
+                for spec_idx, input_spec in enumerate(op_schema.args_spec):
+                    desired_spec = (
+                        op_spec.output_spec
+                        if op_spec.input_specs is None
+                        else op_spec.input_specs[spec_idx]
+                    )
+                    if input_spec.placements != desired_spec.placements:
+                        needs_redistribute = True
+                        break
+
+                if not needs_redistribute:
+                    no_redistribute_strategy_index = strategy_idx
+
         # for eager execution, we just select the one with the minimal redistribute cost
-        return strategy.strategies[op_spec_costs.index(min(op_spec_costs))]
+        min_cost = min(op_spec_costs)
+        if min_cost < 0:
+            # If there's negative cost, we select the one with the minimal cost,
+            # even if this means we need to redistribute, e.g. via local chunking.
+            # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
+            # when the inputs / outputs are sharded.
+            selected_strategy_index = op_spec_costs.index(min_cost)
+        elif min_cost == 0 and no_redistribute_strategy_index != -1:
+            # If there's no redistribute cost, we select the one with no redistribute.
+            selected_strategy_index = no_redistribute_strategy_index
+        else:
+            selected_strategy_index = op_spec_costs.index(min_cost)
+
+        return strategy.strategies[selected_strategy_index]
 
     def _adjust_shape_and_stride_args(
         self,

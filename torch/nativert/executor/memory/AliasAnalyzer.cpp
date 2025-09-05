@@ -66,13 +66,13 @@ bool /* applied */ AliasAnalyzer::update_aliases_if_packed_listunpack(
   }
 
   const auto& list_elems = list->getListElements();
-  TORCH_CHECK_EQ(list_elems.size(), node.numOutputs());
+  TORCH_CHECK(list_elems.size() == node.numOutputs());
 
   for (const auto j : c10::irange(node.numOutputs())) {
     const Value* input = list_elems.at(j);
     const Value* output = node.outputs().at(j);
 
-    TORCH_CHECK_NE(input, output);
+    TORCH_CHECK(input != output);
 
     create_or_update_lifetime(input, i);
     create_or_update_lifetime(output, i);

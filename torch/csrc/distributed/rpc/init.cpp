@@ -79,6 +79,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.attr("_DEFAULT_RPC_TIMEOUT_SEC") = py::cast(kDefaultRpcTimeoutSeconds);
   module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -567,9 +569,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           &TensorPipeRpcBackendOptions::devices,
           R"(All devices used by the local agent.)")
       .def("_set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
-
-  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
-      py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
