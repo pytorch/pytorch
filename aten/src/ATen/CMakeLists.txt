@@ -298,8 +298,8 @@ IF(USE_FBGEMM_GENAI)
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
       ${fbgemm_genai_mx8mx8bf16_grouped}
-      "${FBGEMM_GENAI_SRCS}/common/include/"
-      "${FBGEMM_GENAI_SRCS}/include/"
+      "${FBGEMM_GENAI_SRCS}/common/include/"  # includes fbgemm/quantize/utils.h, fbgemm/quantize/tuning_cache.hpp
+      "${FBGEMM_GENAI_SRCS}/include/"         # includes fbgemm/torch_ops.h
     )
   else()
     if(USE_ROCM)
