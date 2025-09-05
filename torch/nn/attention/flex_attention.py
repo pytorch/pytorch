@@ -69,8 +69,8 @@ def _warn_once(
 __all__ = [
     "BlockMask",
     "flex_attention",
-    "FlexAttentionAuxOutput",
-    "FlexAttentionAuxRequest",
+    "AuxOutput",
+    "AuxRequest",
     "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
@@ -201,7 +201,7 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
 
-class FlexAttentionAuxRequest(NamedTuple):
+class AuxRequest(NamedTuple):
     """Request which auxiliary outputs to compute from flex_attention.
 
     Each field is a boolean indicating whether that auxiliary output should be computed.
@@ -211,7 +211,7 @@ class FlexAttentionAuxRequest(NamedTuple):
     max_scores: bool = False
 
 
-class FlexAttentionAuxOutput(NamedTuple):
+class AuxOutput(NamedTuple):
     """Auxiliary outputs from flex_attention operation.
 
     Fields will be None if not requested, or contain the tensor if requested.
@@ -1290,7 +1290,7 @@ def _apply_kernel_options(
     value: Tensor,
     return_lse: bool,
     kernel_options,
-    return_aux: Optional[FlexAttentionAuxRequest] = None,
+    return_aux: Optional[AuxRequest] = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
@@ -1447,8 +1447,8 @@ def flex_attention(
     return_lse: bool = False,
     kernel_options: Optional[FlexKernelOptions] = None,
     *,
-    return_aux: Optional[FlexAttentionAuxRequest] = None,
-) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, FlexAttentionAuxOutput]]:
+    return_aux: Optional[AuxRequest] = None,
+) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1482,19 +1482,19 @@ def flex_attention(
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
-        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False. **Deprecated**: Use ``return_aux=FlexAttentionAuxRequest(lse=True)`` instead.
+        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False. **Deprecated**: Use ``return_aux=AuxRequest(lse=True)`` instead.
         kernel_options (Optional[FlexKernelOptions]):
             Options to control the behavior of the underlying Triton kernels.
             See :class:`FlexKernelOptions` for available options and usage examples.
-        return_aux (Optional[FlexAttentionAuxRequest]): Specifies which auxiliary outputs to compute and return.
-            If None, only the attention output is returned. Use ``FlexAttentionAuxRequest(lse=True, max_scores=True)``
+        return_aux (Optional[AuxRequest]): Specifies which auxiliary outputs to compute and return.
+            If None, only the attention output is returned. Use ``AuxRequest(lse=True, max_scores=True)``
             to request both auxiliary outputs.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
 
         When ``return_aux`` is not None:
-            aux (FlexAttentionAuxOutput): Auxiliary outputs with requested fields populated.
+            aux (AuxOutput): Auxiliary outputs with requested fields populated.
 
         When ``return_aux`` is None (deprecated paths):
             lse (Tensor): Log-sum-exp of attention scores; shape :math:`(B, Hq, L)`. Only returned if ``return_lse=True``.
@@ -1606,13 +1606,13 @@ def flex_attention(
     if return_lse and return_aux is not None:
         raise ValueError(
             "Cannot specify both return_lse and return_aux. "
-            "return_lse is deprecated, please use return_aux=FlexAttentionAuxRequest(lse=True) instead."
+            "return_lse is deprecated, please use return_aux=AuxRequest(lse=True) instead."
         )
     elif return_lse and return_aux is None:
         _warn_once(
             "deprecated_return_lse",
             "return_lse is deprecated and will be removed in v2.7. "
-            "Please use return_aux=FlexAttentionAuxRequest(lse=True) instead.",
+            "Please use return_aux=AuxRequest(lse=True) instead.",
             category=FutureWarning,
         )
 
@@ -1630,7 +1630,7 @@ def flex_attention(
         lse,
         max_scores,
         *,
-        return_aux: Optional[FlexAttentionAuxRequest],
+        return_aux: Optional[AuxRequest],
         return_lse: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""
@@ -1644,7 +1644,7 @@ def flex_attention(
         )
 
         if return_aux is not None:
-            return out, FlexAttentionAuxOutput(
+            return out, AuxOutput(
                 lse=lse_scaled,
                 max_scores=max_scaled,
             )
