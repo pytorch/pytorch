@@ -608,6 +608,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
     It's useful for supporting autograd of while_loop.
     """
+
     def __init__(self) -> None:
         super().__init__("while_loop_stack_output")
 
