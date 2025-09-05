@@ -377,6 +377,7 @@ class TritonTemplateKernel(TritonKernel):
         num_consumer_groups=0,
         num_buffers_warp_spec=0,
         use_jit=False,
+        tma_store=False,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -386,11 +387,22 @@ class TritonTemplateKernel(TritonKernel):
         hint_override: Optional[int] = None,
     ) -> None:
         numel = sympy_product(output_node.get_size())
-        super().__init__(
-            {
+        if tma_store:
+            assert len(output_node.get_size()) == 2, (
+                "TMA store only supported for 2D with templates"
+            )
+            tiling = {
+                "x": output_node.get_size()[0],
+                "y": output_node.get_size()[1],
+                "r0_": sympy.S.One,
+            }
+        else:
+            tiling = {
                 "x": numel,
                 "r0_": sympy.S.One,
-            },
+            }
+        super().__init__(
+            tiling,
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
@@ -400,6 +412,7 @@ class TritonTemplateKernel(TritonKernel):
         self.defines = defines
         self.kernel_name = kernel_name
         self.use_jit = use_jit
+        self.tma_store = tma_store
         self.num_stages = num_stages
         self.num_warps = num_warps
         self.num_consumer_groups = num_consumer_groups
@@ -717,11 +730,12 @@ class TritonTemplateKernel(TritonKernel):
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
+                self.codegen_prologue(code)
             return code.getvalue()
 
         return self._register_hook("<DEF_KERNEL>", hook)
 
-    def size(self, name: str, index: int):
+    def size(self, name: Optional[str], index: int):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
@@ -1014,6 +1028,66 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook(hook_key, hook)
 
+    def _generate_index_from_tma_index(
+        self,
+        range_tree: "IterationRangesRoot",
+        tma_index: sympy.Symbol,
+        block_size: str,
+        dim: int,
+        num_dims: int,
+    ) -> list[str]:
+        """
+        Generate the logic to compute the regular tl.load index from the provided
+        tma index. This is used to ensure variables can support fusions.
+
+        Args:
+            output_name (str): The output variable name.
+            tma_index (sympy.Symbol): The symbol used for the original TMA index.
+            block_size (str): The block size of the index.
+            dim (int): Which dimension to project the index in.
+            num_dims (int): The total number of dimensions in the output.
+
+        Returns:
+            list[str]: The lines used to generate the index.
+
+        """
+        block_name = range_tree.symt.name
+        output_name = range_tree.name
+        assert output_name in ("xindex", "yindex"), "Unexpected index"
+        offset_name = "xoffset" if output_name == "xindex" else "yoffset"
+        # Generate the expected names for the structure:
+        # XBLOCK/YBLOCK and xoffset/yoffset. We append XBLOCK/YBLOCK
+        # to the top of the kernel so we can safely extract the tensor
+        # descriptor construction to the top of the kernel.
+        self.defines += f"{block_name}: tl.constexpr = {block_size}\n"
+        line0 = f"{offset_name} = {texpr(tma_index)}"
+        expr = f"({offset_name} + tl.arange(0, {block_name}))"
+        prefix_none = "".join(["None, "] * dim)
+        suffix_none = ", ".join(["None"] * (num_dims - (dim + 1)))
+        line1 = f"{output_name} = {expr}[{prefix_none}:, {suffix_none}]"
+        return [line0, line1]
+
+    def _generated_mask_for_tma(
+        self,
+        index_name: str,
+        shape_val: str,
+    ) -> str:
+        """
+        Generate the mask logic to feed to fusions for mask. The expectation
+        is that if we have X/Y there will be a variable named xmask and ymask.
+
+        Args:
+            index_name (str): The index used in the mask. Should be one of
+                xindex or yindex.
+            shape_val (str): The expression for the upper bound shape.
+
+        Returns:
+            str: The mask generation line.
+        """
+        assert index_name in ("xindex", "yindex"), "Unexpected index"
+        output_name = "xmask" if index_name == "xindex" else "ymask"
+        return f"{output_name} = {index_name} < {shape_val}"
+
     def store_output(
         self,
         indices: Union[list[Any], tuple[Any]],
@@ -1037,6 +1111,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
+            assert isinstance(val_shape, (type(None), list))
             assert self.template_mask is None
             indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
@@ -1045,26 +1120,81 @@ class TritonTemplateKernel(TritonKernel):
             ]
             assert len(indices) == len(lengths)
 
-            # glue to make generated code use same indexing from template
-            for name, range_tree_entry in zip(
-                indices, self.range_trees[0].construct_entries(lengths)
-            ):
-                range_tree_entry.set_name(name)
-            contiguous_index = sympy_dot(
-                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
-            )
-            contiguous_index = self.rename_indexing(contiguous_index)
-            self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-                "xindex"
-            )
-            self.template_mask = mask
+            output_layout = self.output_node.get_layout()
             self.template_out = val
-            self.template_indices = indices
-            output_index = self.output_node.get_layout().make_indexer()(index_symbols)
-            output_index = self.rename_indexing(output_index)
-            if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex", integer=True)
+            if self.tma_store:
+                assert val_shape, "TMA store requires passing in val_shape"
+                assert len(val_shape) == 2, "TMA only supports 2D data at this time"
+                assert not mask, "Mask is not supported with TMA"
+                output_index = index_symbols
+                # Generate the expected indexing symbols.
+                # Note: TMA indices are expected to be in the
+                # format (x, y), but the range_tree is always
+                # (yindex, xindex).
+                index_order = [1, 0]
+                intermediate_lines: list[str] = []
+                epilogue_index_symbols: list[sympy.Symbol] = []
+                for i, range_tree in zip(index_order, self.range_trees[:-1]):
+                    name = range_tree.name
+                    symbol = range_tree.symbol()
+                    epilogue_index_symbols.append(symbol)
+                    lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
+                    old_name = lookup_output.symbol()
+                    lookup_output.set_name(name)
+                    # Update var_list and var_range
+                    range_tree.var_list[range_tree.var_list.index(old_name)] = symbol
+                    range_val = range_tree.var_ranges[old_name]
+                    del range_tree.var_ranges[old_name]
+                    range_tree.var_ranges[symbol] = range_val
+
+                    intermediate_lines.extend(
+                        self._generate_index_from_tma_index(
+                            range_tree,
+                            output_index[i],
+                            val_shape[i],
+                            i,
+                            len(index_order),
+                        )
+                    )
+                    # Generate the xmask and ymask
+                    intermediate_lines.append(
+                        self._generated_mask_for_tma(name, self.size(None, i))
+                    )
+                    # Update the val_shape information to use consistent naming
+                    # after the remapping.
+                    val_shape[i] = range_tree.symt.name
+
+                # Reverse the index symbols because TMA is indexed
+                # as (x, y), not (y, x)
+                index_symbols = epilogue_index_symbols[::-1]
+                contiguous_index = sympy_dot(output_layout.stride, index_symbols)
+                output_index = contiguous_index
+
+                # Write out the intermediate lines
+                for line in intermediate_lines:
+                    self.body.writeline(line)
+            else:
+                # glue to make generated code use same indexing from template
+                for name, range_tree_entry in zip(
+                    indices, self.range_trees[0].construct_entries(lengths)
+                ):
+                    range_tree_entry.set_name(name)
+                contiguous_index = sympy_dot(
+                    ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+                )
+                contiguous_index = self.rename_indexing(contiguous_index)
+                self.body.writeline("xindex = " + texpr(contiguous_index))
+                self.range_trees[0].lookup(
+                    sympy.S.One, sympy_product(lengths)
+                ).set_name("xindex")
+                self.template_mask = mask
+                self.template_indices = indices
+                output_index = self.output_node.get_layout().make_indexer()(
+                    index_symbols
+                )
+                output_index = self.rename_indexing(output_index)
+                if output_index == contiguous_index:
+                    output_index = sympy.Symbol("xindex", integer=True)
 
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1087,6 +1217,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.output_node.get_name(),
                 output_index,
                 self.epilogue_fn(*epilogue_args),
+                mode="tma" if self.tma_store else None,
             )
             self.codegen_body()
 
@@ -1322,6 +1453,7 @@ class GeneratedCodeCache:
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
         epilogue_fn_hash: Optional[str],
+        tma_store: bool,
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1378,6 +1510,7 @@ class GeneratedCodeCache:
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
+                "tma_store": tma_store,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
             }
@@ -1487,6 +1620,7 @@ class TritonTemplate(KernelTemplate):
         kwargs: dict[str, Any],
         generate_with_caching,
         hint_override: Optional[int] = None,
+        tma_store: bool = False,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1505,6 +1639,7 @@ class TritonTemplate(KernelTemplate):
                 suffix_args,
                 epilogue_fn,
                 epilogue_fn_hash,
+                tma_store,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1564,6 +1699,7 @@ class TritonTemplate(KernelTemplate):
                 workspace_arg=workspace_arg,
                 use_jit=False,
                 hint_override=hint_override,
+                tma_store=tma_store,
                 **kernel_options,
             )
 
@@ -1684,6 +1820,7 @@ class TritonTemplate(KernelTemplate):
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
         hint_override: Optional[int] = None,
+        tma_store: bool = False,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -1729,6 +1866,7 @@ class TritonTemplate(KernelTemplate):
             kwargs,
             generate_with_caching and self._cache_codegen_enabled_for_template,
             hint_override=hint_override,
+            tma_store=tma_store,
         )
 
         # May happen as result of dev by 0.
@@ -1782,6 +1920,7 @@ class TritonTemplate(KernelTemplate):
                 workspace_arg=workspace_arg,
                 use_jit=False,
                 hint_override=hint_override,
+                tma_store=tma_store,
                 **options,
             )
             render = functools.partial(
