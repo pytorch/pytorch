@@ -655,12 +655,10 @@ class TestDTensorOps(DTensorOpTestBase):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
         assert len(ops) == 1
         op = ops[0]
-        # num_classes = -1 appears to have a bug with dtensor.max().item()
         self.run_opinfo_test(
             torch.int64,
             op,
             requires_grad=False,
-            sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
         )
 
 

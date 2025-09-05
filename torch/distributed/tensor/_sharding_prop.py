@@ -25,6 +25,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.distributed.tensor.placement_types import Replicate
 
 
 aten = torch.ops.aten
@@ -335,7 +336,25 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
-            return OutputSharding(None, op_schema)
+            # Need to Replicate() the input before calling .item() on the local tensor,
+            # to resolve any Partial(...) placements.
+            arg_spec = op_schema.args_spec[0]
+            placements = arg_spec.placements
+            return OutputSharding(
+                None,
+                OpSchema(
+                    op_schema.op,
+                    (
+                        DTensorSpec(
+                            arg_spec.mesh,
+                            tuple(Replicate() for _ in range(len(placements))),
+                            arg_spec.tensor_meta,
+                        ),
+                    ),
+                    {},
+                ),
+                needs_redistribute=True,
+            )
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
