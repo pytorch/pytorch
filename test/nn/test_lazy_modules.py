@@ -742,6 +742,48 @@ class TestLazyModules(TestCase):
         input_shape_vid = (batch_size, 7, 5, 10, 10)
         self._check_lazy_layer_norm_pickle(input_shape_vid)
 
+    def _check_lazy_layer_norm_norm_state(
+        self, normalized_shape: tuple[int, ...]
+    ) -> None:
+        start_dim = len(normalized_shape)
+
+        for bias in [True, False]:
+            module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
+            lazy_module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=True, bias=bias
+            )
+
+            lazy_module.load_state_dict(module.state_dict())
+            # Parameters have been initialized but the module won't become a full
+            # GroupNorm one until the first iteration. This is due to
+            # limitations on the state_dict loading logic
+            self.assertFalse(lazy_module.has_uninitialized_params())
+            self.assertIsInstance(lazy_module, nn.LazyLayerNorm)
+
+            self.assertEqual(lazy_module.weight.shape, normalized_shape)
+
+            if bias:
+                self.assertEqual(lazy_module.bias.shape, normalized_shape)
+
+            module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
+            lazy_module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=True, bias=bias
+            )
+            with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
+                module.load_state_dict(lazy_module.state_dict())
+
+    def test_lazy_layer_norm_norm_state(self) -> None:
+        batch_size = 10
+
+        input_shape_seq = (batch_size, 5, 10)
+        self._check_lazy_layer_norm_norm_state(input_shape_seq)
+
+        input_shape_img = (batch_size, 5, 7, 7)
+        self._check_lazy_layer_norm_norm_state(input_shape_img)
+
+        input_shape_vid = (batch_size, 7, 5, 10, 10)
+        self._check_lazy_layer_norm_norm_state(input_shape_vid)
+
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
