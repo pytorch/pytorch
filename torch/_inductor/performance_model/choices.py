@@ -6,8 +6,6 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 import torch._inductor.config as config
 
 from ..choices import InductorChoices
-from ..kernel_template_choice import make_ktc_generator
-from ..template_heuristics.registry import get_template_heuristic
 from .core import predict_and_filter_choices
 from .registry import get_model_function_for_key
 
@@ -16,7 +14,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from ..codegen.common import KernelTemplate
-    from ..ir import Layout
     from ..kernel_inputs import KernelInputs
     from ..kernel_template_choice import KernelTemplateChoice
     from ..select_algorithm import ExternKernelChoice
@@ -34,7 +31,6 @@ class PerformanceModelChoices(InductorChoices):
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
         kwarg_overrides: dict[str, dict[str, Any]],
     ) -> tuple[list[KernelTemplateChoice], int]:
@@ -68,7 +64,8 @@ class PerformanceModelChoices(InductorChoices):
             # Actualize original generator to count size
             original_choices = list(generator)
             original_sizes += len(original_choices)
-            if model_function is not None:
+            if model_function is not None and len(original_choices) > 0:
+                c0 = original_choices[0]
                 log.debug(
                     "Performance model found for template_id=%r op_name=%r, expanding search space",
                     template_uid,
@@ -78,41 +75,17 @@ class PerformanceModelChoices(InductorChoices):
                 # Create exhaustive generator by patching config
                 with config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
                     # Get the template heuristic for exhaustive generation
-                    assert kernel_inputs.device_type is not None, "device_type is None"
-                    heuristic = get_template_heuristic(
-                        template_uid, kernel_inputs.device_type, op_name
-                    )
-
-                    # Get exhaustive configs from heuristic
-                    exhaustive_configs = heuristic.get_template_configs(
+                    exhaustive_ktc = self.get_ktc(
                         kernel_inputs,
-                        layout,
+                        c0.template,
                         op_name,
+                        kwarg_overrides=kwarg_overrides.get(template_uid, {}),
                     )
-                    # Create new generator with exhaustive configs
-                    # Need to reconstruct the template and other args from original choices
-                    if original_choices:
-                        # Extract template and kwargs from first choice
-                        first_choice = original_choices[0]
-                        template = first_choice.template
-                        extra_kwargs = first_choice.extra_kwargs
-                        # Create new generator with exhaustive configs
-                        overrides = kwarg_overrides.get(template_uid, {})
-                        # Add exhaustive choices directly to the list
-                        all_choices.extend(
-                            make_ktc_generator(
-                                template=template,
-                                cs=exhaustive_configs,
-                                overrides=overrides,
-                                extra_kwargs=extra_kwargs,
-                                layout=layout,
-                                inputs=kernel_inputs,
-                            )
-                        )
+                    all_choices.extend(exhaustive_ktc)
 
             else:
                 log.debug(
-                    "No performance model found for template_id=%r op_name=%r, keeping original search space",
+                    "No performance model found for template_id=%r op_name=%r, or not choices in original search space keeping original search space",
                     template_uid,
                     op_name,
                 )
@@ -121,11 +94,10 @@ class PerformanceModelChoices(InductorChoices):
 
         return all_choices, original_sizes
 
-    def _adjust_mm_configs(
+    def _finalize_mm_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        layout: Layout,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
@@ -159,10 +131,9 @@ class PerformanceModelChoices(InductorChoices):
             )
             enabled = False
         if not enabled:
-            return super()._adjust_mm_configs(
+            return super()._finalize_mm_configs(
                 template_choices,
                 kernel_inputs,
-                layout,
                 templates,
                 op_name,
                 kwarg_overrides,
@@ -170,7 +141,7 @@ class PerformanceModelChoices(InductorChoices):
         # Expand template choices using performance model logic
         kwarg_overrides = kwarg_overrides or {}
         actualized_choices, original_sizes = self._expand(
-            template_choices, kernel_inputs, layout, op_name, kwarg_overrides
+            template_choices, kernel_inputs, op_name, kwarg_overrides
         )
 
         # Handle topk normalization: if topk == -1, set to total original size

@@ -766,9 +766,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         templates_to_use.append(mm_contiguous_subgraph_template)
 
     # Single unified call for all non-autoheuristic templates
-    choices.extend(
-        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, "mm")
-    )
+    choices.extend(V.choices.get_mm_configs(kernel_inputs, templates_to_use, "mm"))
 
     if (
         is_nonzero
@@ -808,7 +806,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 # mm-extra is a hack to keep the ah functionality alive
                 # while we transition to the unified kwargs retrieval
                 kernel_inputs,
-                layout,
                 [mm_template],
                 "mm-ah",
             )
@@ -897,9 +894,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         templates_to_use.append(mm_template)
 
     # Single unified call for all templates
-    choices.extend(
-        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
-    )
+    choices.extend(V.choices.get_mm_configs(kernel_inputs, templates_to_use, name))
 
     if use_cutlass and _use_cutlass_for_op(name):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -952,9 +947,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(addmm_contiguous_subgraph_template)
 
     # Single unified call for all templates
-    choices.extend(
-        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
-    )
+    choices.extend(V.choices.get_mm_configs(kernel_inputs, templates_to_use, name))
 
     if (
         is_nonzero
@@ -1141,7 +1134,6 @@ def tuned_scaled_mm(
     choices.extend(
         V.choices.get_mm_configs(
             kernel_inputs,
-            layout,
             templates_to_use,
             name,
             kwarg_overrides=kwarg_overrides,

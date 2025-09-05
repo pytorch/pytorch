@@ -16,8 +16,6 @@ from .registry import register_template_heuristic
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    import torch
-
     from ..kernel_inputs import KernelInputs
 
 
@@ -42,7 +40,6 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        out_dtype: torch.dtype,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         yield dict()
@@ -56,10 +53,9 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
-        out_dtype: torch.dtype,
         op_name: str,
     ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, out_dtype, op_name)
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         alpha = kernel_inputs.get_scalar("alpha")
         beta = kernel_inputs.get_scalar("beta")
         return {
@@ -104,7 +100,6 @@ class ATenBiasAddMMConfigHeuristics(
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        out_dtype: torch.dtype,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         nodes = kernel_inputs.nodes()
