@@ -470,7 +470,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if guard_or_false(sym_and(x == 1, y == 1)):
                 pass
             elif guard_or_false(sym_or(x == 1, y == 1)):
-                # assume braodcasting.
+                # assume broadcasting.
                 return True
 
             # u0==u1 assume the same, no broadcasting!
