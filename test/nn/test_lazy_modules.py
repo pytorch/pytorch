@@ -743,10 +743,8 @@ class TestLazyModules(TestCase):
         self._check_lazy_layer_norm_pickle(input_shape_vid)
 
     def _check_lazy_layer_norm_norm_state(
-        self, normalized_shape: tuple[int, ...]
+        self, normalized_shape: tuple[int, ...], start_dim: int
     ) -> None:
-        start_dim = len(normalized_shape)
-
         for bias in [True, False]:
             module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
             lazy_module = nn.LazyLayerNorm(
@@ -773,16 +771,14 @@ class TestLazyModules(TestCase):
                 module.load_state_dict(lazy_module.state_dict())
 
     def test_lazy_layer_norm_norm_state(self) -> None:
-        batch_size = 10
+        normalized_shape = (5, 10)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -2)
 
-        input_shape_seq = (batch_size, 5, 10)
-        self._check_lazy_layer_norm_norm_state(input_shape_seq)
+        normalized_shape = (5, 7, 7)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -3)
 
-        input_shape_img = (batch_size, 5, 7, 7)
-        self._check_lazy_layer_norm_norm_state(input_shape_img)
-
-        input_shape_vid = (batch_size, 7, 5, 10, 10)
-        self._check_lazy_layer_norm_norm_state(input_shape_vid)
+        normalized_shape = (7, 5, 10, 10)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -4)
 
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
