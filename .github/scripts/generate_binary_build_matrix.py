@@ -330,13 +330,14 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13t on cpu-s390x
-            if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
-                continue
             # TODO: Enable python 3.14 for rest
-            if os not in ["linux", "linux-aarch64", "macos-arm64", "windows"] and (
-                python_version == "3.14" or python_version == "3.14t"
-            ):
+            if os not in [
+                "linux",
+                "linux-aarch64",
+                "linux-s390x",
+                "macos-arm64",
+                "windows",
+            ] and (python_version == "3.14" or python_version == "3.14t"):
                 continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
