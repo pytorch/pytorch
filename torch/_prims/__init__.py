@@ -1425,7 +1425,7 @@ def _collapse_view_helper(
             )  # type: ignore[assignment]
 
             # early exit if we already know its invalid.
-            if guard_or_false(torch.sym_not(valid_op)):
+            if guard_or_false(valid_op is False):
                 if must_be_valid:
                     torch._check(valid_op, lambda: must_be_valid)
                 else:
