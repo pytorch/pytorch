@@ -1552,6 +1552,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 namespace {
   void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
+    // Checks scales for 2d or 3d target tensors (`mat`).
     if (mat.dim() == 2) {
       TORCH_CHECK(
           scale.dim() == 1,
@@ -1565,7 +1566,7 @@ namespace {
           scale.size(0) == mat.size(dim) * scale_multiplier,
           "scale must have the same length as mat for arg ",
           arg_idx);
-    } else if (mat.dim() == 3) {
+    } else {
       TORCH_CHECK(
           scale.dim() == 2,
           "scale must be a 2D tensor, but got ",
@@ -1584,12 +1585,11 @@ namespace {
           scale.size(1) == mat.size(1 + dim),
           "scale must have the same first dimension as mat for arg ",
           arg_idx);
-    } else {
-      TORCH_CHECK(false, "mat must be 2D or 3D, but got ", mat.dim(), "D for arg ", arg_idx);
     }
   }
 
   void _check_scales_mxfp8(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+    // Checks scales for 2d or 3d target tensors (`mat`).
     if (mat.dim() == 2) {
       // For MXFP8, 2d tensors have variable size groups represented as subtensors,
       // that are converted to blocked padded format individually,
@@ -1608,7 +1608,7 @@ namespace {
           scale.size(scale_dim_to_check) >= mat.size(mat_dim_to_check),
           "for mxfp8, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
           "must have scale.shape[", scale_dim_to_check, "] >= ", mat.size(mat_dim_to_check), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
-    } else if (mat.dim() == 3) {
+    } else {
       // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
       // so we can check the exact expected scale sizes here without a d2h sync.
       auto round_up = [](auto x, auto y) {
@@ -1632,8 +1632,6 @@ namespace {
         scale.size(0) == G && scale.size(1) == blocked_scale_K * blocked_scale_N,
         "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
       );
-    } else {
-      TORCH_CHECK(false, "mat must be 2D or 3D, but got ", mat.dim(), "D for arg ", arg_idx);
     }
   }
 
