@@ -256,42 +256,43 @@ endif()
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
   set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
-
   if(USE_CUDA)
-    # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
-    # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
-    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
-    file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
-    list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
+    if("$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0")
+      # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
+      # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
+      set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
+      file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
+        "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
+        "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
+      list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
 
-    file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
-      "${FBGEMM_GENAI_SRCS}/common/*.cpp"
-    )
+      file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
+        "${FBGEMM_GENAI_SRCS}/common/*.cpp"
+      )
 
-    # Combine all source files into a single list
-    list(APPEND fbgemm_genai_all_sources
-      ${fbgemm_genai_native_cuda_cu}
-      ${fbgemm_genai_native_cuda_cpp}
-    )
+      # Combine all source files into a single list
+      list(APPEND fbgemm_genai_all_sources
+        ${fbgemm_genai_native_cuda_cu}
+        ${fbgemm_genai_native_cuda_cpp}
+      )
 
-    # Now, create the library and provide the sources at the same time
-    add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
+      # Now, create the library and provide the sources at the same time
+      add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
 
-    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    set(fbgemm_genai_mx8mx8bf16_grouped
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
-    )
+      set(fbgemm_genai_mx8mx8bf16_grouped
+        "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+      )
 
-    target_include_directories(fbgemm_genai PUBLIC
-      ${FBGEMM_THIRD_PARTY}/cutlass/include
-      ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${fbgemm_genai_mx8mx8bf16_grouped}
-      ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
-      ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
-    )
+      target_include_directories(fbgemm_genai PUBLIC
+        ${FBGEMM_THIRD_PARTY}/cutlass/include
+        ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+        ${fbgemm_genai_mx8mx8bf16_grouped}
+        ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
+        ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
+      )
+    endif()
   else()
     if(USE_ROCM)
       # Only include the kernels we want to build to avoid increasing binary size.
