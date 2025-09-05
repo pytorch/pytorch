@@ -1377,6 +1377,20 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "_make_dtensor": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_dtensor",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt]",
+                        "local_tensor: Tensor",
+                        "requires_grad: _bool",
+                    ],
+                    "S",
+                )
+            ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
             "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
             "__setitem__": [
@@ -1885,8 +1899,15 @@ def main() -> None:
         default=".",
         help="path to output directory",
     )
+    parser.add_argument(
+        "--template-dir",
+        default=".",
+        help="path to template directory",
+    )
     args = parser.parse_args()
-    fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
+    fm = FileManager(
+        install_dir=args.out, template_dir=args.template_dir, dry_run=False
+    )
     gen_pyi(
         args.native_functions_path,
         args.tags_path,
