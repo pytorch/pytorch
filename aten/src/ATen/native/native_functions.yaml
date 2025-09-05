@@ -288,6 +288,7 @@
   dispatch:
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
+    MPS: native_dropout_mps
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: native_dropout_nested
   tags: [nondeterministic_seeded, core]
   autogen: native_dropout.out
@@ -296,6 +297,7 @@
   dispatch:
     CPU, NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: native_dropout_backward
     CUDA: native_dropout_backward_cuda
+    MPS: native_dropout_backward_mps
   autogen: native_dropout_backward.out
   tags: pointwise
 

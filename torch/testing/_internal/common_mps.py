@@ -340,7 +340,6 @@ if torch.backends.mps.is_available():
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
-            "native_dropout_backward": None,
             "normnuc": None,
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
