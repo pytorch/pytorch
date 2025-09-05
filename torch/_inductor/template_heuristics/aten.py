@@ -79,15 +79,16 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         nodes = kernel_inputs.nodes()
         max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
         if op_name == "addmm" and not max_autotune:
-            inp_unexpanded = kernel_inputs.views().get("inp_unexpanded")
-            assert inp_unexpanded is not None, (
-                f"inp_unexpanded needs to be available for {op_name}"
-            )
-            nodes = [inp_unexpanded, *nodes[1:]]
+            from ..ir import ReinterpretView
+
+            inp = nodes[0]
+            if isinstance(inp, ReinterpretView):
+                # remove the view
+                inp_unexpanded = inp.data
+                nodes = [inp_unexpanded, *nodes[1:]]
         return MMKernelInputs(
             nodes,
             scalars=kernel_inputs.scalars(),
-            views=kernel_inputs.views(),
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
         )

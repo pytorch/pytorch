@@ -29,28 +29,20 @@ class KernelInputs(ABC):
         input_nodes: list[Any],
         scalars: Optional[dict[str, Union[float, int]]] = None,
         out_dtype: Optional[torch.dtype] = None,
-        views: Optional[dict[str, Any]] = None,
     ):
         """
         Initialize with a tuple of input nodes.
 
         You can use scalars to propagate through scalar values that are not nodes
 
-        You can use views if some templates/ops need specific nodes to be different
-        views of some of the input_nodes. It is your responsibility to manage this
-        correctly inside the heuristic e.g. through adjust_kernel_inputs
-
         Args:
             input_nodes: A tuple of input nodes to store
             out_dtype: Optional output dtype to store
             scalars: Optional dictionary of scalar values
                 e.g. {'alpha': 0.5}
-            views: Optional dictionary of view information
-                e.g. {'inp_unexpanded': inp}
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
-        self._views = views if views is not None else {}
         self._scalars = scalars if scalars is not None else {}
         self._out_dtype = out_dtype
         assert len(input_nodes) > 0, "Expected at least one input node"
@@ -72,15 +64,6 @@ class KernelInputs(ABC):
             f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
         )
         return [self._input_nodes[i] for i in reorder]
-
-    def views(self) -> dict[str, Any]:
-        """
-        Return the stored view information.
-
-        Returns:
-            The dictionary of view information
-        """
-        return self._views
 
     @property
     def count(self) -> int:
@@ -248,7 +231,6 @@ class MMKernelInputs(KernelInputs):
         input_nodes: list[Any],
         scalars: Optional[dict[str, Union[float, int]]] = None,
         out_dtype: Optional[torch.dtype] = None,
-        views: Optional[dict[str, Any]] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):
@@ -258,7 +240,7 @@ class MMKernelInputs(KernelInputs):
         By default, we assume the last 2 input nodes are mat1 and mat2, but
         the caller can adjust when necessary
         """
-        super().__init__(input_nodes, scalars, out_dtype, views)
+        super().__init__(input_nodes, scalars, out_dtype)
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
