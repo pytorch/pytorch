@@ -1530,6 +1530,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             else:
                 kernel._cubin_path = cubin_location
 
+            static_kernel = StaticallyLaunchedCudaKernel(kernel)
             try:
                 static_kernel = StaticallyLaunchedCudaKernel(kernel)
             except NotImplementedError as e:
