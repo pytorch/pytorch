@@ -2299,6 +2299,7 @@ class PythonWrapperCodegen(CodeGen):
                         "config": config_to_dict(cfg),
                         "python": [*map(pexpr, grid)],
                         "cpp": [*map(cexpr, grid)],
+                        "python_slow": [*map(pexpr, grid)],
                     }
                 )
             inductor_meta = {
