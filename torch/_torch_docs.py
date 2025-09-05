@@ -5555,26 +5555,48 @@ Example::
 add_docstr(
     torch.is_floating_point,
     r"""
-is_floating_point(input) -> (bool)
+is_floating_point(input: Tensor) -> bool
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
 one of ``torch.float64``, ``torch.float32``, ``torch.float16``, and ``torch.bfloat16``.
 
 Args:
     {input}
+
+Example::
+
+    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0]))
+    True
+    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.int32))
+    False
+    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
+    True
+    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.complex64))
+    False
 """.format(**common_args),
 )
 
 add_docstr(
     torch.is_complex,
     r"""
-is_complex(input) -> (bool)
+is_complex(input: Tensor) -> bool
 
 Returns True if the data type of :attr:`input` is a complex data type i.e.,
 one of ``torch.complex64``, and ``torch.complex128``.
 
 Args:
     {input}
+
+Example::
+
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex64))
+    True
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex128))
+    True
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.int32))
+    False
+    >>> torch.is_complex(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
+    False
 """.format(**common_args),
 )
 

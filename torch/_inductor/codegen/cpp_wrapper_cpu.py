@@ -1695,6 +1695,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
             )
+            self.wrapper_call.writeline(
+                f"wrap_with_raii_handle_if_needed({old_handle_name});"
+            )
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
