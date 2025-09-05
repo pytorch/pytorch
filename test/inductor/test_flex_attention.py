@@ -30,12 +30,12 @@ from torch.nn.attention.flex_attention import (
     _score_mod_signature,
     _WARNINGS_SHOWN,
     and_masks,
+    AuxOutput,
+    AuxRequest,
     BlockMask,
     create_block_mask,
     flex_attention,
     flex_attention_hop,
-    FlexAttentionAuxOutput,
-    FlexAttentionAuxRequest,
     noop_mask,
     or_masks,
 )
@@ -1987,14 +1987,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(max_scores=True),
+            return_aux=AuxRequest(max_scores=True),
         )
         out_both, aux_both = flex_attention(
             query,
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(lse=True, max_scores=True),
+            return_aux=AuxRequest(lse=True, max_scores=True),
         )
 
         flex_compile = torch.compile(flex_attention, fullgraph=True)
@@ -2003,7 +2003,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(max_scores=True),
+            return_aux=AuxRequest(max_scores=True),
         )
 
         torch.testing.assert_close(out_only, out_max, atol=1e-6, rtol=1e-6)
@@ -2065,7 +2065,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @skip_on_cpu
     def test_return_aux(self, device, dtype, score_mod):
-        """Test the new return_aux API with FlexAttentionAuxRequest/Output"""
+        """Test the new return_aux API with AuxRequest/Output"""
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 243, 16),
@@ -2084,9 +2084,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # Test 2: Request only LSE
         out, aux_lse = flex_compile(
-            query, key, value, score_mod, return_aux=FlexAttentionAuxRequest(lse=True)
+            query, key, value, score_mod, return_aux=AuxRequest(lse=True)
         )
-        self.assertIsInstance(aux_lse, FlexAttentionAuxOutput)
+        self.assertIsInstance(aux_lse, AuxOutput)
         self.assertIsInstance(aux_lse.lse, torch.Tensor)
         self.assertIsNone(aux_lse.max_scores)
         self.assertEqual(aux_lse.lse.shape, (2, 2, 243))
@@ -2098,9 +2098,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(max_scores=True),
+            return_aux=AuxRequest(max_scores=True),
         )
-        self.assertIsInstance(aux_max, FlexAttentionAuxOutput)
+        self.assertIsInstance(aux_max, AuxOutput)
         self.assertIsNone(aux_max.lse)
         self.assertIsInstance(aux_max.max_scores, torch.Tensor)
         self.assertEqual(aux_max.max_scores.shape, (2, 2, 243))
@@ -2112,9 +2112,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(lse=True, max_scores=True),
+            return_aux=AuxRequest(lse=True, max_scores=True),
         )
-        self.assertIsInstance(aux_both, FlexAttentionAuxOutput)
+        self.assertIsInstance(aux_both, AuxOutput)
         self.assertIsInstance(aux_both.lse, torch.Tensor)
         self.assertIsInstance(aux_both.max_scores, torch.Tensor)
         self.assertEqual(aux_both.lse.shape, (2, 2, 243))
@@ -2126,9 +2126,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             key,
             value,
             score_mod,
-            return_aux=FlexAttentionAuxRequest(),  # Default is lse=False, max_scores=False
+            return_aux=AuxRequest(),  # Default is lse=False, max_scores=False
         )
-        self.assertIsInstance(aux_none, FlexAttentionAuxOutput)
+        self.assertIsInstance(aux_none, AuxOutput)
         self.assertIsNone(aux_none.lse)
         self.assertIsNone(aux_none.max_scores)
 
@@ -2181,7 +2181,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     key,
                     value,
                     return_lse=True,
-                    return_aux=FlexAttentionAuxRequest(lse=True),
+                    return_aux=AuxRequest(lse=True),
                 )
             self.assertIn(
                 "Cannot specify both return_lse and return_aux", str(cm.exception)
