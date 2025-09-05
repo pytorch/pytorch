@@ -6494,6 +6494,14 @@ class MutationOutput(Buffer):
     def should_allocate(self) -> bool:
         return False
 
+    def get_mutation_buffers(self) -> Sequence[IRNode]:
+        mutation_names = self.get_mutation_names()
+        return [
+            buf
+            for buf in (V.graph.try_get_buffer(name) for name in mutation_names)
+            if buf is not None
+        ]
+
 
 class TMADescriptor(ExternKernel):
     """
