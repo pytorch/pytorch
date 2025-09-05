@@ -12,6 +12,7 @@ from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -38,8 +39,8 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
 # TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
 # by either adding specific register_template_heuristic tags, or setting the
 # device to None (enabled on all devices)
-class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
-    def get_template_configs(
+class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,

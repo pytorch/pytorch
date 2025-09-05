@@ -165,7 +165,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                 **extra_kwargs,
             )
 
-    if use_triton_template(layout1):
+    if use_triton_template(layout1, check_max_autotune=False):
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"

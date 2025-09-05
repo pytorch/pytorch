@@ -32,7 +32,7 @@ from ..utils import (
     using_b200,
 )
 from ..virtualized import V
-from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -1417,7 +1417,7 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-class MMTemplateConfigMixin(TemplateConfigHeuristics):
+class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
     This handles the logic that was previously in choices.get_mm_configs.
@@ -1448,7 +1448,7 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         else:
             return self.get_mm_configs()
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1466,6 +1466,7 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
         if not self._valid(kernel_inputs):
             return
+
         # Extract M, N, K from kernel_inputs
         m, n, k = kernel_inputs.mnk_symbolic()
 
@@ -1593,7 +1594,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1614,8 +1615,10 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
-            kernel_inputs, layout, op_name
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            layout,
+            op_name,
         ):
             yield {**template_kwargs, **tma_opts}
 
@@ -1661,7 +1664,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes, mat1_idx=kernel_inputs._mat1_idx, mat2_idx=kernel_inputs._mat2_idx
         )
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1713,7 +1716,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return
 
         # Get base template configs from superclass
-        for template_kwargs in super().get_template_configs(
+        for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, layout, op_name
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
@@ -1769,7 +1772,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
@@ -1779,8 +1782,10 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         Generate scaled TMA template configs with both scaled MM and TMA-specific options.
         """
         # Get base scaled MM template configs from superclass
-        for template_kwargs in super().get_template_configs(
-            kernel_inputs, layout, op_name
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            layout,
+            op_name,
         ):
             # Add TMA-specific options for device TMA scaled MM
             template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE

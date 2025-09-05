@@ -8,6 +8,7 @@ from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
 from ..kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
     If you want to use this with an ATen choice that has kwargs, just subclass
     """
 
-    def get_template_configs(
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
@@ -68,17 +69,15 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
 
 
 @register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")
-class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
-    def get_template_configs(
+class ATenBiasAddMMConfigHeuristics(
+    ATenAddMMConfigHeuristics, GemmMaxAutotuneTemplateConfigHeuristics
+):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
-        if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
-            # NOTE: this preserves the original logic that if there is not max-autotune
-            # then we skip bias_addmm
-            return
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]

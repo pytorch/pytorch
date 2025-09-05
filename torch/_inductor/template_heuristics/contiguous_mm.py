@@ -12,6 +12,7 @@ from ..kernel.mm import (
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import use_contiguous
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -41,8 +42,8 @@ class EmptyContiguousMMConfigHeuristics(TemplateConfigHeuristics):
     register=torch.version.hip is not None,
     op_name="addmm",
 )
-class ContiguousMMHeuristics(TemplateConfigHeuristics):
-    def get_template_configs(
+class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
@@ -54,7 +55,6 @@ class ContiguousMMHeuristics(TemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs), (
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
-
         # Check for unbacked symbols - if found, yield nothing
         unbacked_symbols = any(
             len(get_free_symbols(itr, unbacked_only=True)) > 0
