@@ -471,7 +471,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc_python(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python mode
+        Test the dynamic launch grid calculation for Triton kernel wrapper using python mode
         """
         func = torch.add
         args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
@@ -493,7 +493,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc_python_slow(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python_slow mode
+        Test the dynamic launch grid calculation for Triton kernel wrapper using python_slow mode
         """
         from torch._inductor.runtime.triton_heuristics import GridExpr
 

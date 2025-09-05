@@ -214,7 +214,7 @@ class TestQuantizedOps(TestCase):
             `output_is_observed`: if specified and is True, we'll append extra
              output_scale/output_zero_point keyword argument when calling quantized op
         """
-        # Retrives the default parameters from X.
+        # Retrieves the default parameters from X.
         X, (scale, zero_point, torch_type) = X
         if not isinstance(X, torch.Tensor):
             X = torch.from_numpy(X)
@@ -2152,7 +2152,7 @@ class TestQuantizedOps(TestCase):
 
         test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
         k = 2
-        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+        for x_dim, side, dim, large, sort, dtype, nhwc in test_cases:
             if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
                 continue
             if dim >= x_dim:  # Dimension to find top-k for should exist
@@ -2165,12 +2165,12 @@ class TestQuantizedOps(TestCase):
                 qX = qX.permute([0, 3, 1, 2])
                 X = np.transpose(X, [0, 3, 1, 2])
 
-            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=large, sorted=sort)
 
             values = torch.quantize_per_tensor(X, scale, zp, dtype)
             indices = torch.tensor(X).long()
 
-            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
+            quantized_out = torch.topk(qX, k, dim=dim, largest=large, sorted=sort)
 
             assert len(unquantized_out) == len(quantized_out)
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
@@ -3573,7 +3573,7 @@ class TestDynamicQuantizedOps(TestCase):
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
         # We are not using opcheck over here because the output for the op we're testing
         # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
-        # due to the C-struct it's procuding. This would fail the check when we're trying
+        # due to the C-struct it's producing. This would fail the check when we're trying
         # to match the result between compiled and eager version.
         #
         # This is only a temporary solution, long term, we should be able to support PT2
@@ -5561,7 +5561,7 @@ class TestQuantizedConv(TestCase):
         )
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -5642,7 +5642,7 @@ class TestQuantizedConv(TestCase):
         )
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -5953,7 +5953,7 @@ class TestQuantizedConv(TestCase):
             "out_channel:", out_channel,
             "kernel_size:", kernel_size,
             "height:", height,
-            "widht:", width
+            "width:", width
         )
         conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
         input = torch.randn((batch_size, in_channel, height, width), device='cuda')
@@ -6073,7 +6073,7 @@ class TestQuantizedConv(TestCase):
             )
 
             act_qdtypes = [torch.quint8]
-            # Only qnnpack qengine supportes qint8
+            # Only qnnpack qengine supports qint8
             if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
                 act_qdtypes.append(torch.qint8)
 
@@ -6199,7 +6199,7 @@ class TestQuantizedConv(TestCase):
             bias=use_bias
         )
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -6504,7 +6504,7 @@ class TestQuantizedConv(TestCase):
         qconv = torch.ops.quantized.conv1d
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -6575,7 +6575,7 @@ class TestQuantizedConv(TestCase):
         qconv = torch.ops.quantized.conv1d_relu
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 

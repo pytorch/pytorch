@@ -167,7 +167,7 @@ print(f"Device of z: {z.device}")
   - Device-agnostic APIs
   - Memory Management
   - Generator
-  - Distrubuted
+  - Distributed
   - Custom Tensor&Storage
   - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.
