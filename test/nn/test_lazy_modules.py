@@ -745,6 +745,8 @@ class TestLazyModules(TestCase):
     def _check_lazy_layer_norm_norm_state(
         self, normalized_shape: tuple[int, ...], start_dim: int
     ) -> None:
+        # Note the value of start dim doesn't matter in this test as the parameter shape
+        #  is determent by normalized_shape of the LayerNorm
         for bias in [True, False]:
             module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
             lazy_module = nn.LazyLayerNorm(
