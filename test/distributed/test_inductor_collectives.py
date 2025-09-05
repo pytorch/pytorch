@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
     TEST_XPU,
     xfailIf,
@@ -269,7 +268,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
