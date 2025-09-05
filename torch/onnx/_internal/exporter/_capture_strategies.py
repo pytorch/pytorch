@@ -280,7 +280,7 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
         )
 
 
-CAPTURE_STRATEGIES: tuple[CaptureStrategy, ...] = (
+CAPTURE_STRATEGIES: tuple[type[CaptureStrategy], ...] = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrictStrategy,
 )
