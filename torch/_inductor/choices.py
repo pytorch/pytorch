@@ -30,14 +30,14 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from torch.utils._ordered_set import OrderedSet
-
     from triton import Config as TritonConfig
+
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
-    from .ir import ChoiceCaller
+    from .ir import ChoiceCaller, Layout
     from .kernel_template_choice import KernelTemplateChoice
     from .select_algorithm import ExternKernelChoice
 
@@ -105,7 +105,7 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _adjust_mm_configs(
+    def _finalize_mm_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -118,7 +118,7 @@ class InductorChoices:
         This method can be subclassed to perform any override/modification of the choices.
         The incoming parameters are cheap (generators), so you can do any overrides without
         incurring too much cost. Override this method to customize the kernel template choices
-        before they are converted to ChoiceCaller objects.
+        before they are converted to ChoiceCaller objects, which is expensive on template codegen.
 
         The full list of arguments are here to facilitate any overrides you may want to do,
         as they can be used to start from scratch for each template if so desired.
@@ -138,6 +138,48 @@ class InductorChoices:
         for choice_gen in template_choices.values():
             choices.extend(choice_gen)
         return choices
+
+    def get_ktc(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        template: Union[KernelTemplate, ExternKernelChoice],
+        op_name: str,
+        kwarg_overrides: Optional[dict[str, Any]] = None,
+    ) -> Generator[KernelTemplateChoice, None, None]:
+        """
+        Utility to get the KernelTemplateChoice generator for a specific input.
+
+        This is a per template/op call, whereas get_mm_configs is an op wide call (all templates).
+        Consider when overriding/using at which level you need to make decisions
+        """
+        # Extract device_type from kernel_inputs
+        device_type = kernel_inputs.device_type
+        assert device_type is not None, "get_mm_configs requires a valid device type"
+        # Extract template_name from the template object
+        template_name = template.uid
+
+        # Get the appropriate template-specific heuristic
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
+        cs = heuristic.get_template_configs(
+            kernel_inputs,
+            layout,
+            op_name,
+        )
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+        # adjust the kernel inputs to the template-specific heuristic, if needed
+        # default here is to just return the kernel_inputs as is
+        inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
+        # Create KernelTemplateChoice generator using the moved function
+        overrides = kwarg_overrides or {}
+        return make_ktc_generator(
+            template=template,
+            cs=cs,
+            overrides=overrides,
+            extra_kwargs=extra_kwargs,
+            layout=layout,
+            inputs=inputs_val,
+        )
 
     def get_mm_configs(
         self,
@@ -166,49 +208,19 @@ class InductorChoices:
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
 
-        # Extract device_type from kernel_inputs
-        device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
-
         # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
         template_choices = {}
         for template in templates:
-            # Extract template_name from the template object
-            template_name = template.uid
-
-            # Get the appropriate template-specific heuristic
-            heuristic = get_template_heuristic(template_name, device_type, op_name)
-
-            cs = heuristic.get_template_configs(
+            template_choices[template.uid] = self.get_ktc(
                 kernel_inputs,
                 layout,
+                template,
                 op_name,
+                kwarg_overrides.get(template.uid, {}),
             )
-            extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
-
-            # Extract layout and input_nodes from extra_kwargs to pass them explicitly
-            layout_val = layout
-            # adjust the kernel inputs to the template-specific heuristic, if needed
-            # default here is to just return the kernel_inputs as is
-            inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
-
-            # Get overrides for this specific template
-            overrides = kwarg_overrides.get(template.uid, {})
-
-            # Create KernelTemplateChoice generator using the moved function
-            choice_gen = make_ktc_generator(
-                template=template,
-                cs=cs,
-                overrides=overrides,
-                extra_kwargs=extra_kwargs,
-                layout=layout_val,
-                inputs=inputs_val,
-            )
-
-            template_choices[template.uid] = choice_gen
 
         # Second pass: Adjust the template choices
-        adjusted_choices = self._adjust_mm_configs(
+        adjusted_choices = self._finalize_mm_configs(
             template_choices,
             kernel_inputs,
             layout,
