@@ -408,7 +408,10 @@ def register_backend_for_device(
     device_custom_config: Optional[ConfigModule] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
-        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen, device_fx_wrapper_codegen
+        device_scheduling,
+        device_wrapper_codegen,
+        device_cpp_wrapper_codegen,
+        device_fx_wrapper_codegen,
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
