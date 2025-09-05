@@ -16668,6 +16668,27 @@ def forward(self, x, y):
             str(ep.graph)
         )
 
+    def test_item(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+                self.b = 5.0
+
+            def forward(self, y):
+                at = torch.tensor(self.a)
+                # This becomes 5
+                a = at.item()
+                bt = torch.tensor(self.b)
+                # This becomes 5.0
+                b = bt.item()
+                return a * b * y
+
+        ep = export(M(), (torch.ones(3),))
+        FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
 
 if __name__ == "__main__":
     run_tests()
