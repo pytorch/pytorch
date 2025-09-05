@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import torch
 
@@ -19,6 +19,7 @@ from .mm_common import mm_args, mm_grid
 
 if TYPE_CHECKING:
     from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.select_algorithm import KernelTemplate
 
 log = logging.getLogger(__name__)
 
@@ -155,16 +156,19 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     assert layout1 == layout2
     # options to tune from
     choices: list[ChoiceCaller] = []
+
+    # Collect all templates for unified call
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, [aten_mm_plus_mm], "mm_plus_mm")
-        )
+        templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
-        # Get template choices using the new unified function
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, [mm_plus_mm_template], "mm_plus_mm")
-        )
+        templates_to_use.append(mm_plus_mm_template)
+
+    # Single unified call for all templates
+    choices.extend(
+        V.choices.get_mm_configs(kernel_inputs, templates_to_use, "mm_plus_mm")
+    )
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
