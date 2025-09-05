@@ -8239,6 +8239,36 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
             )
 
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_while_loop_stack_output(self, dynamic, backend):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                c = torch.tensor(0, dtype=torch.int64)
+
+                def cond_fn(c, x):
+                    return c < x.size(0)
+
+                def body_fn(c, x):
+                    return c + 1, self.linear(x)
+
+                stacked_c, stacked_x = torch.ops.higher_order.while_loop_stack_output(
+                    cond_fn, body_fn, (c, x), tuple()
+                )
+                return stacked_c, stacked_x
+
+        x = torch.randn(3, 3)
+        mod = Mod()
+        compiled_out = torch.compile(mod, backend=backend, dynamic=dynamic)(x)
+        self.assertEqual(len(compiled_out), 2)
+        self.assertEqual(compiled_out[0].size(0), 3)
+        self.assertEqual(compiled_out[1].size(0), 3)
+        self.assertEqual(compiled_out, mod(x))
+
     def test_input_output_alias(self):
         def fn(f, *args):
             return torch.cond(args[0].sum() > 0, f, f, args)
