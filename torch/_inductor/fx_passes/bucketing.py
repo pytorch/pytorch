@@ -43,7 +43,7 @@ def bucket_all_gather(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx)
+    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx, mode)
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets, mode)
@@ -61,7 +61,6 @@ def bucket_all_gather_all(
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
     ag_buckets = bucket_all_gather_by_mb_all(gm, bucket_cap_mb_by_bucket_idx)
-    print(f"XXX AG_BUCKETS:{ag_buckets}")
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets, mode)
@@ -344,6 +343,7 @@ def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -376,7 +376,7 @@ def bucket_all_gather_by_mb(
 
     group_key_fn = (
         _ag_group_key
-        if torch._inductor.config.bucket_all_gather_fx_multidtype
+        if mode and "multidtype" in mode
         else _ag_group_key_multidtype
     )
 
@@ -545,6 +545,7 @@ def _pre_bucket_all_gather(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],
     rank: int,
 ) -> torch.Tensor:
     ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
@@ -607,7 +608,7 @@ def all_gather_merge_fn_to_trace_custom_ops(
     ]
     ag_input_numel = sum(ins_split_sizes)
     new_ag_out = torch.ops._bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, rank
+        ag_ins, group_size, group_name, dtype, out_dtypes, rank
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
@@ -621,7 +622,6 @@ def all_gather_merge_fn_to_trace_custom_ops(
         ins_split_sizes,
         dim=1,
     )
-    breakpoint()
     outs_reshaped = [
         o.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
         for o, shape, out_dtype in zip(outs_bucket_dtype, ins_sizes, out_dtypes)
@@ -634,6 +634,7 @@ def all_gather_merge_fn_to_trace(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype], # ignored in this implementation
     rank: int,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
@@ -668,6 +669,7 @@ def all_gather_merge_fn_to_trace_functional(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype], # ignored in this implementation
     rank: int,
     use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
@@ -848,6 +850,12 @@ def merge_reduce_scatter(
                 g.erase_node(wait_n)
                 g.erase_node(rs_n)
 
+def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:
+    assert len(dtypes) > 0
+    if len(OrderedSet(dtypes)) == 1:
+        return dtypes[0]
+
+    return torch.uint8
 
 def merge_all_gather(
     gm: torch.fx.GraphModule,
@@ -911,8 +919,7 @@ def merge_all_gather(
             _ag_ns = ag_buckets[bucket_idx]
             _ag_dtypes = ag_dtypes[bucket_idx]
 
-            # TODO(ivankobzarev): pick dtype?
-            bucket_dtype = torch.bfloat16
+            bucket_dtype = pick_bucket_dtype(_ag_dtypes)
 
             ag0 = _ag_ns[0]
             ag0_val = ag0.meta["val"]

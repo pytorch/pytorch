@@ -1591,8 +1591,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops"])
-    def test_all_gather_bucket_multi_dtype(self, bucket_mode):
+    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1625,7 +1625,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             {
                 "bucket_all_gathers_fx": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
-                "bucket_all_gather_fx_multidtype": True,
             }
         ):
             compiled = torch.compile(func)

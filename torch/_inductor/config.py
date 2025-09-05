@@ -424,7 +424,6 @@ bucket_fx_collectives_trie = ["ag", "rs"]
 bucket_fx_collectives_trie_use_nn_module_stack = True
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
-bucket_all_gather_fx_multidtype = True
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
 
