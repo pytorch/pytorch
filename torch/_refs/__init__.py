@@ -458,7 +458,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
         for x, y in zip(a, b):
             if guard_or_true(x != y):
                 return True
-            # assume no braodcasting for unabcked.
+            # assume no broadcasting for unbacked.
             torch._check(x == y)
 
         return False

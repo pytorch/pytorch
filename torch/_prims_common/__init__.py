@@ -107,6 +107,7 @@ CustomOutParamAnnotation = "__custom_out_param__"
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
     if len(a) != len(b):
         return False
 
@@ -115,7 +116,8 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             if isinstance(y, torch.SymInt):
                 continue
 
-        if x != y:
+        # if we do not know, then they are not the same.
+        if guard_or_true(x != y):
             return False
 
     return True
