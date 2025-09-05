@@ -2709,15 +2709,18 @@ class BenchmarkRunner:
                     )
 
             if os.getenv("CALL_TORCH_COMPILE_DIRECTLY", "0") == "1":
+
                 @torch.compile
                 def f(x):
                     out = model(**x)[0]
                     out.sum().backward()
+
                 from triton.testing import do_bench
+
                 model = model
                 ms = do_bench(lambda: f(example_inputs))
                 print(f"{ms=}")
-                exit(0)
+                sys.exit(0)
 
             if (
                 self.args.export_aot_inductor
