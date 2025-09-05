@@ -683,6 +683,28 @@ void Graph::applyDevicePlacement(const Placement& placement) {
   }
 }
 
+void Graph::overrideWeightsDevice(const std::unordered_map<std::string, std::optional<c10::Device>>& submodNameToDevice) {
+  for (auto& [weightName, weightMeta] : weightsMeta_) {
+    for (auto& [name, device] : submodNameToDevice) {
+      if (device.has_value() && weightName.starts_with(name) && weightMeta.device() != device) {
+        LOG(INFO) << "Overriding " << weightName << " from " << weightMeta.device() << " to device " << device.value();
+        weightMeta.setDevice(device.value());
+        break;
+      }
+    }
+  }
+
+  for (auto& [tensorName, tensorMeta] : tensorValuesMeta_) {
+    for (auto& [name, device] : submodNameToDevice) {
+      if (device.has_value() && tensorName.starts_with(name) && tensorMeta.device() != device) {
+        LOG(INFO) << "Overriding " << tensorName << " from " << tensorMeta.device() << " to device " << device.value();
+        tensorMeta.setDevice(device.value());
+        break;
+      }
+    }
+  }
+}
+
 Node* Graph::nodeAfter(Node* n) {
   TORCH_CHECK(n->owningGraph() == this);
   if (n == outputNode_) {
