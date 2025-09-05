@@ -6335,6 +6335,13 @@ class CommonTemplate:
         if self.device == "xpu":
             atol = 3e-4
             rtol = 1e-4
+        elif config.triton.enable_native_matmul and self.device == "cuda":
+            # With default atol and rtol,
+            # Mismatched elements: 16897 / 131072 (12.9%)
+            # Greatest absolute difference: 0.0009765625 at index (32, 251)
+            # Greatest relative difference: 0.013382526114583015 at index (86, 142)
+            atol = 5e-4
+            rtol = 3e-4
         else:
             # use default
             atol = None
@@ -6361,6 +6368,9 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "native matmul has better precision"
+    )
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
@@ -6382,6 +6392,7 @@ class CommonTemplate:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
+            atol, rtol = None, None
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
             else:
@@ -6397,14 +6408,18 @@ class CommonTemplate:
             ]
             for fn in fns:
                 out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-                self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+                self.assertEqual(
+                    out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
+                )
 
             # test broadcasted shape bail
             fn = lambda x: x + torch.zeros(  # noqa: E731
                 [256, 256, 256], dtype=lowp_dtype, device=self.device
             )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+            self.assertEqual(
+                out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
+            )
 
     def test_remove_noop_copy(self):
         def fn(x, y):
@@ -6784,6 +6799,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    @unittest.skipIf(config.triton.enable_native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -8489,7 +8505,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._inductor.metrics.generated_kernel_count = 0
         with torch.no_grad():
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
-        assertGeneratedKernelCountEqual(self, 1)
+
+        if (
+            config.triton.enable_native_matmul
+            and config.cuda_backend == "triton"
+            and self.device == "cuda"
+        ):
+            assertGeneratedKernelCountEqual(self, 2)
+        else:
+            assertGeneratedKernelCountEqual(self, 1)
 
     @skipIfMPS
     def test_slice_scatter_dtype_consistency(self):
@@ -9766,11 +9790,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
             check_lowp=False,
         )
-        expected_kernel = 0
-        # codegen mm kernel from template
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, expected_kernel
-        )
+
+        if (
+            config.triton.enable_native_matmul
+            and config.cuda_backend == "triton"
+            and self.device == "cuda"
+        ):
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        else:
+            # codegen mm kernel from template
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
@@ -9843,6 +9872,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
+    @unittest.skipIf(config.triton.enable_native_matmul, "matmul count is different")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -13893,6 +13923,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
         return code_allowed != code_disallowed
 
+    @unittest.skipIf(config.triton.enable_native_matmul, "matmul is now generated")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -14764,6 +14795,7 @@ if RUN_GPU:
                 self.assertTrue("ymask = yindex < ynumel" in code)
                 self.assertTrue("xmask = xindex < xnumel" in code)
 
+        @config.patch("triton.enable_native_matmul", False)
         def test_kernel_names_descriptive(self):
             @torch.compile(backend="inductor")
             def fn1(x):
