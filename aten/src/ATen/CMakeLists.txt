@@ -255,12 +255,12 @@ endif()
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
 
   if(USE_CUDA)
     add_library(fbgemm_genai OBJECT)
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    # To avoid increasing the build time/binary size unneccesarily, use an allow-list of kernels to build.
+    # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
     set(FBGEMM_CUTLASS_KERNELS_REGEX
       ".*(f8f8bf16_rowwise).*"
@@ -297,8 +297,8 @@ IF(USE_FBGEMM_GENAI)
     if(USE_ROCM)
       # Only include the kernels we want to build to avoid increasing binary size.
       file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-        "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-        "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
       set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
       # Add additional HIPCC compiler flags for performance
@@ -322,8 +322,8 @@ IF(USE_FBGEMM_GENAI)
         # FBGEMM version of Composable Kernel is used due to some customizations
         ${FBGEMM_THIRD_PARTY}/composable_kernel/include
         ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-        ${FBGEMM_GENAI_DIR}/include/
-        ${FBGEMM_GENAI_DIR}/common/include/
+        ${FBGEMM_GENAI_SRCS}/include/
+        ${FBGEMM_GENAI_SRCS}/common/include/
       )
     endif()
   endif()
