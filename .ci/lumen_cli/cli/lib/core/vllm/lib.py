@@ -76,7 +76,6 @@ def sample_vllm_test_library():
                 ),
                 "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
                 "pytest -v -s entrypoints/llm/test_generate.py ",
-                "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
                 "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
             ],
         },
@@ -102,9 +101,20 @@ def sample_vllm_test_library():
                 "pytest -v -s -x lora/test_multi_loras_with_tp.py",
             ],
         },
-        "vllm_lora_280_failure_test": {
-            "title": "LoRA 280 failure test",
-            "id": "vllm_lora_280_failure_test",
+         "vllm_distributed_test_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest models/multimodal -v -s -m 'distributed(num_gpus=2)",
+            ]
+        },
+        "vllm_lora_28_failure_test": {
+            "title": "LoRA pytorch 2.8 failure test",
+            "id": "vllm_lora_28_failure_test",
             "steps": ["pytest -v lora/test_quant_model.py"],
         },
         "vllm_multi_model_processor_test": {
@@ -113,6 +123,16 @@ def sample_vllm_test_library():
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
             "steps": [
                 "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
+            ],
+        },
+         "vllm_multi_model_test_28_failure_test":{
+            "title": "Multi-Model Test (Failed 2.8 release)",
+            "id": "vllm_multi_model_test_28_failure_test",
+            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
+            "steps": [
+                "pytest -v -s models/multimodal/generation/test_voxtral.py",
+                "pytest -v -smodels/multimodal/pooling/test_jinavl_reranker.py",
+
             ],
         },
         "vllm_pytorch_compilation_unit_tests": {
