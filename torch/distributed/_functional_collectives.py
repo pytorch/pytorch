@@ -824,8 +824,6 @@ def _are_we_tracing() -> bool:
         torch._C.DispatchKey.PythonDispatcher
     ):
         return True
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace:
-        return True
     return get_proxy_mode() is not None
 
 
