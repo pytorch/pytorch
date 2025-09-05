@@ -1818,7 +1818,12 @@ class CUDAAddMMTemplateConfigHeuristic(AddMMConfigMixin, CUDAMMTemplateConfigHeu
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
-@register_template_heuristic("mm-ah", "cuda", register=torch.version.hip is None)
+@register_template_heuristic(
+    mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="mm-ah",
+)
 class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA using the extra mm configs only (for autoheuristic)"""
 

@@ -23,7 +23,7 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, FlexibleLayout, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
@@ -584,7 +584,7 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     kernel under the hood.  There are a few shapes where this is slower,
     but they are rare.
     """
-    if inp.stride(0) == 0 or inp.size(0) == 1:
+    if (inp.stride(0) == 0 and inp.size(0) != 0) or inp.size(0) == 1:
         return torch.addmm(inp[0], mat1, mat2, out=out, alpha=alpha, beta=beta)
     return torch.addmm(inp, mat1, mat2, out=out, alpha=alpha, beta=beta)
 
@@ -750,13 +750,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
         aten_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
-
-    # options to tune from
-    choices = (
-        [aten_mm.bind(kernel_inputs.nodes(), aten_layout)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs, aten_layout, aten_mm.uid, "mm"
+        ):
+            aten_mm.maybe_append_choice(
+                choices=choices,
+                **kwargs,
+                **extra_kwargs,
+            )
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout):
@@ -838,8 +841,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
             # while we transition to the unified kwargs retrieval
             kernel_inputs,
             layout,
+            mm_template.uid,
             "mm-ah",
-            "mm",
         ):
             assert not kwargs, "mm-ah should not have any extra kwargs"
             mm_template.maybe_append_choice(
@@ -916,13 +919,19 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
-
-    choices = (
-        [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
-    )
+    choices: list[ChoiceCaller] = []
 
     # Create MMKernelInputs for Int MM
     kernel_inputs = MMKernelInputs([mat1, mat2])
+    if use_aten_gemm_kernels():
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs, layout, aten__int_mm.uid, "int_mm"
+        ):
+            aten__int_mm.maybe_append_choice(
+                choices=choices,
+                **kwargs,
+                **extra_kwargs,
+            )
 
     if use_cutlass and _use_cutlass_for_op("int_mm"):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -950,11 +959,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
-
+    name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
         [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
+    choices: list[ChoiceCaller] = []
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
@@ -967,7 +977,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
-
+    aten_layout = layout
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
@@ -976,61 +986,51 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         from torch._inductor.ir import FixedLayout, FlexibleLayout
 
         if isinstance(layout, FixedLayout):
-            layout = FlexibleLayout(
+            aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
-        choices = (
-            [
-                aten_addmm.bind(
-                    # TODO(coconutruben): replace with kernel_inputs.nodes()
-                    # once that supports the unexpanded nodes as well
-                    [inp, mat1, mat2],
-                    layout,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
+        # TODO(coconutruben): combine this with the main flow of addmm through
+        # a subgraph or something as inp vs inp_expanded causes some slight numeric
+        # differences
+        kernel_inputs = MMKernelInputs(
+            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
         )
-        return autotune_select_algorithm(
-            # TODO(coconutruben): replace with kernel_inputs.nodes()
-            # once that supports the unexpanded nodes as well
-            "addmm",
-            choices,
-            [inp, mat1, mat2],
-            layout,
-        )
-
-    choices = (
-        [
-            aten_addmm.bind(
-                kernel_inputs.nodes(),
-                layout,
-                alpha=alpha,
-                beta=beta,
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            aten_addmm.uid,
+            name,
+        ):
+            aten_addmm.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
             )
-        ]
-        if use_aten_gemm_kernels()
-        else []
-    )
+        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
-    if (
-        use_aten_gemm_kernels()
-        and inp_expanded.get_stride()[0] == 0
-        and inp_expanded.get_device().type == "cuda"
-        and inductor_config.triton.autotune_cublasLt
-    ):
-        # unexpand inp to make sure fused addmm from cublasLt is used
-        choices.insert(
-            0,
-            aten_bias_addmm.bind(
-                kernel_inputs.nodes(),
-                layout,
-                alpha=alpha,
-                beta=beta,
-            ),
-        )
+    if use_aten_gemm_kernels():
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            aten_addmm.uid,
+            name,
+        ):
+            aten_addmm.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
+            )
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            aten_bias_addmm.uid,
+            name,
+        ):
+            aten_bias_addmm.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
+            )
 
     if is_nonzero and use_triton_template(layout):
         # all the triton templates use the extra_kwargs
@@ -1039,7 +1039,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             kernel_inputs,
             layout,
             mm_template.uid,
-            "addmm",
+            name,
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1053,7 +1053,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 kernel_inputs,
                 layout,
                 persistent_tma_mm_template.uid,
-                "addmm",
+                name,
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -1076,7 +1076,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if (
         is_nonzero
         and use_cutlass_template(layout, m, n, k)
-        and _use_cutlass_for_op("addmm")
+        and _use_cutlass_for_op(name)
     ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
@@ -1110,7 +1110,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm("addmm", choices, kernel_inputs.nodes(), layout)
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
@@ -1119,13 +1119,13 @@ def tuned_sparse_semi_structured_mm(
 ):
     from torch._inductor.select_algorithm import realize_inputs
 
+    # TODO(coconturuben): support V.choices.get_mm_configs for sparse_semi_structured_mm
     mat1, mat1_meta, mat2 = realize_inputs(mat1, mat1_meta, mat2)
     m1, k1 = mat1.get_size()
     m2, _ = mat1_meta.get_size()
     k2, n = mat2.get_size()
     m = V.graph.sizevars.check_equals_and_simplify(m1, m2)
     k = V.graph.sizevars.check_equals_and_simplify(2 * k1, k2)
-
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
@@ -1207,7 +1207,7 @@ def tuned_scaled_mm(
         mat_b.get_dtype(),
         layout,
     )
-
+    name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
@@ -1223,17 +1223,25 @@ def tuned_scaled_mm(
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
     kernel_inputs = MMKernelInputs(input_nodes, mat1_idx=0, mat2_idx=1)
 
-    aten_choice = aten__fp8_mm.bind(
-        input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
-    )
-
-    choices = []
+    choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices.append(aten_choice)
+        aten_extra_kwargs = dict(out_dtype=out_dtype, use_fast_accum=use_fast_accum)
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            aten__fp8_mm.uid,
+            name,
+            kwarg_overrides=aten_extra_kwargs,
+        ):
+            aten__fp8_mm.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
+            )
 
     # We dont have triton lowerings for the MX variants yet
     if scale_a.dtype != torch.float32:
-        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+        return autotune_select_algorithm(name, choices, input_nodes, layout)
 
     _, is_nonzero = _is_static_problem(layout)
 
@@ -1247,7 +1255,7 @@ def tuned_scaled_mm(
                 kernel_inputs,
                 layout,
                 scaled_mm_device_tma_template.uid,
-                "scaled_mm",
+                name,
                 overriders,
             ):
                 scaled_mm_device_tma_template.maybe_append_choice(
@@ -1261,7 +1269,7 @@ def tuned_scaled_mm(
             kernel_inputs,
             layout,
             mm_template.uid,
-            "scaled_mm",
+            name,
             overriders,
         ):
             # possibly appends a TritonTemplateCaller to choices
@@ -1274,7 +1282,7 @@ def tuned_scaled_mm(
     if (
         is_nonzero
         and use_cutlass_template(layout, m, n, k)
-        and _use_cutlass_for_op("scaled_mm")
+        and _use_cutlass_for_op(name)
     ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
@@ -1286,9 +1294,7 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(
-        "scaled_mm", choices, kernel_inputs.nodes(), layout
-    )
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @functools.cache
