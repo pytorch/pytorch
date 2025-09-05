@@ -9,7 +9,6 @@ import torch
 
 from . import config
 from .codecache import write_text
-from .ir import FixedLayout, FlexibleLayout
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
@@ -40,7 +39,7 @@ if TYPE_CHECKING:
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
-    from .ir import ChoiceCaller, Layout
+    from .ir import ChoiceCaller
     from .kernel_template_choice import KernelTemplateChoice
 
 
@@ -107,11 +106,10 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _adjust_mm_configs(
+    def _finalize_mm_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        layout: Any,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
@@ -120,7 +118,7 @@ class InductorChoices:
         This method can be subclassed to perform any override/modification of the choices.
         The incoming parameters are cheap (generators), so you can do any overrides without
         incurring too much cost. Override this method to customize the kernel template choices
-        before they are converted to ChoiceCaller objects.
+        before they are converted to ChoiceCaller objects, which is expensive on template codegen.
 
         The full list of arguments are here to facilitate any overrides you may want to do,
         as they can be used to start from scratch for each template if so desired.
@@ -128,7 +126,6 @@ class InductorChoices:
         Args:
             template_choices: Dictionary mapping template UIDs to generators of KernelTemplateChoice objects
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
-            layout: Output layout
             templates: List of template objects (KernelTemplate or ExternKernelChoice) in use
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm")
             kwarg_overrides: Optional dict of kwargs to override for each template heuristic
@@ -144,7 +141,6 @@ class InductorChoices:
     def get_ktc(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         template: Union[KernelTemplate, ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, Any]] = None,
@@ -165,10 +161,9 @@ class InductorChoices:
         heuristic = get_template_heuristic(template_name, device_type, op_name)
         cs = heuristic.get_template_configs(
             kernel_inputs,
-            layout.dtype,
             op_name,
         )
-        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout.dtype, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
@@ -179,46 +174,55 @@ class InductorChoices:
             cs=cs,
             overrides=overrides,
             extra_kwargs=extra_kwargs,
-            layout=layout,
+            layout=kernel_inputs.output_layout(),
             inputs=inputs_val,
         )
 
-    def _can_try_flexible_layout(
+    def _need_to_fix_layout(
         self,
         adjusted_choices: list[KernelTemplateChoice],
+        op_name: str,
     ) -> bool:
         """
-        Check if we can try flexible layout for a given kernel template choice.
+        Check if we need to fix the layout instead of keeping it flexible
 
         Args:
             ktc: KernelTemplateChoice object
 
         Returns:
-            True if we can try flexible layout, False otherwise
+            True if we need to fix the layout, False otherwise
         """
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
-            return True
+            return False
+
+        # TODO: debug and fix
+        # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
+        # that for mps, everything stays as it was before this optimization
+        if len(adjusted_choices) > 0:
+            if adjusted_choices[0].inputs.device_type == "mps":
+                if op_name not in ["mm", "addmm"]:
+                    return True
+
         # Since the following backends are not using get_mm_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
         # defensively.
         # TODO(coconutruben): remove this once TRITON,CPP,CK,CUTLASS are supported
         if _use_autotune_backend("TRITON"):
-            return False
+            return True
         if _use_autotune_backend("CUTLASS"):
-            return False
+            return True
         if _use_autotune_backend("CK") or _use_autotune_backend("CKTILE"):
-            return False
+            return True
         if _use_autotune_backend("CPP"):
-            return False
-        return all(
-            isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
+            return True
+        return any(
+            not isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
         )
 
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
@@ -241,40 +245,34 @@ class InductorChoices:
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
-
+        layout = kernel_inputs.output_layout()
         # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
         template_choices = {}
         for template in templates:
             template_choices[template.uid] = self.get_ktc(
                 kernel_inputs,
-                layout.dtype,
                 template,
                 op_name,
                 kwarg_overrides.get(template.uid, {}),
             )
 
         # Second pass: Adjust the template choices
-        adjusted_choices = self._adjust_mm_configs(
+        adjusted_choices = self._finalize_mm_configs(
             template_choices,
             kernel_inputs,
-            layout,
             templates,
             op_name,
             kwarg_overrides,
         )
         # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
-        if self._can_try_flexible_layout(adjusted_choices):
+        if self._need_to_fix_layout(adjusted_choices, op_name):
+            layout = kernel_inputs.output_layout(flexible=False)
             for ktc in adjusted_choices:
-                if isinstance(ktc.layout, FixedLayout):
-                    ktc.layout = FlexibleLayout(
-                        device=ktc.layout.device,
-                        dtype=ktc.layout.dtype,
-                        size=ktc.layout.size,
-                    )
-                    # for good measure, delete the cached ChoiceCaller from the ktc if it existed.
-                    # ExternKernelChoice are cheap to generate
-                    if hasattr(ktc, "_choice"):
-                        del ktc._choice
+                ktc.layout = layout
+                # for good measure, delete the cached ChoiceCaller from the ktc if it existed.
+                # ExternKernelChoice are cheap to generate
+                if hasattr(ktc, "_choice"):
+                    del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
         return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
 
