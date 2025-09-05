@@ -4352,7 +4352,7 @@ class Scheduler:
         # benefit to cudagraph
         if (
             not torch._inductor.config.triton.cudagraphs
-            and not config.customized_partition_wrappers
+            and config.customized_partition_wrappers is None
         ):
             return True
 
