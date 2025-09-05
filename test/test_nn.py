@@ -60,6 +60,7 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3496,7 +3497,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    @skipIfRocm
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -3504,7 +3504,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.GRU(10, 20, batch_first=True),
             nn.RNN(10, 20, batch_first=True)
         ]
-        first_warn = True
+        # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
+        first_warn = False if torch.version.hip else True
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
@@ -5193,7 +5194,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
 
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16"
+                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16" \
                                         ) and _get_torch_rocm_version() >= (6, 4):
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue SWDEV-507600")
 

@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/miopen_batch_norm_native.h>
 #include <ATen/ops/miopen_batch_norm_backward_native.h>
 #endif
@@ -100,7 +101,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     mode = miopenBNSpatial;
   }
 
-  auto output_t = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
+  auto output_t = at::empty_like(input_t, input_t.options(), input_t.suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getMiopenHandle();
@@ -168,22 +169,15 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const std::optional<Tensor>& save_var_t_opt,
     double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& running_mean =
-      running_mean_opt.value_or(Tensor());
-  const Tensor& running_var =
-      running_var_opt.value_or(Tensor());
-  const Tensor& save_mean_t =
-      save_mean_t_opt.value_or(Tensor());
-  const Tensor& save_var_t =
-      save_var_t_opt.value_or(Tensor());
+  const Tensor& save_mean_t = save_mean_t_opt.value_or(Tensor());
+  const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
 
   auto grad_output_contig =
       grad_output_t.contiguous(input_t.suggest_memory_format());
-  TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_contig, "grad_output", 2 },
-            weight{ weight_t, "weight", 3 },
-            save_mean{ save_mean_t, "save_mean", 4 },
-            save_var{ save_var_t, "save_var", 5 };
+  TensorArg input{input_t, "input", 1},
+      grad_output{grad_output_contig, "grad_output", 2},
+      weight{weight_t, "weight", 3}, save_mean{save_mean_t, "save_mean", 4},
+      save_var{save_var_t, "save_var", 5};
   CheckedFrom c = "miopen_batch_norm_backward";
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
