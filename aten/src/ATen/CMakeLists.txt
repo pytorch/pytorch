@@ -255,7 +255,7 @@ endif()
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/)
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
 
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
@@ -274,6 +274,7 @@ IF(USE_FBGEMM_GENAI)
       # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
       "${FBGEMM_GENAI_SRCS}/quantize_defs.cpp"
       "${FBGEMM_GENAI_SRCS}/quantize.cpp"
+      "${FBGEMM_GENAI_SRCS}/include/fbgemm_gpu/torch_ops.h"
     )
     message(STATUS "fbgemm_genai_native_cuda_cpp: ${fbgemm_genai_native_cuda_cpp}")
 
