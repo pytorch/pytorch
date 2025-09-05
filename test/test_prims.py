@@ -142,7 +142,7 @@ class TestPrims(TestCase):
             self.assertTrue(view._is_view())
 
         t_discontig = t.transpose(0, 1)
-        with self.assertRaises(ValueError, msg="no such view exists"):
+        with self.assertRaises(RuntimeError, msg="Attempting to view a collapsed tensor, but no such view exists!"):
             view = prims.collapse_view(t_discontig, 0, 2)
 
         copy = prims.collapse(t_discontig, 0, 1)
