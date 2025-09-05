@@ -121,7 +121,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import DynamoTracerOutput
+from .output_graph import DynamoTracerOutput, OutputGraphMinimal
 from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
@@ -852,15 +852,28 @@ class DynamoOutput:
         cache_entry: Optional[CacheEntry] = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
-        assert self.tracer_output.output_graph is not None
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
         return CheckFunctionManager(
             code,
-            self.tracer_output.output_graph,
+            output_graph,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
             strict_error=strict_error,
+        )
+
+    def graph_capture_output(self) -> GraphCaptureOutput:
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
+        return GraphCaptureOutput(
+            OutputGraphMinimal(
+                output_graph.dump_guards_state(),
+                output_graph.shape_env,
+            ),
+            output_graph.import_sources,
+            self.bytecode,
         )
 
 
@@ -882,6 +895,35 @@ class BackendInput:
 
 
 @dataclass
+class GraphCaptureOutput:
+    """
+    Minimal version of DynamoOutput
+    """
+
+    output_graph: OutputGraphMinimal
+    import_sources: dict[str, str]
+    bytecode: types.CodeType
+
+    def build_guards(
+        self,
+        code: types.CodeType,
+        hooks: Optional[Hooks] = None,
+        save: bool = False,
+        cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
+    ) -> CheckFunctionManager:
+        return CheckFunctionManager(
+            code,
+            self.output_graph,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+            save_guards=save,
+            strict_error=strict_error,
+        )
+
+
+@dataclass
 class CaptureOutput:
     """
     CaptureOutput should represent all the information produced from torch
@@ -893,7 +935,7 @@ class CaptureOutput:
     frontends.
     """
 
-    dynamo_output: DynamoOutput
+    graph_capture_output: GraphCaptureOutput
     backend_input: BackendInput
 
 
@@ -964,7 +1006,10 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     assert backend_input is not None
-    return CaptureOutput(dynamo_output, backend_input)
+    return CaptureOutput(
+        dynamo_output.graph_capture_output(),
+        backend_input,
+    )
 
 
 def compile_frame(  # type: ignore[return]

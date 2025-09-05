@@ -148,16 +148,14 @@ def aot_compile_fullgraph(
                 closure=fn.__closure__ or (),  # type: ignore[arg-type]
             )
         )
-        dynamo_output = capture_output.dynamo_output
-        check_fn = dynamo_output.build_guards(
+        graph_capture_output = capture_output.graph_capture_output
+        assert graph_capture_output.output_graph is not None
+        check_fn = graph_capture_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
         assert check_fn.guards_state is not None
 
     backend_input = capture_output.backend_input
-    output_graph = dynamo_output.tracer_output.output_graph
-    assert output_graph is not None
-    import_sources = output_graph.import_sources
     with torch._guards.tracing(TracingContext(backend_input.fake_mode)):
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
 
@@ -172,10 +170,10 @@ def aot_compile_fullgraph(
         )
     compile_artifacts = CompileArtifacts(
         signature=signature,
-        bytecode=dynamo_output.bytecode,
+        bytecode=graph_capture_output.bytecode,
         guard_manager=check_fn.guard_manager,
         guards_state=check_fn.guards_state,
-        import_sources=import_sources,
+        import_sources=graph_capture_output.import_sources,
         backend_id=backend_input.backend_id,
         compiled_fn=compiled_fn,
         original_code=fn.__code__,

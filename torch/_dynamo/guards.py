@@ -2449,8 +2449,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
-        from torch._dynamo.output_graph import OutputGraph
-
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
         assert output_graph is not None
@@ -2466,8 +2464,9 @@ class GuardBuilder(GuardBuilderBase):
             # shape variables to sources from tracked_fakes.  This must happen after
             # tensor checks.
             # NB: self.output_graph can be None in the debug_nops tests
-            assert isinstance(output_graph, OutputGraph)
-            fs = output_graph.tracked_fakes
+            # assert isinstance(output_graph, OutputGraph)
+            assert output_graph.shape_env is not None
+            fs = output_graph.shape_env.tracked_fakes
             input_contexts = [a.symbolic_context for a in fs]
 
             def get_sources(t_id: int, dim: int) -> list[Source]:
@@ -2478,7 +2477,6 @@ class GuardBuilder(GuardBuilderBase):
                     for source in output_graph.tracked_fakes_id_to_source[t_id]
                 ]
 
-            assert output_graph.shape_env is not None
             if output_graph.export_constraints:
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
@@ -3440,9 +3438,7 @@ class CheckFunctionManager:
 
         self.guards_state: Optional[bytes] = None
         if save_guards:
-            from torch._dynamo.output_graph import OutputGraph
-
-            assert isinstance(self.output_graph, OutputGraph)
+            # assert isinstance(self.output_graph, OutputGraph)
             try:
                 self.guards_state = self.serialize_guards(
                     builder, sorted_guards, self.output_graph
