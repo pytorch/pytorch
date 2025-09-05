@@ -204,7 +204,6 @@ class TestMatmulCuda(TestCase):
             self.cublas_addmm(size, dtype, False, True)
 
     @onlyCUDA
-    @skipIfRocm
     def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
         orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_fp16_accumulation = True
@@ -732,7 +731,6 @@ class TestMatmulCuda(TestCase):
 
 
     @onlyCUDA
-    @skipIfRocm
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
@@ -1738,8 +1736,8 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
             else:  # nvfp4 # mxfp4
                 scale_func = data_to_mx_scale if recipe == "mxfp4" else data_to_nvfp4_scale
-                A_scale = scale_func(A_ref, BLOCK_SIZE, recipe if recipe == "mxfp4" else None)
-                B_scale = scale_func(B_ref, BLOCK_SIZE, recipe if recipe == "mxfp4" else None)
+                A_scale = scale_func(*([A_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
+                B_scale = scale_func(*([B_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
                 max_val = FP4_MAX_VAL
                 min_val = -1 * max_val
 
@@ -1801,10 +1799,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_a size to be {expected_a_size} "
-                f"but got {expected_a_size - 1}"
-            ),
+            f".*For Block[W,w]ise.*scaling.*scale_a should have {expected_a_size} "
+            f"elements.*"
+            ,
         ):
             incorrect_size_a = torch.ones(expected_a_size - 1, device=device, dtype=scale_dtype)
             correct_size_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
@@ -1819,10 +1816,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_b with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_b size to be {expected_b_size} "
-                f"but got {expected_b_size + 1}"
-            ),
+            f"For Block[W,w]ise.*scaling.*scale_b should have {expected_b_size} "
+            f"elements.*"
+            ,
         ):
             correct_size_a = torch.ones(expected_a_size, device=device, dtype=scale_dtype)
             incorrect_size_b = torch.ones(expected_b_size + 1, device=device, dtype=scale_dtype)
@@ -1837,9 +1833,8 @@ class TestFP8Matmul(TestCase):
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                "For BlockWise scaling: Both scale_a and scale_b must be contiguous"
-            ),
+            "For Block[W,w]ise.*scaling.*both should be contiguous"
+            ,
         ):
             non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=scale_dtype)[::2]
             contiguous_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
