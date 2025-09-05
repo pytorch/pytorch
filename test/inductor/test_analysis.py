@@ -5,10 +5,18 @@ import tempfile
 import unittest
 import uuid
 from io import StringIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.nn.functional as F
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    _get_amd_smi,
+    _get_pynvml,
+    datasheet_tops,
+    DeviceInfo,
+    lookup_device_info,
+)
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -289,14 +297,12 @@ class TestAnalysis(TestCase):
         om = _test_model(device, dtype)
         REPEAT = 5
         trace1, trace2 = trace_files()
-        print(f"first trace {trace1}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
                 om()
         p.export_chrome_trace(trace1)
 
-        print(f"second trace {trace2}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
@@ -304,7 +310,6 @@ class TestAnalysis(TestCase):
                     om()
         p.export_chrome_trace(trace2)
 
-        print("diffing...")
         with patch(
             "sys.argv",
             [
@@ -635,6 +640,8 @@ class TestAnalysis(TestCase):
         self.assertTrue(profile1_event_names.intersection(combined_event_names))
         self.assertTrue(profile2_event_names.intersection(combined_event_names))
         self.assertTrue(profile3_event_names.intersection(combined_event_names))
+
+
 
 
 instantiate_device_type_tests(TestAnalysis, globals())
