@@ -1818,6 +1818,48 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(isinstance(s3, int))
         self.assertTrue(str(s1.node.expr) != str(s2.node.expr))
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_dynamic_int_basic(self, backend):
+        from torch.fx.experimental.symbolic_shapes import DynamicInt
+
+        cnt = CompileCounterWithBackend(backend)
+
+        # test scalar inputs to function
+        @torch.compile(fullgraph=True, backend=cnt)
+        def fn(x, y, z):
+            out = torch.tensor([x + y + z])
+            out = out + torch.zeros(abs(x) + 2).sum()  # test out tensor construction
+            return out
+
+        x = DynamicInt(1)
+        z = DynamicInt(3)
+        self.assertEqual(fn(x, x, z), 5)  # guard: x == y
+        self.assertEqual(fn(2, 2, 0), 4)
+        self.assertEqual(fn(-1, -1, 2), 0)
+        self.assertEqual(cnt.frame_count, 1)  # no recompiles
+
+        self.assertEqual(fn(3, 4, 5), 12)  # now we recompile
+        self.assertEqual(cnt.frame_count, 2)
+
+        # test nn module property
+        @torch.compile(backend=cnt, fullgraph=True)
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.i = DynamicInt(1)
+
+            def forward(self, x):
+                return torch.tensor([x + self.i])
+
+        cnt.clear()
+        m = Foo()
+        self.assertEqual(m(DynamicInt(0)), 1)
+        m.i = -2  # override attribute
+        self.assertEqual(m(-1), -3)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 

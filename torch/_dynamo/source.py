@@ -527,6 +527,25 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DynamicScalarSource(ChainedSource):
+    is_int: bool
+
+    def __post_init__(self) -> None:
+        assert self.base is not None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "int"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"int({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None

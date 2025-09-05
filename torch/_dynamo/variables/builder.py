@@ -63,6 +63,8 @@ from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
     DimDynamic,
+    DynamicInt,
+    _DynamicScalar,
     RelaxedUnspecConstraint,
     StatefulSymbolicContext,
     SubclassSymbolicContext,
@@ -100,6 +102,7 @@ from ..source import (
     ConvertIntSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
+    DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -452,7 +455,9 @@ class VariableBuilder:
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
             # all other usages of that constant, leading to unnecessary recompilations.
-            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+            return (
+                is_torch_sym(value) or isinstance(value, _DynamicScalar)
+            ) and isinstance(vt, SymNodeVariable)
 
         if (
             (
@@ -1097,6 +1102,51 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif isinstance(value, _DynamicScalar):
+            if not self.tx.one_graph:
+                raise AssertionError(
+                    "DynamicInts are only compatible with fullgraph compile, please use torch.compile(fullgraph=True)"
+                )
+
+            is_int = isinstance(value, DynamicInt)
+            source = DynamicScalarSource(self.source, is_int)
+            if id(value) in self.tx.output.root_tracer.dynamic_scalar_nodes:
+                # If we've already seen this dynamic scalar, reuse the existing
+                # SymInt/SymFloat node.
+                node = self.tx.output.root_tracer.dynamic_scalar_nodes[id(value)]
+            else:
+                sym = self.tx.output.shape_env.create_unspecified_symbol(
+                    value.val,
+                    source=source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                )
+                node = self.tx.output.shape_env.create_symintnode(
+                    sym,
+                    hint=value.val,
+                    source=source,
+                )
+                
+            # Bind to graph input
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(node),
+                node,
+                source=source,
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                source,
+                node,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=node,
+            )
+            sym_expr = node.node.expr
+            assert isinstance(sym_expr, sympy.Symbol), (
+                f"{sym_expr} is not a basic Symbol."
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
+            return SymNodeVariable(sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
