@@ -10,15 +10,13 @@ from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm,
 from ..kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from ..ir import Layout
     from ..kernel_inputs import KernelInputs
-
-from .registry import register_template_heuristic
 
 
 # These are all labeled as device type None to indicate that they
@@ -42,9 +40,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         yield dict()
 
@@ -57,10 +53,9 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
     ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         alpha = kernel_inputs.get_scalar("alpha")
         beta = kernel_inputs.get_scalar("beta")
         return {
@@ -84,15 +79,16 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         nodes = kernel_inputs.nodes()
         max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
         if op_name == "addmm" and not max_autotune:
-            inp_unexpanded = kernel_inputs.views().get("inp_unexpanded")
-            assert inp_unexpanded is not None, (
-                f"inp_unexpanded needs to be available for {op_name}"
-            )
-            nodes = [inp_unexpanded, *nodes[1:]]
+            from ..ir import ReinterpretView
+
+            inp = nodes[0]
+            if isinstance(inp, ReinterpretView):
+                # remove the view
+                inp_unexpanded = inp.data
+                nodes = [inp_unexpanded, *nodes[1:]]
         return MMKernelInputs(
             nodes,
             scalars=kernel_inputs.scalars(),
-            views=kernel_inputs.views(),
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
         )
@@ -105,9 +101,7 @@ class ATenBiasAddMMConfigHeuristics(
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
-        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
