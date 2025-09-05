@@ -1307,7 +1307,9 @@ class TestMaxAutotune(TestCase):
 
         # Force only contiguous choice to test the transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 
@@ -1349,7 +1351,9 @@ class TestMaxAutotune(TestCase):
 
         # Force contiguous choice to test the transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 
@@ -1410,7 +1414,7 @@ class TestMaxAutotune(TestCase):
             # Test with non-contiguous second matrix - should use contiguous transform
             with (
                 mock.patch(
-                    "torch._inductor.kernel.mm.use_contiguous"
+                    "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
                 ) as contiguous_mock,
             ):
                 contiguous_mock.return_value = True
@@ -1455,7 +1459,9 @@ class TestMaxAutotune(TestCase):
 
         # Force contiguous transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 

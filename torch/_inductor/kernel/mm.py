@@ -42,7 +42,6 @@ from ..utils import (
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
-    use_contiguous,
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
@@ -797,11 +796,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **kwargs,
                     **extra_kwargs,
                 )
-        if not mat2.get_layout().is_contiguous() and use_contiguous(m, n, k):
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs, layout, mm_contiguous_subgraph_template.name, "mm"
+        ):
             mm_contiguous_subgraph_template.maybe_append_choice(
                 choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
+                **kwargs,
+                **extra_kwargs,
             )
 
     if (
@@ -1065,11 +1066,16 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     **extra_kwargs,
                 )
 
-        if not mat2.get_layout().is_contiguous() and use_contiguous(m, n, k):
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            addmm_contiguous_subgraph_template.name,
+            "addmm",
+        ):
             addmm_contiguous_subgraph_template.maybe_append_choice(
                 choices,
-                input_nodes=(inp_expanded, mat1, mat2),
-                layout=layout,
+                **kwargs,
+                **extra_kwargs,
             )
 
     if (
