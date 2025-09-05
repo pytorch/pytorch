@@ -490,11 +490,6 @@ struct bitwise_not_functor {
   }
 };
 
-template <typename T>
-float erfc(T x) {
-  return 1.0 - erf(x);
-}
-
 struct round_decimals_functor {
   template <typename T>
   inline T operator()(const T x, const long ndigits) {
