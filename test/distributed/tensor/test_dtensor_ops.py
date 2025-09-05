@@ -516,7 +516,7 @@ class TestDTensorOps(DTensorOpTestBase):
         def test():
             samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
             for sample_input in samples:
-                if sample_inputs_filter(sample_input):
+                if not sample_inputs_filter(sample_input):
                     continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
