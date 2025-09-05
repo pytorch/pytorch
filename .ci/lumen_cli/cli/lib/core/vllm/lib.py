@@ -131,8 +131,7 @@ def sample_vllm_test_library():
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
             "steps": [
                 "pytest -v -s models/multimodal/generation/test_voxtral.py",
-                "pytest -v -smodels/multimodal/pooling/test_jinavl_reranker.py",
-
+                "pytest -v -s models/multimodal/pooling",
             ],
         },
         "vllm_pytorch_compilation_unit_tests": {
