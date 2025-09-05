@@ -1857,32 +1857,6 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 
 @register_template_heuristic(
     persistent_tma_mm_template.uid,
-    "xpu",
-)
-class XPUPersistentTMATemplateConfigHeuristic(
-    TMATemplateConfigMixin, XPUConfigHeuristic
-):
-    """Persistent TMA template heuristic for CUDA"""
-
-    def __init__(self) -> None:
-        super().__init__()
-        # Override mm_configs to use persistent_mm_configs
-        self.mm_configs = self.persistent_mm_configs
-
-
-@register_template_heuristic(
-    persistent_tma_mm_template.uid,
-    "xpu",
-    op_name="addmm",
-)
-class XPUAddmmPersistentTMATemplateConfigHeuristic(
-    AddMMConfigMixin, XPUPersistentTMATemplateConfigHeuristic
-):
-    """Addmm specific mixin for XPU"""
-
-
-@register_template_heuristic(
-    persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="addmm",
@@ -2149,6 +2123,28 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
 @register_template_heuristic(mm_template.uid, "xpu", op_name="addmm")
 @register_template_heuristic(bmm_template.uid, "xpu", op_name="baddbmm")
 class XPUAddmmTemplateConfigHeuristic(AddMMConfigMixin, XPUMMTemplateConfigHeuristic):
+    """Addmm specific mixin for XPU"""
+
+
+@register_template_heuristic(
+    persistent_tma_mm_template.uid,
+    "xpu",
+)
+class XPUPersistentTMATemplateConfigHeuristic(
+    TMATemplateConfigMixin, XPUConfigHeuristic
+):
+    """Persistent TMA template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(persistent_tma_mm_template.uid, "xpu", op_name="addmm")
+class XPUAddmmPersistentTMATemplateConfigHeuristic(
+    AddMMConfigMixin, XPUPersistentTMATemplateConfigHeuristic
+):
     """Addmm specific mixin for XPU"""
 
 
