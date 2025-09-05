@@ -3182,9 +3182,16 @@ class InstructionTranslatorBase(
         op = inst.argval
         try:
             self.push(right.call_method(self, "__contains__", [left], {}))
-        except Unsupported as excp:  # object doesn't support __contains__
+        except (
+            # right.__contains__ can raise TypeError
+            exc.ObservedTypeError,
+            # Ideally we should only capture TypeError here but some VTs don't
+            # implement hasattr(vt, "__contains__") entirely
+            Unsupported,
+        ) as excp:  # object doesn't support __contains__
             # Use __iter__ as fallback
-            excp.remove_from_stats()
+            if isinstance(excp, Unsupported):
+                excp.remove_from_stats()
             self.push(
                 self.inline_user_function_return(
                     VariableTracker.build(self, impl_CONTAINS_OP_fallback),
@@ -3749,8 +3756,8 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
-        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # NOTE: one_graph is used for export/fullgraph=True to always force errors on graph breaks.
+        # To toggle erroring/resuming on graph breaks during fullgraph=False compile, self.error_on_graph_break
         # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
         # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
         # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
