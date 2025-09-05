@@ -476,7 +476,7 @@ class SizeVarAllocator:
             fallback_value=fallback_value,
         )
 
-    def is_size_one(self, size: Expr) -> bool:
+    def is_size_one_or_false(self, size: Expr) -> bool:
         """Return True if size equals 1.
 
         Unbacked symbolic sizes return False without introducing a guard.

@@ -2877,7 +2877,9 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or V.graph.sizevars.is_size_one(old_size[i]):
+            elif old_size[i] is None or V.graph.sizevars.is_size_one_or_false(
+                old_size[i]
+            ):
                 pass
             else:
                 # Sanity check: Expect broadcast compatibility
@@ -2901,7 +2903,9 @@ class ExpandView(BaseView):
             new_stride = [sympy.S.Zero] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
-                    stride if not V.graph.sizevars.is_size_one(size) else sympy.S.Zero
+                    stride
+                    if not V.graph.sizevars.is_size_one_or_false(size)
+                    else sympy.S.Zero
                 )
             new_layout = FixedLayout(
                 old_layout.device,
