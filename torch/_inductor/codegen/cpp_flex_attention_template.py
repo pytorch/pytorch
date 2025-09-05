@@ -1327,12 +1327,10 @@ class CppFlexAttentionTemplate(CppTemplate):
             # if static shape, FLEX_DECODING will be chosen with these conditions:
             #  1) partition size is multiple of kv block size, so each partition has several blocks
             #  2) decoding scenario: q seq length is 1
-            #  3) Parallelism of FLEX_ATTENTION not sufficient: num_threads larger than total tasks num
-            #  4) The actual k seq length (k_seq_len / q_batch_size) is large enough
+            #  3) The actual k seq length (k_seq_len / q_batch_size) is large enough
             if (
                 self.partition_size % self.kv_block_size == 0
                 and q_seq_len == 1
-                and num_threads > q_batch_size * q_num_heads
                 and k_seq_len / q_batch_size >= max(self.partition_size * 2, 512)
             ):
                 FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
