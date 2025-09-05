@@ -2236,11 +2236,12 @@ def _reduction(
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
             )
-        for i in dims:
-            torch._check(
-                a.shape[i] > 0,
-                "found empty reduction axis for op without an identity",
-            )
+        if a.ndim != 0:
+            for i in dims:
+                torch._check(
+                    a.shape[i] > 0,
+                    "found empty reduction axis for op without an identity",
+                )
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
