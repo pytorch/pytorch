@@ -109,7 +109,7 @@ def sample_vllm_test_library():
             },
             "num_gpus": 4,
             "steps": [
-                "pytest models/multimodal -v -s -m 'distributed(num_gpus=2)",
+                "pytest -v -s distributed/test_sequence_parallel.py",
             ],
         },
         "vllm_lora_28_failure_test": {
