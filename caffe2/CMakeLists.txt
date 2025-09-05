@@ -1762,7 +1762,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   if(USE_FBGEMM_GENAI)
-    if (USE_ROCM)
+    if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE fbgemm_genai)
     endif()
   endif()

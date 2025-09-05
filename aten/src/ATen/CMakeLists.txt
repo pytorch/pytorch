@@ -265,12 +265,10 @@ IF(USE_FBGEMM_GENAI)
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
     list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
-    message(STATUS "fbgemm_genai_native_cuda_cu: ${fbgemm_genai_native_cuda_cu}")
 
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
       "${FBGEMM_GENAI_SRCS}/common/*.cpp"
     )
-    message(STATUS "fbgemm_genai_native_cuda_cpp: ${fbgemm_genai_native_cuda_cpp}")
 
     # Combine all source files into a single list
     list(APPEND fbgemm_genai_all_sources
@@ -279,8 +277,6 @@ IF(USE_FBGEMM_GENAI)
     )
 
     # Now, create the library and provide the sources at the same time
-    message(STATUS "FBGEMM_GENAI_SRCS directory: ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize")
-    message(STATUS "fbgemm_genai_all_sources: ${fbgemm_genai_all_sources}")
     add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
 
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
