@@ -25,12 +25,7 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
-from ..lowering import (
-    add_layout_constraint,
-    constrain_to_fx_strides,
-    lowerings as L,
-    register_lowering,
-)
+from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -1217,13 +1212,16 @@ def tuned_scaled_mm(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
 
-    input_nodes: tuple[Any, ...]
+    input_nodes: list[Any]
 
     if not bias:
-        input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real)
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
     else:
         bias_real = realize_inputs(bias)
-        input_nodes = (mat_a, mat_b, scale_a_real, scale_b_real, bias_real)
+        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
+
+    # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
+    kernel_inputs = MMKernelInputs(input_nodes, mat1_idx=0, mat2_idx=1)
 
     aten_choice = aten__fp8_mm.bind(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
@@ -1238,37 +1236,6 @@ def tuned_scaled_mm(
         return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
     _, is_nonzero = _is_static_problem(layout)
-
-    # Prepare triton input nodes and create kernel_inputs at the top
-    triton_input_nodes: list[Any]
-    if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
-        # Need to unsqueeze bias from [N] -> [1, N]
-        triton_bias = L[aten.unsqueeze](bias, 0)
-    else:
-        triton_bias = bias
-
-    if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-        assert len(scale_a.get_size()) == len(scale_b.get_size())
-        # Need to unsqueeze scale from [] -> [1, 1]
-        triton_scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
-        triton_scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
-    else:
-        triton_scale_a = scale_a
-        triton_scale_b = scale_b
-
-    if bias:
-        triton_input_nodes = [
-            mat_a,
-            mat_b,
-            triton_scale_a,
-            triton_scale_b,
-            triton_bias,
-        ]
-    else:
-        triton_input_nodes = [mat_a, mat_b, triton_scale_a, triton_scale_b]
-
-    # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
-    kernel_inputs = MMKernelInputs(triton_input_nodes, mat1_idx=0, mat2_idx=1)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
@@ -1319,7 +1286,9 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+    return autotune_select_algorithm(
+        "scaled_mm", choices, kernel_inputs.nodes(), layout
+    )
 
 
 @functools.cache
