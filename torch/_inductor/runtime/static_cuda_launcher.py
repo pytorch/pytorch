@@ -67,7 +67,6 @@ class StaticallyLaunchedCudaKernel:
             return False
 
         if not hook_is_empty(launch_enter) or not hook_is_empty(launch_exit):
-            breakpoint()
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )
