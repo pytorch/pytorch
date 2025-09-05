@@ -1156,7 +1156,8 @@ class NamedTupleVariable(TupleVariable):
                 raise_observed_exception(AttributeError, tx)
             # Subclass of namedtuple type can have dynamic attributes
             tx.output.side_effects.mutation(self)
-            tx.output.side_effects.store_attr(self, attr, value)
+            if self.source:
+                tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
