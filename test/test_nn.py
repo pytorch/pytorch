@@ -3525,8 +3525,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(RuntimeError, "Expected hidden.*size.*got", rnn, x_right, hidden)
             self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), 'CUDNN not available')
+    @unittest.skipIf(not (TEST_CUDNN), 'CUDNN not available')
     @skipIfRocm
+    @skipIfXpu
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -8451,10 +8452,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", device_type)
-    def test_avg_pool_large_tensor2(self, device):
-        # test for https://github.com/pytorch/pytorch/issues/129785
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2008
         out_size = [2048, 64, 104, 79]
-        size = [2048, 64, 209, 159]
         inp = torch.randn(size, device=device, requires_grad=True, dtype=torch.float)
         inp_cpu = inp.detach().cpu()
         m = torch.nn.AvgPool2d([2, 2], [2, 2], [0, 0], False, True, None)
@@ -9123,6 +9122,7 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # Double not supported
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    @skipIfXpu # AssertionError: MultiheadAttention does not support NestedTensor outside of its fast path.
     def test_TransformerEncoderLayer_empty(self, device):
         for training in (True, False):
             for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -10395,6 +10395,7 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB', device_type)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2006
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
         out = torch.nn.functional.interpolate(x.to(memory_format=torch.channels_last), scale_factor=2, mode='nearest')
@@ -10707,6 +10708,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypesIfXPU(torch.half, torch.float)
     @dtypes(torch.float)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2006
     def test_softmax_results(self, device, dtype):
         # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
         # Note: dim1 > 1024 is needed to exercise the vectorized (non-persistent) path, (16, 30576) is BERT-esque
@@ -10744,6 +10746,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2006
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device=device_type, dtype=torch.float16, requires_grad=True)
@@ -11520,6 +11523,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16, torch.float)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2014
     def test_hardswish_grad_corner(self, device, dtype):
         self._test_hardswish_grad_corner(device, dtype, 3, torch.ones)
         self._test_hardswish_grad_corner(device, dtype, -3, torch.zeros)
@@ -13019,6 +13023,7 @@ if __name__ == '__main__':
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     @dtypesIfXPU(torch.double, torch.float, torch.half)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2015
     def test_transformerencoderlayer(self, device, dtype):
         if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
             self.skipTest("Skip on ROCM due to Flash Attention tolerances")
@@ -13244,6 +13249,7 @@ if __name__ == '__main__':
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypesIfXPU(torch.half, torch.float)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2015
     def test_transformerencoderlayer_gelu(self, device, dtype):
         if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
             self.skipTest("Skip on ROCM due to Flash Attention tolerances")
@@ -13457,6 +13463,7 @@ if __name__ == '__main__':
 
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest("20GB", device_type)
+    @skipIfXpu # https://github.com/intel/torch-xpu-ops/issues/2006
     def test_softmax_backward_64bit_indexing(self, device):
         for numel in (2147483650, 2147483650 + 1):
             x = torch.ones([1, 1, numel], device=device, dtype=torch.float16)

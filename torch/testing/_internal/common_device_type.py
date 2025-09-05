@@ -1967,7 +1967,7 @@ def skipPRIVATEUSE1(fn):
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> list[str]:
-    return ["cpu"] if not torch.accelerator.is_available() else ["cpu", "cuda", "xpu"]
+    return ["cpu"] if not torch.accelerator.is_available() else ["cpu", torch.accelerator.current_accelerator().type]
 
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
