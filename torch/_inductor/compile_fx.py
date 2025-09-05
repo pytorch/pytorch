@@ -65,7 +65,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
 )
-from torch._inductor.custom_partitioner_fn import CustomPartitionerFn
+from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
     create_mapping_pre_post_grad_nodes,
     save_args_for_compile_fx_inner,

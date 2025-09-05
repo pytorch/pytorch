@@ -4,7 +4,6 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
-import torch._inductor.custom_partitioner_fn
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
@@ -268,9 +267,7 @@ post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Allow users to pass in custom partition function
-custom_partitioner_fn: torch._inductor.custom_partitioner_fn.CustomPartitionerFnType = (
-    None
-)
+custom_partitioner_fn: torch._inductor.custom_graph_pass.CustomPartitionerFnType = None
 
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None

@@ -83,8 +83,6 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
     CustomGraphPassType,
-)
-from torch._inductor.custom_partitioner_fn import (
     CustomPartitionerFn,
     CustomPartitionerFnType,
 )

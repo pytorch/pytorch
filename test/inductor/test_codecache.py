@@ -33,9 +33,9 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
+    CustomPartitionerFn,
     get_hash_for_files,
 )
-from torch._inductor.custom_partitioner_fn import CustomPartitionerFn
 from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
