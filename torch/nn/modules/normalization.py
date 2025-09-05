@@ -253,7 +253,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
     def __init__(
         self,
-        start_dim: int,
+        start_dim: int = -1,
         eps: float = 1e-5,
         elementwise_affine: bool = True,
         bias: bool = True,
