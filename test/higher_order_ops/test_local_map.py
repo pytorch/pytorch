@@ -189,8 +189,9 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.graphs[1].print_readable(print_output=False))
+                normalize_gm(backend.graphs[1].print_readable(print_output=False)),
             )
+
 
 if __name__ == "__main__":
     run_tests()
