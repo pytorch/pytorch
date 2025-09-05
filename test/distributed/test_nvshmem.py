@@ -669,7 +669,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         torch.ops.symm_mem.tile_reduce(inp, out, root, group_name)
 
         # Check data
-        expected = torch.empty_like(full_out).fill_(0)
+        expected = torch.zeros_like(full_out)
         if self.rank == root:
             expected[tile_size:full_size, tile_size:full_size] = (
                 self.world_size * (self.world_size - 1) / 2
