@@ -759,6 +759,48 @@ def forward(self, x):
             if "aten.sum.dim_IntList" in node.target:
                 self.assertEqual(node.inputs[1].arg.type, "as_ints")
 
+    def test_empty_constant(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        eager_out = m(*sample_inputs)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        ep_out = loaded_ep.module()(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+        self.assertEqual(len(loaded_ep.constants), 0)
+
+    def test_empty_state_dict(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.randn(4, 4)
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(4, 4),)
+        eager_out = m(*sample_inputs)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        ep_out = loaded_ep.module()(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+        self.assertEqual(len(loaded_ep.state_dict), 0)
+
     def test_preserve_aliasing(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -831,6 +873,25 @@ def forward(self, x):
         self.assertEqual(epm.const2[0], 123)
         epm.const2[-1] = 321
         self.assertEqual(epm.const1[-1][-1], 321)
+
+    def test_storage_offset(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[:4]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
