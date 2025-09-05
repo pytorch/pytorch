@@ -304,11 +304,19 @@ class CrossMapLRN2d(Function):
         return grad_input, None, None, None, None
 
 
-class BackwardHookFunction(torch.autograd.Function):
+class BackwardHookFunction(Function):
+    generate_vmap_rule = True
+
     @staticmethod
-    def forward(ctx, *args):
-        ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
+    def forward(*args, **kwargs):
         return args
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        ctx.mark_non_differentiable(
+            *[input for input in inputs if not input.requires_grad]
+        )
+        return output
 
     @staticmethod
     def backward(ctx, *args):
