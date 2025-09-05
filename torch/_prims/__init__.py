@@ -1413,14 +1413,25 @@ def _collapse_view_helper(
     stride = strides[end]
 
     valid_op = True
-    for idx in range(end - 1, start - 1, -1):
-        valid_op = sym_and(
-            valid_op,
-            sym_or(
-                shape[idx + 1] == 1, strides[idx] == strides[idx + 1] * shape[idx + 1]
-            ),
-        )  # type: ignore[assignment]
+    if guard_or_false(a.numel() != 0):
+        for idx in range(end - 1, start - 1, -1):
+            valid_op = sym_and(
+                valid_op,
+                sym_or(
+                    shape[idx] == 1,
+                    shape[idx + 1] == 1,
+                    strides[idx] == strides[idx + 1] * shape[idx + 1],
+                ),
+            )  # type: ignore[assignment]
 
+            # early exit if we already know its invalid.
+            if guard_or_false(torch.sym_not(valid_op)):
+                if must_be_valid:
+                    torch._check(valid_op, lambda: must_be_valid)
+                else:
+                    return None, None
+
+    # for unbacked this become a runtime assertion.
     valid_op = sym_or(valid_op, a.numel() == 0)
 
     if must_be_valid:
