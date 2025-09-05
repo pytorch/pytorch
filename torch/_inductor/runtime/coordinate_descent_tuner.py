@@ -241,10 +241,7 @@ class CoordescTuner:
 
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
-            "%s: Baseline Config %s, baseline timing %f",
-            self.name,
-            baseline_config,
-            baseline_timing,
+            "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
         )
         improved = True
         best_config = baseline_config
@@ -286,17 +283,15 @@ class CoordescTuner:
 
                 if improved:
                     msg = red_text(
-                        "%s: Coordinate descend tuning found improvement of %.3fx by looking in all directions."
+                        "Coordinate descend tuning found improvement of %.3fx by looking in all directions."
                     )
                     log.debug(
                         msg,
-                        self.name,
                         old_best_timing / best_timing,
                     )
 
         log.debug(
-            "%s: Improve from %s %f -> %s %f, %.3fx",
-            self.name,
+            "Improve from %s %f -> %s %f, %.3fx",
             baseline_config,
             baseline_timing,
             best_config,

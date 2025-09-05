@@ -1700,6 +1700,19 @@ def _export_to_aten_ir_make_fx(
 
             @contextmanager
             def _temp_register_custom_call_function_hop_to_predispatch():
+                """
+                This context manager temporarily adds pre-dispatch implementation 
+                to custom_function_call HOP which is used to deal with vmap + custom 
+                autograd function. This can show up in following scenario:
+                1. Using TransformGetItemToIndex tf mode will redirect slicing to mod_index custom
+                   autograd function 
+                2. If the body under tf mode is in vmap region, we trigger special HOP called custom_function_call
+                3. In pre-dispatch export, we don't know how to deal with this HOP, so we just desugar it 
+                   and call the underlying custom autograd function. This will do the right thing when we lower to 
+                   inference because exported graph contains enough info to turn on vmap. 
+
+                We do this only for export because in other cases, we should never get into predispatch mode. 
+                """
                 from torch._functorch.autograd_function import custom_function_call
                 from torch._subclasses.fake_impls import _deregister_op_impl
                 from torch.export.custom_ops import (
@@ -1710,7 +1723,7 @@ def _export_to_aten_ir_make_fx(
                     track_tensor_tree,
                 )
 
-                saved_py_table = custom_function_call.py_kernels.copy()
+                saved_py_table = custom_function_call.python_key_table.copy()
 
                 def trace_custom_function_call(mode, function_cls, *args, **kwargs):
                     if mode.pre_dispatch:
@@ -1733,11 +1746,11 @@ def _export_to_aten_ir_make_fx(
                         return track_tensor_tree(
                             out, out_proxy, constant=None, tracer=mode.tracer
                         )
-                    assert False, (
+                    raise AssertionError(
                         "We should never trace into custom_function_call at python key"
                     )
 
-                custom_function_call.py_impl(ProxyTorchDispatchMode)(
+                custom_function_call.python_key_table[ProxyTorchDispatchMode] = (
                     trace_custom_function_call
                 )
 
@@ -1745,8 +1758,8 @@ def _export_to_aten_ir_make_fx(
                     yield
 
                 finally:
-                    custom_function_call.py_kernels.clear()
-                    custom_function_call.py_kernels.update(saved_py_table)
+                    custom_function_call.python_key_table.clear()
+                    custom_function_call.python_key_table.update(saved_py_table)
                     custom_function_call._dispatch_cache.clear()
                     _deregister_op_impl(custom_function_call)
 

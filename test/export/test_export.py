@@ -13524,7 +13524,7 @@ graph():
     %_call_custom_autograd_function_in_pre_dispatch : [num_users=1] = call_function[target=torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch](args = (torch._dynamo._trace_wrapped_higher_order_op.ModIndex, %b_base, [%_add_batch_dim]), kwargs = {})
     %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%_call_custom_autograd_function_in_pre_dispatch, 1, 4, 0), kwargs = {})
     %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
-    return (_remove_batch_dim,)"""
+    return (_remove_batch_dim,)""",
         )
 
         self.assertEqual(m(idxs), ep.module()(idxs))
@@ -13536,10 +13536,9 @@ graph():
     %b_base : [num_users=1] = placeholder[target=b_base]
     %indices : [num_users=1] = placeholder[target=indices]
     %index : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%b_base, [%indices]), kwargs = {})
-    return (index,)"""
+    return (index,)""",
         )
         self.assertEqual(m(idxs), ep.module()(idxs))
-
 
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
@@ -13776,22 +13775,6 @@ def forward(self, x, y):
         self.assertTrue(placeholders[0].meta["val"].requires_grad)
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
-
-    def test_expand_copy_export_handles_implicit_true(self):
-        class ExpandModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, implicit):
-                return torch.expand_copy(x, [3, 3], implicit=implicit)
-
-        model = ExpandModel()
-        x = torch.ones([3])
-
-        model(x, False)
-        model(x, True)
-        export(model, (x, False))
-        export(model, (x, True))
 
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():
@@ -15588,10 +15571,13 @@ class GraphModule(torch.nn.Module):
     @contextmanager
     def distributed_env(self, world_size):
         try:
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
             torch.distributed.init_process_group(
                 backend="fake",
                 world_size=world_size,
                 rank=0,
+                store=FakeStore(),
             )
             yield
 
@@ -16711,27 +16697,6 @@ def forward(self, x, y):
 
         ep = export(M(), inp)
         FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
-            str(ep.graph)
-        )
-
-    def test_item(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = 5
-                self.b = 5.0
-
-            def forward(self, y):
-                at = torch.tensor(self.a)
-                # This becomes 5
-                a = at.item()
-                bt = torch.tensor(self.b)
-                # This becomes 5.0
-                b = bt.item()
-                return a * b * y
-
-        ep = export(M(), (torch.ones(3),))
-        FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
 
