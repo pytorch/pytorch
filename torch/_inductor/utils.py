@@ -3603,7 +3603,7 @@ class CUDAGraphWrapperMetadata:
     # The number of partitions that are cudagraphable.
     num_partitions: int
 
-    # The number of partitions that are cudagraphable and have a fallback.
+    # Index of the current partition.
     partition_index: int
 
 
