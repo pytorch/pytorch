@@ -129,17 +129,19 @@ void FunctionalTensorWrapper::freeze_storage() const {
 // - view_value: The output tensor that we need to wrap.
 // - base: The "base" of the view that `view_value` was generated from.
 // See Note [Functionalization: Alias Removal Part 2] for more details on the mutation replay logic.
-FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, const functionalization::ViewMeta& meta)
-  : c10::TensorImpl(
-      c10::DispatchKeySet(DispatchKey::Functionalize),
-      view_value.dtype(),
-      view_value.device()
-    ),
-    value_(view_value),
-    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
-    was_storage_changed_(base->was_storage_changed_),
-    is_symbolic_(base->is_symbolic_)
-{
+FunctionalTensorWrapper::FunctionalTensorWrapper(
+    const Tensor& view_value,
+    const FunctionalTensorWrapper* base,
+    const std::shared_ptr<functionalization::ViewMeta>& meta)
+    : c10::TensorImpl(
+          c10::DispatchKeySet(DispatchKey::Functionalize),
+          view_value.dtype(),
+          view_value.device()),
+      value_(view_value),
+      is_multi_output_view_(
+          base->is_multi_output_view_ || meta->is_multi_output),
+      was_storage_changed_(base->was_storage_changed_),
+      is_symbolic_(base->is_symbolic_) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   set_constructor_metadata();
@@ -148,10 +150,9 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
-  maybe_mark_symbolic(meta);
+  maybe_mark_symbolic(meta.get());
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
 }
-
 
 functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_storage_impl() const {
   return static_cast<functionalization::FunctionalStorageImpl*>(storage_.unsafeGetStorageImpl());
@@ -176,18 +177,18 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 }
 
 // See Note [Functionalization Pass - Inplace View Ops]
-void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::ViewMeta& meta) {
+void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
   view_metas_.push_back(meta);
   // Manually track the fact that this tensor received a metadata mutation!
   has_metadata_mutation_ = true;
   // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
-  maybe_mark_symbolic(meta);
+  maybe_mark_symbolic(meta.get());
   // Note [Functionalization Pass - Inplace View Ops]
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
   // Calling transpose_() should ensure that a gets an alias, and append the new ViewMeta to a's current list of ViewMetas.
   at::AutoDispatchSkipFunctionalize guard;
-  value_ = meta.forward_fn(value_, meta.out_index);
+  value_ = meta->forward(value_);
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
 }
 
@@ -368,15 +369,8 @@ void FunctionalTensorWrapper::sync_() {
   regenerate_from_base();
 }
 
-Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base) {
-  auto t = base;
-
-  // Reapply views to get the viewed tensor from the base in alias_
-  for (auto& view_meta: view_metas_) {
-    t = view_meta.forward_fn(t, view_meta.out_index);
-  }
-
-  return t;
+const std::vector<std::shared_ptr<functionalization::ViewMeta>>& FunctionalTensorWrapper::view_metas() const {
+  return view_metas_;
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
@@ -385,7 +379,7 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  t = apply_view_metas(t);
+  t = at::functionalization::impl::apply_view_meta_sequence(t, view_metas_);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
 
   replace_(t, /*from_lazy_regenerate=*/true);
@@ -759,20 +753,28 @@ void freeze_functional_tensor(const Tensor& tensor) {
   functional_base_impl->freeze_storage();
 }
 
-Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
+Tensor create_functional_tensor_with_view_meta(
+    const at::Tensor& view_to_wrap,
+    const at::Tensor& base,
+    const std::shared_ptr<functionalization::ViewMeta>& meta,
+    int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
   auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(base);
+  auto meta_ = meta;
   if (out_idx != 0) {
     // Note [out_idx in ViewMeta]
     // When a view op outputs multiple tensors, each output needs its own separate ViewMeta.
     // Each ViewMeta also tracks the index of the particular output tensor, which is needed in the reverse function.
-    meta = meta.to_out_idx(out_idx);
+    meta_ = meta->to_out_index(out_idx);
   }
-  return at::detail::make_tensor<FunctionalTensorWrapper>(view_to_wrap, functional_base_impl, meta);
+  return at::detail::make_tensor<FunctionalTensorWrapper>(view_to_wrap, functional_base_impl, meta_);
 }
 
-std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_to_wrap, const at::Tensor& base, const functionalization::ViewMeta& meta) {
+std::vector<Tensor> create_functional_tensor_with_view_meta(
+    ITensorListRef view_to_wrap,
+    const at::Tensor& base,
+    const std::shared_ptr<functionalization::ViewMeta>& meta) {
   std::vector<Tensor> outputs(view_to_wrap.size());
   int64_t i = 0;
   for (const auto& tensor : view_to_wrap) {
@@ -782,10 +784,20 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
   return outputs;
 }
 
-void mutate_view_meta(const at::Tensor& self, const functionalization::ViewMeta& meta) {
+void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionalization::ViewMeta>& meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
   self_impl->mutate_view_meta(meta);
+}
+
+Tensor apply_view_meta_sequence(
+    const Tensor& base,
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
+  Tensor r = base;
+  for (auto& vm : sequence) {
+    r = vm->forward(r);
+  }
+  return r;
 }
 
 // Note [Propagating strides in the functionalization pass]

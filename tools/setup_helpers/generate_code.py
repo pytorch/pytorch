@@ -189,6 +189,12 @@ def main() -> None:
     )
     options = parser.parse_args()
 
+    # Path: aten/src/ATen
+    aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
+    operator_selector = get_selector(
+        options.selected_op_list_path, options.operators_yaml_path
+    )
+
     generate_code(
         options.gen_dir,
         options.native_functions_path,
@@ -198,13 +204,32 @@ def main() -> None:
         options.disable_autograd,
         options.force_schema_registration,
         # options.selected_op_list
-        operator_selector=get_selector(
-            options.selected_op_list_path, options.operators_yaml_path
-        ),
+        operator_selector=operator_selector,
+    )
+
+    # Generate the python bindings for functionalization's `ViewMeta` classes.
+    from torchgen.gen_functionalization_type import (
+        gen_functionalization_view_meta_classes,
+    )
+
+    functionalization_templates_dir = os.path.join(aten_path, "templates")
+    functionalization_install_dir = os.path.join(
+        options.gen_dir, "torch/csrc/functionalization/generated"
+    )
+
+    os.makedirs(functionalization_install_dir, exist_ok=True)
+    assert os.path.isdir(functionalization_install_dir)
+    assert os.path.isdir(functionalization_templates_dir)
+
+    gen_functionalization_view_meta_classes(
+        options.native_functions_path or NATIVE_FUNCTIONS_PATH,
+        options.tags_path or TAGS_PATH,
+        selector=operator_selector,
+        install_dir=functionalization_install_dir,
+        template_dir=functionalization_templates_dir,
     )
 
     if options.gen_lazy_ts_backend:
-        aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
         ts_backend_yaml = os.path.join(aten_path, "native/ts_native_functions.yaml")
         ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
         ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"

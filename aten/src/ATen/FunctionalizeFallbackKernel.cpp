@@ -1,3 +1,5 @@
+#include <ATen/FunctionalizeFallbackKernel.h>
+
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/EmptyTensor.h>
@@ -27,6 +29,31 @@
 
 #include <utility>
 #endif
+
+namespace at::functionalization {
+
+Tensor resize__ViewMeta::forward(const Tensor& base) {
+  if (reapply_views) {
+    return base.as_strided(size, c10::contiguous_strides(size));
+  } else {
+    return at::as_strided_copy(base, size, c10::contiguous_strides(size));
+  }
+}
+
+Tensor resize__ViewMeta::reverse(const Tensor& base, const Tensor& mutated_view) {
+  return base.as_strided_scatter(
+      mutated_view, size, c10::contiguous_strides(size));
+}
+
+Tensor _unsafe_view_ViewMeta::forward(const Tensor& base) {
+  return at::_unsafe_view_symint(base, size);
+}
+
+Tensor _unsafe_view_ViewMeta::reverse(const Tensor& base, const Tensor& mutated_view) {
+  return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
+}
+
+} // namespace at::functionalization
 
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet [[maybe_unused]], torch::jit::Stack* stack) {
@@ -169,19 +196,8 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   // The output of resizing is equivalent to taking a slice of a larger tensor.
   // We have to emulate this "slicing" with an as_strided call.
   auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
-      if (reapply_views) {
-        return base.as_strided(size, c10::contiguous_strides(size));
-      } else {
-        return at::as_strided_copy(base, size, c10::contiguous_strides(size));
-      }
-    },
-    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
-    },
-    /*has_symbolic_inputs=*/false
-  );
+  auto view_meta = std::make_shared<at::functionalization::resize__ViewMeta>(
+      reapply_views, size.vec());
   at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
 }
@@ -300,17 +316,11 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
     tmp_output = at::_unsafe_view_symint(self_, size);
   }
 
-  bool has_symbolic_inputs = std::any_of(size.begin(), size.end(), [=](auto& s) { return s.is_symbolic(); });
-
-  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
-      return at::_unsafe_view_symint(base, size);
-    },
-    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx [[maybe_unused]]) -> at::Tensor {
-      return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
-    },
-    /*has_symbolic_inputs=*/has_symbolic_inputs
-  );
+  bool has_symbolic_inputs = std::any_of(
+      size.begin(), size.end(), [=](auto& s) { return s.is_symbolic(); });
+  auto view_meta =
+      std::make_shared<at::functionalization::_unsafe_view_ViewMeta>(
+          has_symbolic_inputs, size.vec());
 
   auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
   // See  Note [Propagating strides in the functionalization pass]
