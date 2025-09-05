@@ -170,15 +170,9 @@ case $desired_python in
         echo "Using 3.10 deps"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
-    3.9)
-        echo "Using 3.9 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="==2.0.2"
-        ;;
     *)
-        echo "Using default deps"
-        NUMPY_PINNED_VERSION="==1.11.3"
+        echo "Unsupported version $desired_python"
+        exit 1
         ;;
 esac
 
