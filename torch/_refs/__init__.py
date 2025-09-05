@@ -450,16 +450,27 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     )
 
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
-        from torch.fx.experimental.symbolic_shapes import guard_or_true
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
         if len(a) != len(b):
             return True
 
         for x, y in zip(a, b):
-            if guard_or_true(x != y):
+            # We know they are not the same.
+            if guard_or_false(x != y):
                 return True
-            # assume no broadcasting for unbacked.
-            torch._check(x == y)
+
+            # They are the same or we do not know if they are the same or not.
+            # u0==1 and 1==u0 cases. We broadcast!
+            if guard_or_false(sym_or(x == 1, y == 1)):
+                # assume braodcasting.
+                return True
+
+            # u0==u1 assume the same, no broadcasting!
+            torch._check(
+                x == y,
+                "sizes assumed to be the same due to unbacked broadcasting semantics",
+            )
 
         return False
 

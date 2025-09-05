@@ -108,6 +108,7 @@ CustomOutParamAnnotation = "__custom_out_param__"
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     from torch.fx.experimental.symbolic_shapes import guard_or_true
+
     if len(a) != len(b):
         return False
 
