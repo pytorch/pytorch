@@ -524,12 +524,6 @@ class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
 
 
-def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
-    if tx is None:
-        return _get_error_on_graph_break()
-    return tx.error_on_graph_break
-
-
 def get_compile_id(
     frame_state: dict[str, Union[int, FrameStateSizeEntry]],
 ) -> CompileId:
@@ -1167,10 +1161,8 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph or _is_error_on_graph_break(e._torch_dynamo_tracer_output):
-                log.debug(
-                    "No graph captured with one_graph=True or error_on_graph_break=True"
-                )
+            if one_graph:
+                log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
@@ -1376,10 +1368,9 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _get_error_on_graph_break():
+            elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
-                    "Excessive recompilations can degrade "
+                    f"{limit_type} reached with fullgraph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."

@@ -116,7 +116,6 @@ class DistributedUtilTest(TestCase):
                 timeout=1,
             )
 
-    @skipIfRocm
     def test_create_store_timeout_on_worker(self):
         with self.assertRaises(DistNetworkError):
             # use any available port (port 0) since timeout is expected
