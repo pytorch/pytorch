@@ -61,7 +61,7 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
                 # Move the parameter to the new name
                 if hasattr(graph_module, old_target):
                     param = torch.fx.graph_module._get_attr(graph_module, old_target)
-                    torch.fx.graph_module._set_attr(graph_module, new_target, param)
+                    torch.fx.graph_module._assign_attr(param, graph_module, new_target)
                     torch.fx.graph_module._del_attr(graph_module, old_target)
 
 
