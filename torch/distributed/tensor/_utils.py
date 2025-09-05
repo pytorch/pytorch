@@ -71,7 +71,10 @@ def _explicit_order_placements(
 
 
 def compute_local_shape_and_global_offset(
-    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    device_order: Optional[Sequence[int]] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
@@ -122,8 +125,12 @@ def _compute_local_shape_and_global_offset(
     mesh_shape: ShapeType,
     my_coordinate: Optional[list[int]],
     placements: Sequence[Placement],
+    device_order: Optional[Sequence[int]] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    ordered_placements = _explicit_order_placements(mesh_shape, placements)
+    if device_order is None:
+        ordered_placements = _explicit_order_placements(mesh_shape, placements)
+    else:
+        ordered_placements = list(zip(device_order, placements))
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
