@@ -98,7 +98,7 @@ at::Tensor InputMetadata::maybe_reduce(
         needs_reduce = true;
       }
     } else {
-      if (!size.sym_eq(target).expect_true(__FILE__, __LINE__)) {
+      if (!TORCH_GUARD_OR_TRUE(size.sym_eq(target))) {
         fail();
       }
     }
