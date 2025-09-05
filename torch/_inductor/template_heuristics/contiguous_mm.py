@@ -5,6 +5,10 @@ from typing import Any, TYPE_CHECKING
 import torch
 
 from ..ir import get_free_symbols
+from ..kernel.mm import (
+    addmm_contiguous_subgraph_template,
+    mm_contiguous_subgraph_template,
+)
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import use_contiguous
 from .base import TemplateConfigHeuristics
@@ -17,17 +21,25 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
-@register_template_heuristic("contiguous_mm", None, op_name="mm")
-@register_template_heuristic("contiguous_addmm", None, op_name="addmm")
+@register_template_heuristic(mm_contiguous_subgraph_template.uid, None, op_name="mm")
+@register_template_heuristic(
+    addmm_contiguous_subgraph_template.uid, None, op_name="addmm"
+)
 class EmptyContiguousMMConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip contiguous mm on not cuda"""
 
 
 @register_template_heuristic(
-    "contiguous_mm", "cuda", register=torch.version.hip is not None, op_name="mm"
+    mm_contiguous_subgraph_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+    op_name="mm",
 )
 @register_template_heuristic(
-    "contiguous_addmm", "cuda", register=torch.version.hip is not None, op_name="addmm"
+    addmm_contiguous_subgraph_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+    op_name="addmm",
 )
 class ContiguousMMHeuristics(TemplateConfigHeuristics):
     def get_template_configs(

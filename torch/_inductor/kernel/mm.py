@@ -762,7 +762,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_triton_template(layout):
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template.name, "mm"
+            kernel_inputs, layout, mm_template.uid, "mm"
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -773,7 +773,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template params using the new unified function
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, persistent_tma_mm_template.name, "mm"
+                kernel_inputs, layout, persistent_tma_mm_template.uid, "mm"
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -784,7 +784,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         # Only do split-k optimization if K is much larger than m, n and m, n are small
         if use_decompose_k_choice(m, n, k):
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, decompose_k_subgraph_template.name, "mm"
+                kernel_inputs, layout, decompose_k_subgraph_template.uid, "mm"
             ):
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
@@ -931,7 +931,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template.name, "int_mm"
+            kernel_inputs, layout, mm_template.uid, "int_mm"
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1038,7 +1038,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs,
             layout,
-            mm_template.name,
+            mm_template.uid,
             "addmm",
         ):
             mm_template.maybe_append_choice(
@@ -1052,7 +1052,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                persistent_tma_mm_template.name,
+                persistent_tma_mm_template.uid,
                 "addmm",
             ):
                 persistent_tma_mm_template.maybe_append_choice(
@@ -1246,7 +1246,7 @@ def tuned_scaled_mm(
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                scaled_mm_device_tma_template.name,
+                scaled_mm_device_tma_template.uid,
                 "scaled_mm",
                 overriders,
             ):
@@ -1260,7 +1260,7 @@ def tuned_scaled_mm(
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs,
             layout,
-            mm_template.name,
+            mm_template.uid,
             "scaled_mm",
             overriders,
         ):
