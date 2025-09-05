@@ -39,7 +39,7 @@ class KernelTemplateChoice:
         """
         Lazily evaluate and return the ChoiceCaller for this template choice.
 
-        On first access, calls template.choice_or_None() with the stored parameters.
+        On first access, calls template.choice_or_none() with the stored parameters.
         If successful, caches and returns the ChoiceCaller. If it fails, caches
         and returns None. Subsequent accesses return the cached value.
 
