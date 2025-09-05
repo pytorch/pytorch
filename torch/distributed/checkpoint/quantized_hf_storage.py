@@ -123,6 +123,11 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         Returns:
             Dequantized tensor
         """
+        # Convert to float32 for computation
+        # Certain quantized dtypes like Float8_e4m3fn
+        # don't support multiplication on CPU yet in PyTorch.
+        upcasted_weight = weight.to(torch.float32)
+
         # Get original dimensions
         orig_shape = weight.shape
 
@@ -131,7 +136,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         block_rows, block_cols = expected_scale_shape
 
         # Create output tensor in target dtype
-        dequantized = weight.detach().clone().to(dtype=self.target_dtype)
+        dequantized = weight.detach().to(dtype=self.target_dtype, copy=True)
 
         # Apply scaling factors to each block
         for i in range(block_rows):
@@ -143,7 +148,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 col_end = min(col_start + self.block_size, orig_shape[1])
 
                 # Get the block
-                block = weight[row_start:row_end, col_start:col_end]
+                block = upcasted_weight[row_start:row_end, col_start:col_end]
 
                 scale = scale_inv[i, j]
                 block = block * scale
