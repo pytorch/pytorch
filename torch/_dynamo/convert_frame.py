@@ -95,6 +95,7 @@ from .cache_size import (
 )
 from .eval_frame import (
     always_optimize_code_objects,
+    Constraint,
     dynamo_tls,
     skip_code,
     TorchPatcher,
@@ -900,7 +901,8 @@ class CaptureOutput:
     """
 
     dynamo_output: DynamoOutput
-    backend_input: BackendInput
+    # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
+    backend_input: Optional[BackendInput]
 
 
 @dataclass
@@ -913,7 +915,10 @@ class FrameInfo:
 
 
 def fullgraph_capture(
-    frame: FrameInfo, *, _is_export_deprecated_do_not_use: bool = False
+    frame: FrameInfo,
+    *,
+    constraints: Optional[list[Constraint]] = None,
+    _is_export_deprecated_do_not_use: bool = False,
 ) -> CaptureOutput:
     """
     A standalone function which takes a frame and returns dynamo captured graph
@@ -957,6 +962,7 @@ def fullgraph_capture(
             frame.closure,
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
+            export_constraints=constraints,  # type: ignore[arg-type]
             one_graph=True,
             restart_reasons=set(),
         )
@@ -972,7 +978,6 @@ def fullgraph_capture(
             cur_exn = cur_exn.__cause__
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
-    assert backend_input is not None
     return CaptureOutput(dynamo_output, backend_input)
 
 
