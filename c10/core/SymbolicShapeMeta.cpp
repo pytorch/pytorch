@@ -78,16 +78,14 @@ bool all_hinted(
   auto all_hinted = true;
   for (const auto& s : sizes) {
     if (!s.has_hint()) {
-      all_hinted = false;
-      break;
+      return false;
     }
   }
 
   if (all_hinted) {
     for (const auto& s : strides) {
       if (!s.has_hint()) {
-        all_hinted = false;
-        break;
+        return false;
       }
     }
   }
