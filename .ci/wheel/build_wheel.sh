@@ -124,7 +124,7 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=10.15
+export MACOSX_DEPLOYMENT_TARGET=11.0
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 SETUPTOOLS_PINNED_VERSION="==70.1.0"
@@ -223,7 +223,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir"
+python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name ${mac_version}
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
