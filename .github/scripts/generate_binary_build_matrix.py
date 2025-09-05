@@ -244,8 +244,6 @@ def generate_libtorch_matrix(
                 arches.remove("13.0")
         elif os == "windows":
             arches += CUDA_ARCHES
-            if "13.0" in arches:
-                arches.remove("13.0")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -310,8 +308,6 @@ def generate_wheels_matrix(
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            if "13.0" in arches:
-                arches.remove("13.0")
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -334,13 +330,14 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13t on cpu-s390x
-            if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
-                continue
             # TODO: Enable python 3.14 for rest
-            if os not in ["linux", "linux-aarch64", "macos-arm64", "windows"] and (
-                python_version == "3.14" or python_version == "3.14t"
-            ):
+            if os not in [
+                "linux",
+                "linux-aarch64",
+                "linux-s390x",
+                "macos-arm64",
+                "windows",
+            ] and (python_version == "3.14" or python_version == "3.14t"):
                 continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
