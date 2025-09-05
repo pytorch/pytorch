@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from torch.utils._ordered_set import OrderedSet
-
     from triton import Config as TritonConfig
+
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -181,10 +181,12 @@ class InductorChoices:
 
             cs = heuristic.get_template_configs(
                 kernel_inputs,
-                layout,
+                layout.dtype,
                 op_name,
             )
-            extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+            extra_kwargs = heuristic.get_extra_kwargs(
+                kernel_inputs, layout.dtype, op_name
+            )
 
             # Extract layout and input_nodes from extra_kwargs to pass them explicitly
             layout_val = layout
