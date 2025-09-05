@@ -475,7 +475,7 @@ class MathTests(__TestCase):
         #self.assertEqual(math.ceil(NINF), NINF)
         #self.assertTrue(math.isnan(math.ceil(NAN)))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class TestCeil:
                 def __ceil__(self):
                     return 42
@@ -633,7 +633,7 @@ class MathTests(__TestCase):
         #self.assertEqual(math.ceil(NINF), NINF)
         #self.assertTrue(math.isnan(math.floor(NAN)))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class TestFloor:
                 def __floor__(self):
                     return 42
@@ -1056,7 +1056,7 @@ class MathTests(__TestCase):
         )
 
         # Verify tuple subclasses are allowed
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class T(tuple):
                 pass
         self.assertEqual(dist(T((1, 2, 3)), ((4, 2, -1))), 5.0)
@@ -1090,7 +1090,7 @@ class MathTests(__TestCase):
         with self.assertRaises(TypeError):
             dist([1], 2)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadFloat:
                 __float__ = BadDescr()
 
@@ -1165,7 +1165,7 @@ class MathTests(__TestCase):
         self.assertIs(type(s), int)
         self.assertEqual(s, 0)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class IntegerLike(object):
                 def __init__(self, value):
                     self.value = value
@@ -1399,7 +1399,7 @@ class MathTests(__TestCase):
         self.assertEqual(sumprod([1], BasicIterClass(1)), 0)
 
         # Error in multiplication
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadMultiply:
                 def __mul__(self, other):
                     raise RuntimeError
@@ -1449,7 +1449,7 @@ class MathTests(__TestCase):
         Decimal = decimal.Decimal
         Fraction = fractions.Fraction
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Int(int):
                 def __add__(self, other):
                     return Int(int(self) + int(other))
@@ -1988,7 +1988,7 @@ class MathTests(__TestCase):
         self.assertEqual(math.trunc(-0.999999), -0)
         self.assertEqual(math.trunc(-100.999), -100)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class TestTrunc:
                 def __trunc__(self):
                     return 23
@@ -2231,7 +2231,7 @@ class MathTests(__TestCase):
         self.assertEqual(prod([1., F(3, 2)]), 1.5)
 
         # Error in multiplication
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadMultiply:
                 def __rmul__(self, other):
                     raise RuntimeError
@@ -2540,7 +2540,7 @@ class MathTests(__TestCase):
     def test_issue39871(self):
         # A SystemError should not be raised if the first arg to atan2(),
         # copysign(), or remainder() cannot be converted to a float.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class F:
                 def __float__(self):
                     self.converted = True
