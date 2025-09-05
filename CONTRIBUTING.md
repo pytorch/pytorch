@@ -259,6 +259,8 @@ dependencies as well as the nightly binaries into the repo directory.
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
   See [README](tools/README.md) of this directory for more details.
+* [torchgen](torchgen) - This module contains the logic for generating ATen source files from
+  operator definitions (typically found in `native_functions.yaml` and Autograd and other components)
 * [test](test) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality.
