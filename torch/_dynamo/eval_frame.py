@@ -598,8 +598,7 @@ class _TorchDynamoContext:
         patch_fn: Callable[[], Any] = nothing,
         first_ctx: bool = False,
         *,
-        fullgraph: bool = False,
-        error_on_graph_break: Optional[bool] = None,
+        error_on_graph_break: bool = False,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -612,7 +611,6 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
-        self.fullgraph = fullgraph
         self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
@@ -707,7 +705,7 @@ class _TorchDynamoContext:
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
 
-            if not self.fullgraph:
+            if not self.error_on_graph_break:
                 raise RuntimeError(
                     "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
                 )
@@ -812,7 +810,7 @@ class _TorchDynamoContext:
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_error_on_graph_break = None
-                if not self.fullgraph and self.error_on_graph_break is not None:
+                if self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
                     _set_error_on_graph_break(self.error_on_graph_break)
 
@@ -859,14 +857,11 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        if self.error_on_graph_break is not None:
-            compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-                external_utils.wrap_inline_with_error_on_graph_break(
-                    fn, self.error_on_graph_break
-                )
+        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+            external_utils.wrap_inline_with_error_on_graph_break(
+                fn, self.error_on_graph_break
             )
-        else:
-            compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        )
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -928,8 +923,7 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor: Callable[[], contextlib.AbstractContextManager[Any]],
         first_ctx: bool = False,
         *,
-        fullgraph: bool = False,
-        error_on_graph_break: Optional[bool] = None,
+        error_on_graph_break: bool = False,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -948,7 +942,6 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
-            fullgraph=fullgraph,
             error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
@@ -1074,8 +1067,7 @@ def _optimize_catch_errors(
     backend_ctx_ctor: Callable[
         [], contextlib.AbstractContextManager[Any]
     ] = null_context,
-    fullgraph: bool = False,
-    error_on_graph_break: Optional[bool] = None,
+    error_on_graph_break: bool = False,
     export: bool = False,
     dynamic: Optional[bool] = None,
     compiler_config: Optional[Any] = None,
@@ -1086,7 +1078,6 @@ def _optimize_catch_errors(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
-        fullgraph=fullgraph,
         error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
@@ -1185,7 +1176,6 @@ def _optimize(
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
     nopython: bool = False,
-    error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
@@ -1208,11 +1198,6 @@ def _optimize(
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
-        error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
-            See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
-
-            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
-            If `nopython` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
@@ -1243,15 +1228,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython and not config.debug_force_graph_break_on_leaf_return:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
-            package=package,
-        )
-
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1276,8 +1252,7 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        fullgraph=False,
-        error_on_graph_break=error_on_graph_break
+        error_on_graph_break=nopython
         and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
@@ -2199,11 +2174,10 @@ def _optimize_assert(
     package: Optional[CompilePackage] = None,
 ) -> OptimizeContext:
     """
-    Guarantees single-graph capture.
-    The same as `torch._dynamo.optimize(backend)` but ignores
-    symbolic_convert.error_on_graph_break setting.
+    The same as `torch._dynamo.optimize(backend, nopython=True)`,
+    but ignores symbolic_convert.error_on_graph_break setting.
 
-    Used for fullgraph=True and export, since we must always error on graph breaks and ignore
+    Used for export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
@@ -2230,7 +2204,6 @@ def _optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
-        fullgraph=True,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
