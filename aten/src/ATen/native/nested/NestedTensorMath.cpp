@@ -896,7 +896,7 @@ Tensor _nested_view_from_buffer(
     const int64_t* offset_ptr = all_offsets[i].const_data_ptr<int64_t>();
     checkInBoundsForStorage(
         IntArrayRef(sizemat_ptr, sizemat_ptr + size_dim),
-        IntArrayRef(stridemat_ptr, stridemat_ptr + size_dim),
+        OptionalIntArrayRef(std::in_place, stridemat_ptr, stridemat_ptr + size_dim),
         *offset_ptr,
         buffer.dtype(),
         buffer.storage());

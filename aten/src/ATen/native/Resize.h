@@ -82,16 +82,16 @@ inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__
 template <typename T>
 inline void checkInBoundsForStorage(
     ArrayRef<T> size,
-    ArrayRef<T> stride,
+    OptionalArrayRef<T> stride,
     T storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
   T storage_size_bytes, storage_size_plus_offset_bytes;
-  if (stride.data()) {
+  if (stride.has_value()) {
     storage_size_bytes =
-        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+        at::detail::computeStorageNbytes(size, *stride, data_type.itemsize());
     storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
-        size, stride, data_type.itemsize(), storage_offset);
+        size, *stride, data_type.itemsize(), storage_offset);
   } else {
     storage_size_bytes =
         at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
@@ -111,7 +111,7 @@ inline void checkInBoundsForStorage(
       "setStorage: sizes ",
       size,
       ", strides ",
-      stride,
+      stride.value_or(ArrayRef<T>()),
       ","
       " storage offset ",
       storage_offset,
@@ -125,11 +125,10 @@ inline void checkInBoundsForStorage(
 
 template <typename T>
 inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
-                                   ArrayRef<T> size, ArrayRef<T> stride, bool check_offset_in_bounds = true) {
-  // FIXME: stride should be optional
-  if (stride.data()) {
-    TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
-                                              ") and stride length (", stride.size(), ")");
+                                   ArrayRef<T> size, OptionalArrayRef<T> stride, bool check_offset_in_bounds = true) {
+  if (stride.has_value()) {
+    TORCH_CHECK(size.size() == stride.value().size(), "unequal size length (", size.size(),
+                ") and stride length (", stride.value().size(), ")");
   }
 
 #ifdef DEBUG
@@ -149,8 +148,8 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
   if (check_offset_in_bounds) {
     auto result_tensor_impl = result.unsafeGetTensorImpl();
     bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
-    bool stride_unchanged = stride.data()
-        ? result_tensor_impl->generic_strides<T>() == stride
+    bool stride_unchanged = stride.has_value()
+        ? result_tensor_impl->generic_strides<T>() == *stride
         : true;
     if (size_unchanged && stride_unchanged) {
       checkInBoundsForStorage(
@@ -195,7 +194,7 @@ inline void setStrided(
 
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
-      size, stride, storage_offset, self_->dtype(), self_->storage());
+      size, OptionalArrayRef<T>(stride), storage_offset, self_->dtype(), self_->storage());
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);

@@ -140,12 +140,12 @@ Tensor& set_mps_(Tensor& result) {
   return result;
 }
 
-Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, OptionalIntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
-  //std::cout << "set storage_mps " << storage_offset << " stride " << stride << std::endl;
+  //std::cout << "set storage_mps " << storage_offset << " stride " << stride_opt << std::endl;
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  std::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
-                                          std::optional<IntArrayRef>(stride) : std::nullopt;
+  std::optional<IntArrayRef> stride_opt = stride.has_value() ?
+    std::optional<IntArrayRef>(stride.value()) : std::nullopt;
   at::native::resize_impl_mps_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }
