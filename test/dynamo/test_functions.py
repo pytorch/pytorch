@@ -45,6 +45,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
