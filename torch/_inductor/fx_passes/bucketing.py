@@ -94,7 +94,7 @@ def bucket_reduce_scatter_all(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    rs_buckets = bucket_reduce_scatter_by_mb_all(gm, bucket_cap_mb_by_bucket_idx)
+    rs_buckets = bucket_reduce_scatter_by_mb_all(gm, bucket_cap_mb_by_bucket_idx, None, mode)
     if len(rs_buckets) == 0:
         return
     merge_reduce_scatter(gm, rs_buckets, mode)
@@ -438,11 +438,23 @@ def bucket_reduce_scatter_by_mb(
         assert isinstance(reduce_op, str)
         return (group_name, reduce_op, dtype)
 
+    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op)
+
+    group_key_fn = (
+        _rs_group_key_multidtype
+        if mode and "multidtype" in mode
+        else _rs_group_key
+    )
+
     return greedy_bucket_collective_by_mb(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_reduce_scatter_tensor,
-        _rs_group_key,
+        group_key_fn,
         filter_wait_node,
     )
 
@@ -451,6 +463,7 @@ def bucket_reduce_scatter_by_mb_all(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
         _, reduce_op, group_size, group_name = node.args
@@ -459,11 +472,23 @@ def bucket_reduce_scatter_by_mb_all(
         assert isinstance(reduce_op, str)
         return (group_name, reduce_op, dtype)
 
+    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op)
+
+    group_key_fn = (
+        _rs_group_key_multidtype
+        if mode and "multidtype" in mode
+        else _rs_group_key
+    )
+
     return greedy_bucket_collective_by_mb_all(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_reduce_scatter_tensor,
-        _rs_group_key,
+        group_key_fn,
         filter_wait_node,
     )
 
@@ -472,8 +497,10 @@ def bucket_reduce_scatter_by_mb_all(
 def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    dtype: torch.dtype,
+    numel_mults: list[int],
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.view(dtype).view(group_size, -1) for x in rs_ins]
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
@@ -481,26 +508,32 @@ def _pre_bucket_reduce_scatter(
 def _pre_bucket_reduce_scatter_fake(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    dtype: torch.dtype,
+    numel_mults: list[int],
 ) -> torch.Tensor:
-    out_numel = sum(rs_in.numel() for rs_in in rs_ins)
-    return torch.empty((out_numel,), device=rs_ins[0].device, dtype=rs_ins[0].dtype)
+    out_numel = sum(rs_in.numel() * mult for rs_in, mult in zip(rs_ins, numel_mults))
+    return torch.empty((out_numel,), device=rs_ins[0].device, dtype=dtype)
 
 
 _pre_bucket_reduce_scatter.register_fake(_pre_bucket_reduce_scatter_fake)
 
 
 def reduce_scatter_merge_fn_to_trace_custom_ops(
-    rs_ins: list[torch.Tensor],
+    _rs_ins: list[torch.Tensor],
     group_size: int,
     group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    rs_ins = [_rs_in.to(out_dtype) for _rs_in, out_dtype in zip(_rs_ins, out_dtypes)]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
-    new_out_numels = [x.numel() // group_size for x in rs_ins]
+    reduce_dtype_size_bytes = _dtype_size_bytes(reduce_dtype)
+    numel_mults = [_dtype_size_bytes(x.dtype) // reduce_dtype_size_bytes for x in rs_ins]
+    new_out_split_sizes = [x.numel() * mult // group_size for x, mult in zip(rs_ins, numel_mults)]
 
-    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size)
+    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size, reduce_dtype, numel_mults)
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
@@ -509,8 +542,8 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
             new_rs_in, reduce_op, group_size, group_name
         )
     )
-    new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_out_flat = new_rs_out.split(new_out_split_sizes, 0)
+    new_outs = [x.view(dtype).view(s) for x, s, dtype in zip(new_out_flat, new_out_sizes, out_dtypes)]
     return new_outs
 
 
@@ -545,7 +578,6 @@ def _pre_bucket_all_gather(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype],
     rank: int,
 ) -> torch.Tensor:
     ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
@@ -601,14 +633,14 @@ def all_gather_merge_fn_to_trace_custom_ops(
 ) -> list[torch.Tensor]:
     ag_ins = [_ag_in.to(out_dtype) for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
+    ins_split_sizes_bytes = [ag_in.numel() * _dtype_size_bytes(out_dtype) for ag_in, out_dtype in zip(ag_ins, out_dtypes)]
     bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
     ag_input_numel = sum(ins_split_sizes)
     new_ag_out = torch.ops._bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, out_dtypes, rank
+        ag_ins, group_size, group_name, dtype, rank
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
@@ -786,12 +818,12 @@ def merge_reduce_scatter(
         g = gm.graph
         rs_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
         rs_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
+        rs_dtypes: list[list[torch.dtype]] = [[] for _ in range(n_buckets)]
 
         for bucket_idx, rs_nodes in enumerate(rs_buckets):
             rs0 = rs_nodes[0]
             rs0_val = rs0.meta["val"]
             _, reduce_op, group_size, group_name = rs0.args
-            reduce_dtype = rs0_val.dtype
             device = rs0_val.device
             for n in rs_nodes:
                 rs_val = n.meta["val"]
@@ -800,22 +832,23 @@ def merge_reduce_scatter(
                     and n.args[2] == group_size
                     and n.args[3] == group_name
                     and rs_val.device == device
-                    and rs_val.dtype == reduce_dtype
                 )
                 assert len(n.users) == 1
                 wait_n = next(iter(n.users))
                 rs_ins[bucket_idx].append(n.args[0])  # type: ignore[arg-type]
                 rs_waits[bucket_idx].append(wait_n)
+                rs_dtypes[bucket_idx].append(rs_val.dtype)
 
         for bucket_idx in range(n_buckets):
             _rs_ins = rs_ins[bucket_idx]
             _rs_waits = rs_waits[bucket_idx]
             _rs_ns = rs_buckets[bucket_idx]
+            _rs_dtypes = rs_dtypes[bucket_idx]
 
             rs0 = _rs_ns[0]
             rs0_val = rs0.meta["val"]
             _, reduce_op, group_size, group_name = rs0.args
-            reduce_dtype = rs0_val.dtype
+            reduce_dtype = pick_bucket_dtype(_rs_dtypes)
             device = rs0_val.device
 
             replacements = _insert_fn_trace_before_node(
@@ -827,6 +860,7 @@ def merge_reduce_scatter(
                     group_name,
                     reduce_op,
                     reduce_dtype,
+                    _rs_dtypes,
                     device,
                 ),
                 _rs_ns[-1].next,
@@ -1192,6 +1226,9 @@ def bucket_collectives_trie(gm, config):
             node_descendents,
             try_left=3,
         ):
+            if len(ns) <= 1:
+                return []
+
             buckets: list[list[torch.fx.Node]] = []
             cur_bucket: list[torch.fx.Node] = []
             cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
@@ -1243,16 +1280,23 @@ def bucket_collectives_trie(gm, config):
                 cur_bucket_descendents |= node_descendents[node]
             if not _add_bucket(cur_bucket, cur_bucket_descendents):
                 left_ns.extend(cur_bucket)
-            if try_left > 0 and len(left_ns) > 1:
-                ns_to_bucket = left_ns
-                # first one should become last if all others are descendents
-                left_buckets = _greedy_bucket(
-                    ns_to_bucket,
+            # if try_left > 0 and len(left_ns) > 1:
+            #     ns_to_bucket = left_ns
+            #     # first one should become last if all others are descendents
+            #     left_buckets = _greedy_bucket(
+            #         ns_to_bucket,
+            #         bucket_cap_mb_by_bucket_idx,
+            #         node_descendents,
+            #         try_left=try_left - 1,
+            #     )
+            #     buckets.extend(left_buckets)
+            if len(buckets) == 0:
+                return _greedy_bucket(
+                    ns[1:],
                     bucket_cap_mb_by_bucket_idx,
                     node_descendents,
-                    try_left=try_left - 1,
+                    try_left,
                 )
-                buckets.extend(left_buckets)
             return buckets
 
         ret_buckets = []
@@ -1328,7 +1372,7 @@ def bucket_collectives_trie(gm, config):
         },
         payload_fn=lambda: trie_log,
     )
-    bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops")
+    bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")
 
 
 def __bucket_collectives_trie(gm, config):

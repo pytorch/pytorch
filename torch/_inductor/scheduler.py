@@ -885,7 +885,9 @@ class BaseSchedulerNode:
 
         if flops_est == 0 or flops_est is None:
             # no flops estimate, so fall back to memory estimate
-            return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
+            ns = self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
+            ms = ns / 1e6
+            return ms
 
         # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
         factor = 1.0
@@ -895,7 +897,9 @@ class BaseSchedulerNode:
         transfer_time = counted_bytes / gpu_memory_bandwidth
 
         # Return estimated runtime in millis
-        return max(compute_time, transfer_time) / 1e6
+        ns = max(compute_time, transfer_time)
+        ms = ns / 1e6
+        return ms
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None

@@ -1699,6 +1699,52 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @parametrize("bucket_mode", ["all_custom_ops"])
+    def test_reduce_scatter_bucket_multidtype(self, bucket_mode):
+        def func(x, w, rs_0, rs_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # reduce_scatter
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+
+            return y, rs_0_out, rs_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.bfloat16)
+        inputs = [x, w, rs_0, rs_1]
+        func(*inputs, **self.get_world_trs())
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_reduce_scatters_fx": bucket_mode,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+            print(f"XXX RS_MULTIDTYPE_CODE:{code}")
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+        print(f"XXX RS_MD out:{out}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     @parametrize("bucket_mode", ["all", "all_custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
