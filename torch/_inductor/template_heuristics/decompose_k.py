@@ -7,6 +7,7 @@ import sympy
 import torch
 
 from ..ir import get_free_symbols
+from ..kernel.mm import decompose_k_subgraph_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
@@ -20,14 +21,17 @@ if TYPE_CHECKING:
     from ..ir import Layout
 
 
-@register_template_heuristic("decompose_k", None, op_name="mm")
+@register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
 class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
 
 # on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
-    "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
+    decompose_k_subgraph_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="mm",
 )
 # TODO(coconutruben): enable decompose k on AMD by removing the register bool
 # and benchmarking it for performance and stability
