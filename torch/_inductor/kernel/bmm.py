@@ -174,7 +174,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     name = "bmm"
 
     # Create MMKernelInputs for BMM at the top
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]  # Extract batch dimension
@@ -214,9 +214,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_mm_configs(
+        V.choices.get_template_configs(
             kernel_inputs,
-            layout,
             templates_to_use,
             name,
             kwarg_overrides=kwarg_overrides,
@@ -292,7 +291,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
