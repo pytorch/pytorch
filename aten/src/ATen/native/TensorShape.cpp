@@ -378,12 +378,10 @@ Tensor& set_storage_cpu_(
     Storage storage,
     int64_t storage_offset,
     IntArrayRef size,
-    IntArrayRef stride) {
-  checkSetStorage(result, std::move(storage), storage_offset, size, stride);
+    OptionalIntArrayRef stride_opt) {
+  checkSetStorage(result, std::move(storage), storage_offset, size, stride_opt);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  at::OptionalIntArrayRef stride_opt =
-      stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : std::nullopt;
   // We can reuse this kernel for the meta device.
   // We just need to make sure we don't actually try to resize the (null)
   // storage.
@@ -400,7 +398,7 @@ Tensor& set_storage_meta__symint(
     Storage storage,
     c10::SymInt storage_offset,
     c10::SymIntArrayRef size,
-    c10::SymIntArrayRef stride) {
+    OptionalSymIntArrayRef stride) {
   checkSetStorage(
       result,
       storage,
@@ -410,7 +408,7 @@ Tensor& set_storage_meta__symint(
       /*check_offset_in_bounds=*/false);
 
   c10::SymDimVector contiguous_strides;
-  if (stride.data() == nullptr) {
+  if (!stride.has_value()) {
     // TODO: dedupe this with empty() symbolic logic
     int64_t dim = size.size();
     contiguous_strides.resize(dim);
@@ -428,7 +426,7 @@ Tensor& set_storage_meta__symint(
 
   // Run this before storage setting so we can access numel
   result.unsafeGetTensorImpl()->set_sizes_and_strides(
-      size, stride, storage_offset);
+      size, stride.value(), storage_offset);
 
   // Matches maybe_resize_storage_cpu no-numel behavior
   if (TORCH_GUARD_OR_TRUE(result.sym_numel().sym_ne(0))) {
@@ -456,7 +454,7 @@ Tensor& set_storage_meta__symint(
           ? at::detail::computeStorageNbytesContiguous(
                 size, itemsize, std::move(storage_offset))
           : at::detail::computeStorageNbytes(
-                size, stride, itemsize, std::move(storage_offset));
+                size, stride.value(), itemsize, std::move(storage_offset));
 
       if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
           (new_size_bytes > storage.sym_nbytes())) {
@@ -472,7 +470,7 @@ Tensor& set__symint(
     const Tensor& storage,
     c10::SymInt storage_offset,
     c10::SymIntArrayRef size,
-    c10::SymIntArrayRef stride) {
+    OptionalSymIntArrayRef stride) {
   TORCH_CHECK(
       storage.is_contiguous(),
       "passed in tensor to be used as storage must be contiguous");

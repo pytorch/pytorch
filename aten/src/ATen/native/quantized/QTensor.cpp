@@ -173,11 +173,11 @@ Tensor& set_storage_quantized_(
     Storage storage,
     int64_t storage_offset,
     IntArrayRef sizes,
-    IntArrayRef strides) {
+    OptionalIntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
   self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
-  self_->set_sizes_and_strides(sizes, strides);
+  self_->set_sizes_and_strides(sizes, strides.value_or(IntArrayRef()));
   return self;
 }
 

@@ -951,7 +951,6 @@ class FunctionSchema:
         is_vararg: _bool,
         is_varret: _bool,
     ) -> None: ...
-    def _is_view_op(self) -> bool: ...
 
 class _UpgraderEntry:
     bumped_at_version: _int
