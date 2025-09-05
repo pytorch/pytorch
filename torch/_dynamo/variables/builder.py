@@ -2991,12 +2991,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, (int, float, bool)) and (
         proxy.node.target is call_torchbind
-    ):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is flat_apply
+        or proxy.node.target is flat_apply
+        or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
