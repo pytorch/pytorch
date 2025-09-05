@@ -21,6 +21,13 @@ class TestAutocastoOpenReg(TestCase):
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.float16)
 
+    def test_openreg_autocast_float32_supported(self):
+        with torch.amp.autocast(device_type="openreg"):
+            x = torch.randn(2, device="openreg", dtype=torch.float16)
+            y = torch.randn(2, device="openreg", dtype=torch.float16)
+            result = torch.dot(x, y)
+            self.assertEqual(result.dtype, torch.float32)
+
     def test_autocast_fast_dtype(self):
         openreg_fast_dtype = torch.get_autocast_dtype(device_type="openreg")
         self.assertEqual(openreg_fast_dtype, torch.half)
