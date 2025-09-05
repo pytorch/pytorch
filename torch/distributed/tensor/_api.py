@@ -8,7 +8,6 @@ from typing import Any, Callable, cast, Optional
 from typing_extensions import deprecated
 
 import torch
-
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
@@ -270,13 +269,22 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-
-        r = torch.Tensor._make_dtensor(
+        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(0)
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Conjugate):
+            extra_dispatch_keys = extra_dispatch_keys.add(
+                torch._C.DispatchKey.Conjugate
+            )
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Negative):
+            extra_dispatch_keys = extra_dispatch_keys.add(torch._C.DispatchKey.Negative)
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             spec.tensor_meta.shape,
-            spec.tensor_meta.stride,
-            local_tensor,
-            requires_grad,
+            strides=spec.tensor_meta.stride,
+            dtype=local_tensor.dtype,
+            device=local_tensor.device,
+            layout=local_tensor.layout,
+            requires_grad=requires_grad,
+            _extra_dispatch_keys=extra_dispatch_keys,
         )
 
         r._spec = spec
