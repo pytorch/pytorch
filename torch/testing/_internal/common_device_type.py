@@ -1395,13 +1395,13 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type):
+    def __init__(self, device_type: Union[str, list]):
         self.device_type = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
+            if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
                 raise unittest.SkipTest(reason)
 
@@ -1967,7 +1967,7 @@ def skipPRIVATEUSE1(fn):
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> list[str]:
-    return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
+    return ["cpu"] if not torch.accelerator.is_available() else ["cpu", "cuda", "xpu"]
 
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
