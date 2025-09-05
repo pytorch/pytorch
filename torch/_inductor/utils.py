@@ -1634,7 +1634,11 @@ def _use_conv_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(
-    layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1651,7 +1655,8 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
+        # some callers handle max-autotune checking externally
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1679,7 +1684,7 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
 
-    def _is_tma_compatible(x: IRNode) -> bool:
+    def _is_tma_compatible_default(x: IRNode) -> bool:
         sizes = x.get_size()
         strides = x.get_stride()
         rank = len(sizes)
@@ -1739,7 +1744,25 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
         return True
 
-    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+    def _is_tma_compatible_xpu(x: IRNode) -> bool:
+        strides = x.get_stride()
+        strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
+        # Find the single contiguous (“inner”) dim
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
+            return False
+        return True
+
+    return has_triton_tma_device() and all(
+        _is_tma_compatible_default(m)
+        if (m_device := m.get_device()) is None or m_device.type != "xpu"
+        else _is_tma_compatible_xpu(m)
+        for m in matrices
+    )
 
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
