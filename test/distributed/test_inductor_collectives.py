@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
     TEST_XPU,
     xfailIf,
@@ -269,7 +268,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
@@ -1550,7 +1548,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not TEST_XPU and not SM80OrLater, "bfloat16")
     def test_all_gather_bucket(self):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1649,10 +1647,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, ag_0_out, ag_1_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1]
 
         with torch._inductor.config.patch(
@@ -1701,10 +1699,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return y, rs_0_out.to(torch.float32), rs_1_out.to(torch.float32)
 
         for f in [func, func2]:
-            x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-            w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-            rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-            rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+            x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+            w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+            rs_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+            rs_1 = torch.ones(384, 256, device=self.device, dtype=torch.float32)
             inputs = [x, w, rs_0, rs_1]
             f(*inputs, **self.get_world_trs())
 
