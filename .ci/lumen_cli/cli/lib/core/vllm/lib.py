@@ -101,7 +101,7 @@ def sample_vllm_test_library():
                 "pytest -v -s -x lora/test_multi_loras_with_tp.py",
             ],
         },
-         "vllm_distributed_test_28_failure_test": {
+        "vllm_distributed_test_28_failure_test": {
             "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
             "id": "vllm_distributed_test_28_failure_test",
             "env_vars": {
@@ -110,7 +110,7 @@ def sample_vllm_test_library():
             "num_gpus": 4,
             "steps": [
                 "pytest models/multimodal -v -s -m 'distributed(num_gpus=2)",
-            ]
+            ],
         },
         "vllm_lora_28_failure_test": {
             "title": "LoRA pytorch 2.8 failure test",
@@ -125,7 +125,7 @@ def sample_vllm_test_library():
                 "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
             ],
         },
-         "vllm_multi_model_test_28_failure_test":{
+        "vllm_multi_model_test_28_failure_test": {
             "title": "Multi-Model Test (Failed 2.8 release)",
             "id": "vllm_multi_model_test_28_failure_test",
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
