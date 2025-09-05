@@ -881,7 +881,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Create MMKernelInputs for Int MM
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.int32)
 
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
@@ -1112,7 +1112,9 @@ def tuned_scaled_mm(
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
-    kernel_inputs = MMKernelInputs(input_nodes, mat1_idx=0, mat2_idx=1)
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
 
     choices: list[ChoiceCaller] = []
 
