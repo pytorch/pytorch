@@ -41,6 +41,7 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
+IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
 
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
@@ -132,7 +133,7 @@ def evaluate_platform_supports_mx_gemm():
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
-        return built_with_fbgemm_genai and SM100OrLater
+        return built_with_fbgemm_genai and IS_SM100 
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())

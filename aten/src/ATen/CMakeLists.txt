@@ -676,6 +676,13 @@ if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
+
+  # Add FBGEMM_GENAI include directories for torch_ops.h
+  if(USE_FBGEMM_GENAI)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
+  endif()
+
   if($ENV{ATEN_STATIC_CUDA})
     if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS

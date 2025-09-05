@@ -1139,7 +1139,7 @@ class TestFP8Matmul(TestCase):
         assert not y_mxfp8.isnan().any(), "mxfp8 output contains NaN"
 
         # Assert outputs are close
-        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+        self.assertEqual(y_mxfp8, y_bf16)#, atol=8.0e-2, rtol=8.0e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
@@ -1209,7 +1209,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert outputs are close.
-        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+        self.assertEqual(y_mxfp8, y_bf16, atol=8.0e-2)#, rtol=8.0e-2)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)

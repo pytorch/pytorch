@@ -1723,20 +1723,21 @@ bool use_fast_accum) {
     mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
     scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu &&
     out_dtype == at::kBFloat16
-  )
+  );
 
   if (is_mx8mx8bf16) {
     bool b_is_3d = mat_b.dim() == 3;
     bool is_2d_2d = a_is_2d && b_is_2d;
     bool is_2d_3d = a_is_2d && b_is_3d;
     TORCH_CHECK(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
+    TORCH_CHECK(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
 
     fbgemm_gpu::mx8mx8bf16_grouped_mm(
         mat_a,
         mat_b,
         scale_a,
         scale_b,
-        offs,
+        offs.value(),
         out);
   }
 #endif
