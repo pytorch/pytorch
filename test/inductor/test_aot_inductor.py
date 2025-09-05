@@ -6299,6 +6299,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(500, device=self.device),)
         self.check_model(model, example_inputs)
 
+    @skipIfXpu
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():
             raise unittest.SkipTest("requires modern GPU to run max-autotune")
@@ -7052,6 +7053,34 @@ class AOTInductorTestsTemplate:
         outputs_aoti = model_aoti(*example_inputs)
 
         self.assertEqual(outputs, outputs_aoti)
+
+    def test_pad_non_zero_memory_leak(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("test is only for GPU_TYPE")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                x = torch.ops.aten.constant_pad_nd(x, (0, 1, 0, 0), 12345.0)
+
+                return x @ x
+
+        model = Model()
+        example_inputs = (torch.randn(2048, 2047, device=self.device),)
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, model, example_inputs
+        )
+        outputs = model(*example_inputs)
+        model_aoti = torch._inductor.aoti_load_package(package_path)
+        outputs_aoti = model_aoti(*example_inputs)
+
+        self.assertEqual(outputs, outputs_aoti)
+
+        FileCheck().check_regex(
+            r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
+        ).check("wrap_with_raii_handle_if_needed(buf0_handle);").check(
+            "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
+        ).run(code)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
