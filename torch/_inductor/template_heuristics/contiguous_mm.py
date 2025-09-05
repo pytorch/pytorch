@@ -44,7 +44,6 @@ class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        out_dtype: torch.dtype,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
