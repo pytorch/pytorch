@@ -881,7 +881,7 @@ cmake_dependent_option(
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_ROCM"
+  "USE_CUDA OR USE_ROCM"
   OFF)
 
 IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)

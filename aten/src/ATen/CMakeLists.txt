@@ -255,42 +255,53 @@ endif()
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/)
 
   if(USE_CUDA)
-    add_library(fbgemm_genai OBJECT)
-    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
     set(FBGEMM_CUTLASS_KERNELS_REGEX
-      ".*(mx8mx8bf16_grouped_mm).*"
+      ".*(mx8mx8bf16_grouped).*"
     )
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
     list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
-    set(fbgemm_genai_native_cuda_cuh
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/f8f8bf16_rowwise/"
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped_mm/"
-    )
+    message(STATUS "fbgemm_genai_native_cuda_cu: ${fbgemm_genai_native_cuda_cu}")
+
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
       "${FBGEMM_GENAI_SRCS}/common/*.cpp"
       # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
-      "${FBGEMM_GENAI_SRCS}/quantize_defs_torch.cpp"
-      "${FBGEMM_GENAI_SRCS}/quantize_torch.cpp"
+      "${FBGEMM_GENAI_SRCS}/quantize_defs.cpp"
+      "${FBGEMM_GENAI_SRCS}/quantize.cpp"
+    )
+    message(STATUS "fbgemm_genai_native_cuda_cpp: ${fbgemm_genai_native_cuda_cpp}")
+
+    # Combine all source files into a single list
+    list(APPEND fbgemm_genai_all_sources
+      ${fbgemm_genai_native_cuda_cu}
+      ${fbgemm_genai_native_cuda_cpp}
+    )
+
+    # Now, create the library and provide the sources at the same time
+    message(STATUS "FBGEMM_GENAI_SRCS directory: ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize")
+    message(STATUS "fbgemm_genai_all_sources: ${fbgemm_genai_all_sources}")
+    add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
+
+    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    set(fbgemm_genai_native_cuda_cuh
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped_mm/"
     )
     set(fbgemm_genai_native_cuda_h
       "${FBGEMM_GENAI_SRCS}/common/include/"
     )
+
     target_include_directories(fbgemm_genai PUBLIC
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
       ${fbgemm_genai_native_cuda_cuh}
       ${fbgemm_genai_native_cuda_h}
-    )
-    target_sources(fbgemm_genai PRIVATE
-      ${fbgemm_genai_native_cuda_cu}
-      ${fbgemm_genai_native_cuda_cpp}
     )
   else()
     if(USE_ROCM)
