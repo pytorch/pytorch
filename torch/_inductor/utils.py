@@ -3363,7 +3363,7 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
 def is_using_cudagraph_partition() -> bool:
     return (
         torch._inductor.config.triton.cudagraphs
-        or not _unstable_customized_partition_wrappers
+        or len(_unstable_customized_partition_wrappers) > 0
     ) and torch._inductor.config.graph_partition
 
 

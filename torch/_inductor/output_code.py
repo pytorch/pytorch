@@ -629,7 +629,7 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and _unstable_customized_partition_wrappers:
+        if config.graph_partition and len(_unstable_customized_partition_wrappers) > 0:
             # Mechanically apply user-specified cudagraph wrappers without modification
             assert self.recursively_apply_fns is not None
             self.recursively_apply_fns(_unstable_customized_partition_wrappers)

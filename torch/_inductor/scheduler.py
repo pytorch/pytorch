@@ -4353,7 +4353,7 @@ class Scheduler:
         # benefit to cudagraph
         if (
             not torch._inductor.config.triton.cudagraphs
-            and not _unstable_customized_partition_wrappers
+            and len(_unstable_customized_partition_wrappers) == 0
         ):
             return True
 
