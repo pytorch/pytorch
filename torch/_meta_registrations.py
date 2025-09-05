@@ -7424,17 +7424,17 @@ def _meta_grouped_mm_common(
         fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
-            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
         )
     else:
         torch._check(
             mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
         )
 
     torch._check(
         mat_a.dim() in [2, 3] and mat_b.dim() in [2, 3],
-        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",
+        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",  # noqa: B950
     )
 
     mat_a_is_2d = mat_a.dim() == 2
@@ -7458,11 +7458,11 @@ def _meta_grouped_mm_common(
 
         torch._check(
             is_row_major(mat_a),
-            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",
+            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",  # noqa: B950
         )
         torch._check(
             is_col_major(mat_b),
-            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
+            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",  # noqa: B950
         )
 
     def check_valid_strides(mat_name, mat):
@@ -7474,7 +7474,7 @@ def _meta_grouped_mm_common(
         ):
             torch._check(
                 mat_stride[end_dim] % alignment == 0,
-                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",
+                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",  # noqa: B950
             )
         elif mat_stride[end_dim] == 1 and mat_stride[end_dim - 1] >= max(
             1, mat.shape[end_dim]
@@ -7523,7 +7523,7 @@ def _meta_grouped_mm_common(
                 if is_mxfp8:
                     torch._check(
                         scale.dim() == mat.dim(),
-                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
+                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
                     )
                 else:
                     torch._check(
@@ -7548,16 +7548,17 @@ def _meta_grouped_mm_common(
                 if is_mxfp8:
                     torch._check(
                         mat.ndim == scale.ndim,
-                        lambda: f"For MXFP8, scale should have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
+                        lambda: f"For MXFP8, scale should have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
                     )
-                    # TODO: This logic only holds for RHS tensor in 2d-3d case. We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
+                    # TODO: This logic only holds for RHS tensor in 2d-3d case.
+                    # We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
                     G, K, N = scale.shape
                     block_size = 32
                     blocked_K = round_up(K / block_size, 4)
                     blocked_N = round_up(N, 128)
                     torch._check(
                         mat.shape[-2] == blocked_K and mat.shape[-1] == blocked_N,
-                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K},{blocked_N}), but got {scale.shape}",
+                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K},{blocked_N}), but got {scale.shape}",  # noqa: B950
                     )
                 else:
                     torch._check(
@@ -7566,7 +7567,7 @@ def _meta_grouped_mm_common(
                     )
                     torch._check(
                         scale.shape[1] == mat.shape[1 + scaled_dim],
-                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
+                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",  # noqa: B950
                     )
 
         scale_multiplier = (

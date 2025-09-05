@@ -56,7 +56,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, ceil_div, to_blocked, to_mxfp8, generate_jagged_offs
+from torch.testing._internal.common_quantized import (
+    _f32_to_floatx_unpacked,
+    _floatx_unpacked_to_f32,
+    ceil_div, to_blocked,
+    to_mxfp8,
+    generate_jagged_offs,
+)
 
 _IS_SM8X = False
 if TEST_CUDA:
