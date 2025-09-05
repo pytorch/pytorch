@@ -41,7 +41,7 @@ from torch.distributed._shard.sharding_spec import (
 )
 from torch.distributed.remote_device import _remote_device
 from torch.testing._internal.common_distributed import (
-    requires_nccl_or,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
     tp_transports,
@@ -62,6 +62,10 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
     MyShardedModel1,
 )
 
+if torch.accelerator.is_available():
+    DEVICE_TYPE = torch.accelerator.current_accelerator().type
+    BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -69,10 +73,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-
-DEVICE_TYPE = torch.accelerator.current_accelerator().type
-BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 
 
 class TestShardedTensorMetadata(TestCase):
@@ -172,7 +172,7 @@ class TestCreateTensorFromParams(TestCase):
 class TestShardParameter(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_parameter(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -201,7 +201,7 @@ class TestShardParameter(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_parameter_errors(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -264,7 +264,7 @@ class TestShardParameter(ShardedTensorTestBase):
 class TestShardTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_tensor(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -287,7 +287,7 @@ class TestShardTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_tensor_with_empty_shard(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -318,7 +318,7 @@ class TestShardTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_tensor_errors(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -379,7 +379,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_reshard_output(self):
         specs = _chunk_sharding_specs_list_for_test([0, 1], seed=5)
         spec, reshard_spec = specs[0], specs[1]
@@ -404,7 +404,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_collect_local_shard(self):
         specs = _chunk_sharding_specs_list_for_test([0], seed=5)
         spec = specs[0]
@@ -420,7 +420,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 class TestLocalTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_local_tensor(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -438,7 +438,7 @@ class TestLocalTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_local_tensor_error(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -465,7 +465,7 @@ class TestLocalTensor(ShardedTensorTestBase):
 class TestShardedTensorChunked(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_metadata(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -515,7 +515,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_complete_world_size(self):
         for dim in [0, -2]:
             spec = ChunkShardingSpec(
@@ -562,20 +562,20 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(1, len(shards))
                 for remote_shard in shards:
                     self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    if DEVICE_TYPE != "xpu":
-                        shard = remote_shard.to_here()
-                        self.assertEqual(
-                            f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
-                            str(shard.metadata.placement),
-                        )
-                        if rpc_rank == 3:
-                            self.assertEqual((1, 20), shard.tensor.size())
-                        else:
-                            self.assertEqual((3, 20), shard.tensor.size())
+                    # if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual(
+                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
+                        str(shard.metadata.placement),
+                    )
+                    if rpc_rank == 3:
+                        self.assertEqual((1, 20), shard.tensor.size())
+                    else:
+                        self.assertEqual((3, 20), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_with_ones(self):
         """Test sharded_tensor.ones(...)"""
 
@@ -603,7 +603,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_gather_even(self) -> None:
         """Test _sharded_tensor.gather(...) with evenly distributed._shards"""
 
@@ -636,7 +636,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_gather_uneven(self) -> None:
         """Test _sharded_tensor.gather(...) with unevenly distributed._shards"""
 
@@ -670,7 +670,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_with_zeros(self):
         """Test sharded_tensor.zeros(...)"""
 
@@ -698,7 +698,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_with_rand(self):
         """Test sharded_tensor.rand(...)/randn(...)"""
 
@@ -749,7 +749,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_with_full(self):
         """Test sharded_tensor.full(...)"""
 
@@ -783,7 +783,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_like(self):
         """Test tensor like methods, i.e. torch.zeros_like(...), torch.full_like, etc."""
 
@@ -837,7 +837,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_partial_world_size(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -882,17 +882,17 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual(
-                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                    )
-                    self.assertEqual((5, 20), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual(
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                )
+                self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_new_group(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -937,19 +937,20 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(1, len(shards))
-            if DEVICE_TYPE != "xpu":
-                for remote_shard in shards:
-                    shard = remote_shard.to_here()
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    self.assertEqual(
-                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                    )
-                    self.assertEqual((5, 20), shard.tensor.size())
+            # if DEVICE_TYPE != "xpu":
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                self.assertEqual(
+                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                )
+                self.assertEqual((5, 20), shard.tensor.size())
+
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_multiple_local_shards(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -993,14 +994,15 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(3, len(remote_shards))
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(2, len(shards))
-            if DEVICE_TYPE != "xpu":
-                for remote_shard in shards:
-                    shard = remote_shard.to_here()
-                    self.assertEqual((2, 20), shard.tensor.size())
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+            # if DEVICE_TYPE != "xpu":
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual((2, 20), shard.tensor.size())
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharding_columns(self):
         self.init_pg(dist.get_default_backend_for_device(DEVICE_TYPE))
 
@@ -1037,7 +1039,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 )
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_invalid_sharding(self):
         self.init_pg(dist.get_default_backend_for_device(DEVICE_TYPE))
 
@@ -1103,7 +1105,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_invalid_pg_rpc_ranks(self):
         self.init_pg(dist.get_default_backend_for_device(DEVICE_TYPE))
 
@@ -1127,7 +1129,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_insufficient_sharding_dims(self):
         self.init_pg(dist.get_default_backend_for_device(DEVICE_TYPE))
 
@@ -1172,7 +1174,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_sizes(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -1227,7 +1229,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_state_dict(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -1273,7 +1275,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_state_dict_new_group(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -1314,7 +1316,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_state_dict_no_sharded_tensors(self):
         # Verify hooks don't affect modules with no ShardedTensors.
         m = torch.nn.Linear(10, 10)
@@ -1339,7 +1341,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(m.bias, module_load.bias)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_load_state_dict_errors(self):
         self.init_rpc()
 
@@ -1394,7 +1396,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_cleanup(self):
         def create_tensors():
             spec = ChunkShardingSpec(
@@ -1416,7 +1418,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_metadata(self):
         spec = EnumerableShardingSpec(
             [
@@ -1490,7 +1492,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grid_sharding(self):
         spec = EnumerableShardingSpec(
             [
@@ -1555,13 +1557,14 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
+
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_sharded_tensor_with_ones(self):
         """Test sharded_tensor.ones(...)"""
 
@@ -1602,7 +1605,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_gather_even(self) -> None:
         """Test _sharded_tensor.gather(...) with evenly distributed._shards"""
 
@@ -1647,7 +1650,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_gather_uneven(self) -> None:
         """Test _sharded_tensor.gather(...) with unevenly distributed._shards"""
 
@@ -1692,7 +1695,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_to_cpu(self):
         cpu_spec = ChunkShardingSpec(
             dim=0,
@@ -1779,7 +1782,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_to_accelerator(self):
         cpu_spec = ChunkShardingSpec(
             dim=0,
@@ -1836,7 +1839,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_to_test(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -1909,7 +1912,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_device(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -1933,7 +1936,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(st_cpu.device, cpu_device)
 
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_uneven_shards(self):
         self.init_pg(dist.get_default_backend_for_device(DEVICE_TYPE))
 
@@ -2010,7 +2013,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_partial_world_size(self):
         spec = EnumerableShardingSpec(
             [
@@ -2071,14 +2074,14 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_new_group(self):
         spec = EnumerableShardingSpec(
             [
@@ -2141,14 +2144,14 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_multiple_local_shards(self):
         spec = EnumerableShardingSpec(
             [
@@ -2226,14 +2229,14 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(2, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_with_rpc_names(self):
         spec = EnumerableShardingSpec(
             [
@@ -2298,9 +2301,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
 
 class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
@@ -2359,17 +2362,17 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 # If remote shard does not exist, to_here() will throw exception.
-                if DEVICE_TYPE != "xpu":
-                    if tensor_meta.shards_metadata[rpc_rank]:
-                        shard = remote_shard.to_here()
-                        self.assertEqual(
-                            rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
-                        )
+                # if DEVICE_TYPE != "xpu":
+                    # if tensor_meta.shards_metadata[rpc_rank]:
+                shard = remote_shard.to_here()
+                self.assertEqual(
+                    rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
+                )
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_tensor(self):
         chunk_specs = _chunk_sharding_specs_list_for_test([0, 1, 1, 0], seed=31)
         for spec in chunk_specs:
@@ -2380,7 +2383,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_tensor_errors(self):
         enumerable_sharding_spec = EnumerableShardingSpec(
             [
@@ -2418,7 +2421,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
 class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_local_shards(self):
         shard_offsets = [(self.rank // 2) * 5, (self.rank % 2) * 5]
         local_shard_metadata = ShardMetadata(
@@ -2445,7 +2448,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -2498,14 +2501,14 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_recalc_for_metadata(self):
         shard_sizes = [0, 5]  # test 2 different shard sizes
         for shard_size in shard_sizes:
@@ -2560,7 +2563,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_with_different_glb_size(self):
         wrong_offset_local_shard_metadata = ShardMetadata(
             shard_offsets=[0, 0],
@@ -2594,7 +2597,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_non_rw_sharded_recalc_for_metadata(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -2689,7 +2692,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_and_global_metadata_with_all_zeros(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[0, 0],
@@ -2764,7 +2767,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_and_global_metadata_with_local_view(self):
         # testing cases where we create ST with local view, meaning we initialize other rank's metadata with 0s
         shard_offsets = [0, 1]  # valid, invalid
@@ -2861,7 +2864,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     @skipIfRocm
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_and_global_metadata(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -2943,13 +2946,13 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                if DEVICE_TYPE != "xpu":
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+                # if DEVICE_TYPE != "xpu":
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_new_group(self):
         new_pg = dist.new_group(ranks=[1, 2, 3])
 
@@ -2999,7 +3002,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_invalid_local_shards(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -3054,7 +3057,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_invalid_property_cross_ranks(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -3153,7 +3156,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_invalid_shards_overlap(self):
         local_shard_size = [5, 5] if self.rank != 0 else [6, 6]
         local_shard_metadata = ShardMetadata(
@@ -3176,7 +3179,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_invalid_shards_gaps(self):
         local_shard_size = [5, 5] if self.rank != 0 else [4, 4]
         local_shard_metadata = ShardMetadata(
@@ -3199,7 +3202,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_init_from_local_shards_and_global_metadata_invalid_shards(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
@@ -3343,7 +3346,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_op(self):
         @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
@@ -3365,7 +3368,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_op_override(self):
         t = torch.rand(10, 10).to(torch.device(self.rank))
 
@@ -3392,7 +3395,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_op_errors(self):
         with self.assertRaisesRegex(TypeError, "expects signature"):
 
@@ -3409,7 +3412,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
 class TestShardMetadata(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_metadata_init(self):
         pg = dist.distributed_c10d._get_default_group()
 
@@ -3426,7 +3429,7 @@ class TestShardMetadata(ShardedTensorTestBase):
         self.assertEqual(device, torch.device("cpu"))
 
     @with_comms(backend=BACKEND)
-    @requires_nccl_or(["xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_create_shard_with_no_placement(self):
         md = ShardMetadata([0], [10])
         shard = Shard(torch.zeros(10), md)
