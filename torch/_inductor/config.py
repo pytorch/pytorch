@@ -266,6 +266,9 @@ b2b_gemm_pass = False
 post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
+# Allow users to pass in custom partition function
+custom_partitioner_fn: torch._inductor.custom_graph_pass.CustomPartitionerFnType = None
+
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
