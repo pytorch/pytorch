@@ -641,7 +641,7 @@ class CompiledFxGraph(OutputCode):
             ]
             customized_wrapper = _unstable_customized_partition_wrapper.wrapper
             customized_wrappers_with_metadata = [
-                lambda f: customized_wrapper(f, metadata)
+                lambda f, m=metadata: customized_wrapper(f, m)
                 for metadata in wrapper_metadatas
             ]
             self.recursively_apply_fns(customized_wrappers_with_metadata)
