@@ -1549,7 +1549,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not TEST_XPU and not SM80OrLater, "bfloat16")
-    def test_all_gather_bucket(self):
+    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1596,7 +1597,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_fx": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1606,7 +1607,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
-            .check_count(".all_gather_into_tensor_out.default(", 2, exactly=True)
+            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
+            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
@@ -1667,7 +1670,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    def test_reduce_scatter_bucket(self):
+    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1708,7 +1712,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             with torch._inductor.config.patch(
                 {
-                    "bucket_reduce_scatters_fx": "fsdp",
+                    "bucket_reduce_scatters_fx": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                 }
             ):
@@ -1734,7 +1738,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    def test_reorder_peak_memory_bucketed(self):
+    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
         Ensure the whole bucketed group including copy-ops get moved together rather than the copy ops preventing the
@@ -1836,9 +1841,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_fx": bucket_mode,
                 "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                "bucket_reduce_scatters_fx": "all",
+                "bucket_reduce_scatters_fx": bucket_mode,
                 "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
