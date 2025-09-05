@@ -260,9 +260,7 @@ IF(USE_FBGEMM_GENAI)
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
-    set(FBGEMM_CUTLASS_KERNELS_REGEX
-      ".*(mx8mx8bf16_grouped).*"
-    )
+    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
@@ -271,9 +269,6 @@ IF(USE_FBGEMM_GENAI)
 
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
       "${FBGEMM_GENAI_SRCS}/common/*.cpp"
-      # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
-      "${FBGEMM_GENAI_SRCS}/quantize_defs.cpp"
-      "${FBGEMM_GENAI_SRCS}/quantize.cpp"
     )
     message(STATUS "fbgemm_genai_native_cuda_cpp: ${fbgemm_genai_native_cuda_cpp}")
 
@@ -330,8 +325,10 @@ IF(USE_FBGEMM_GENAI)
         # FBGEMM version of Composable Kernel is used due to some customizations
         ${FBGEMM_THIRD_PARTY}/composable_kernel/include
         ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-        ${FBGEMM_GENAI_SRCS}/include/
-        ${FBGEMM_GENAI_SRCS}/common/include/
+        ${FBGEMM_THIRD_PARTY}/cutlass/include
+        ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+        ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
+        ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
       )
     endif()
   endif()

@@ -1058,10 +1058,10 @@ class TestFP8Matmul(TestCase):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
-            G, total_K, multiple_of=32, device=self.device
+            G, total_K, multiple_of=32, device="cuda"
         )
-        X = torch.randn((M, total_K), dtype=torch.bfloat16, device=self.device) * 0.1
-        W = torch.randn((N, total_K), dtype=torch.bfloat16, device=self.device) * 0.01
+        X = torch.randn((M, total_K), dtype=torch.bfloat16, device="cuda") * 0.1
+        W = torch.randn((N, total_K), dtype=torch.bfloat16, device="cuda") * 0.01
 
         # Convert scales to blocked format.
         x_list = []
@@ -1120,7 +1120,7 @@ class TestFP8Matmul(TestCase):
         w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
 
         # Compute mxfp8 grouped mm output
-        out = torch.empty((G, M, N), dtype=torch.bfloat16, device=self.device)
+        out = torch.empty((G, M, N), dtype=torch.bfloat16, device="cuda")
         y_mxfp8 = torch._scaled_grouped_mm(
             xq,  # (M, total_K)
             wq.transpose(-2, -1),  # (total_K, N)
@@ -1139,7 +1139,7 @@ class TestFP8Matmul(TestCase):
         assert not y_mxfp8.isnan().any(), "mxfp8 output contains NaN"
 
         # Assert outputs are close
-        self.assertEqual(y_mxfp8, y_bf16)#, atol=8.0e-2, rtol=8.0e-2)
+        self.assertEqual(y_mxfp8, y_bf16)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
@@ -1152,10 +1152,10 @@ class TestFP8Matmul(TestCase):
         # 2D inputs with groups along M, 3D weights.
         block_size = 32
         total_M = M  # Alias for clarity that M dim contains groups.
-        X = torch.randn((total_M, K), dtype=torch.bfloat16, device=self.device) * 0.1
-        W = torch.randn((G, N, K), dtype=torch.bfloat16, device=self.device) * 0.01
+        X = torch.randn((total_M, K), dtype=torch.bfloat16, device="cuda") * 0.1
+        W = torch.randn((G, N, K), dtype=torch.bfloat16, device="cuda") * 0.01
         input_group_end_offsets = generate_jagged_offs(
-            G, total_M, multiple_of=32, device=self.device
+            G, total_M, multiple_of=32, device="cuda"
         )
 
         # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
@@ -1190,7 +1190,7 @@ class TestFP8Matmul(TestCase):
         xq = xq.view(-1, xq.shape[-1])
 
         # Compute mxfp8 grouped gemm.
-        out = torch.empty((total_M, N), dtype=torch.bfloat16, device=self.device)
+        out = torch.empty((total_M, N), dtype=torch.bfloat16, device="cuda")
         y_mxfp8 = torch._scaled_grouped_mm(
             xq,
             wq.transpose(-2, -1),
@@ -1209,7 +1209,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert outputs are close.
-        self.assertEqual(y_mxfp8, y_bf16, atol=8.0e-2)#, rtol=8.0e-2)
+        self.assertEqual(y_mxfp8, y_bf16, atol=8.0e-2)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
