@@ -173,7 +173,10 @@ def _sharded_tensor_metadata(
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
     sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
+        tensor.shape,
+        tensor.device_mesh,
+        tensor.placements,
+        getattr(tensor._spec, "device_order", None),
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
 
