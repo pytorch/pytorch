@@ -15,6 +15,7 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
+
 class CallbackTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
