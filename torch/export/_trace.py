@@ -1698,10 +1698,63 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
+            @contextmanager
+            def _temp_register_custom_call_function_hop_to_predispatch():
+                from torch._functorch.autograd_function import custom_function_call
+                from torch._subclasses.fake_impls import _deregister_op_impl
+                from torch.export.custom_ops import (
+                    _call_custom_autograd_function_in_pre_dispatch,
+                )
+                from torch.fx.experimental.proxy_tensor import (
+                    ProxyTorchDispatchMode,
+                    track_tensor_tree,
+                )
+
+                saved_py_table = custom_function_call.py_kernels.copy()
+
+                def trace_custom_function_call(mode, function_cls, *args, **kwargs):
+                    if mode.pre_dispatch:
+                        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+                        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+
+                        function_cls_name = (
+                            f"{function_cls.__module__}.{function_cls.__qualname__}"
+                        )
+
+                        out_proxy = mode.tracer.create_proxy(
+                            "call_function",
+                            _call_custom_autograd_function_in_pre_dispatch,
+                            (function_cls_name,)
+                            + tuple(proxy_args),  # String name as first arg
+                            proxy_kwargs,
+                        )
+
+                        out = function_cls.apply(*args, **kwargs)
+                        return track_tensor_tree(
+                            out, out_proxy, constant=None, tracer=mode.tracer
+                        )
+                    assert False, (
+                        "We should never trace into custom_function_call at python key"
+                    )
+
+                custom_function_call.py_impl(ProxyTorchDispatchMode)(
+                    trace_custom_function_call
+                )
+
+                try:
+                    yield
+
+                finally:
+                    custom_function_call.py_kernels.clear()
+                    custom_function_call.py_kernels.update(saved_py_table)
+                    custom_function_call._dispatch_cache.clear()
+                    _deregister_op_impl(custom_function_call)
+
             with (
                 ctx,
                 override_getattribute_for_subclasses(flat_args),
                 _maybe_restore_grad_state(),
+                _temp_register_custom_call_function_hop_to_predispatch(),
             ):
                 gm = make_fx(
                     wrapped_fn,
