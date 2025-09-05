@@ -1701,17 +1701,17 @@ def _export_to_aten_ir_make_fx(
             @contextmanager
             def _temp_register_custom_call_function_hop_to_predispatch():
                 """
-                This context manager temporarily adds pre-dispatch implementation 
-                to custom_function_call HOP which is used to deal with vmap + custom 
+                This context manager temporarily adds pre-dispatch implementation
+                to custom_function_call HOP which is used to deal with vmap + custom
                 autograd function. This can show up in following scenario:
                 1. Using TransformGetItemToIndex tf mode will redirect slicing to mod_index custom
-                   autograd function 
+                   autograd function
                 2. If the body under tf mode is in vmap region, we trigger special HOP called custom_function_call
-                3. In pre-dispatch export, we don't know how to deal with this HOP, so we just desugar it 
-                   and call the underlying custom autograd function. This will do the right thing when we lower to 
-                   inference because exported graph contains enough info to turn on vmap. 
+                3. In pre-dispatch export, we don't know how to deal with this HOP, so we just desugar it
+                   and call the underlying custom autograd function. This will do the right thing when we lower to
+                   inference because exported graph contains enough info to turn on vmap.
 
-                We do this only for export because in other cases, we should never get into predispatch mode. 
+                We do this only for export because in other cases, we should never get into predispatch mode.
                 """
                 from torch._functorch.autograd_function import custom_function_call
                 from torch._subclasses.fake_impls import _deregister_op_impl
