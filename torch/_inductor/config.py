@@ -460,13 +460,6 @@ graph_partition: bool = (
     == "1"
 )
 
-# A tuple of customized partition wrappers from users. Inductor mechanically wraps
-# each partition fn with the customized partition wrapper. When using for CUDAGraph wrapper,
-# users need to handle details such as static inputs, dynamic shapes, etc.
-customized_partition_wrappers: Optional[
-    tuple[Callable[..., Callable[..., Any]], ...]
-] = None
-
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure

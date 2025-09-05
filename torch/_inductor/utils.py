@@ -3363,7 +3363,7 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
 def is_using_cudagraph_partition() -> bool:
     return (
         torch._inductor.config.triton.cudagraphs
-        or torch._inductor.config.customized_partition_wrappers is not None
+        or not _unstable_customized_partition_wrappers
     ) and torch._inductor.config.graph_partition
 
 
@@ -3589,3 +3589,33 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
+
+
+# A tuple of customized partition wrappers from users. Inductor mechanically wraps
+# each partition fn with the customized partition wrapper. When using for CUDAGraph wrapper,
+# users need to handle all details such as static inputs, dynamic shapes, etc.
+# Assume there is only 1 dynamo graph in the process and the number of partitions
+# equals to the number of customized partition wrappers.
+#
+# Warning: This API is unstable and may change in the future.
+_unstable_customized_partition_wrappers: list[Callable[..., Callable[..., Any]]] = []
+
+
+def set_customized_partition_wrappers(
+    wrappers: tuple[Callable[..., Callable[..., Any]], ...],
+    metadata: Optional[tuple[Any, ...]] = None,
+) -> None:
+    """
+    Set customized partition wrappers for the current process.
+
+    Args:
+        wrappers (tuple[Callable[..., Callable[..., Any]]]): A tuple of
+            customized partition wrappers.
+        metadata (tuple[Any]): Metadata for the partition wrappers.
+    """
+    # metadata is unused for now
+    assert metadata is None
+    global _unstable_customized_partition_wrappers
+
+    _unstable_customized_partition_wrappers.clear()
+    _unstable_customized_partition_wrappers.extend(wrappers)

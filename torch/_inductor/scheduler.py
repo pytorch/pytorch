@@ -54,6 +54,7 @@ from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
+    _unstable_customized_partition_wrappers,
     cache_on_self,
     cmp,
     device_need_guard,
@@ -4352,7 +4353,7 @@ class Scheduler:
         # benefit to cudagraph
         if (
             not torch._inductor.config.triton.cudagraphs
-            and config.customized_partition_wrappers is None
+            and not _unstable_customized_partition_wrappers
         ):
             return True
 

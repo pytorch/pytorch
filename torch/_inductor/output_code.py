@@ -41,6 +41,7 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
+    _unstable_customized_partition_wrappers,
     align_inputs_from_check_idxs,
     BoxedBool,
     GraphPartitionMap,
@@ -628,10 +629,10 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and config.customized_partition_wrappers:
+        if config.graph_partition and _unstable_customized_partition_wrappers:
             # Mechanically apply user-specified cudagraph wrappers without modification
             assert self.recursively_apply_fns is not None
-            self.recursively_apply_fns(config.customized_partition_wrappers)
+            self.recursively_apply_fns(_unstable_customized_partition_wrappers)
             return
 
         set_tracing_context_output_strides(example_inputs, self)
