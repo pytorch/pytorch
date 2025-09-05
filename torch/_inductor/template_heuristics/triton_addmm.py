@@ -7,7 +7,8 @@ from .base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from ..ir import Layout
+    import torch
+
     from ..kernel_inputs import KernelInputs
 
 
@@ -19,10 +20,10 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
+        out_dtype: torch.dtype,
         op_name: str,
     ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs = super().get_extra_kwargs(kernel_inputs, out_dtype, op_name)
         assert op_name in [
             "addmm",
             "baddbmm",
@@ -31,7 +32,7 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
         beta = kernel_inputs.get_scalar("beta")
         return {
             **kwargs,
-            "epilogue_fn": addmm_epilogue(layout.dtype, alpha, beta),
-            "epilogue_fn_hash": str(["addmm_epilogue", layout.dtype, alpha, beta]),
+            "epilogue_fn": addmm_epilogue(out_dtype, alpha, beta),
+            "epilogue_fn_hash": str(["addmm_epilogue", out_dtype, alpha, beta]),
             "prefix_args": 1,
         }
