@@ -90,7 +90,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k1, other=0.)
             b = tl.load(B, mask=rk[:, None] < k1, other=0.)
-        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -103,7 +103,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             c = tl.load(C, mask=rk[None, :] < k2, other=0.)
             d = tl.load(D, mask=rk[:, None] < k2, other=0.)
-        acc += tl.dot(c, d, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
 
@@ -158,7 +158,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     if use_triton_template(layout1):
         # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
         ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
@@ -167,9 +167,8 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
                 mm_plus_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout1,
                     **kwargs,
+                    **extra_kwargs,
                 )
 
     return autotune_select_algorithm(

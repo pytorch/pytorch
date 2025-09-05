@@ -39,6 +39,7 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/passes/SubgraphRewriter.cpp
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
 )
 
 add_executable(test_nativert

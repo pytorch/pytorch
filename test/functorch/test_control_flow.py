@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -1862,7 +1861,6 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(grads, expected_grads)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2007,7 +2005,6 @@ def forward(self, pred_1, x_1):
     # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -3747,7 +3744,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3814,7 +3810,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3873,7 +3868,6 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3891,7 +3885,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3984,7 +3977,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4061,53 +4053,53 @@ class GraphModule(torch.nn.Module):
         child_4: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 1, None, 2)
         child_5: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 1, None, 2)
 
-        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
+        lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
 
-        _add_batch_dim: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
-        _add_batch_dim_1: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_1, 0, 1);  child_1 = None
-        _add_batch_dim_2: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
-        _add_batch_dim_3: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
-        _add_batch_dim_4: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
-        _add_batch_dim_5: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_5, 0, 1);  child_5 = None
+        _add_batch_dim: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child, 0, 1);  child = None
+        _add_batch_dim_1: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_1, 0, 1);  child_1 = None
+        _add_batch_dim_2: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
+        _add_batch_dim_3: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
+        _add_batch_dim_4: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
+        _add_batch_dim_5: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_5, 0, 1);  child_5 = None
 
         a: "f32[10, 2]" = _add_batch_dim + _add_batch_dim_5;  _add_batch_dim = None
         b: "f32[10, 2]" = _add_batch_dim_1 - _add_batch_dim_5;  _add_batch_dim_1 = _add_batch_dim_5 = None
 
         child_6: "f32[10, 2]" = a - b
 
-        child_7: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a, 1, 1, 0);  a = None
-        child_8: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b, 1, 1, 0);  b = None
-        child_9: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
+        child_7: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a, 1, 1, 0);  a = None
+        child_8: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b, 1, 1, 0);  b = None
+        child_9: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
         child_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 2, None, 2)
         child_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 2, None, 2)
         child_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 2, None, 2)
 
-        lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
+        lazy_load_decompositions_1 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_1 = None
 
-        _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
+        _vmap_increment_nesting_1 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
 
-        _add_batch_dim_6: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_7, 0, 1)
-        _add_batch_dim_7: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_8, 0, 1)
-        _add_batch_dim_8: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
-        _add_batch_dim_9: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
-        _add_batch_dim_10: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
-        _add_batch_dim_11: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_12, 0, 1);  child_12 = None
+        _add_batch_dim_6: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_7, 0, 1)
+        _add_batch_dim_7: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_8, 0, 1)
+        _add_batch_dim_8: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
+        _add_batch_dim_9: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
+        _add_batch_dim_10: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
+        _add_batch_dim_11: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_12, 0, 1);  child_12 = None
 
         a_1: "f32[10, 2]" = _add_batch_dim_6 + _add_batch_dim_11;  _add_batch_dim_6 = None
         b_1: "f32[10, 2]" = _add_batch_dim_7 - _add_batch_dim_11;  _add_batch_dim_7 = _add_batch_dim_11 = None
 
         child_13: "f32[10, 2]" = a_1 - b_1
 
-        child_14: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
-        child_15: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
-        child_16: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
+        child_14: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
+        child_15: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
+        child_16: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
 
-        _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+        _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
 
         slice_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, 1);  elem_3 = None
         cat: "f32[2, 10, 2]" = torch.cat([slice_10, child_14], dim = 0);  slice_10 = child_14 = None
@@ -4168,7 +4160,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4215,7 +4206,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4264,7 +4254,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4444,7 +4433,6 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["device"] == torch.device("cpu")
             or params["compile_mode"] == "compile_dynamic_shape"
-            or torch.version.hip
         ),
     )
     def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
@@ -4562,7 +4550,6 @@ class GraphModule(torch.nn.Module):
             inputs=x,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4580,7 +4567,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4609,7 +4595,6 @@ class GraphModule(torch.nn.Module):
             inputs=elements,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -8836,22 +8821,6 @@ class TestHopSchema(TestCase):
         self.assertEqual(schema1.parse(str(schema1)), schema1)
         self.assertEqual(schema2.parse(str(schema2)), schema2)
         self.assertEqual(schema3.parse(str(schema3)), schema3)
-
-    def test_while_loop_schema_gen(self):
-        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
-        graph = make_fx(fn)(*inp).graph
-        while_loop_node = next(
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target is torch.ops.higher_order.while_loop
-        )
-        schema = torch._library.utils.hop_schema_from_fx_node(while_loop_node)
-        self.assertExpectedInline(
-            str(schema),
-            """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
-        )
-        self.assertEqual(schema.parse(str(schema)), schema)
 
     def test_schema_tree_spec(self):
         schema_gen = HopSchemaGenerator(torch.ops.higher_order.cond)

@@ -1486,8 +1486,8 @@ class TestFullyShardWorldSize1(FSDPTest):
     @skip_if_lt_x_gpu(1)
     def test_train_parity_single_worldsize1(self):
         """
-        Tests train parity with DDP for a single FSDP group
-        when sharding parameters on dim-0.
+        Tests train parity with DDP for a single FSDP group when sharding
+        parameters on dim-0.
         """
         self.run_subtests(
             {
@@ -1535,7 +1535,9 @@ class TestFullyShardWorldSize1(FSDPTest):
                 losses.append(model(*inp).sum())
                 losses[-1].backward()
 
-            self.assertEqual(comm_mode.get_total_counts(), 0)
+            # Before there was 1 all-gather and 1 reduce-scatter
+            # Now therre is 1 reduce-scatter
+            self.assertEqual(comm_mode.get_total_counts(), 1)
             optim.step()
 
             self.assertEqual(losses[0], losses[1])
