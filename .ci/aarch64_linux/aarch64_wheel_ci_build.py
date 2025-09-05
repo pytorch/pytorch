@@ -147,6 +147,26 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
         )
 
+    # Create unversioned symlink for nvrtc (supports both CUDA 12 and 13)
+    nvrtc_unversioned = f"{folder}/tmp/torch/lib/libnvrtc.so"
+    
+    # Determine CUDA major version and create appropriate symlink
+    if "130" in desired_cuda:
+        nvrtc_versioned = f"{folder}/tmp/torch/lib/libnvrtc.so.13"
+        symlink_target = "libnvrtc.so.13"
+    elif "12" in desired_cuda:
+        nvrtc_versioned = f"{folder}/tmp/torch/lib/libnvrtc.so.12"
+        symlink_target = "libnvrtc.so.12"
+    else:
+        nvrtc_versioned = None
+        symlink_target = None
+    
+    if nvrtc_versioned and os.path.exists(nvrtc_versioned):
+        if os.path.exists(nvrtc_unversioned):
+            os.remove(nvrtc_unversioned)
+        os.symlink(symlink_target, nvrtc_unversioned)
+        print(f"Created symlink: libnvrtc.so -> {symlink_target}")
+
     # Make sure the wheel is tagged with manylinux_2_28
     for f in os.scandir(f"{folder}/tmp/"):
         if f.is_dir() and f.name.endswith(".dist-info"):
@@ -154,7 +174,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             break
 
     os.mkdir(f"{folder}/cuda_wheel")
-    os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
+    os.system(f"cd {folder}/tmp/; zip -ry {folder}/cuda_wheel/{wheelname} *")
     shutil.move(
         f"{folder}/cuda_wheel/{wheelname}",
         f"{folder}/{wheelname}",
