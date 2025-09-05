@@ -3620,7 +3620,7 @@ class CUDAGraphWrapper:
 
 # A customized partition wrappers from users. Interface should be:
 #
-# def wrapper(fn: PartitionFnType, metadata: CudaGraphMeta) -> PartitionFnType
+# def wrapper(fn: PartitionFnType, metadata: CUDAGraphWrapperMetadata) -> PartitionFnType
 #
 # Inductor generates N wrapper functions for N partition functions, and mechanically wrap
 # each partition fn with the generated wrapper function. Users need to handle all details
