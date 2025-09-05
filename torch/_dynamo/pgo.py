@@ -828,6 +828,12 @@ def add_extra_remote_code_state(cache_key: str) -> None:
                             _CODE_STATE[code_id].automatic_dynamic[src] |= entry
                     else:
                         _CODE_STATE[code_id] = state
+                # log to tlparse
+                trace_structured_artifact(
+                    "add_extra_remote_code_state",
+                    "string",
+                    lambda: render_code_state(code_state),
+                )
 
 
 def get_code_state() -> defaultdict[CodeId, CodeState]:
@@ -968,6 +974,7 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
     _INIT_CODE_STATE = None
+    _LOGGED_DYNAMIC_ALLOWLIST = False

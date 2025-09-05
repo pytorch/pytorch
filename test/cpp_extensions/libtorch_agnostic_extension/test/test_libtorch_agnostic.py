@@ -337,6 +337,14 @@ if not IS_WINDOWS:
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
+        def test_my_new_zeros_dtype_variant(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device)
+            out = libtorch_agnostic.ops.my_new_zeros_dtype_variant(t)
+            ref_out = t.new_zeros((2, 5), dtype=torch.float)
+            self.assertEqual(out, ref_out, exact_device=True)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
