@@ -707,7 +707,7 @@ class VariableBuilder:
             result = NamedTupleVariable(
                 output, tuple_cls=type(value), source=self.source
             )
-            if result.is_structseq() or result.tuple_cls.__bases__ == (tuple,):
+            if result.tuple_cls.__bases__ == (tuple,):
                 return result
 
             return self.tx.output.side_effects.track_object_existing(value, result)
