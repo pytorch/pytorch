@@ -65,6 +65,7 @@ class TestGpuWrapper(InductorTestCase):
     def test_non_tensor_args_wrapped_on_cpu(self):
         def test_fn(x, s):
             return (x + s).sum()
+
         compiled = torch.compile(options={"cpp_wrapper": True})(test_fn)
         x = torch.randn(4, device=self.device)
         with torch.utils._device.DeviceContext(self.device):
