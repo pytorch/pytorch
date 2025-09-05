@@ -7190,7 +7190,8 @@ def prepare_softmax_online(x, dim):
 
     if (
         num_split == 1
-        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+        and V.graph.sizevars.size_hint(rnumel, fallback=config.unbacked_symint_fallback)
+        >= config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, reduction_hint=hint, **kwargs
