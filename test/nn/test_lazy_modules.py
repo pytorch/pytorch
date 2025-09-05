@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+import itertools
 import pickle
 import unittest
 
@@ -624,6 +625,7 @@ class TestLazyModules(TestCase):
 
     def test_lazy_layer_norm(self) -> None:
         batch_size = 10
+
         input_shape_seq = (batch_size, 5, 10)
         self._check_lazy_layer_norm(input_shape_seq)
 
@@ -633,8 +635,40 @@ class TestLazyModules(TestCase):
         input_shape_vid = (batch_size, 7, 5, 10, 10)
         self._check_lazy_layer_norm(input_shape_vid)
 
+    def _check_lazy_layer_norm_start_dim_calc(
+        self,
+        input_shape: tuple[int, ...],
+        start_dim: int,
+        normalized_shape_expected: tuple[int, ...],
+    ) -> None:
+        module = nn.LazyLayerNorm(start_dim)
+        input = torch.ones(input_shape)
+        output = module(input)  # materialized
+
+        self.assertEqual(module.normalized_shape, normalized_shape_expected)
+
+        self.assertEqual(
+            output,
+            torch.nn.functional.layer_norm(
+                input,
+                module.normalized_shape,
+                module.weight,
+                module.bias,
+                module.eps,
+            ),
+        )
+
     def test_lazy_layer_norm_start_dim_calc(self) -> None:
-        pass
+        input_shape = (5, 3, 7, 10)
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 1, (3, 7, 10))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -1, (10,))
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 2, (7, 10))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -2, (7, 10))
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 3, (10,))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -3, (3, 7, 10))
 
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
