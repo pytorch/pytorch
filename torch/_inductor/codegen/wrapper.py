@@ -3370,7 +3370,9 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output):
+        """while_loop is codegened as a host side while_loop"""
+
         def codegen_subgraph(subgraph, outer_inputs, outer_outputs):
             """Helper method to deduplicate subgraph codegen logic"""
             if V.graph.aot_mode:
@@ -3388,7 +3390,13 @@ class PythonWrapperCodegen(CodeGen):
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
 
+        ckp_offset = len(outer_carried_inputs)
         self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+        if stack_output:
+            self.writeline(
+                f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+            )
+
         for i, inp in enumerate(outer_carried_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
@@ -3411,10 +3419,21 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"should_loop = {cond_outer_outputs[0]}")
         self.writeline("if not should_loop:")
-        for i, (carried_input, carried_buf) in enumerate(
-            zip(outer_carried_inputs, while_loop.carried_inputs)
-        ):
-            self.writeline(f"    {name}[{i}] = {carried_input}.clone()")
+        if stack_output:
+            # Handle the case when loop never executes
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
+                self.writeline(ExitSubgraphLine(self))
+        else:
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                self.writeline(ExitSubgraphLine(self))
 
         self.writeline("while should_loop:")
         # Body execution
@@ -3424,6 +3443,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
 
+        # Collect outputs if enabled
+        if stack_output:
+            self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
+            self.writeline(ExitSubgraphLine(self))
+
         # Condition check at end of loop
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
         codegen_subgraph(
@@ -3431,6 +3457,17 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
         self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
+
+        # Stack outputs after loop completion
+        if stack_output:
+            self.writeline("# Stack outputs after loop completion")
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(
+                    f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
+                )
+                self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
     def statically_known_int_or_none(x):
