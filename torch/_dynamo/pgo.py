@@ -671,6 +671,16 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return code_state_str
 
 
+def merge_pgo_entry(src: FrameStateSizeEntry, dst: FrameStateSizeEntry) -> None:
+    def rank(entry: FrameStateSizeEntry) -> int:
+        if not isinstance(entry.size, tuple):  # scalar
+            return -1
+        return len(entry.size)
+
+    if rank(src) == rank(dst):  # both tensors same rank, or both scalars
+        dst |= src
+
+
 @CacheArtifactFactory.register
 class PGOCacheArtifact(CacheArtifact):
     @override
@@ -825,7 +835,9 @@ def add_extra_remote_code_state(cache_key: str) -> None:
                             # where one entry might be 1-d, the other 2-d.
                             # or if entries are of different types?
                             # with local source naming, could be scalar vs. tensor
-                            _CODE_STATE[code_id].automatic_dynamic[src] |= entry
+                            merge_pgo_entry(
+                                entry, _CODE_STATE[code_id].automatic_dynamic[src]
+                            )
                     else:
                         _CODE_STATE[code_id] = state
                 # log to tlparse
