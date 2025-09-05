@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
@@ -313,13 +314,11 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ) -> tuple[str, list[torch.Tensor], list[IntLikeType], list[FloatLikeType]]:
-        global in_compiled_autograd_initial_trace
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
-        in_compiled_autograd_initial_trace = True
         self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         get_chromium_event_logger().log_event_start(
@@ -346,64 +345,67 @@ class AutogradCompilerInstance:
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
 
-        # tensor inputs to fake tensors
-        x = inputs[0]  # mypy will complain about unbound x
-        try:
-            for idx, x in enumerate(inputs):
-                inputs[idx] = self.wrap_fake(x, self.source("inputs", idx))
-        except Exception as e:
-            raise NotImplementedError(
-                f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
-            ) from e
-        self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
+        # Turn on PythonDispatcher during initial trace to make it identifiable
+        # that tracing is happening, which is needed to prevent hashing symints
+        with enable_python_dispatcher():
+            # tensor inputs to fake tensors
+            x = inputs[0]  # mypy will complain about unbound x
+            try:
+                for idx, x in enumerate(inputs):
+                    inputs[idx] = self.wrap_fake(x, self.source("inputs", idx))
+            except Exception as e:
+                raise NotImplementedError(
+                    f"Found tensor of type {type(x)}, which is not supported by FakeTensorMode. {TURN_OFF_MSG}"
+                ) from e
+            self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
 
-        # size inputs to symints
-        sym_sizes = [
-            self.shape_env.create_unspecified_symint_and_symbol(
-                val,
-                self.source("sizes", idx),
-                DimDynamic.DYNAMIC,
-            )
-            for idx, val in enumerate(sizes)
-        ]
-
-        # We want to mark every size as dynamic, but since there's no way to
-        # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
-        # In the graph, we unwrap it with `unwrap_maybe_dynamic_int` back into a primitive.
-        proxies = [self.sizes_proxy[i] for i in range(len(sym_sizes))]  # type: ignore[index]
-        for i, symint in enumerate(sym_sizes):
-            proxies[i] = self.fx_tracer.create_proxy(
-                "call_function",
-                unwrap_maybe_dynamic_int,
-                (proxies[i],),
-                {},
-            )
-            self.symnode_proxy_lookup[symint.node] = proxies[i]
-        proxies = self.bind_objects_to_proxies(sym_sizes, proxies, sizes_origins)
-
-        for idx, val in enumerate(scalars):
-            source = self.source("scalars", idx)
-            if isinstance(val, int):
-                scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
+            # size inputs to symints
+            sym_sizes = [
+                self.shape_env.create_unspecified_symint_and_symbol(
                     val,
-                    source,
+                    self.source("sizes", idx),
                     DimDynamic.DYNAMIC,
                 )
-            elif isinstance(val, float):
-                scalars[idx] = self.shape_env.create_symfloatnode(
-                    self.shape_env.create_unspecified_symbol(
-                        val,
-                        source=source,
-                        dynamic_dim=DimDynamic.DYNAMIC,
-                    ),
-                    hint=val,
-                    source=source,
+                for idx, val in enumerate(sizes)
+            ]
+
+            # We want to mark every size as dynamic, but since there's no way to
+            # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
+            # In the graph, we unwrap it with `unwrap_maybe_dynamic_int` back into a primitive.
+            proxies = [self.sizes_proxy[i] for i in range(len(sym_sizes))]  # type: ignore[index]
+            for i, symint in enumerate(sym_sizes):
+                proxies[i] = self.fx_tracer.create_proxy(
+                    "call_function",
+                    unwrap_maybe_dynamic_int,
+                    (proxies[i],),
+                    {},
                 )
-            else:
-                raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_objects_to_proxies(scalars, self.scalars_proxy, scalars_origins)
-        for i, symval in enumerate(scalars):
-            self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
+                self.symnode_proxy_lookup[symint.node] = proxies[i]
+            proxies = self.bind_objects_to_proxies(sym_sizes, proxies, sizes_origins)
+
+            for idx, val in enumerate(scalars):
+                source = self.source("scalars", idx)
+                if isinstance(val, int):
+                    scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
+                        val,
+                        source,
+                        DimDynamic.DYNAMIC,
+                    )
+                elif isinstance(val, float):
+                    scalars[idx] = self.shape_env.create_symfloatnode(
+                        self.shape_env.create_unspecified_symbol(
+                            val,
+                            source=source,
+                            dynamic_dim=DimDynamic.DYNAMIC,
+                        ),
+                        hint=val,
+                        source=source,
+                    )
+                else:
+                    raise AssertionError("Unexpected scalar type: ", type(val))
+            self.bind_objects_to_proxies(scalars, self.scalars_proxy, scalars_origins)
+            for i, symval in enumerate(scalars):
+                self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -1020,7 +1022,6 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs: Any) -> tuple[Callable[..., Any], Any]:
-        global in_compiled_autograd_initial_trace
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1143,7 +1144,6 @@ class AutogradCompilerInstance:
             self.start_time_ns,
             log_pt2_compile_event=True,
         )
-        in_compiled_autograd_initial_trace = False
         self.compile_context.__exit__(None, None, None)
         return runtime_wrapper, self.compiler_fn(graph)
 
@@ -1457,9 +1457,6 @@ compiled_autograd_enabled = False
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
 
-# global flag to check if we are capturing for compiled autograd
-in_compiled_autograd_initial_trace = False
-
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
@@ -1569,9 +1566,8 @@ def _disable() -> Generator[None, None, None]:
 
 # return to starting state of a new process
 def reset() -> None:
-    global compiled_autograd_enabled, in_compiled_autograd_initial_trace
+    global compiled_autograd_enabled
     compiled_autograd_enabled = False
-    in_compiled_autograd_initial_trace = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
