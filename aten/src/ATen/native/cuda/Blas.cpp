@@ -1720,7 +1720,7 @@ bool use_fast_accum) {
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
-#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA)
+#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA) && !defined(USE_ROCM)
   // MXFP8 grouped GEMM dispatching
   bool is_mx8mx8bf16 = (
     mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
