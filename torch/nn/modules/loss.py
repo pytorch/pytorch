@@ -2065,7 +2065,7 @@ class CTCLoss(_Loss):
         In order to use CuDNN, the following must be satisfied: the :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
-        dtype :attr:`torch.int32`, and the :attr:`input` itself must be of
+        dtype :attr:`torch.int32`, and the :attr:`log_probs` itself must be of
         dtype :attr:`torch.float32`.
 
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
