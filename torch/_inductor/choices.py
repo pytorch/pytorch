@@ -218,7 +218,7 @@ class InductorChoices:
             not isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
         )
 
-    def get_mm_configs(
+    def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],

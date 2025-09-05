@@ -214,7 +214,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_mm_configs(
+        V.choices.get_template_configs(
             kernel_inputs,
             templates_to_use,
             name,
@@ -290,6 +290,8 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
-    choices.extend(V.choices.get_mm_configs(kernel_inputs, templates_to_use, name))
+    choices.extend(
+        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
+    )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
