@@ -535,20 +535,17 @@ class TestLazyModules(TestCase):
         input = torch.ones((20, 5, 10, 10))
         rank = len(input.shape)
 
-        for i in range(1, rank):
+        allowed_start_dims = itertools.chain(range(1, rank), range(-rank + 1, 0))
+
+        for i in allowed_start_dims:
             module = nn.LazyLayerNorm(start_dim=i)
             module(input)
 
-        for i in range(-rank + 1, 0):
-            module = nn.LazyLayerNorm(start_dim=i)
-            module(input)
+        forbidden_start_dims = itertools.chain(
+            range(-rank - 1, -rank - 3, -1), range(rank, rank + 3)
+        )
 
-        for i in range(rank, rank + 3):
-            with self.assertRaisesRegex(ValueError, f"start dim {i} is out of bound"):
-                module = nn.LazyLayerNorm(start_dim=i)
-                module(input)
-
-        for i in range(-rank - 1, -rank - 3, -1):
+        for i in forbidden_start_dims:
             with self.assertRaisesRegex(ValueError, f"start dim {i} is out of bound"):
                 module = nn.LazyLayerNorm(start_dim=i)
                 module(input)
