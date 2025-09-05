@@ -274,7 +274,6 @@ IF(USE_FBGEMM_GENAI)
       # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
       "${FBGEMM_GENAI_SRCS}/quantize_defs.cpp"
       "${FBGEMM_GENAI_SRCS}/quantize.cpp"
-      "${FBGEMM_GENAI_SRCS}/include/fbgemm_gpu/torch_ops.h"
     )
     message(STATUS "fbgemm_genai_native_cuda_cpp: ${fbgemm_genai_native_cuda_cpp}")
 
@@ -291,18 +290,16 @@ IF(USE_FBGEMM_GENAI)
 
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    set(fbgemm_genai_native_cuda_cuh
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped_mm/"
-    )
-    set(fbgemm_genai_native_cuda_h
-      "${FBGEMM_GENAI_SRCS}/common/include/"
+    set(fbgemm_genai_mx8mx8bf16_grouped
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
     )
 
     target_include_directories(fbgemm_genai PUBLIC
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${fbgemm_genai_native_cuda_cuh}
-      ${fbgemm_genai_native_cuda_h}
+      ${fbgemm_genai_mx8mx8bf16_grouped}
+      "${FBGEMM_GENAI_SRCS}/common/include/"
+      "${FBGEMM_GENAI_SRCS}/include/"
     )
   else()
     if(USE_ROCM)
