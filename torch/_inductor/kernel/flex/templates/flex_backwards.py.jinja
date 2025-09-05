@@ -539,11 +539,6 @@ def bwd_dkdv_block_mn(
         out="qkT"
     ) | indent_except_first(1) }}
 
-    {# if CHECK_BLOCK_BOUNDARY: #}
-        # Mask out the elements that are out of the Q_LEN for non divisible seqlen.
-        {# post_mod_scores = tl.where(offs_m1[None, :] < Q_LEN, post_mod_scores, float("-inf")) #}
-        {# post_mod_scores = tl.where(offs_n1[:, None] < KV_LEN, post_mod_scores, float("-inf")) #}
-
     if not IS_FULL_BLOCKS:
         {{ modification(
             subgraph_number=2,
@@ -602,11 +597,6 @@ def bwd_dkdv_block_mn(
             grad_score_mod="dsT"
         ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-{# 
-    if CHECK_BLOCK_BOUNDARY:
-        grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
-        grad_scores = tl.where(offs_m1[None, :] < Q_LEN, grad_scores, 0.0) #}
-
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
         # (grads) apply mask for partially unmasked block
