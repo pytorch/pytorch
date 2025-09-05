@@ -596,6 +596,18 @@ def while_loop_func(
 
 
 class WhileLoopStackOutputOp(HigherOrderOperator):
+    """
+    while_loop_stack_output is a variant of while_loop that returns a stack of outputs.
+    Its semantic can be illurated using python code as:
+    def while_loop_stack_output(cond_fn, body_fn, carried_inputs, additional_inputs):
+        outs = []
+        while cond_fn(*carried_inputs, *additional_inputs):
+            out = body_fn(*carried_inputs, *additional_inputs)
+            outs.append(out)
+        return torch.stack(outs)
+
+    It's useful for supporting autograd of while_loop.
+    """
     def __init__(self) -> None:
         super().__init__("while_loop_stack_output")
 
