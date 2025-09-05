@@ -7499,7 +7499,7 @@ def _meta_grouped_mm_common(
                 scale_a.dtype == torch.float8_e8m0fnu
                 and scale_b.dtype == torch.float8_e8m0fnu
             ),
-            lambda: "For FP8, scale_a and scale_b must both float32. For MXFP8 both must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
+            lambda: f"For FP8 scales must both be float32, or for MXFP8 both scales must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
         )
         is_mxfp8 = (
             scale_a.dtype == torch.float8_e8m0fnu
@@ -7518,7 +7518,7 @@ def _meta_grouped_mm_common(
                 )
                 # For MXFP8, 2d tensors have variable size groups represented as subtensors,
                 # that are converted to blocked padded format individually. At compile time we don't know
-                # the group sizes yet, so we don't know the expecte size of the blocked format scale.
+                # the group sizes yet, so we don't know the expect size of the blocked format scale.
                 # This limits what we can check here.
                 if is_mxfp8:
                     torch._check(

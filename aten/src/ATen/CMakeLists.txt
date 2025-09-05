@@ -263,8 +263,7 @@ IF(USE_FBGEMM_GENAI)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
     set(FBGEMM_CUTLASS_KERNELS_REGEX
-      ".*(f8f8bf16_rowwise).*"
-      ".*(mx8mx8bf16_grouped_mm).*"
+      ".*(f8f8bf16_rowwise).*|.*(mx8mx8bf16_grouped_mm).*"
     )
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"

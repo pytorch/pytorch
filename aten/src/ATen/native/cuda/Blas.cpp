@@ -1551,84 +1551,94 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 }
 
 namespace {
-  void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
+  void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
     if (mat.dim() == 2) {
-      if (scale.dtype() == kFloat) { // FP8 checks
-          TORCH_CHECK(
-              scale.dim() == 1,
-              "scale must be a 1D tensor, but got ",
-              scale.dim(),
-              "D, arg ",
-              arg_idx);
-          TORCH_CHECK(
-              scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
-          TORCH_CHECK(
-              scale.size(0) == mat.size(dim) * scale_multiplier,
-              "scale must have the same length as mat for arg ",
-              arg_idx);
-
-      } else if (scale.dtype() == at::kFloat8_e8m0fnu) { // MXFP8 checks
-        // For MXFP8, 2d tensors have variable size groups represented as subtensors,
-        // that are converted to blocked padded format individually,
-        // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
-        TORCH_CHECK(
-          scale.dim() == mat.dim(),
-          "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx);
-      } else {
-        TORCH_CHECK(
-            false,
-            "scale must be float32 or float8_e8m0fnu, but got ",
-            scale.dtype());
-      }
+      TORCH_CHECK(
+          scale.dim() == 1,
+          "scale must be a 1D tensor, but got ",
+          scale.dim(),
+          "D, arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(dim) * scale_multiplier,
+          "scale must have the same length as mat for arg ",
+          arg_idx);
     } else {
-      if (scale.dtype() == kFloat) { // FP8 checks
-        TORCH_CHECK(
-            scale.dim() == 2,
-            "scale must be a 2D tensor, but got ",
-            scale.dim(),
-            "D for arg ",
-            arg_idx);
-        TORCH_CHECK(
-            scale.stride(1) == 1,
-            "scale must be contiguous in the last dimension for arg ",
-            arg_idx);
-        TORCH_CHECK(
-            scale.size(0) == mat.size(0),
-            "scale must have the same batch dimension as mat for arg ",
-            arg_idx);
-        TORCH_CHECK(
-            scale.size(1) == mat.size(1 + dim),
-            "scale must have the same first dimension as mat for arg ",
-            arg_idx);
-        } else if (scale.dtype() == at::kFloat8_e8m0fnu) { // MXFP8 checks
-          // For MXFP8, 3d tensors have groups defined by the leading dim, not as subtensors defined by the `offsets` arg,
-          // so we can check the expected scale sizes here without a d2h sync.
-          auto round_up = [](auto x, auto y) {
-              return ((x + y - 1) / y) * y;
-          };
-          int64_t G = mat.size(0);
-          int64_t K = mat.size(-2);
-          int64_t N = mat.size(-1);
-          int64_t blocked_scale_K = round_up(K/32, 4);
-          int64_t blocked_scale_N = round_up(N, 128);
-          TORCH_CHECK(
-            scale.dim() == mat.dim(),
-            "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
-          );
-          TORCH_CHECK(
-            scale.size(-2) == K && scale.size(-1) == blocked_scale_N,
-            "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
-          );
-        } else {
-          TORCH_CHECK(
-              false,
-              "scale must be float32 or float8_e8m0fnu, but got ",
-              scale.dtype());
-        }
+      TORCH_CHECK(
+          scale.dim() == 2,
+          "scale must be a 2D tensor, but got ",
+          scale.dim(),
+          "D for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.stride(1) == 1,
+          "scale must be contiguous in the last dimension for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(0),
+          "scale must have the same batch dimension as mat for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(1) == mat.size(1 + dim),
+          "scale must have the same first dimension as mat for arg ",
+          arg_idx);
     }
-}
+  }
 
+  void _check_scales_mxfp8(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+    if (mat.dim() == 2) {
+      // For MXFP8, 2d tensors have variable size groups represented as subtensors,
+      // that are converted to blocked padded format individually,
+      // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
+      TORCH_CHECK(
+        scale.dim() == mat.dim(),
+        "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx);
 
+      // mat shape (M, total_K) -> scale shape (rounded_up(M, 128), rounded_up_per_group(K/32, 4))
+      // mat shape (total_K, N) -> scale shape (rounded_up_per_group(K/32, 4), rounded_up(N, 128))
+      // `dim` = 0 for scale_a (LHS), 1 for scale_b (RHS)
+      TORCH_CHECK(
+          scale.size(dim) >= mat.size(dim),
+          "for mxfp8, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
+          "must have scale.shape[", dim, "] >= ", mat.size(dim), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
+    } else {
+      // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
+      // so we can check the exact expected scale sizes here without a d2h sync.
+      auto round_up = [](auto x, auto y) {
+          return ((x + y - 1) / y) * y;
+      };
+
+      // TODO: this is for 3d tensor in 2d-3d case specifically.
+      // We'll need to support 3d-3d and 3d-2d cases once mxfp8 grouped gemm supports them.
+      int64_t G = mat.size(0);
+      int64_t K = mat.size(1);
+      int64_t N = mat.size(2);
+      int64_t blocked_scale_K = round_up(K/32, 4);
+      int64_t blocked_scale_N = round_up(N, 128);
+      TORCH_CHECK(
+        scale.dim() == mat.dim(),
+        "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
+      );
+      TORCH_CHECK(
+        scale.size(0) == G && scale.size(1) == blocked_scale_K && scale.size(2) == blocked_scale_N,
+        "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
+      );
+    }
+  }
+
+  void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
+    bool using_fp8_rowwise = scale.scalar_type() == kFloat;
+    bool using_mxfp8 = scale.scalar_type() == at::kFloat8_e8m0fnu;
+    if (using_fp8_rowwise) {
+      _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
+    } else if (using_mxfp8) {
+      _check_scales_mxfp8(mat, scale, dim, arg_idx);
+    } else {
+      TORCH_CHECK(false, "scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
+    }
+  }
 }
 
 Tensor
@@ -1701,7 +1711,7 @@ bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
 #if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA)
   // MXFP8 grouped GEMM dispatching
