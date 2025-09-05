@@ -79,7 +79,9 @@ class TORCH_API Pickler {
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);
+#ifdef USE_DISTRIBUTED
   void pushRRef(const IValue& ivalue);
+#endif
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);

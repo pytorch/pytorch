@@ -94,7 +94,7 @@ class PerformanceModelChoices(InductorChoices):
 
         return all_choices, original_sizes
 
-    def _finalize_mm_configs(
+    def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -131,7 +131,7 @@ class PerformanceModelChoices(InductorChoices):
             )
             enabled = False
         if not enabled:
-            return super()._finalize_mm_configs(
+            return super()._finalize_template_configs(
                 template_choices,
                 kernel_inputs,
                 templates,

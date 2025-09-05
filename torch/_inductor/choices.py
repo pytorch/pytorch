@@ -106,7 +106,7 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _finalize_mm_configs(
+    def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -218,7 +218,7 @@ class InductorChoices:
             not isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
         )
 
-    def get_mm_configs(
+    def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
@@ -255,7 +255,7 @@ class InductorChoices:
             )
 
         # Second pass: Adjust the template choices
-        adjusted_choices = self._finalize_mm_configs(
+        adjusted_choices = self._finalize_template_configs(
             template_choices,
             kernel_inputs,
             templates,
