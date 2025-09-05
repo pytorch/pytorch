@@ -290,13 +290,13 @@ else
 
       WERROR=1 python setup.py clean
 
-      WERROR=1 python setup.py bdist_wheel
+      WERROR=1 python -m build --wheel --no-isolation
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      python setup.py bdist_wheel
+      python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
