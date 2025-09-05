@@ -324,6 +324,7 @@ from tools.setup_helpers.env import (
     IS_WINDOWS,
 )
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+from tools.setup_helpers.rocm_env import get_ck_dependency_string, IS_ROCM
 
 
 def str2bool(value: str | None) -> bool:
@@ -505,7 +506,6 @@ else:
     CMAKE_PYTHON_LIBRARY = Path(
         sysconfig.get_config_var("LIBDIR")
     ) / sysconfig.get_config_var("INSTSONAME")
-
 
 ################################################################################
 # Version, create_version_file, and package_name
@@ -1492,6 +1492,12 @@ def configure_extension_build() -> tuple[
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
         extra_install_requires.extend(
             map(str.strip, pytorch_extra_install_requires.split("|"))
+        )
+
+    # Adding extra requirements for ROCm builds
+    if IS_ROCM and platform.system() == "Linux":
+        extra_install_requires.append(
+            f"rocm-composable-kernel {get_ck_dependency_string()}"
         )
 
     # Cross-compile for M1
