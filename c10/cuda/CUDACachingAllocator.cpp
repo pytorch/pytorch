@@ -2977,8 +2977,8 @@ class DeviceCachingAllocator {
           --it;
         }
         if (!(*cur)->expandable_segment_) {
-          release_block(*cur, context);
           totalReleased += (*cur)->size;
+          release_block(*cur, context);
         }
         if (is_first) {
           break;
