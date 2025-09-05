@@ -1754,7 +1754,7 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
     return has_triton_tma_device() and all(
         _is_tma_compatible_default(m)
-        if m.get_device().type != "xpu"
+        if (m_device := m.get_device()) is None or m_device.type != "xpu"
         else _is_tma_compatible_xpu(m)
         for m in matrices
     )
