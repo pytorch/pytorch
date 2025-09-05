@@ -508,14 +508,36 @@ def flex_attention_fake_impl(
     # TODO: Figure out a better way to handle this for NJT than using sum()
     if query.is_nested:
         out = torch.empty_like(query, memory_format=torch.contiguous_format)
-        logsumexp = query.sum(dim=-1)
-        max_scores = query.max(dim=-1)[0]
+        # Create zero-sized tensors when auxiliary outputs are not needed for nested tensors too
+        if kernel_options.get("OUTPUT_LOGSUMEXP", True):
+            logsumexp = query.sum(dim=-1)
+        else:
+            logsumexp = query.new_empty(0, dtype=torch.float32)
+
+        if kernel_options.get("OUTPUT_MAX", False):
+            max_scores = query.max(dim=-1)[0]
+        else:
+            max_scores = query.new_empty(0, dtype=torch.float32)
         return out, logsumexp, max_scores
 
     v_head_dim = value.size(-1)
     batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
-    logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
-    max_scores = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
+
+    # Create zero-sized tensors when auxiliary outputs are not needed to save memory
+    if kernel_options.get("OUTPUT_LOGSUMEXP", True):
+        logsumexp = query.new_empty(
+            batch_size, num_heads, seq_len_q, dtype=torch.float32
+        )
+    else:
+        logsumexp = query.new_empty(0, dtype=torch.float32)
+
+    if kernel_options.get("OUTPUT_MAX", False):
+        max_scores = query.new_empty(
+            batch_size, num_heads, seq_len_q, dtype=torch.float32
+        )
+    else:
+        max_scores = query.new_empty(0, dtype=torch.float32)
+
     out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
     out = query.new_empty(out_shape)
     out = _permute_strides(out, query.stride())
