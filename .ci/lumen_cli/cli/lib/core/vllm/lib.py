@@ -148,6 +148,27 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
+        "vllm_languagde_model_test_extended_generation_28_failure_test": {
+            "title": "Language Models Test (Extended Generation) 2.8 release failure",
+            "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
+            "package_install": [
+                "git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8"
+            ],
+            "steps": [
+                "pytest -v -s models/language/generation/test_mistral.py",
+            ],
+        },
+        "vllm_distributed_test_2_gpu_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_2_gpu_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest -v -s distributed/test_sequence_parallel.py",
+            ],
+        },
         # TODO(elainewy):need to add g6 with 4 gpus to run this test
         "vllm_lora_test": {
             "title": "LoRA Test %N",
