@@ -753,33 +753,32 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, aten_layout, aten_mm, "mm")
+            V.choices.get_mm_configs(kernel_inputs, aten_layout, [aten_mm], "mm")
         )
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         # Get template choices using the new unified function
         choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, mm_template, "mm")
+            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], "mm")
         )
-
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template choices using the new unified function
             choices.extend(
                 V.choices.get_mm_configs(
-                    kernel_inputs, layout, persistent_tma_mm_template, "mm"
+                    kernel_inputs, layout, [persistent_tma_mm_template], "mm"
                 )
             )
 
         if use_decompose_k_choice(m, n, k):
             choices.extend(
                 V.choices.get_mm_configs(
-                    kernel_inputs, layout, decompose_k_subgraph_template, "mm"
+                    kernel_inputs, layout, [decompose_k_subgraph_template], "mm"
                 )
             )
         choices.extend(
             V.choices.get_mm_configs(
-                kernel_inputs, layout, mm_contiguous_subgraph_template, "mm"
+                kernel_inputs, layout, [mm_contiguous_subgraph_template], "mm"
             )
         )
 
@@ -822,7 +821,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 # while we transition to the unified kwargs retrieval
                 kernel_inputs,
                 layout,
-                mm_template,
+                [mm_template],
                 "mm-ah",
             )
         )
@@ -903,7 +902,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                aten__int_mm,
+                [aten__int_mm],
                 name,
             )
         )
@@ -917,7 +916,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         layout, enable_int32=True, check_max_autotune=False
     ):
         choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, mm_template, name)
+            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], name)
         )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
@@ -971,7 +970,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 aten_layout,
-                aten_addmm,
+                [aten_addmm],
                 name,
             )
         )
@@ -982,7 +981,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 aten_layout,
-                aten_bias_addmm,
+                [aten_bias_addmm],
                 name,
             )
         )
@@ -990,7 +989,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 aten_layout,
-                aten_addmm,
+                [aten_addmm],
                 name,
             )
         )
@@ -1002,7 +1001,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                mm_template,
+                [mm_template],
                 name,
             )
         )
@@ -1013,7 +1012,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 V.choices.get_mm_configs(
                     kernel_inputs,
                     layout,
-                    persistent_tma_mm_template,
+                    [persistent_tma_mm_template],
                     name,
                 )
             )
@@ -1022,7 +1021,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                addmm_contiguous_subgraph_template,
+                [addmm_contiguous_subgraph_template],
                 "addmm",
             )
         )
@@ -1183,11 +1182,13 @@ def tuned_scaled_mm(
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                aten__fp8_mm,
+                [aten__fp8_mm],
                 name,
-                kwarg_overrides=dict(
-                    out_dtype=out_dtype, use_fast_accum=use_fast_accum
-                ),
+                kwarg_overrides={
+                    aten__fp8_mm.uid: dict(
+                        out_dtype=out_dtype, use_fast_accum=use_fast_accum
+                    )
+                },
             )
         )
 
@@ -1209,9 +1210,9 @@ def tuned_scaled_mm(
                 V.choices.get_mm_configs(
                     kernel_inputs,
                     layout,
-                    scaled_mm_device_tma_template,
+                    [scaled_mm_device_tma_template],
                     name,
-                    overriders,
+                    kwarg_overrides={scaled_mm_device_tma_template.uid: overriders},
                 )
             )
 
@@ -1220,9 +1221,9 @@ def tuned_scaled_mm(
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                mm_template,
+                [mm_template],
                 name,
-                overriders,
+                kwarg_overrides={mm_template.uid: overriders},
             )
         )
 
