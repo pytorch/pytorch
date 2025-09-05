@@ -508,7 +508,7 @@ class TestDTensorOps(DTensorOpTestBase):
         return OP_DB_WORLD_SIZE
 
     def run_opinfo_test(
-        self, dtype, op, requires_grad, sample_inputs_filter=lambda s: True
+        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
     ):
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 

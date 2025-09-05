@@ -355,12 +355,11 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        result = DTensor._op_dispatcher.dispatch(
+        return DTensor._op_dispatcher.dispatch(
             func,
             args,
             kwargs or {},
         )
-        return result
 
     @staticmethod
     def from_local(
