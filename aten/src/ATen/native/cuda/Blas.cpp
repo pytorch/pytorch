@@ -1565,7 +1565,7 @@ namespace {
           scale.size(0) == mat.size(dim) * scale_multiplier,
           "scale must have the same length as mat for arg ",
           arg_idx);
-    } else {
+    } else if (mat.dim() == 3) {
       TORCH_CHECK(
           scale.dim() == 2,
           "scale must be a 2D tensor, but got ",
@@ -1584,6 +1584,8 @@ namespace {
           scale.size(1) == mat.size(1 + dim),
           "scale must have the same first dimension as mat for arg ",
           arg_idx);
+    } else {
+      TORCH_CHECK(false, "mat must be 2D or 3D, but got ", mat.dim(), "D for arg ", arg_idx);
     }
   }
 
@@ -1603,7 +1605,7 @@ namespace {
           scale.size(dim) >= mat.size(dim),
           "for mxfp8, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
           "must have scale.shape[", dim, "] >= ", mat.size(dim), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
-    } else {
+    } else if (mat.dim() == 3) {
       // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
       // so we can check the exact expected scale sizes here without a d2h sync.
       auto round_up = [](auto x, auto y) {
@@ -1625,6 +1627,8 @@ namespace {
         scale.size(0) == G && scale.size(1) == blocked_scale_K && scale.size(2) == blocked_scale_N,
         "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
       );
+    } else {
+      TORCH_CHECK(false, "mat must be 2D or 3D, but got ", mat.dim(), "D for arg ", arg_idx);
     }
   }
 
