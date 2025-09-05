@@ -54,7 +54,7 @@ class TestCustomPartitionerFn(TestCase):
         # `a` and `b` (i.e., `primals_1` and `primals_2`) are saved for backward.
         custom_partitioner_fn = MyCustomPartitionerFn()
         self.assertFalse(custom_partitioner_fn.called)
-        self.assertNotEqual(custom_partitioner_fn.uuid(), None)
+        self.assertIsNotNone(custom_partitioner_fn.uuid())
 
         with torch._inductor.config.patch(custom_partitioner_fn=custom_partitioner_fn):
             code_cp = run_fw_bw_and_get_code(lambda: f(a, b))
