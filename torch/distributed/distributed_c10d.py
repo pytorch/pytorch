@@ -337,12 +337,10 @@ class Backend(str):  # noqa: SLOT000
             # assume default devices "cpu" and "cuda", but warn
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
-                "`cuda` or `xpu`. Please specify it via the `devices` argument of "
+                "`cuda`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = (
-                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
-            )
+            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -1741,16 +1739,11 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
-            if backend == "fake":
-                from torch.testing._internal.distributed.fake_pg import FakeStore
-
-                store = FakeStore()
-            else:
-                rendezvous_iterator = rendezvous(
-                    not_none(init_method), rank, world_size, timeout=timeout
-                )
-                store, rank, world_size = next(rendezvous_iterator)
-                store.set_timeout(timeout)
+            rendezvous_iterator = rendezvous(
+                not_none(init_method), rank, world_size, timeout=timeout
+            )
+            store, rank, world_size = next(rendezvous_iterator)
+            store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.

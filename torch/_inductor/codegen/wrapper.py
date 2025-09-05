@@ -228,18 +228,11 @@ def user_defined_kernel_grid_fn_code(
                 key=lambda x: len(x[1].kwargs),
                 reverse=True,
             ):
-                guardslist = []
                 if c.kwargs:
-                    # Remove AMD specific kwargs.
-                    for kwarg in c.kwargs:
-                        if kwarg not in [
-                            "matrix_instr_nonkdim",
-                            "waves_per_eu",
-                            "kpack",
-                        ]:
-                            guardslist.append(f"meta['{kwarg}'] == {c.kwargs[kwarg]}")
-                if guardslist:
-                    guards = " and ".join(guardslist)
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
                 else:
                     guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid, example_grid)
@@ -261,7 +254,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     compile_wrapper.splice(kernel.src, strip=True)
 
     # Also include any possible kernel being called indirectly
-    import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
 
@@ -287,14 +279,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-                    compile_wrapper.splice(symbol.src, strip=True)
-                    symbols_included.add(symbol_name)
-                    traverse(symbol)
-                elif hasattr(triton, "constexpr_function") and isinstance(
-                    symbol, triton.runtime.jit.ConstexprFunction
-                ):
-                    compile_wrapper.newline()
-                    compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -2299,7 +2283,6 @@ class PythonWrapperCodegen(CodeGen):
                         "config": config_to_dict(cfg),
                         "python": [*map(pexpr, grid)],
                         "cpp": [*map(cexpr, grid)],
-                        "python_slow": [*map(pexpr, grid)],
                     }
                 )
             inductor_meta = {

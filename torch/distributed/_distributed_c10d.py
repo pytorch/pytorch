@@ -14,8 +14,6 @@ Example:
     _set_global_rank(rank)
 """
 
-from typing import TYPE_CHECKING
-
 # Import all core distributed components from the C extension
 # NB: This list has to be spelled out because the _C module doesn't have __all__
 from torch._C._distributed_c10d import (
@@ -84,8 +82,7 @@ _XCCL_AVAILABLE = False
 try:
     from torch._C._distributed_c10d import HashStore
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import HashStore
+    from torch.distributed._C_stubs import HashStore
 
 # NVSHMEM/SymmetricMemory components
 try:
@@ -95,12 +92,11 @@ try:
         _SymmetricMemory,
     )
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import (
-            _is_nvshmem_available,
-            _nvshmemx_cumodule_init,
-            _SymmetricMemory,
-        )
+    from torch.distributed._C_stubs import (
+        _is_nvshmem_available,
+        _nvshmemx_cumodule_init,
+        _SymmetricMemory,
+    )
 
 # MPI backend
 try:
@@ -108,8 +104,7 @@ try:
 
     _MPI_AVAILABLE = True
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import ProcessGroupMPI
+    from torch.distributed._C_stubs import ProcessGroupMPI
 
 # NCCL backend
 try:
@@ -123,14 +118,13 @@ try:
 
     _NCCL_AVAILABLE = True
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import (
-            _DEFAULT_PG_NCCL_TIMEOUT,
-            _dump_nccl_trace,
-            _dump_nccl_trace_json,
-            _hash_tensors,
-            ProcessGroupNCCL,
-        )
+    from torch.distributed._C_stubs import (
+        _DEFAULT_PG_NCCL_TIMEOUT,
+        _dump_nccl_trace,
+        _dump_nccl_trace_json,
+        _hash_tensors,
+        ProcessGroupNCCL,
+    )
 
 # Gloo backend
 try:
@@ -138,8 +132,7 @@ try:
 
     _GLOO_AVAILABLE = True
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import _ProcessGroupWrapper, ProcessGroupGloo
+    from torch.distributed._C_stubs import _ProcessGroupWrapper, ProcessGroupGloo
 
 # UCC backend
 try:
@@ -147,8 +140,7 @@ try:
 
     _UCC_AVAILABLE = True
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import ProcessGroupUCC
+    from torch.distributed._C_stubs import ProcessGroupUCC
 
 # XCCL backend
 try:
@@ -156,8 +148,7 @@ try:
 
     _XCCL_AVAILABLE = True
 except ImportError:
-    if not TYPE_CHECKING:
-        from torch.distributed._C_stubs import ProcessGroupXCCL
+    from torch.distributed._C_stubs import ProcessGroupXCCL
 
 # Provide backwards compatibility by making all symbols available at module level
 __all__ = [

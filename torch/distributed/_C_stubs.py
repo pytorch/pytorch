@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from torch._C._distributed_c10d import Store
-
 
 if TYPE_CHECKING:
     from datetime import timedelta
@@ -21,7 +19,7 @@ import torch
 
 
 # Store classes
-class HashStore(Store):
+class HashStore:
     """Stub HashStore for builds without this functionality."""
 
     def __init__(self, *args, **kwargs):
