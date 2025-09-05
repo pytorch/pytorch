@@ -93,8 +93,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
                 return func(*args, **kwargs)
 
         # test e2e, with Inductor, as smoketest.
-        @torch._dynamo.error_on_graph_break(True)
-        @torch.compile(backend="inductor")
+        @torch.compile(fullgraph=True, backend="inductor")
         def g(x):
             return 2 * x.sin().cos()
 

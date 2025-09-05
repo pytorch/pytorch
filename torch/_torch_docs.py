@@ -5555,48 +5555,26 @@ Example::
 add_docstr(
     torch.is_floating_point,
     r"""
-is_floating_point(input: Tensor) -> bool
+is_floating_point(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
 one of ``torch.float64``, ``torch.float32``, ``torch.float16``, and ``torch.bfloat16``.
 
 Args:
     {input}
-
-Example::
-
-    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0]))
-    True
-    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.int32))
-    False
-    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
-    True
-    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.complex64))
-    False
 """.format(**common_args),
 )
 
 add_docstr(
     torch.is_complex,
     r"""
-is_complex(input: Tensor) -> bool
+is_complex(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a complex data type i.e.,
 one of ``torch.complex64``, and ``torch.complex128``.
 
 Args:
     {input}
-
-Example::
-
-    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex64))
-    True
-    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex128))
-    True
-    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.int32))
-    False
-    >>> torch.is_complex(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
-    False
 """.format(**common_args),
 )
 
@@ -12419,24 +12397,6 @@ Keyword args:
     {device}
     {requires_grad}
     {memory_format}
-
-Example::
-
-    >>> x = torch.ones(2, 3)
-    >>> torch.full_like(x, 3.141592)
-    tensor([[ 3.1416,  3.1416,  3.1416],
-            [ 3.1416,  3.1416,  3.1416]])
-    >>> torch.full_like(x, 7)
-    tensor([[7., 7., 7.],
-            [7., 7., 7.]])
-    >>> torch.full_like(x, 0.5, dtype=torch.int32)
-    tensor([[0, 0, 0],
-            [0, 0, 0]], dtype=torch.int32)
-    >>> y = torch.randn(3, 4, dtype=torch.float64)
-    >>> torch.full_like(y, -1.0)
-    tensor([[-1., -1., -1., -1.],
-            [-1., -1., -1., -1.],
-            [-1., -1., -1., -1.]], dtype=torch.float64)
 """.format(**factory_like_common_args),
 )
 
