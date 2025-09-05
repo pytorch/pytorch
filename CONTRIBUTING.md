@@ -129,7 +129,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git clean -xdf
       python setup.py clean
       git submodule update --init --recursive
-      python -m pip install -r requirements.txt
+      python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
       ```
   4. The main step within `python -m pip install -e . -v --no-build-isolation` is running `make` from the `build` directory. If you want to
@@ -294,7 +294,7 @@ The following packages should be installed with `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements.txt
+pip install --group dev
 ```
 will install these dependencies for you.
 
