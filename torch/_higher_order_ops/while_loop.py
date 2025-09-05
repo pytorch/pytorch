@@ -606,6 +606,19 @@ def while_loop_func(
 
 
 class WhileLoopStackOutputOp(HigherOrderOperator):
+    """
+    while_loop_stack_output is a variant of while_loop that returns a stack of outputs.
+    Its semantic can be illurated using python code as:
+    def while_loop_stack_output(cond_fn, body_fn, carried_inputs, additional_inputs):
+        outs = []
+        while cond_fn(*carried_inputs, *additional_inputs):
+            out = body_fn(*carried_inputs, *additional_inputs)
+            outs.append(out)
+        return torch.stack(outs)
+
+    It's useful for supporting autograd of while_loop.
+    """
+
     def __init__(self) -> None:
         super().__init__("while_loop_stack_output")
 
@@ -756,7 +769,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # set up single step bw fn
         bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
         # Note [Handle inputs that're not differentiable]
-        # When a forward input is non-differentiable e.g. a symint or an integern tensor, their gradients
+        # When a forward input is non-differentiable e.g. a symint or an integer tensor, their gradients
         # will be None. However, we don't want to return None in the subgraph because this complicates the
         # inductor codegen, where we need to do a non-unform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.

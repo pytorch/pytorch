@@ -757,7 +757,7 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_select_with_input_idx(self, device, dynamic):
@@ -1199,7 +1199,7 @@ class WhileLoopTests(TestCase):
                     compiled_parameters = dict(compiled_model.named_parameters())
                     for name, param in model_parameters.items():
                         self.assertEqual(param, compiled_parameters[name])
-                        torch.testing.assert_close(
+                        self.assertEqual(
                             param.grad,
                             compiled_parameters[name].grad,
                             atol=1e-4,
@@ -1211,7 +1211,7 @@ class WhileLoopTests(TestCase):
                         pytree.tree_flatten(cloned_inputs2)[0],
                     ):
                         if inp1.requires_grad:
-                            torch.testing.assert_close(
+                            self.assertEqual(
                                 inp1.grad,
                                 inp2.grad,
                                 atol=1e-4,
