@@ -840,7 +840,7 @@ class ViewMetaSpecialization:
         return [
             f"""
 struct TORCH_API {self.classname} : public ViewMeta {{
-  FUNCTIONALIZATION_VIEWMETA_NAME({self.classname});
+  FUNCTIONALIZATION_VIEWMETA_NAME({self.classname})
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(\n{serializable_tuple_args});
 
   {self.classname}(const SerializableTuple& tpl)
