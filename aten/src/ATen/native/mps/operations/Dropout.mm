@@ -34,7 +34,7 @@ std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std
   mask.bernoulli_(p_comp);
   auto scale = p_comp == 0 ? 0.0f : 1.0f / p_comp;
   Tensor output = native_dropout_mask_and_scale(input, mask, scale);
-  return {output, mask};
+  return {std::move(output), std::move(mask)};
 }
 
 Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, double scale) {
