@@ -378,16 +378,16 @@ reorder_for_compute_comm_overlap_passes: list[
         ],
     ]
 ] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
+    "reorder_communication_preserving_peak_memory",
+    "sink_waits_iterative",
+    "reorder_communication_preserving_peak_memory",
 ]
 
 # Maximum number of positions to advance a given collective, unlimited by default
 reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = False
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
@@ -399,7 +399,32 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
+
+# Comparing estimations vs real benchmarks showed big divergence.
+# Exposing extensive config for easier experimentation.
+reorder_iterative_use_runtime_estimations: bool = True
+sink_iterative_use_runtime_estimations: bool = True
+reorder_for_compute_comm_overlap_broadcast_runtime_estimations: bool = True
+
+reorder_sink_runtime_estimations_comm_mult: float = 2.0
+reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
+# Ratio of comm_time to cover deviations of comm_time from estimations
+reorder_iterative_extra_comm_comp_overlap: float = 1.0
+sink_iterative_extra_comm_comp_overlap: float = 1.0
+reorder_iterative_peak_memory_budget: float = 0.2
+sink_iterative_peak_memory_budget: float = 0.2
+
+# Experimental unsafe configuration that allows changing relative collectives order,
+# No guarantees for now that all the rank will do the same order of collectives,
+# which can result in collective hangs.
+reorder_iterative_unsafe_collectives_reorder: bool = True
+sink_waits_iterative_unsafe_collectives_reorder: bool = True
+
+bucket_fx_collectives_trie = ["ag", "rs"]
+bucket_fx_collectives_trie_use_nn_module_stack = True
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
+bucket_all_gather_fx_multidtype = True
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
 
@@ -412,6 +437,9 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
+
+runtime_estimations_use_nccl_lib_estimations: bool = False
+runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink

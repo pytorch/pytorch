@@ -11,6 +11,7 @@ import operator
 import os
 import pprint
 import textwrap
+import time
 import traceback
 import typing
 from collections import Counter, defaultdict
@@ -26,11 +27,13 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
@@ -38,7 +41,10 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
-from .comm_analysis import estimate_nccl_collective_runtime
+from .comm_analysis import (
+    estimate_nccl_collective_runtime,
+    estimate_nccl_collective_runtime_nccl_estimator,
+)
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -211,6 +217,7 @@ class BaseSchedulerNode:
     min_order: int
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
+    override_estimated_runtime: Optional[float] = None
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
@@ -807,10 +814,16 @@ class BaseSchedulerNode:
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
-    @cache_on_self
     def get_estimated_runtime(self) -> float:
+        if self.override_estimated_runtime is not None:
+            return self.override_estimated_runtime
+
+        return self._get_estimated_runtime()
+
+    @cache_on_self
+    def _get_estimated_runtime(self) -> float:
         """
-        Returns estimated op runtime in nanoseconds (ns)
+        Returns estimated op runtime in millis (ms)
         """
         buf = self.get_nodes()[0].get_outputs()[0]
         layout = buf.node.get_output_spec()
@@ -822,6 +835,13 @@ class BaseSchedulerNode:
         if is_collective(self.node):
             assert isinstance(self.node, ir.IRNode)
             try:
+                if config.runtime_estimations_use_nccl_lib_estimations:
+                    est = estimate_nccl_collective_runtime_nccl_estimator(self)
+                    if est is None:
+                        # NCCL estimations fail: fallback to in-tree algorithmic estimation.
+                        est = estimate_nccl_collective_runtime(self.node)
+
+                    return est
                 return estimate_nccl_collective_runtime(self.node)
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
@@ -839,6 +859,11 @@ class BaseSchedulerNode:
             # when we are processing the collective op IR node, so ir.Wait takes 0 time
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
+
+        if config.runtime_estimations_mms_benchmark:
+            ret = estimate_runtime_benchmark(self)
+            if ret is not None:
+                return ret
 
         dtype = buf.node.maybe_get_dtype()
         try:
@@ -869,8 +894,8 @@ class BaseSchedulerNode:
         compute_time = (factor * flops_est / gpu_flops) * 1e9
         transfer_time = counted_bytes / gpu_memory_bandwidth
 
-        # Return estimated runtime in nanoseconds
-        return max(compute_time, transfer_time)
+        # Return estimated runtime in millis
+        return max(compute_time, transfer_time) / 1e6
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
@@ -893,6 +918,77 @@ class BaseSchedulerNode:
         template_node = nodes[template_index]
         epilogue = nodes[template_index + 1 :]
         return prologue, template_node, epilogue
+
+
+@functools.cache
+def get_estimate_runtime_cache() -> torch._inductor.codecache.LocalCache:
+    return torch._inductor.codecache.LocalCache()
+
+
+def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
+    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
+    args = snode.node.inputs  # type: ignore[union-attr]
+    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
+        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
+        snode.node.kwargs,  # type: ignore[union-attr]
+    )
+    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+
+    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
+        return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
+
+    cache_key = str(
+        (python_kernel_name,)
+        + tuple(tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args)
+    )
+    return cache_key
+
+
+def estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
+    # Extern Kernels(e.g. mm) perf will depend on backends.
+    if not isinstance(snode, ExternKernelSchedulerNode):
+        return None
+    mms_fns = {
+        "extern_kernels.mm": torch.ops.aten.mm,
+        "extern_kernels.bmm": torch.ops.aten.bmm,
+        "extern_kernels.addmm": torch.ops.aten.addmm,
+    }
+    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
+    if python_kernel_name not in mms_fns:
+        return None
+    if not isinstance(snode.node, ir.ExternKernel):
+        return None
+
+    cache_key = get_estimate_runtime_cache_key_from_snode(snode)
+    cache = get_estimate_runtime_cache()
+    cache_val = cache.lookup(cache_key)
+    if cache_val is not None:
+        assert isinstance(cache_val, float)
+        return cache_val
+
+    with no_dispatch():
+        from .utils import snode_args_kwargs
+
+        args, kwargs = snode_args_kwargs(snode)
+        fn = mms_fns[python_kernel_name]
+        fn(*args, **kwargs)
+
+        num_iters = 3
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        cpu_start = time.time()
+        start_event.record(torch.cuda.current_stream())
+        for _ in range(num_iters):
+            fn(*args, **kwargs)
+        end_event.record(torch.cuda.current_stream())
+        cpu_end = time.time()
+        torch.cuda.synchronize()
+        cpu_time = cpu_end - cpu_start
+        total_op_time = start_event.elapsed_time(end_event) - cpu_time
+        mean_op_time_ms = total_op_time / num_iters
+        cache.set_value(cache_key, value=mean_op_time_ms)
+        return mean_op_time_ms
 
 
 class WhyNoFuse:
@@ -2166,6 +2262,31 @@ class Scheduler:
                 assign_memory_planning_info_for_scheduler_buffers(
                     self.nodes, self.name_to_buf
                 )
+
+            runtime_estimations = None
+            if config.reorder_for_compute_comm_overlap_broadcast_runtime_estimations:
+                runtime_estimations = {}
+                for snode in self.nodes:
+                    runtime_estimations[snode] = snode.get_estimated_runtime()
+                import torch.distributed as dist
+                from torch.distributed.distributed_c10d import _get_default_group
+
+                world_size = dist.get_world_size()
+                pg = _get_default_group()
+                gathered_runtime_estimations: list[list[float]] = [
+                    [] for _ in range(world_size)
+                ]
+                dist.all_gather_object(
+                    gathered_runtime_estimations, list(runtime_estimations.values()), pg
+                )
+                median_runtime_estimations = torch.median(
+                    torch.tensor(gathered_runtime_estimations), dim=0
+                ).values.tolist()
+                for idx, (key, value) in enumerate(runtime_estimations.items()):
+                    self.nodes[
+                        idx
+                    ].override_estimated_runtime = median_runtime_estimations[idx]
+
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2178,7 +2299,7 @@ class Scheduler:
                     [
                         f"snode[{i}]"
                         + n.debug_str()
-                        + f" buffer_names:{n.get_buffer_names()}"
+                        + f"\n runtime_estimation:{n.get_estimated_runtime()}"
                         for i, n in enumerate(self.nodes)
                     ]
                 ),
