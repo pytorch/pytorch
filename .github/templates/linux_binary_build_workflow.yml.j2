@@ -135,7 +135,7 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: ./.github/actions/setup-xpu
+        uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: configure aws credentials
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4

@@ -24,6 +24,7 @@ from torch.distributed._functional_collectives import (
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
@@ -60,10 +61,7 @@ if not dist.is_available():
     sys.exit(0)
 
 
-@skip_but_pass_in_sandcastle_if(
-    (not dist.is_xccl_available() and not dist.is_nccl_available()),
-    "c10d was not compiled with the NCCL or XCCL backend",
-)
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -82,9 +80,10 @@ class TestWithNCCL(MultiProcessTestCase):
         return torch.device(self.rank)
 
     def _init_process_group(self) -> None:
-        torch.accelerator.set_device_index(self.rank)
+        torch.accelerator.set_device_idx(self.device.index)
         store = dist.FileStore(self.file_name, self.world_size)
-        backend = "xccl" if TEST_XPU else "nccl"
+        backend = dist.get_default_backend_for_device(self.device.type)
+
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -278,7 +277,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         # check memory leak
         for i in range(1, 10):
-            mem_usage[i] = torch.get_device_module(self.device.type).max_memory_allocated()
+            mem_usage[i] = torch.accelerator.max_memory_allocated()
             compiled(arg)
 
         assert mem_usage[9] == mem_usage[8]
@@ -382,7 +381,9 @@ class TestWithNCCL(MultiProcessTestCase):
 
         input_split_sizes = send_sz_matrix[self.rank].tolist()
         output_split_sizes = send_sz_matrix[:, self.rank].tolist()
-        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(self.device.type)
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(
+            self.device.type
+        )
 
         output = torch.ops._c10d_functional.all_to_all_single(
             input,
@@ -1148,7 +1149,9 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(self.device.type)
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(
+            self.device.type
+        )
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,

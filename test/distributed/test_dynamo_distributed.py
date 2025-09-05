@@ -43,10 +43,12 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     DynamoDistributedSingleProcTestCase,
     import_transformers_or_skip,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle_if, skipIfXpu, TEST_XPU
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def reset_rng_state():
@@ -269,8 +271,15 @@ def get_hf_bert(rank):
     except ImportError as e:
         raise unittest.SkipTest("Unable to import transformers") from e
 
-    device_type = torch.accelerator.current_accelerator().type
-    batch_size, max_length, config, device = 4, 512, BertConfig(), f"{device_type}:{rank}"
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
+    batch_size, max_length, config, device = (
+        4,
+        512,
+        BertConfig(),
+        f"{device_type}:{rank}",
+    )
     model = AutoModelForMaskedLM.from_config(config).to(device)
     input_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(device)
     decoder_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(
@@ -550,11 +559,8 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
-# optimizer, you should be able to repro it single process!
-@skip_but_pass_in_sandcastle_if(
-    not dist.is_nccl_available() and not dist.is_xccl_available(),
-    "c10d was not compiled with the NCCL or XCCL backend",
-)
+# # optimizer, you should be able to repro it single process!
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Note: MultiProcTestCase spawns processes per test and is slow.
@@ -562,6 +568,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     sparingly for integration tests.
     """
     device_type = torch.accelerator.current_accelerator().type
+
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
 
     @skip_if_lt_x_gpu(2)
     @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
@@ -684,7 +694,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(TEST_XPU, "torch._inductor.cudagraph_trees is not supported on XPU")
+    @requires_cuda_and_triton
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
@@ -735,7 +745,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             from torch._dynamo.utils import counters
 
             counters.clear()
-            m, inputs, correct_outputs = get_mutating_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_mutating_model(
+                f"{self.device_type}:{self.rank}"
+            )
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
             outputs = fsdp_m(inputs)
@@ -753,7 +765,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             from torch._dynamo.utils import counters
 
             counters.clear()
-            m, inputs, correct_outputs = get_forced_getattr_module(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_forced_getattr_module(
+                f"{self.device_type}:{self.rank}"
+            )
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
             outputs = fsdp_m(inputs)
@@ -767,7 +781,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             from torch._dynamo.utils import counters
 
             counters.clear()
-            m, inputs, correct_outputs = get_forced_getattr_module(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_forced_getattr_module(
+                f"{self.device_type}:{self.rank}"
+            )
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
             outputs = fsdp_m(inputs)
@@ -1201,7 +1217,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             pg = dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
             self.assertEqual(f(x), x + 1)
 
-    @skipIfXpu  # ProcessGroupXCCL hasn't support _set_default_timeout yet.
+    @skipIfXpu  # ProcessGroupXCCL doesn't support _set_default_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
@@ -1253,7 +1269,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @skipIfXpu  # ProcessGroupXCCL hasn't support _set_default_timeout yet.
+    @skipIfXpu  # ProcessGroupXCCL doesn't support _set_default_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", True)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
@@ -1308,11 +1324,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.accelerator.synchronize(device)
 
 
-@skip_but_pass_in_sandcastle_if(
-    not dist.is_nccl_available() and not dist.is_xccl_available(),
-    "c10d was not compiled with the NCCL or XCCL backend",
-)
-@unittest.skipUnless(torch.accelerator.is_available() , "Requires accelerator")
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipUnless(torch.accelerator.is_available(), "Requires accelerator")
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
@@ -1321,6 +1334,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Use TestMultiProc for things that really need to run on multiple nodes
     """
     device_type = torch.accelerator.current_accelerator().type
+
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
 
     def get_model(
         self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
@@ -1439,7 +1456,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self.assertEqual(len(break_reasons), 4)
                 self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
-    @skipIfXpu  # XPU device hasn't support flex_attention yet.
+    @skipIfXpu  # XPU device doesn't support flex_attention yet.
     @patch.object(config, "optimize_ddp", True)
     def test_compiled_flex_attention_full_model_ddp(self):
         class Model(torch.nn.Module):
@@ -1495,7 +1512,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
-    @skipIfXpu  # XPU device hasn't support flex_attention yet.
+    @skipIfXpu  # XPU device doesn't support flex_attention yet.
     @patch.object(config, "optimize_ddp", True)
     def test_compiled_flex_attention_local_ddp(self):
         class Model(torch.nn.Module):
@@ -1944,7 +1961,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class DuplicateModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = torch.accelerator.current_accelerator().type
+                device_type = (
+                    acc.type
+                    if (acc := torch.accelerator.current_accelerator())
+                    else "cpu"
+                )
                 self._param = torch.randn((3,), device=device_type)
                 self._buf = torch.nn.Buffer(
                     torch.randn((3,), requires_grad=False, device=device_type)
@@ -1977,7 +1998,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = torch.accelerator.current_accelerator().type
+                device_type = (
+                    acc.type
+                    if (acc := torch.accelerator.current_accelerator())
+                    else "cpu"
+                )
                 self._buf = nn.Buffer(
                     torch.randn((3,), requires_grad=False, device=device_type)
                 )
@@ -1988,7 +2013,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = torch.accelerator.current_accelerator().type
+                device_type = (
+                    acc.type
+                    if (acc := torch.accelerator.current_accelerator())
+                    else "cpu"
+                )
                 self._param = nn.Parameter(torch.randn((1,), device=device_type))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
@@ -2025,7 +2054,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 super().__init__()
                 self._use_self = use_self
                 torch.manual_seed(42)  # force `_param` to be deterministic
-                device_type = torch.accelerator.current_accelerator().type
+                device_type = (
+                    acc.type
+                    if (acc := torch.accelerator.current_accelerator())
+                    else "cpu"
+                )
                 self._param = nn.Parameter(torch.randn((3,), device=device_type))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:

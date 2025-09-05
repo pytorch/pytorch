@@ -54,6 +54,8 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -1174,9 +1176,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    device = torch.accelerator.current_accelerator()
-    assert (
-        device is not None and not torch.get_device_module(device)._initialized
-    ), "test_distributed must not have initialized GPU context on main process"
-
+    if device_type != "cpu":
+        assert not torch.get_device_module()._initialized, (
+            "test_distributed must not have initialized {device_type} context on main process"
+        )
     run_tests()

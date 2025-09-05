@@ -122,13 +122,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
-        # test suite sets each rank's seed to the same value but in actual
-        # execution the default random seed will be different (a random value).
-        # The DTensor random ops will use the same random seed even though the
-        # torch random generator keeps different seeds on ranks. This ensures
-        # that Replicate DTensor will have the same initialized results
-        # across ranks.
-        torch.manual_seed(self.rank)
+        # test suite sets each rank's seed to the same value.
+        # The DTensor random ops will use the same generator as the default one on the device.
+
+        # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
+        torch.get_device_module(self.device_type).manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
