@@ -393,6 +393,7 @@ def _dynamo_graph_capture_for_export(
 
         constraint_violation_error = None
         try:
+            # Check if we have any constraint violations
             check_fn = out.dynamo_output.build_guards(
                 module_to_trace.forward.__code__
             ).guard_manager
