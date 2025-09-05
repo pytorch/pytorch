@@ -1230,6 +1230,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         is_cuda = "cuda" in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_share_memory(self, device):
         a = torch.randn(3, 4, device=device)
         b = torch.randn(5, 4, device=device)
