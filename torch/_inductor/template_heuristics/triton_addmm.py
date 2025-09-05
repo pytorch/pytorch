@@ -30,8 +30,6 @@ class AddMMBiasExpansionConfigMixin(TemplateConfigHeuristics):
         nodes = kernel_inputs.nodes()
         bias = nodes[0]
         layout = kernel_inputs.output_layout()
-        bias = nodes[0]
-        layout = kernel_inputs.output_layout()
         bias = realize_inputs(expand(bias, layout.size))
         return MMKernelInputs(
             [bias, *nodes[1:]],
