@@ -948,6 +948,7 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
+                ("", "torch/csrc/**/*.hpp"),
                 ("", "torch/nativert/**/*.h"),
                 ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
@@ -2033,6 +2034,7 @@ def define_buck_targets(
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
+                ("", "torch/csrc/*.hpp"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
                 ("", "torch/csrc/autograd/*/*.h"),
