@@ -3363,7 +3363,7 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
 def is_using_cudagraph_partition() -> bool:
     return (
         torch._inductor.config.triton.cudagraphs
-        or len(_unstable_customized_partition_wrappers) > 0
+        or _unstable_customized_partition_wrapper.wrapper is not None
     ) and torch._inductor.config.graph_partition
 
 
@@ -3591,31 +3591,46 @@ def python_subprocess_env() -> dict[str, str]:
     return env
 
 
-# A tuple of customized partition wrappers from users. Inductor mechanically wraps
-# each partition fn with the customized partition wrapper. When using for CUDAGraph wrapper,
-# users need to handle all details such as static inputs, dynamic shapes, etc.
-# Assume there is only 1 dynamo graph in the process and the number of partitions
-# equals to the number of customized partition wrappers.
+@dataclasses.dataclass(frozen=True)
+class CUDAGraphWrapperMetadata:
+    """
+    Metadata for Customized CUDAGraphWrapper.
+
+    Currently assumes there is 1 dynamo graph and will extend to
+    multiple graphs in the future.
+    """
+
+    # The number of partitions that are cudagraphable.
+    num_partitions: int
+
+    # The number of partitions that are cudagraphable and have a fallback.
+    partition_index: int
+
+
+PartitionFnType = Callable[..., Any]
+CUDAGraphWrapperType = Callable[
+    [PartitionFnType, CUDAGraphWrapperMetadata], PartitionFnType
+]
+
+
+# only incremented by user call of mark_step_begin
+class CUDAGraphWrapper:
+    wrapper: Optional[CUDAGraphWrapperType] = None
+
+
+# A customized partition wrappers from users. Interface should be:
+#
+# def wrapper(fn: PartitionFnType, metadata: CudaGraphMeta) -> PartitionFnType
+#
+# Inductor generates N wrapper functions for N partition functions, and mechanically wrap
+# each partition fn with the generated wrapper function. Users need to handle all details
+# such as static inputs, dynamic shapes, etc.
+# Users could customize the wrapper based on the metadata. One example is to have special
+# handle for the first and last wrapper function.
 #
 # Warning: This API is unstable and may change in the future.
-_unstable_customized_partition_wrappers: list[Callable[..., Callable[..., Any]]] = []
+_unstable_customized_partition_wrapper = CUDAGraphWrapper()
 
 
-def set_customized_partition_wrappers(
-    wrappers: tuple[Callable[..., Callable[..., Any]], ...],
-    metadata: Optional[tuple[Any, ...]] = None,
-) -> None:
-    """
-    Set customized partition wrappers for the current process.
-
-    Args:
-        wrappers (tuple[Callable[..., Callable[..., Any]]]): A tuple of
-            customized partition wrappers.
-        metadata (tuple[Any]): Metadata for the partition wrappers.
-    """
-    # metadata is unused for now
-    assert metadata is None
-    global _unstable_customized_partition_wrappers
-
-    _unstable_customized_partition_wrappers.clear()
-    _unstable_customized_partition_wrappers.extend(wrappers)
+def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
+    _unstable_customized_partition_wrapper.wrapper = wrapper
