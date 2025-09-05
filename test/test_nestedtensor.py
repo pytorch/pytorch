@@ -1092,6 +1092,32 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         check(inputs, y)
 
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_max_min_dtypes(self, device, dtype):
+        # Ensure max/min reduction operations work correctly for all dtypes.
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_max = x.max(dim=1)
+        result_min = x.min(dim=1)
+        expected_max = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+        expected_min = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_max.values, expected_max)
+        self.assertEqual(result_min.values, expected_min)
+
     @skipMeta
     @torch.inference_mode()
     @dtypes(*floating_types_and_half())
