@@ -83,7 +83,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
 # Re-generate this failed list, turn on dry_run of the below func
 # check_dtensor_func(self, test, op, dry_run=True), then run sth
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
-dtensor_fails = {
+dtensor_fails_eager = {
     # these sometimes pass and sometimes fail
     # we need to remove many of them from list once op
     # get full support with varying sharding specs
@@ -485,6 +485,83 @@ dtensor_fails = {
 }
 
 
+dtensor_fails_compile = dtensor_fails_eager.union({
+    xfail("vsplit"),
+    xfail("view_as_complex"),
+    xfail("unsqueeze"),
+    xfail("unsqueeze_copy"),
+    xfail("transpose_copy"),
+    xfail("topk"),
+    xfail("tile"),
+    xfail("t"),
+    xfail("split_with_sizes"),
+    xfail("sparse.mm", "reduce"),
+    xfail("sort"),
+    xfail("slice"),
+    xfail("slice_scatter"),
+    xfail("select"),
+    xfail("scatter_reduce", "sum"),
+    xfail("scatter_reduce", "prod"),
+    xfail("scatter_reduce", "mean"),
+    xfail("scatter_reduce", "amin"),
+    xfail("scatter_reduce", "amax"),
+    xfail("repeat"),
+    xfail("permute"),
+    xfail("nonzero_static"),
+    xfail("nn.functional.pad", "replicate"),
+    xfail("nn.functional.pad", "replicate_negative"),
+    xfail("nn.functional.pad", "reflect"),
+    xfail("nn.functional.multi_head_attention_forward"),
+    xfail("nn.functional.interpolate", "nearest"),
+    xfail("nn.functional.interpolate", "nearest-exact"),
+    xfail("nn.functional.interpolate", "area"),
+    xfail("nn.functional.channel_shuffle"),
+    xfail("nextafter"),
+    xfail("narrow"),
+    xfail("mvlgamma", "mvlgamma_p_5"),
+    xfail("mvlgamma", "mvlgamma_p_3"),
+    xfail("mvlgamma", "mvlgamma_p_1"),
+    xfail("msort"),
+    xfail("movedim"),
+    xfail("minimum"),
+    xfail("min", "reduction_with_dim"),
+    xfail("min", "binary"),
+    xfail("maximum"),
+    xfail("max", "reduction_with_dim"),
+    xfail("max", "binary"),
+    xfail("logit"),
+    xfail("linalg.vector_norm"),
+    xfail("linalg.diagonal"),
+    xfail("item"),
+    xfail("index_reduce", "prod"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "amin"),
+    xfail("index_reduce", "amax"),
+    xfail("igammac"),
+    xfail("igamma"),
+    xfail("i0"),
+    xfail("hsplit"),
+    xfail("hash_tensor"),
+    xfail("expand"),
+    xfail("expand_as"),
+    xfail("einsum"),
+    xfail("dsplit"),
+    xfail("diagonal"),
+    xfail("diagonal_copy"),
+    xfail("diag"),
+    xfail("cumulative_trapezoid"),
+    xfail("cumsum"),
+    xfail("cov"),
+    xfail("corrcoef"),
+    xfail("copysign"),
+    xfail("chalf"),
+    xfail("cfloat"),
+    xfail("cdouble"),
+})
+
+dtensor_fails_dynamic = dtensor_fails_compile.copy()
+
+
 # Add a list of ops that are currently failing BW pass
 skip_bw = [
     None,  # corresponds to the transpose ops 'H' and 'T'
@@ -511,8 +588,23 @@ class TestDTensorOps(DTensorOpTestBase):
     # when feel necessary later (i.e when adding quantization support).
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
-    def test_dtensor_op_db(self, dtype, op):
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_eager)
+    def test_dtensor_op_db_eager(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, False, False)
+
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_compile)
+    def test_dtensor_op_db_compile(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, True, False)
+
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_dynamic)
+    def test_dtensor_op_db_dynamic(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, True, True)
+
+    def _test_dtensor_op_db(self, dtype, op, use_compile, use_dynamic):
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 
         # test each op with dist tensor inputs and normal inputs
@@ -522,7 +614,7 @@ class TestDTensorOps(DTensorOpTestBase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
-                self.run_dtensor_crossref(op.op, args, kwargs)
+                self.run_dtensor_crossref(op.op, args, kwargs, use_compile, use_dynamic)
                 # we need to figure out a way to test the out variant, out variant testing
                 # is tricky, as we need to pre allocate the dtensor out, some of them rely
                 # on sharding placements to be pre-known (i.e. mm.out)
@@ -555,7 +647,7 @@ class TestDTensorOps(DTensorOpTestBase):
 
             self.assertEqualOnRank(dtensor_r, r)
 
-    def run_dtensor_crossref(self, func, args, kwargs):
+    def run_dtensor_crossref(self, func, args, kwargs, use_compile, use_dynamic):
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
         def concat_res_if_necessary(func, res: object) -> object:
@@ -580,6 +672,7 @@ class TestDTensorOps(DTensorOpTestBase):
         # errors
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            maybe_compiled_func = func
             # for every comb of sharding choices, we test if it works
             for dtensor_args, dtensor_kwargs in to_dtensor:
                 # Only attempt if we managed to convert all tensors to DTensor
@@ -592,7 +685,24 @@ class TestDTensorOps(DTensorOpTestBase):
                         # but it does matter if you want to use this decorator
                         # for cross-ref testing, as some tests may be looking at
                         # errors
-                        dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
+
+                        # If compiling without dynamic, need to reset caches, compile,
+                        # then synchronize to allow all threads to clear caches. This is
+                        # needed for dynamic too due to specializations on 0s and 1s.
+                        if use_compile:
+                            torch.compiler.reset()
+                            maybe_compiled_func = torch.compile(
+                                func,
+                                backend="aot_eager",
+                                dynamic=use_dynamic,
+                                fullgraph=True,
+                            )
+                            # The barrier is needed on certain hardware (e.g. A100)
+                            # Not sure why it's hardware dependant, but it is
+                            torch.distributed.barrier()
+                        dtensor_rs = maybe_compiled_func(
+                            *dtensor_args, **dtensor_kwargs
+                        )
 
                         # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/PiPPy/issues/470
