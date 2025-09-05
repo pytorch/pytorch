@@ -133,7 +133,7 @@ def evaluate_platform_supports_mx_gemm():
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
-        return built_with_fbgemm_genai and IS_SM100 
+        return built_with_fbgemm_genai and IS_SM100
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())

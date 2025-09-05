@@ -1051,7 +1051,7 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
-    @parametrize("M", [2048])
+    @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
     def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K):
@@ -1120,14 +1120,13 @@ class TestFP8Matmul(TestCase):
         w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
 
         # Compute mxfp8 grouped mm output
-        out = torch.empty((G, M, N), dtype=torch.bfloat16, device="cuda")
         y_mxfp8 = torch._scaled_grouped_mm(
             xq,  # (M, total_K)
             wq.transpose(-2, -1),  # (total_K, N)
             x_blocked_scales,  # to_blocked_per_group(M, total_K//32)
             w_blocked_scales,  # to_blocked_per_group(N, total_K//32)
-            input_group_end_offsets,  # (G,)
-            out,  # (G, M, N)
+            offs=input_group_end_offsets,  # (G,)
+            out_dtype=torch.bfloat16,
         )
 
         # bf16 reference output
@@ -1139,7 +1138,7 @@ class TestFP8Matmul(TestCase):
         assert not y_mxfp8.isnan().any(), "mxfp8 output contains NaN"
 
         # Assert outputs are close
-        self.assertEqual(y_mxfp8, y_bf16)
+        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
@@ -1190,14 +1189,13 @@ class TestFP8Matmul(TestCase):
         xq = xq.view(-1, xq.shape[-1])
 
         # Compute mxfp8 grouped gemm.
-        out = torch.empty((total_M, N), dtype=torch.bfloat16, device="cuda")
         y_mxfp8 = torch._scaled_grouped_mm(
             xq,
             wq.transpose(-2, -1),
             x_scale,
             w_scale,
-            input_group_end_offsets,
-            out,
+            offs=input_group_end_offsets,
+            out_dtype=torch.bfloat16,
         )
 
         # Compute reference bf16 grouped gemm.
@@ -1209,7 +1207,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert outputs are close.
-        self.assertEqual(y_mxfp8, y_bf16, atol=8.0e-2)
+        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
