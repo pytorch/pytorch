@@ -1634,7 +1634,11 @@ def _use_conv_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(
-    layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1651,7 +1655,8 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
+        # some callers handle max-autotune checking externally
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )

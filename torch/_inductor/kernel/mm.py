@@ -762,7 +762,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
     static_shape, is_nonzero = _is_static_problem(layout)
 
-    if is_nonzero and use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template, "mm"
@@ -941,7 +941,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, kernel_inputs.nodes(), fuseable=True, non_fuseable=True
         )
 
-    if is_nonzero and use_triton_template(layout, enable_int32=True):
+    if is_nonzero and use_triton_template(
+        layout, enable_int32=True, check_max_autotune=False
+    ):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template, name
         ):
@@ -1035,7 +1037,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **extra_kwargs,
             )
 
-    if is_nonzero and use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         # all the triton templates use the extra_kwargs
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
@@ -1248,7 +1250,9 @@ def tuned_scaled_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    if is_nonzero and use_triton_template(layout, enable_float8=True):
+    if is_nonzero and use_triton_template(
+        layout, enable_float8=True, check_max_autotune=False
+    ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
