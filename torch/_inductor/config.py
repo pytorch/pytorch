@@ -768,6 +768,10 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Threshold to decide if a kernel has small memory access in bytes
+# Default value is 16 MB which is arbitrarily selected.
+small_memory_access_threshold: int = 16777216
+
 # Whether to log from subprocess workers that are launched.
 worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
@@ -925,6 +929,9 @@ pad_dynamic_shapes = False
 
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
+
+# Control if we will expand the dimension of pointwise nodes to fuse
+expand_dimension_for_pointwise_nodes = False
 
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
