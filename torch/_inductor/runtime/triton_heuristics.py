@@ -608,7 +608,7 @@ class CachingAutotuner(KernelInterface):
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
         self.launchers = launchers
 
-    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any]:
+    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any, Any]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
         Returns a tuple of old values
@@ -619,12 +619,14 @@ class CachingAutotuner(KernelInterface):
             self.fn.used_global_vals,
             self.fn.repr,
             self.launchers,
+            getattr(self.fn, "_hash_lock", None),
         )
         self.fn.fn = None
         self.fn.__globals__ = None
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+        self.fn._hash_lock = None
         return old_values
 
     def prepare_for_caching(self) -> None:
