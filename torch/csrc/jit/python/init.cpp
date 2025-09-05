@@ -1696,7 +1696,7 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name, const std::string& overload_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
+          const auto& operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               return op->schema();
@@ -1717,7 +1717,7 @@ void initJITBindings(PyObject* module) {
          const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
+          const auto& operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
