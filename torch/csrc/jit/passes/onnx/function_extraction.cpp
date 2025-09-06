@@ -216,7 +216,7 @@ void FunctionExtractor::FunctionContext::SetAttrName(
   TORCH_INTERNAL_ASSERT(
       v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end());
   auto* n_in_def = v_it->second->node();
-  auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
+  node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
 std::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
@@ -405,7 +405,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
-        return common_ancestor.value();
+        return common_ancestor;
       }
     }
   }

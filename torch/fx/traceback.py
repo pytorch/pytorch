@@ -1,14 +1,19 @@
 # mypy: allow-untyped-defs
 import copy
+import logging
 import traceback
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
 
+from torch._utils_internal import signpost_event
+
 from ._compatibility import compatibility
 from .graph import Graph
 from .node import Node
 
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "preserve_node_meta",
@@ -311,12 +316,26 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     """
     Given an fx.Graph, return a json that contains the provenance information of each node.
     """
-    provenance_tracking_json = {}
-    for node in graph.nodes:
-        if node.op == "call_function":
-            provenance_tracking_json[node.name] = (
-                [source.to_dict() for source in node.meta["from_node"]]
-                if "from_node" in node.meta
-                else []
-            )
-    return provenance_tracking_json
+    try:
+        provenance_tracking_json = {}
+        for node in graph.nodes:
+            if node.op == "call_function":
+                provenance_tracking_json[node.name] = (
+                    [source.to_dict() for source in node.meta["from_node"]]
+                    if "from_node" in node.meta
+                    else []
+                )
+        return provenance_tracking_json
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "get_graph_provenance_json",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
