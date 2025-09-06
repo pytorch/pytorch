@@ -318,7 +318,7 @@ def get_fill_order(
     """
     Convert strides to fill order (argsort)
     """
-    if shape_env is None:
+    if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
         sorted_idx: Sequence[int] = argsort(seq)
     else:
         # argsort_sym handles unbacked symints (with the help of the shape_env)
@@ -1094,7 +1094,10 @@ class Pointwise(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(
-            device=device, dtype=self.dtype, inner_fn=loader, ranges=self.ranges
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
         )
 
 
@@ -3743,16 +3746,20 @@ class Layout(OutputSpec):
         ):
             return in_strides
 
-        # get_stride_order does not work with dynamic shape. Also we can not
-        # statically decide if a padding is needed or how much padding we should
-        # do for dynamic shape.
-        #
-        # Skip padding the strides for dynamic shape for now.
-        # If outermost dim is dynamic, stride still can be fully static
-        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
+        shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
+
+        def contains_unbacked_symints(expr: sympy.Expr | int) -> bool:
+            if shape_env is None:
+                return False
+            if not isinstance(expr, sympy.Expr):
+                return False
+            return any(shape_env.is_unbacked_symint(s) for s in expr.free_symbols)
+
+        # Skip padding the strides when it contains unbacked symints for now.
+        if shape_env and any(contains_unbacked_symints(s) for s in in_strides):
             return in_strides
 
-        stride_order = get_stride_order(in_strides)
+        stride_order = get_stride_order(in_strides, shape_env)
         fill_order = stride_order2fill_order(stride_order)
 
         new_strides = [0 for _ in range(len(in_strides))]
@@ -3764,11 +3771,17 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-            if isinstance(stride, (int, sympy.Integer)):
-                if stride > config.padding_stride_threshold and stride % align != 0:
-                    stride = ceildiv(stride, align) * align
-                    padded = True
-                new_strides[idx] = stride
+            # Static stride and meets padding conditions OR
+            # Dynamic stride and config.pad_dynamic_shape=True
+            require_padding = (
+                isinstance(stride, (int, sympy.Integer))
+                and stride > config.padding_stride_threshold
+                and stride % align != 0
+            ) or (isinstance(stride, sympy.Expr) and config.pad_dynamic_shapes)
+            new_strides[idx] = stride
+            if require_padding:
+                new_strides[idx] = ceildiv(stride, align) * align
+                padded = True
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -4421,6 +4434,17 @@ class ComputedBuffer(OperationBuffer):
     """
 
     data: Loops
+    _force_realize: ClassVar[bool] = False
+
+    @staticmethod
+    @contextlib.contextmanager
+    def force_realize() -> Iterator[None]:
+        old_value = ComputedBuffer._force_realize
+        try:
+            ComputedBuffer._force_realize = True
+            yield
+        finally:
+            ComputedBuffer._force_realize = old_value
 
     def get_computed_buffer_name(self) -> Optional[str]:
         """
@@ -4495,6 +4519,7 @@ class ComputedBuffer(OperationBuffer):
             not self.get_reduction_type()
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
+            and not self._force_realize
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -5132,6 +5157,37 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class CuteDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
+    Similar to other template buffers but specialized for CuteDSL operations.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.mutated_inputs = mutated_inputs
+        self.outputs: list[Buffer] = [self]
+
+        if mutated_inputs is not None:
+            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
 ) -> TypeIs[Sequence[IRNode]]:
@@ -5583,7 +5639,10 @@ class ExternKernel(InputsKernel):
         from .codegen.cpp_wrapper_cpu import CppWrapperCpu
 
         device = d.type if (d := self.get_device()) else V.graph.device_type
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            assert self.python_kernel_name is not None
+            return self.python_kernel_name
+        elif V.graph.cpp_wrapper:
             assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
                 V.graph.wrapper_code
             )
@@ -5751,8 +5810,7 @@ class ExternKernel(InputsKernel):
         if (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
-            and isinstance(x_unwrap_view, (ReinterpretView, Buffer))
-            # and hasattr(x_unwrap_view, "layout")
+            and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
                 x_unwrap_view_fx_node.meta["val"].is_contiguous(
@@ -6435,6 +6493,14 @@ class MutationOutput(Buffer):
 
     def should_allocate(self) -> bool:
         return False
+
+    def get_mutation_buffers(self) -> Sequence[IRNode]:
+        mutation_names = self.get_mutation_names()
+        return [
+            buf
+            for buf in (V.graph.try_get_buffer(name) for name in mutation_names)
+            if buf is not None
+        ]
 
 
 class TMADescriptor(ExternKernel):
@@ -7136,10 +7202,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
@@ -7277,7 +7343,10 @@ class AssertScalar(ExternKernel):
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            # TODO fix
+            pass
+        elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
@@ -7626,7 +7695,7 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         )
 
-        V.graph.extern_kernel_nodes.append(node)
+        V.extern_kernel_nodes.append(node)
 
         return [*args, *ordered_kwargs]
 
@@ -8260,7 +8329,7 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(operand, ShapeAsConstantBuffer):
+            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -8489,6 +8558,8 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
+    """IR node for while_loop, which supports input mutations"""
+
     carried_inputs: Optional[Sequence[IRNode]] = None
     additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
@@ -8520,6 +8591,38 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    # Accidental aliasing can be created due to cse, where the empty buffers we
+    # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
+    # See test_scan_multiple_layers_gradient for a concrete example.
+    @staticmethod
+    def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
+        if not _has_aliased_buffers(carried_inputs):
+            return carried_inputs
+
+        # Import clone from lowering module
+        from .lowering import clone
+
+        # Unwrap views to get the underlying buffers for comparison
+        unwrapped_buffers = [
+            buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+            for buffer in carried_inputs
+        ]
+
+        # Track which buffers we've seen and their indices
+        seen_buffers: OrderedSet[int] = OrderedSet()
+        result = []
+
+        for i, (original_input, unwrapped_buffer) in enumerate(
+            zip(carried_inputs, unwrapped_buffers)
+        ):
+            if id(unwrapped_buffer) in seen_buffers:
+                result.append(clone(original_input))
+            else:
+                seen_buffers.add(id(unwrapped_buffer))
+                result.append(original_input)
+
+        return result
 
     @classmethod
     def create(
@@ -8556,6 +8659,7 @@ class WhileLoop(ExternKernel):
         fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
         carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
         additional_inputs_ = [cls.realize_input(x) for x in additional_inputs]
         additional_inputs_ = _require_exact_strides(
@@ -8634,7 +8738,6 @@ class WhileLoop(ExternKernel):
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         assert device is not None
         while_loop = WhileLoop(
