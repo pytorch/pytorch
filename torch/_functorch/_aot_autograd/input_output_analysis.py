@@ -460,6 +460,7 @@ def create_graph_signature(
         named_buffers=buffer_names,
         num_user_inputs=num_user_args,
         num_user_outputs=num_user_fw_outs,
+        trace_joint=trace_joint,
         loss_index=loss_index,
         backward_signature=backward_signature,
     )
