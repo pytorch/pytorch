@@ -6,12 +6,19 @@ that calls into the optimized Flash Attention kernels.
 """
 
 import logging
+from functools import lru_cache
 from typing import Union
 
 import torch
 
 
 log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=8)
+def _should_use_cudnn(device_index: int) -> bool:
+    """Cache device capability check to avoid repeated CUDA calls."""
+    return torch.cuda.get_device_capability(device_index)[0] >= 10
 
 
 # import failures when I try to register as custom op
@@ -33,13 +40,9 @@ def _varlen_attn(
     Users should use the public varlen_attn function instead.
     """
 
-    # Check if we should use cuDNN (on SM100 devices like B200)
-    use_cudnn = (
-        query.is_cuda and torch.cuda.get_device_capability(query.device)[0] >= 10
-    )
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
 
-    # THIS basically hangs when I try to run cuDNN ..
-    if False and use_cudnn:
+    if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
         result = torch.ops.aten._cudnn_attention_forward(
             query,
