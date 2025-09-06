@@ -470,6 +470,119 @@ Tensor _weight_int4pack_mm_xpu(
   return C;
 }
 
+Tensor& _weight_fp8pack_mm_out_xpu(
+    const Tensor& A, //[B, M, K] or [M, K]
+    const Tensor& B, // [K, N]
+    const std::optional<Tensor>& scales_,
+    Tensor& out) {
+  // Currently, supports A16W8 matmul.
+  TensorArg out_arg{out, "out", 0};
+  TensorArg A_arg{A, "A", 1};
+  TensorArg B_arg{B, "B", 2};
+
+  at::Tensor scales = scales_.has_value()
+      ? scales_.value()
+      : at::ones({1}, B.options().dtype(kFloat));
+
+  TensorArg scales_arg{scales, "scales", 3};
+
+  checkAllSameGPU("_weight_fp8_mm_out", {out_arg, A_arg, B_arg, scales_arg});
+
+  // A should be [b, m, k] or [m, k]
+  TORCH_CHECK(
+      (A.dim() == 2 || A.dim() == 3),
+      "A must be 2D or 3D matrix but got ",
+      A.dim());
+  TORCH_CHECK(B.dim() == 2, "B must be a 2D matrix but got ", B.dim());
+  int64_t k_dim = (A.dim() == 2) ? 1 : 2;
+  TORCH_CHECK(
+      A.size(k_dim) == B.size(0),
+      "A and B cannot be multiplied: A shape [",
+      A.sizes(),
+      "] x B shape [",
+      B.sizes(),
+      "]");
+
+  if (scales_.has_value()) {
+    TORCH_CHECK(
+        (scales.numel() == 1 || scales.dim() == 2),
+        "If provided scales, it must be a scalar or 2D tensor, but got ",
+        scales.dim());
+    TORCH_CHECK(
+        (scales.numel() == 1 || scales.numel() == B.size(1)),
+        "scales must be scalar or match B's first dimension. But got scales size: ",
+        scales.sizes());
+  }
+
+  TORCH_CHECK(
+      (A.dtype() == kBFloat16 || A.dtype() == kHalf),
+      __func__,
+      " : expect A to be 16-bit tensor, but got ",
+      A.dtype());
+
+  TORCH_CHECK(
+      at::isFloat8Type(B.scalar_type()),
+      __func__,
+      " : expect weight to be fp8 tensor with e5m2 or e4m3fn, but got ",
+      B.dtype());
+
+  TORCH_CHECK(
+      out.dtype() == A.dtype(),
+      __func__,
+      " : expect out dtype the same with A , but got out: ",
+      out.dtype(),
+      " and A: ",
+      A.dtype());
+
+  TORCH_CHECK(
+      scales.dtype() == kFloat,
+      __func__,
+      " : expect scales to be fp32 tensor, but got ",
+      scales.dtype());
+
+  // If A is the 3D tensor with [B, M, K],reshape to [B x M, K]
+  at::Tensor flattened_A;
+  if (A.dim() == 3) {
+    flattened_A = A.reshape({A.size(0) * A.size(1), A.size(2)});
+  } else {
+    flattened_A = A;
+  }
+
+  // Check passed. Reshape output size to [BM, N] for matmul
+  std::vector<int64_t> output_flattened_size;
+  if (A.dim() == 3) {
+    output_flattened_size = {A.size(0) * A.size(1), B.size(1)};
+  } else {
+    output_flattened_size = {A.size(0), B.size(1)};
+  }
+  at::native::resize_output(out, output_flattened_size);
+
+  at::native::onednn::matmul_w8(out, flattened_A, B, scales);
+
+  // [B, M, K] -> [B, M, N] for output
+  std::vector<int64_t> output_size(A.sizes().begin(), A.sizes().end() - 1);
+  output_size.push_back(B.size(1));
+
+  // Reshape output to [B, M, N]
+  if (A.dim() != 2) {
+    out = out.reshape(output_size);
+  }
+  return out;
+}
+
+Tensor _weight_fp8pack_mm_xpu(
+    const Tensor& A, // [B, M, K] or [M, K]
+    const Tensor& B, // [K, N]
+    const std::optional<Tensor>& scales_) {
+  at::Tensor scales = scales_.has_value()
+      ? scales_.value()
+      : at::ones({1}, B.options().dtype(kFloat));
+  // Initialize the empty out tensor and do actual allocation once all check
+  // passed.
+  auto out = at::empty({0}, A.options());
+  return _weight_fp8pack_mm_out_xpu(A, B, scales, out);
+}
+
 Tensor& _int_mm_out_xpu(
     const Tensor& self,
     const Tensor& mat2,
