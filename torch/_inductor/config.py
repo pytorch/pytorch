@@ -187,6 +187,8 @@ cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
 
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
@@ -263,6 +265,9 @@ b2b_gemm_pass = False
 # to which your custom passes have been applied:
 post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
+
+# Allow users to pass in custom partition function
+custom_partitioner_fn: torch._inductor.custom_graph_pass.CustomPartitionerFnType = None
 
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
@@ -387,6 +392,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -436,8 +451,18 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
+# Prune configs that require more shared memory than the hardware limit
+max_autotune_prune_choices_based_on_shared_mem = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    == "1"
+)
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
+    == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -534,6 +559,11 @@ coordinate_descent_search_radius = int(
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+# If set to 1, will run a JIT post compile hook if one is set.
+run_jit_post_compile_hook = (
+    os.environ.get("TORCHINDUCTOR_RUN_JIT_POST_COMPILE_HOOK", "0") == "1"
+)
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -741,6 +771,10 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Threshold to decide if a kernel has small memory access in bytes
+# Default value is 16 MB which is arbitrarily selected.
+small_memory_access_threshold: int = 16777216
+
 # Whether to log from subprocess workers that are launched.
 worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
@@ -893,8 +927,14 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Control if we will do padding on dynamic shapes
+pad_dynamic_shapes = False
+
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
+
+# Control if we will expand the dimension of pointwise nodes to fuse
+expand_dimension_for_pointwise_nodes = False
 
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
@@ -1014,6 +1054,24 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
+
+def get_worker_log_path() -> Optional[str]:
+    log_loc = None
+    if is_fbcode():
+        mast_job_name = os.environ.get("MAST_HPC_JOB_NAME", None)
+        global_rank = os.environ.get("ROLE_RANK", "0")
+
+        if mast_job_name is not None:
+            log_loc = f"/logs/dedicated_log_torch_compile_worker_rank{global_rank}"
+
+    return log_loc
+
+
+torchinductor_worker_logpath: str = Config(
+    env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
+    default="",
+)
 
 
 # config specific to codegen/cpp.py
@@ -1142,6 +1200,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
     )
 
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
+    )
+
 
 class triton:
     """
@@ -1188,6 +1251,15 @@ class triton:
     # always run cudagraphs in the eager warmup stage
     # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
+
+    # If False (default), torch.compile skips cudagraph for a graph if it
+    # contains cudagraph-unsafe ops. If True, we require that all cuda ops
+    # be captured into cudagraph. If this is not possible, this will raise
+    # an error.
+    cudagraph_or_error: bool = Config(
+        env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
+        default=False,
+    )
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -1367,6 +1439,9 @@ class triton:
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
+
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
 
 
 class aot_inductor:
@@ -1810,10 +1885,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
+    # Levels:
+    #   0 - disabled (default)
+    #   1 - normal
+    #   2 - basic
+    # Backward compatibility:
+    #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
+    #   If INDUCTOR_PROVENANCE is set, use its integer value.
+    provenance_tracking_level: int = int(
+        os.environ.get(
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+        )
     )
 
 
