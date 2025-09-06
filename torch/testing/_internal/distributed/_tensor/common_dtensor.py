@@ -31,7 +31,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -337,7 +337,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
-class DTensorContinuousTestBase(MultiProcContinousTest):
+class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def device_type(cls) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
@@ -394,11 +394,14 @@ class DTensorTestBase(MultiProcessTestCase):
         device_id = None
         if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
+            # TODO: if users want to enable testing across hosts, we may need
+            # to change this part.
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
+
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
@@ -420,7 +423,18 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id = (
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
-        dist.barrier(device_ids=[device_id])
+
+        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+            # NOTE: when `device_id` is not None, barrier() will choose the accelerator
+            # of the most pripority, which means if the test specifies to use CPU for
+            # testing while CUDA is available on the host, the barrier() will use CUDA.
+            # To avoid this and better respect `self.device_type`, we add this branch to
+            # enforce barrier() to use CPU when `self.device_type` is CPU and other
+            # accelerator is also available.
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=[device_id])
+
         dist.destroy_process_group()
 
     def setUp(self) -> None:
