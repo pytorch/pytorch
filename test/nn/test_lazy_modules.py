@@ -16,9 +16,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# mypy: ignore-errors
-
-
 class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
     pass
 
