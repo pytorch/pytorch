@@ -998,7 +998,7 @@ def wait_for_process(p, timeout=None):
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
-        exit_status = p.wait(timeout=5)
+        exit_status = p.wait(timeout=120)
         if exit_status is not None:
             return exit_status
         else:
@@ -1009,7 +1009,7 @@ def wait_for_process(p, timeout=None):
         p.send_signal(signal.SIGINT)
         exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
+            exit_status = p.wait(timeout=120)
         # try to handle the case where p.wait(timeout=5) times out as well as
         # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:

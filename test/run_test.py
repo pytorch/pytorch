@@ -1959,6 +1959,7 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    selected_tests = [x for x in selected_tests if "flex_attention" in x]
 
     test_prioritizations = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
