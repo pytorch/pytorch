@@ -15,6 +15,16 @@ if(NOT __NCCL_INCLUDED)
     # this second replacement is needed when there are multiple archs
     string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
+    # Determine NCCL_VERSION based on CUDA_VERSION_STRING
+    # Refer to https://github.com/NVIDIA/nccl/releases for available tags.
+
+    if(CUDA_VERSION_STRING VERSION_LESS "12.0") # For CUDA 11.x
+      set(NCCL_VERSION "v2.21.5-1")
+    else() # For CUDA 12.x and above
+      set(NCCL_VERSION "v2.27.3-1")
+    endif()
+    message(STATUS "NCCL: Using GIT_TAG ${NCCL_VERSION} for CUDA ${CUDA_VERSION_STRING}")
+
     if(DEFINED ENV{MAX_JOBS})
       set(MAX_JOBS "$ENV{MAX_JOBS}")
     else()
@@ -40,6 +50,8 @@ if(NOT __NCCL_INCLUDED)
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
+      GIT_REPOSITORY https://github.com/NVIDIA/nccl.git
+      GIT_TAG ${NCCL_VERSION}
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
