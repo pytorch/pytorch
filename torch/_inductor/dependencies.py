@@ -22,6 +22,7 @@ from .utils import (
     get_dtype_size,
     reduction_num_outputs,
     sympy_index_symbol,
+    sympy_str,
     sympy_subs,
     VarRanges,
 )
@@ -553,23 +554,26 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         }
         return self._normalize(index, var_ranges)
 
-    def load(self, name: str, index: sympy.Expr) -> None:
+    def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
+        return f"load({name}, {sympy_str(index)})"
 
-    def load_seed(self, name: str, index: int) -> None:
+    def load_seed(self, name: str, index: int) -> str:
         assert isinstance(index, int)
-        self.load(name, sympy.Integer(index))
+        return self.load(name, sympy.Integer(index))
 
     def store(
         self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
-    ) -> None:
+    ) -> str:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
+        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
-        self.store(name, index, f"store_reduction({value})")
+    def store_reduction(self, name: str, index: sympy.Expr, value: str) -> str:
+        return self.store(name, index, f"store_reduction({value})")
 
-    def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> None:
+    def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> str:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+        return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
         self,
