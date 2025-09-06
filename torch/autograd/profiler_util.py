@@ -104,7 +104,7 @@ class EventList(list):
         # First we sort the intervals by their start time. Then we iterate over them.
         # Every time we see a new interval we remove several parents from
         # the top until we restore the invariant. Then parent child relationship
-        # if recorded if the stack is not empty.
+        # is recorded if the stack is not empty.
         # Finally we add new interval to the list
         #
         # Algorithm has O(N * log(N)) complexity where N is number of
