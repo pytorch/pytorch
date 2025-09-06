@@ -540,7 +540,7 @@ class TestLazyModules(TestCase):
             module(input)
 
         forbidden_start_dims_example = itertools.chain(
-            range(-rank - 1, -rank - 3, -1), range(rank, rank + 3)
+            range(-rank, -rank - 3, -1), range(rank, rank + 3)
         )
 
         for i in forbidden_start_dims_example:
