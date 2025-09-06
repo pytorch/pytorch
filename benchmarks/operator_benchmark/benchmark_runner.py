@@ -136,6 +136,16 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--use-compile",
+        "--use_compile",
+        type=benchmark_utils.str2bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help="Run operators with PyTorch Compile mode",
+    )
+
+    parser.add_argument(
         "--forward-only",
         "--forward_only",
         type=benchmark_utils.str2bool,

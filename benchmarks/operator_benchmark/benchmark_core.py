@@ -191,6 +191,11 @@ class BenchmarkRunner:
         self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
+        self.use_compile = args.use_compile
+        if self.use_jit and self.use_compile:
+            raise ValueError(
+                "use_jit and use_compile are mutually exclusive, please specify one."
+            )
         self.num_runs = args.num_runs
         self.print_per_iter = False
         self.output_csv = args.output_csv
@@ -222,7 +227,7 @@ class BenchmarkRunner:
             if self.args.operators:
                 print(f"# {self.args.operators}")
 
-    def _print_perf_result(self, reported_run_time_us, test_case):
+    def _print_perf_result(self, reported_run_time_us, test_case, **kwargs):
         if self.args.report_aibench:
             # Output for AIBench
             # Print out per iteration execution time instead of avg time
@@ -241,7 +246,9 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
+            print(
+                f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}"
+            )
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -254,9 +261,11 @@ class BenchmarkRunner:
                     )
                 print()
             else:
-                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
+                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}")
+            if "peak_bytes" in kwargs:
+                print(f"Peak Memory (bytes) : {kwargs['peak_bytes']}\n")
 
-    def _perf_result_to_dict(self, reported_run_time_us, test_case):
+    def _perf_result_to_dict(self, reported_run_time_us, test_case, **kwargs):
         """This function is the parallel of _print_perf_result, which instead of
         writing information to terminal, returns a dictionary.
         """
@@ -265,11 +274,15 @@ class BenchmarkRunner:
         out = {
             "test_name": test_case.test_config.test_name,
             "input_config": test_case.test_config.input_config,
-            "mode": "JIT" if self.use_jit else "Eager",
+            "mode": (
+                "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager"
+            ),
             "run": "Backward" if test_case.test_config.run_backward else "Forward",
             "latency": round(reported_run_time_us[0], 3),
             "latency unit": "us",
         }
+        if "peak_bytes" in kwargs:
+            out["peak memory"] = kwargs["peak_bytes"]
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
         # input: 'M: 1, N: 1, K: 1, device: cpu'
@@ -330,6 +343,8 @@ class BenchmarkRunner:
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
+        if self.use_compile:
+            func = test_case.run_compile_forward
         forward_time = timeit.timeit(
             functools.partial(func, iters, print_per_iter, cuda_sync), number=1
         )
@@ -354,8 +369,19 @@ class BenchmarkRunner:
         """
         curr_test_total_time = 0
         time_trace = []
+        peak_bytes = None
+        # TODO: Add conditional to measure peak memory usage
+        sample_input = next(iter(test_case.op_bench.inputs.values()))
+        device = sample_input.device
+        device_module = torch.get_device_module(device.type)
         while True:
+            if hasattr(device_module, "reset_peak_memory_stats"):
+                device_module.reset_peak_memory_stats(device)
             run_time_sec = launch_test(test_case, iters, print_per_iter)
+            if hasattr(device_module, "synchronize"):
+                device_module.synchronize(device)
+            if hasattr(device_module, "max_memory_allocated"):
+                peak_bytes = device_module.max_memory_allocated(device)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
@@ -369,7 +395,13 @@ class BenchmarkRunner:
             time_trace.append(report_run_time)
             # Print out the time spent in each epoch in ms
             if self.args.report_aibench:
-                mode = "JIT" if self.use_jit else "Eager"
+                mode = (
+                    "JIT"
+                    if self.use_jit
+                    else "Compile"
+                    if self.use_compile
+                    else "Eager"
+                )
                 test_name = "_".join(
                     [test_case.framework, test_case.test_config.test_name, mode]
                 )
@@ -381,7 +413,7 @@ class BenchmarkRunner:
                             "metric": "latency",
                             "unit": "ms",
                             "value": str(report_run_time / 1e3),
-                        }
+                        },
                     )
                 )
             if results_are_significant:
@@ -391,7 +423,7 @@ class BenchmarkRunner:
             # iteration count, and run the benchmark again...
             iters = self._predict_num_iter_needed(iters)
         reported_run_time_us = np.percentile(np.array(time_trace), 50)
-        return reported_run_time_us
+        return reported_run_time_us, peak_bytes
 
     def _check_keep(self, test_flag, cmd_flag):
         return cmd_flag is None or test_flag == cmd_flag
@@ -603,13 +635,15 @@ class BenchmarkRunner:
                     test_case, self.args.warmup_iterations, print_per_iter=False
                 )
                 # Actual Execution
-                reported_time = [
+                results = [
                     self._measure_time(
                         launch_func, test_case, self.iters, self.print_per_iter
                     )
                     for _ in range(self.num_runs)
                 ]
-                self._print_perf_result(reported_time, test_case)
+                reported_time = [r[0] for r in results]
+                peak_bytes = results[0][1]
+                self._print_perf_result(reported_time, test_case, peak_bytes=peak_bytes)
 
                 # output results to csv
                 self._output_csv(
