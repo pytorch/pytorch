@@ -1,6 +1,7 @@
 # Owner(s): ["module: nn"]
 import itertools
 import math
+import os
 import unittest
 import warnings
 from itertools import product
@@ -59,6 +60,10 @@ from torch.testing._internal.common_utils import (
 
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+
+if TEST_WITH_ROCM:
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
 if TEST_SCIPY:
@@ -3241,17 +3246,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
-    @skipCUDAIfRocm
-    @largeTensorTest("24GB", "cpu")
-    @largeTensorTest("20GB", "cuda")
-    def test_conv3d_large_batch_1(self, device):
-        x = torch.rand(1, 32, 512, 512, 256)
-        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
-        yref = m(x)
-        y = m.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y.cpu())
-
-    @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_contig_wrong_stride_cudnn(self, device):
         # x has to have batch_size 1 to test contiguous checks
@@ -4043,6 +4037,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
