@@ -3824,9 +3824,6 @@ class Scheduler:
             # Simply returning true if the two Deps are the same after
             # normalization (merging loops)
             if lhs_dep.normalize() == rhs_dep.normalize():
-                # Even though no reordering happens in this case, return True
-                # so the caller will respect the shared data returned in this
-                # call
                 return self.dep_size_hint(lhs_dep)
             return -1
 
