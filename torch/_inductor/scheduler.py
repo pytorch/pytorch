@@ -238,6 +238,13 @@ class BaseSchedulerNode:
             buf.get_name(): buf for buf in self.outputs
         }
 
+        # mutation_renames for the current node. Due to potential
+        # more mutations happening later, this can be different
+        # to Scheduler.mutation_renames. Also this dict should be small
+        # since only mutation information relevant to the deps for this
+        # node is stored here.
+        self.mutation_renames: dict[str, str] = {}
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
@@ -301,7 +308,12 @@ class BaseSchedulerNode:
         return
 
     def update_mutated_names(self, renames: dict[str, str]) -> None:
-        self.set_read_writes(self.read_writes.rename(renames))
+        self.mutation_renames = {
+            name: renames[name]
+            for name in (dep.name for dep in self.read_writes.reads_and_writes())
+            if name in renames
+        }
+        self.set_read_writes(self.read_writes.rename(self.mutation_renames))
 
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
@@ -1082,7 +1094,9 @@ class SchedulerNode(BaseSchedulerNode):
         self.set_read_writes(
             dependencies.extract_read_writes(
                 self._body, *self._sizes, normalize=normalize
-            ).with_read(fake_deps)
+            )
+            .with_read(fake_deps)
+            .rename(self.mutation_renames)
         )
 
         self.pointwise_read_writes.clear_cache(self)
