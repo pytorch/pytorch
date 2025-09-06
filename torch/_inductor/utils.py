@@ -18,6 +18,7 @@ import re
 import shutil
 import statistics
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import time
@@ -1560,12 +1561,26 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 @functools.lru_cache
 def get_max_num_sms() -> int:
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10
 
 
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
+    if torch.xpu.is_available():
+        return get_max_num_sms()
     carveout = torch._C._get_sm_carveout_experimental()
     return get_max_num_sms() - (carveout if carveout is not None else 0)
 
@@ -1619,7 +1634,11 @@ def _use_conv_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(
-    layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1636,7 +1655,8 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
+        # some callers handle max-autotune checking externally
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1664,7 +1684,7 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
 
-    def _is_tma_compatible(x: IRNode) -> bool:
+    def _is_tma_compatible_default(x: IRNode) -> bool:
         sizes = x.get_size()
         strides = x.get_stride()
         rank = len(sizes)
@@ -1724,12 +1744,31 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
         return True
 
-    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+    def _is_tma_compatible_xpu(x: IRNode) -> bool:
+        strides = x.get_stride()
+        strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
+        # Find the single contiguous (“inner”) dim
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
+            return False
+        return True
+
+    return has_triton_tma_device() and all(
+        _is_tma_compatible_default(m)
+        if (m_device := m.get_device()) is None or m_device.type != "xpu"
+        else _is_tma_compatible_xpu(m)
+        for m in matrices
+    )
 
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        can_use_tma(*matrices, add_guards=add_guards)
+        all(len(m.get_size()) == 2 for m in matrices)
+        and can_use_tma(*matrices, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 
@@ -1793,6 +1832,30 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
             )
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        and not V.graph.cpp_wrapper
+    )
+
+
+@functools.cache
+def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    """
+    Check if we should use the contiguous subgraph transform.
+    This transform makes the second matrix contiguous before the matmul.
+    """
+    decompose_k_threshold = config.triton.decompose_k_threshold
+
+    # Similar conditions to decompose_k but for contiguous transform
+    from torch._inductor.virtualized import V
+
+    return (
+        bool(torch.version.hip)  # Only relevant on AMD
+        and V.graph.sizevars.statically_known_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode
         and not V.graph.cpp_wrapper
     )
 
@@ -3329,6 +3392,13 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
+def is_using_cudagraph_partition() -> bool:
+    return (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    )
+
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -3524,3 +3594,30 @@ def maybe_log_cudagraph_partition(
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)
+
+
+def python_subprocess_env() -> dict[str, str]:
+    """
+    Get a base environment for running Python subprocesses.
+    """
+
+    env = {
+        # Inherit the environment of the current process.
+        **os.environ,
+        # Set the PYTHONPATH so the subprocess can find torch.
+        "PYTHONPATH": os.environ.get(
+            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+        ),
+    }
+
+    # Set PYTHONHOME for internal builds, to account for builds that bundle the
+    # runtime.  Otherwise they will use the libraries and headers from the
+    # platform runtime instead.
+    #
+    # This can't be done for external builds.  The process can be run from a
+    # venv and that won't include Python headers.  The process needs to be able
+    # to search for and find the platform runtime.
+    if config.is_fbcode():
+        env["PYTHONHOME"] = sysconfig.get_path("data")
+
+    return env

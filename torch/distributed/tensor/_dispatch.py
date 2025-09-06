@@ -23,6 +23,7 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 try:
@@ -120,11 +121,17 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
-        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
-        # as implicitly replicated or we throw error to user.
-        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
-        # it as False by default.
-        self._allow_implicit_replication = False
+    # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+    # as implicitly replicated or we throw error to user.
+    # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+    # it as False by default.
+    @property
+    def _allow_implicit_replication(self) -> bool:
+        return torch._C._get_dtensor_allow_implicit_replication()
+
+    @_allow_implicit_replication.setter
+    def _allow_implicit_replication(self, value: bool) -> None:
+        return torch._C._set_dtensor_allow_implicit_replication(value)
 
     def dispatch(
         self,
@@ -158,13 +165,18 @@ class OpDispatcher:
                 return out
             else:
                 raise
+        except Exception as e:
+            raise RuntimeError(
+                f"Sharding propagation failed for {op_info.schema}"
+            ) from e
 
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
-        if mesh.get_coordinate() is not None:
+        participating = mesh.get_coordinate() is not None
+        if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
@@ -277,7 +289,20 @@ class OpDispatcher:
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
-                return args[0]
+                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
+                # the inplace argument's tensor meta. Here we choose to special case
+                # this op because as far as I know this is the only inplace op that
+                # has such as behavior. We can extend this special case if necessary.
+                if op_call == aten.squeeze_.dim:
+                    output_spec = output_sharding.output_spec
+                    assert isinstance(output_spec, DTensorSpec)
+                    assert isinstance(args[0], dtensor.DTensor)
+                    args[0]._spec = output_spec
+                    # use return_and_correct_aliasing to match the outer and the inner
+                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
+                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
+                else:
+                    return args[0]
             else:
                 return None
         elif op_info.schema.is_out_variant_op():
@@ -299,7 +324,11 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            if participating and op_info.schema.is_view_op():
+                return return_and_correct_aliasing(op_call, args, kwargs, ret)
+            else:
+                return ret
 
     @staticmethod
     def redistribute_local_args(

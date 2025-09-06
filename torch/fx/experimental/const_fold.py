@@ -164,6 +164,9 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
+
+    import sympy
+
     if not isinstance(module, torch.fx.GraphModule):
         mod_traced = torch.fx.symbolic_trace(module)
     else:
@@ -192,6 +195,10 @@ def split_const_subgraphs(
 
         # Skip folding side-effectful functions
         if node.is_impure():
+            continue
+
+        # Skip folding nodes that have symbolic fill_value
+        if isinstance(node.kwargs.get("fill_value", None), sympy.Expr):
             continue
 
         # Must be a constant foldable node at this point.
