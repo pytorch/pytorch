@@ -634,7 +634,7 @@ class _PositiveDefinite(_Symmetric):
         sym_check = super().check(value)
         if not sym_check.all():
             return sym_check
-        return torch.linalg.cholesky_ex(value).info.eq(0)
+        return torch.linalg.cholesky_ex(value)[1].eq(0)
 
 
 class _Cat(Constraint):
