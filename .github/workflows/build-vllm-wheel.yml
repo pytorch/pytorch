@@ -24,13 +24,15 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
-        device: [ 'cu128', 'cu129' ]
+        device: [ 'cu128', 'cu129', 'cu130' ]
         runner: [ 'linux.12xlarge.memory' ]
         include:
           - device: cu128
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
           - device: cu129
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+          - device: cu130
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
@@ -181,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: [ 'cu128', 'cu129' ]
+        device: [ 'cu128', 'cu129', 'cu130' ]
     env:
       BUILD_DEVICE: ${{ matrix.device }}
     permissions:
