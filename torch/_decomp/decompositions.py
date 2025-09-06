@@ -4488,6 +4488,73 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     )
 
 
+def should_transpose_and_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
+    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+    # When we have [M, B, K].transpose(0, 1) x [K, N], we should fold when B is small, and 
+    # M, K, N are large
+
+    # TODO: consider checking symint's range with shape_env.var_to_range
+    def check_le(s, num):
+        if isinstance(s, int):
+            return s <= num
+        return False
+
+    def check_ge(s, num):
+        if isinstance(s, int):
+            return s >= num
+        return False
+
+    # TODO: these conditions are very loose, we should fold more aggressively to mm
+    if t1.ndim == 3 and t2.ndim == 2:
+        M, B, K = t1.shape
+        _, N = t2.shape
+        if check_le(B, 64) and check_ge(M, 512) and check_ge(N, 2048) and check_ge(K, 2048):
+            return t1.transpose(0, 1).is_contiguous()
+        else:
+            return False
+    else:
+        return False
+
+def fold_mm(tensor1, tensor2, is_out):
+    dim_tensor1 = tensor1.dim()
+    dim_tensor2 = tensor2.dim()
+    # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
+    # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
+    # and some condition on the strides is fulfilled
+
+    # optimization: use mm instead of bmm by folding the batch of the larger tensor
+    # into its leading matrix dimension
+    transpose = dim_tensor2 > dim_tensor1
+    t1 = tensor2.mT if transpose else tensor1
+    t2 = (
+        tensor2 if not transpose else (tensor1.t() if dim_tensor1 == 2 else tensor1)
+    )
+    # Invariant: t1.dim() >= 3 && (t2.dim() == 1 || t2.dim() == 2)
+    #            and t1 and t2 are matmul-compatible
+
+    # Why not t1.view(-1, sizes_1[-1])?
+    # If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+    # This can happen in e.g. [3, 5, 0] @ [0, 0].
+    sizes_1 = t1.shape
+    output_shape = list(sizes_1[:-1])
+    folded_dim1 = reduce(operator.mul, output_shape)
+
+    # Readjust output_shape if we are multiplying by a matrix
+    t2_is_matrix = t2.dim() == 2
+    if t2_is_matrix:
+        output_shape.append(t2.shape[1])
+
+    # This will almost always be a view.
+    # It may not be a view if t2->requires_grad(). See should_fold in aten/ for an explanation
+    t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
+    if t2_is_matrix:
+        # This copies if we perform a 2D @ 3D and the first tensor requires_grad
+        # See should_fold native/LinearAlgebra.cpp for why.
+        output = torch.ops.aten._unsafe_view(t1_folded.mm(t2), output_shape)
+        return output.mT.contiguous() if transpose else output
+    else:
+        return torch.ops.aten._unsafe_view(t1_folded.mv(t2), output_shape)
+
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
@@ -4504,43 +4571,12 @@ def matmul(tensor1, tensor2, *, is_out=False):
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
         return torch.mm(tensor1, tensor2)
     elif should_fold(tensor1, tensor2, is_out):
-        # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
-        # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
-        # and some condition on the strides is fulfilled
-
-        # optimization: use mm instead of bmm by folding the batch of the larger tensor
-        # into its leading matrix dimension
-        transpose = dim_tensor2 > dim_tensor1
-        t1 = tensor2.mT if transpose else tensor1
-        t2 = (
-            tensor2 if not transpose else (tensor1.t() if dim_tensor1 == 2 else tensor1)
-        )
-        # Invariant: t1.dim() >= 3 && (t2.dim() == 1 || t2.dim() == 2)
-        #            and t1 and t2 are matmul-compatible
-
-        # Why not t1.view(-1, sizes_1[-1])?
-        # If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
-        # This can happen in e.g. [3, 5, 0] @ [0, 0].
-        sizes_1 = t1.shape
-        output_shape = list(sizes_1[:-1])
-        folded_dim1 = reduce(operator.mul, output_shape)
-
-        # Readjust output_shape if we are multiplying by a matrix
-        t2_is_matrix = t2.dim() == 2
-        if t2_is_matrix:
-            output_shape.append(t2.shape[1])
-
-        # This will almost always be a view.
-        # It may not be a view if t2->requires_grad(). See should_fold in aten/ for an explanation
-        t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
-        if t2_is_matrix:
-            # This copies if we perform a 2D @ 3D and the first tensor requires_grad
-            # See should_fold native/LinearAlgebra.cpp for why.
-            output = torch.ops.aten._unsafe_view(t1_folded.mm(t2), output_shape)
-            return output.mT.contiguous() if transpose else output
-        else:
-            return torch.ops.aten._unsafe_view(t1_folded.mv(t2), output_shape)
-
+        return fold_mm(tensor1, tensor2, is_out)
+    elif should_transpose_and_fold(tensor1, tensor2, is_out):
+        t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+        tensor1_transposed = t1.transpose(0, 1)
+        result = fold_mm(tensor1_transposed, t2, is_out)
+        return result.transpose(0, 1)
     elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
         # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
         # we track m1 vs m2 separately even though they must match for nicer error messages
