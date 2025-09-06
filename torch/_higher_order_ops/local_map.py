@@ -50,7 +50,7 @@ local_map_hop_backward = LocalMapBackwardHOP()
 def create_hop_fw_bw(
     fw_gm: GraphModule,
     *_args: Any,
-) -> tuple[GraphModule, GraphModule, int, int]:
+) -> tuple[GraphModule, GraphModule, int, int, set[int]]:
     """
     Traces a joint, applies passes and partitions it
     """
@@ -118,11 +118,6 @@ def create_hop_fw_bw(
             primals = primals_and_tangents[:num_fw_inputs]
             tangents = primals_and_tangents[num_fw_inputs:]
 
-            optional_grads = []
-            for example_grad in example_grads:
-                if example_grad.requires_grad:
-                    optional_grads.append(example_grad)
-
             def prepare_fw_with_masks(fn: Callable[..., Any]) -> Callable[..., Any]:
                 def fw_with_masks(*args: Any) -> tuple[tuple[Any], list[bool]]:
                     fw_out = fn(*args)
@@ -146,7 +141,18 @@ def create_hop_fw_bw(
             # put grads first to work with existing hop utils
             return pytree.tree_map(maybe_clone, (*grads, *fw_outs))
 
-        primals_and_tangents = [*fw_inputs, *example_grads]
+        filtered_grads_idx = set()
+        for i, example_grad in enumerate(example_grads):
+            # Filter out grads that are None or do not require_grad.
+            # The AOTAutograd utils we rely on force this assumption.
+            # We must also filter the runtime tangents too.
+            if example_grad is not None and example_grad.requires_grad:
+                filtered_grads_idx.add(i)
+
+        primals_and_tangents = [
+            *fw_inputs,
+            *[example_grads[i] for i in filtered_grads_idx],
+        ]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
 
         from torch._functorch._aot_autograd.graph_compile import prepare_for_partitioner
@@ -177,7 +183,7 @@ def create_hop_fw_bw(
             "in_placements"
         ]
 
-        return new_fw_gm, new_bw_gm, num_fw_inputs, num_fw_outputs
+        return new_fw_gm, new_bw_gm, num_fw_inputs, num_fw_outputs, filtered_grads_idx
 
 
 class LocalMapAutogradOp(torch.autograd.Function):
@@ -188,11 +194,13 @@ class LocalMapAutogradOp(torch.autograd.Function):
         bw_gm: GraphModule,
         num_fw_ins: int,
         num_fw_outs: int,
+        filtered_grads_idx: set[int],
         *args: Any,
         **kwargs: Any,
     ) -> tuple[Optional[torch.Tensor], ...]:
         ctx.bw_gm = bw_gm
         ctx.num_fw_ins = num_fw_ins
+        ctx.filtered_grads_idx = filtered_grads_idx
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outs_with_saved_activations = local_map_hop(fw_gm, *args, **kwargs)
@@ -205,16 +213,19 @@ class LocalMapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(
-        ctx: Any, *grads: tuple[torch.Tensor]
+        ctx: Any, *_grads: tuple[torch.Tensor]
     ) -> tuple[Optional[torch.Tensor], ...]:
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
+            # Filter out grads that are None or do not require_grad.
+            # The AOTAutograd utils we rely on force this assumption.
+            grads = [_grads[i] for i in ctx.filtered_grads_idx]
             grad_ins = local_map_hop_backward(ctx.bw_gm, *saved_activations, *grads)
             if len(grad_ins) != ctx.num_fw_ins:
                 raise RuntimeError(
                     f"Expected {ctx.num_fw_ins} grad_ins, got {len(grad_ins)}"
                 )
-        return None, None, None, None, *grad_ins
+        return None, None, None, None, None, *grad_ins
 
 
 @local_map_hop.py_impl(torch._C.DispatchKey.Autograd)
@@ -224,9 +235,11 @@ def autograd_key(
     **kwargs: Any,
 ) -> Any:
     if _DEFER_INLINING:
-        fw_gm, bw_gm, num_fw_ins, num_fw_outs = create_hop_fw_bw(fw_gm, *args)
+        fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx = create_hop_fw_bw(
+            fw_gm, *args
+        )
         return LocalMapAutogradOp.apply(
-            fw_gm, bw_gm, num_fw_ins, num_fw_outs, *args, **kwargs
+            fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx, *args, **kwargs
         )
 
     return fw_gm(*args, **kwargs)
