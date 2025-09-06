@@ -742,7 +742,7 @@ class TestLazyModules(TestCase):
 
             lazy_module.load_state_dict(module.state_dict())
             # Parameters have been initialized but the module won't become a full
-            # GroupNorm one until the first iteration. This is due to
+            # LayerNorm one until the first iteration. This is due to
             # limitations on the state_dict loading logic
             self.assertFalse(lazy_module.has_uninitialized_params())
             self.assertIsInstance(lazy_module, nn.LazyLayerNorm)
