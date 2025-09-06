@@ -497,13 +497,9 @@ def broadcast_symbolic_shapes(a, b):
     """
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -949,13 +945,10 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
         if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)

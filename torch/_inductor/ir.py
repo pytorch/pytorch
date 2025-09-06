@@ -2877,8 +2877,8 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(old_size[i], 1), fallback_value=False
+            elif old_size[i] is None or V.graph.sizevars.is_size_one_or_false(
+                old_size[i]
             ):
                 pass
             else:
@@ -2904,9 +2904,7 @@ class ExpandView(BaseView):
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
                     stride
-                    if not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(size, 1), fallback_value=False
-                    )
+                    if not V.graph.sizevars.is_size_one_or_false(size)
                     else sympy.S.Zero
                 )
             new_layout = FixedLayout(
