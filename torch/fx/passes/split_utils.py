@@ -17,7 +17,12 @@ __all__ = ["getattr_recursive", "setattr_recursive", "Component", "split_by_tags
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
     for layer in name.split("."):
-        if hasattr(obj, layer):
+        if isinstance(obj, torch.nn.ModuleList):
+            if hasattr(obj, "_modules") and layer in obj._modules:
+                obj = obj._modules[layer]
+            else:
+                return None
+        elif hasattr(obj, layer):
             obj = getattr(obj, layer)
         else:
             return None
