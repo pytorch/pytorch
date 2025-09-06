@@ -10,6 +10,7 @@ __all__ = ["onnx_impl", "get_torchlib_ops"]
 import logging
 from collections.abc import Sequence
 from typing import Any, Callable, TypeVar
+from typing_extensions import ParamSpec
 
 import onnxscript
 
@@ -17,7 +18,9 @@ import torch
 from torch.onnx._internal.exporter import _constants, _registration
 
 
-_T = TypeVar("_T", bound=Callable)
+# Use ParamSpec for better type preservation instead of bound Callable TypeVar
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 logger = logging.getLogger("__name__")
 
@@ -33,7 +36,7 @@ def onnx_impl(
     opset_introduced: int = 18,
     no_compile: bool = False,
     private: bool = False,
-) -> Callable[[_T], _T]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Register an ONNX implementation of a torch op."""
 
     if isinstance(target, torch._ops.OpOverloadPacket):
@@ -44,8 +47,8 @@ def onnx_impl(
         )
 
     def wrapper(
-        func: _T,
-    ) -> _T:
+        func: Callable[_P, _R],
+    ) -> Callable[_P, _R]:
         processed_func: Any
         if no_compile:
             processed_func = func
