@@ -95,7 +95,7 @@ pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
-retry pip install -q numpy==2.0.1
+retry pip install -q numpy==2.0.2
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
