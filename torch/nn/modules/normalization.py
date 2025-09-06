@@ -254,7 +254,6 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
     The `normalized_shape` of the layer is inferred from the `start_dim` argument and shape of the input
     tensor during the first forward pass. After this the module becomes a regular :class:`torch.nn.LayerNorm` with regular `torch.nn.Parameter`
 
-
     Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
     on lazy modules and their limitations.
 
