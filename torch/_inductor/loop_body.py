@@ -103,15 +103,7 @@ class LoopBody:
     memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
 
-    def __init__(
-        self,
-        fn,
-        args,
-        var_ranges,
-        iter_vars,
-        reduce_vars,
-        allow_same_symbol_in_index=False,
-    ):
+    def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
 
         _flat_sizes = tuple(var_ranges.values())
@@ -125,7 +117,7 @@ class LoopBody:
         self.var_ranges = var_ranges
 
         if isinstance(fn, LoopBody):
-            self._init_with_copy(fn, args, allow_same_symbol_in_index)
+            self._init_with_copy(fn, args)
         else:
             self._init_with_tracing(fn, args)
 
@@ -144,13 +136,13 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
-    def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
+    def _init_with_copy(self, other: LoopBody, args):
         """
         _init_with_tracing() is slow, so this is a fast path in the case
         where we are just reordering/merging/splitting the args of an
         existing LoopBody.
         """
-        indexing_exprs = other.indexing_from_args(args, allow_same_symbol_in_index)
+        indexing_exprs = other.indexing_from_args(args)
         self.indexing_exprs = {
             name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
             for name, expr in indexing_exprs.items()
@@ -195,26 +187,41 @@ class LoopBody:
             index_prevent_reordering(index_exprs, old_reduce_vars, old_reduce_sizes),
         )
 
-        if iter_sizes == old_iter_sizes and reduce_sizes == old_reduce_sizes:
-            return old_body
+        # if iter_sizes == old_iter_sizes:
+        #     # no dimensions get merged.
+        #     return old_sizes, old_body
 
+        # Note: if no dimension get merges, the symbol prefix will
+        # remain 'y'. But if we merge dimensions, we change prefix to
+        # 'z'. If this is an issue, we can always retrace the LoopBody
+        # to change symbol prefix to 'z'.
+        #
+        # There is indeed an issue due to symbol name conflicting.
+        # y0 maybe reused for the y dimension later.
         (
             (
                 iter_vars,
                 reduce_vars,
             ),
             var_ranges,
-        ) = dependencies.index_vars_no_squeeze(iter_sizes, reduce_sizes, prefix="p")
+        ) = dependencies.index_vars_no_squeeze(iter_sizes, reduce_sizes, prefix="t")
         new_body = LoopBody(
             old_body,
             [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
             var_ranges,
             iter_vars,
             reduce_vars,
-            allow_same_symbol_in_index=True,
         )
 
-        return new_body
+        # use the original symbol prefix
+        # Can try to optimize if this is a bottleneck for compilation time
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="p"
+        )
+        new_body2 = LoopBody(
+            new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body2
 
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
@@ -234,7 +241,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
+            prefix="t",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
@@ -246,15 +253,21 @@ class LoopBody:
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
             iter_idx = [iter_idx[i] for i in inverse_order]
-            return old_body(iter_idx, reduce_idx, allow_same_symbol_in_index=True)
+            return old_body(iter_idx, reduce_idx)
 
-        return LoopBody(
-            new_body,
-            (iter_vars, reduce_vars),
-            var_ranges,
-            iter_vars,
-            reduce_vars,
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
         )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
 
     @property
     def vars(self):
@@ -395,21 +408,20 @@ class LoopBody:
         assert self.indexing is not None
         return self.indexing[name]
 
-    def indexing_from_args(self, indices, allow_same_symbol_in_index=False):
+    def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert allow_same_symbol_in_index or all(
-            v not in self.var_ranges for v in index
-        ), f"{self.var_ranges=}, {indices=}"
-
+        assert all(v not in self.var_ranges for v in index), (
+            f"{self.var_ranges=}, {indices=}"
+        )
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
         }
 
-    def __call__(self, *indices, allow_same_symbol_in_index=False):
-        self.indexing = self.indexing_from_args(indices, allow_same_symbol_in_index)
+    def __call__(self, *indices):
+        self.indexing = self.indexing_from_args(indices)
         result = self.root_block()
         self.indexing = None
         return result
