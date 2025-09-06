@@ -341,7 +341,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
 
 # Build flashinfer from source.
-ARG torch_cuda_arch_list='8.0;8.9;9.0a'
+ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 
