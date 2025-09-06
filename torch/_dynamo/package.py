@@ -112,7 +112,17 @@ class InlinedSource:
 
 
 @dataclasses.dataclass
-class _DynamoCodeCacheEntry:
+class DynamoCaptureOutput:
+    """
+    Core information generated from Dynamo for fullgraph=True.
+    """
+
+    guarded_codes: list[_GuardedCodeCacheEntry]
+    backend_ids: list[_BackendId]
+
+
+@dataclasses.dataclass
+class _DynamoCodeCacheEntry(DynamoCaptureOutput):
     """
     Contains the serializable information associated with a single code object
     in dynamo. To restore an execution of compiled code, we will need the following
@@ -130,17 +140,17 @@ class _DynamoCodeCacheEntry:
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
+      10. Whether or not this code entry was bypassed
     """
 
     python_code: SerializedCode
     python_module: str
     function_names: list[_FunctionId]
-    guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
-    backend_ids: list[_BackendId]
     code_source: Optional[str]
     install_to_global: bool
     has_compile_id: bool = False
+    bypassed: bool = False
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -314,7 +324,6 @@ def _compile_frame_context(
     def _ctx() -> Iterator[None]:
         increment_frame()
         compile_id = get_compile_id(frame_state={})
-        log_dynamo_start(code)
         with (
             compile_context(CompileContext(compile_id)),
             dynamo_timed(
@@ -330,6 +339,7 @@ def _compile_frame_context(
                 },
             ),
         ):
+            log_dynamo_start(code)
             yield
 
     return _ctx()
@@ -480,6 +490,10 @@ class CompilePackage:
         try:
             yield
         finally:
+            if (
+                entry.bypassed
+            ):  # Remove the code from the cache entry if it's been bypassed
+                del self._codes[code]
             entry.has_compile_id = True
             self._current_entry = None
 
@@ -489,6 +503,8 @@ class CompilePackage:
         dynamo_code: types.CodeType,
     ) -> None:
         assert self._current_entry is not None
+        if self._current_entry.bypassed:
+            return
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
@@ -496,6 +512,9 @@ class CompilePackage:
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
+        assert self._current_entry is not None
+        if self._current_entry.bypassed:
+            return
         for code in sources:
             if code in self._resume_codes:
                 continue
@@ -515,6 +534,10 @@ class CompilePackage:
                     checksum=_hash_source(source),
                 )
             )
+
+    def bypass_current_entry(self) -> None:
+        assert self._current_entry is not None
+        self._current_entry.bypassed = True
 
     def add_resume_function(
         self,
@@ -636,7 +659,6 @@ class CompilePackage:
                     check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                         target_code,
                         guards_state.output_graph,
-                        guards_serialization_mode="load",
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
                     )

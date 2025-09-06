@@ -22,6 +22,7 @@ from .. import ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
+from ..shape_propagation import BlockShapeType
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
@@ -145,8 +146,9 @@ class CppCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False
         self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
@@ -198,6 +200,14 @@ class CppPrinter(_CppPrinter):
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
+
+    def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
 
 
 # A function to print, useful for printing sympy symbols.

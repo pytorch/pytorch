@@ -60,6 +60,15 @@ def move_to_device_pass(
                     kwargs = node.kwargs.copy()
                     kwargs["device"] = _get_new_device(kwargs["device"], location)
                     node.kwargs = kwargs
+
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.aten.to.device
+                ):
+                    args = list(node.args)
+                    args[1] = _get_new_device(args[1], location)
+                    node.args = tuple(args)
+
                 # move all the tensor metadata
                 node.meta["val"] = pytree.tree_map(
                     lambda v: v.to(_get_new_device(v.device, location))
