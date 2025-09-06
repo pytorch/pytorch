@@ -3229,12 +3229,12 @@ def native_group_norm(
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
-    reduction_dims = [2, 3]
+    reduction_dims_list = [2, 3]
     input_reshaped = torch.reshape(
         input_acc,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
-    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
+    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims_list)
     biased_var, mean = torch.var_mean(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
@@ -3394,10 +3394,10 @@ def renorm(
     acc_type = utils.get_computation_dtype(input.dtype)
     if acc_type != input.dtype:
         norm = torch.linalg.vector_norm(
-            input, p, reduce_dims, keepdim=True, dtype=acc_type
+            input, p, tuple(reduce_dims), keepdim=True, dtype=acc_type
         )
     else:
-        norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True)
+        norm = torch.linalg.vector_norm(input, p, tuple(reduce_dims), keepdim=True)
 
     eps = 1e-7
     norm_factor = torch.where(norm > maxnorm, maxnorm / (norm + eps), 1.0)
@@ -5865,9 +5865,13 @@ def norm(
         # that will throw an error
         if dim is None:
             dim = tuple(range(input.ndim))
-        return torch.linalg.matrix_norm(input, p, dim, keepdim, dtype=dtype)
+        # Extract exactly 2 dimensions for matrix norm
+        matrix_dims = (int(dim[-2]), int(dim[-1]))
+        return torch.linalg.matrix_norm(input, p, matrix_dims, keepdim, dtype=dtype)
     else:
-        return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype)
+        return torch.linalg.vector_norm(
+            input, p, tuple(dim) if dim is not None else None, keepdim, dtype=dtype
+        )
 
 
 @register_decomposition(aten.trace)

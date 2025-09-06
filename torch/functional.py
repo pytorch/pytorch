@@ -1788,31 +1788,55 @@ def norm(  # noqa: F811
             ):
                 if out is None:
                     return torch.linalg.vector_norm(
-                        input, 2, _dim, keepdim, dtype=dtype
+                        input,
+                        2,
+                        _dim,
+                        keepdim,
+                        dtype=dtype,  # type: ignore[arg-type]
                     )
                 else:
                     return torch.linalg.vector_norm(
-                        input, 2, _dim, keepdim, dtype=dtype, out=out
+                        input,
+                        2,
+                        _dim,
+                        keepdim,
+                        dtype=dtype,
+                        out=out,  # type: ignore[arg-type]
                     )
 
             # Here we either call the nuclear norm, or we call matrix_norm with some arguments
             # that will throw an error
             if _dim is None:
-                _dim = list(range(input.ndim))
+                _dim = [-2, -1]  # Default to last 2 dimensions for matrix norm
+
+            # Ensure we have at least 2 dimensions for matrix norm
+            if len(_dim) < 2:
+                raise RuntimeError(
+                    f"Expected at least 2 dimensions for matrix norm, got {len(_dim)}"
+                )
+
+            matrix_dims = (int(_dim[-2]), int(_dim[-1]))
             if out is None:
-                return torch.linalg.matrix_norm(input, p, _dim, keepdim, dtype=dtype)
+                return torch.linalg.matrix_norm(
+                    input, p, matrix_dims, keepdim, dtype=dtype
+                )
             else:
                 return torch.linalg.matrix_norm(
-                    input, p, _dim, keepdim, dtype=dtype, out=out
+                    input, p, matrix_dims, keepdim, dtype=dtype, out=out
                 )
         else:
             # NB. p should be Union[str, number], not Optional!
             _p = 2.0 if p is None else p
             if out is None:
-                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype)
+                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
             else:
                 return torch.linalg.vector_norm(
-                    input, _p, _dim, keepdim, dtype=dtype, out=out
+                    input,
+                    _p,
+                    _dim,
+                    keepdim,
+                    dtype=dtype,
+                    out=out,  # type: ignore[arg-type]
                 )
 
     ndim = input.dim()
