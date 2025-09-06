@@ -259,10 +259,10 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
     on lazy modules and their limitations.
 
     Args:
-        start_dim (int): The dimension starting from here to the end are normalized. Default: -1
+        start_dim (int): The dimension starting from here to the end will be normalized. Default: -1
 
         .. math::
-            [\text{normalized\_shape} = input.shape[start_dim:]
+            \text{normalized\_shape} = \text{input.shape}[\,\text{start\_dim}:\,]
 
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
@@ -283,7 +283,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         >>> # Normalize over the last dimension (i.e. the embedding_dim)
         >>> lazy_layer_norm = nn.LazyLayerNorm(-1)
         >>> # Activate module
-        >>> layer_norm(embedding)
+        >>> lazy_layer_norm(embedding)
         >>>
         >>> # Image Example
         >>> N, C, H, W = 20, 5, 10, 10
@@ -323,7 +323,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
         if start_dim == 0:
             raise ValueError(
-                "start dim is 0 but layer norm is not indented to normalize over batch dimension"
+                "start dim is 0 but layer norm is not intended to normalize over batch dimension"
             )
 
         if self.elementwise_affine:
