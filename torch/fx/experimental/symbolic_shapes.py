@@ -174,6 +174,7 @@ __all__ = [
     "ValueRangesSLoc",
     "SymIntEqByExpr",
     "Specialization",
+    "DynamicInt",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -1023,6 +1024,21 @@ def find_symbol_binding_fx_nodes(
         if (s := is_symbol_binding_fx_node(node)) is not None and s not in r:
             r[s] = node
     return r
+
+
+class _DynamicScalar(abc.ABC):
+    def __new__(cls, *args):
+        if cls is _DynamicScalar:
+            raise TypeError("_DynamicScalar is an abstract base class, use DynamicInt.")
+        return super().__new__(cls)
+
+
+@dataclass(frozen=True)
+class DynamicInt(_DynamicScalar):
+    val: int
+
+    def __int__(self):
+        return self.val
 
 
 @dataclass(frozen=True)
