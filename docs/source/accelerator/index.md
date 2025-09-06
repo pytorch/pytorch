@@ -46,6 +46,7 @@ This guide is a work in progress. For more details, please refer to the [roadmap
 :glob:
 :maxdepth: 1
 
+autoload
 operators
 ```
 
