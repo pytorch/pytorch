@@ -15,7 +15,7 @@
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: !{{ config["desired_cuda"] }}
 {%- if config["gpu_arch_version"] %}
-      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+      GPU_ARCH_VERSION: "!{{ config["gpu_arch_version"] }}"
 {%- endif %}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
 {%- if include_skip_tests %}
@@ -33,7 +33,7 @@
   {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
   {%- endif %}
 
 {%- else %}

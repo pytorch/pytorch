@@ -36,6 +36,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -597,11 +598,13 @@ class _TorchDynamoContext:
         patch_fn: Callable[[], Any] = nothing,
         first_ctx: bool = False,
         *,
-        error_on_graph_break: bool = False,
+        fullgraph: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -609,6 +612,7 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
+        self.fullgraph = fullgraph
         self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
@@ -616,6 +620,7 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        self._hooks = hooks
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -699,6 +704,27 @@ class _TorchDynamoContext:
 
         fn = innermost_fn(fn)
 
+        def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if not self.fullgraph:
+                raise RuntimeError(
+                    "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+                )
+
+            if not callable(self.callback):
+                raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+            assert self._hooks is not None
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
+
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
@@ -739,7 +765,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.wrap_top_frame or (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -758,13 +786,13 @@ class _TorchDynamoContext:
             callback = self.callback  # type: ignore[assignment]
 
         is_jit_tracing = torch._C._is_tracing
-        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
-                if is_fx_tracing():
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -784,7 +812,7 @@ class _TorchDynamoContext:
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_error_on_graph_break = None
-                if self.error_on_graph_break is not None:
+                if not self.fullgraph and self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
                     _set_error_on_graph_break(self.error_on_graph_break)
 
@@ -831,9 +859,14 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
-        )
+        if self.error_on_graph_break is not None:
+            compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+                external_utils.wrap_inline_with_error_on_graph_break(
+                    fn, self.error_on_graph_break
+                )
+            )
+        else:
+            compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -843,6 +876,8 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(compile_wrapper, "get_compiler_config")
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if torch._dynamo.config.enable_aot_compile:
+            compile_wrapper.aot_compile = aot_compile  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -893,7 +928,8 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor: Callable[[], contextlib.AbstractContextManager[Any]],
         first_ctx: bool = False,
         *,
-        error_on_graph_break: bool = False,
+        fullgraph: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -901,6 +937,7 @@ class OptimizeContext(_TorchDynamoContext):
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -911,11 +948,13 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            fullgraph=fullgraph,
             error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
             package=package,
+            hooks=hooks,
         )
 
         if config.compiled_autograd:
@@ -1035,7 +1074,8 @@ def _optimize_catch_errors(
     backend_ctx_ctor: Callable[
         [], contextlib.AbstractContextManager[Any]
     ] = null_context,
-    error_on_graph_break: bool = False,
+    fullgraph: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     export: bool = False,
     dynamic: Optional[bool] = None,
     compiler_config: Optional[Any] = None,
@@ -1046,12 +1086,14 @@ def _optimize_catch_errors(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        fullgraph=fullgraph,
         error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        hooks=hooks,
     )
 
 
@@ -1070,7 +1112,7 @@ def get_compiler_fn(
         compiler_str = compiler_fn
     else:
         compiler_str = None
-    compiler_fn = lookup_backend(compiler_fn)
+    compiler_fn = lookup_backend(compiler_fn)  # type: ignore[arg-type]
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
@@ -1143,6 +1185,7 @@ def _optimize(
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
     nopython: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
@@ -1165,6 +1208,11 @@ def _optimize(
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
+        error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
+            See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
+
+            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
+            If `nopython` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
@@ -1195,6 +1243,15 @@ def _optimize(
     ):
         return _NullDecorator()
 
+    if nopython and not config.debug_force_graph_break_on_leaf_return:
+        return optimize_assert(
+            backend,
+            dynamic=dynamic,
+            hooks=hooks,
+            rebuild_ctx=rebuild_ctx,
+            package=package,
+        )
+
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1219,7 +1276,9 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
+        fullgraph=False,
+        error_on_graph_break=error_on_graph_break
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1245,7 +1304,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
         graphs: list[torch.fx.GraphModule] = []
         break_reasons: list[Any] = []
         op_count: int = 0
-        ops_per_graph: list[torch.fx.Node] = []
+        ops_per_graph: list[list[Target]] = []
         out_guards: list[_guards.Guard] = []
 
         def dynamo_graph_accumulating_compiler(
@@ -1702,7 +1761,6 @@ def export(
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
@@ -1760,6 +1818,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
@@ -1926,7 +1987,6 @@ def export(
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             _compiling_state_context(),
         ):
@@ -2139,10 +2199,11 @@ def _optimize_assert(
     package: Optional[CompilePackage] = None,
 ) -> OptimizeContext:
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`,
-    but ignores symbolic_convert.error_on_graph_break setting.
+    Guarantees single-graph capture.
+    The same as `torch._dynamo.optimize(backend)` but ignores
+    symbolic_convert.error_on_graph_break setting.
 
-    Used for export, since we must always error on graph breaks and ignore
+    Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
@@ -2169,6 +2230,7 @@ def _optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
+        fullgraph=True,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
