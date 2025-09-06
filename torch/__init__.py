@@ -96,6 +96,7 @@ __all__ = [
     "get_deterministic_debug_mode",
     "get_device_module",
     "get_float32_matmul_precision",
+    "get_printoptions",
     "get_rng_state",
     "inference_mode",
     "initial_seed",
@@ -108,6 +109,7 @@ __all__ = [
     "manual_seed",
     "matmul",
     "no_grad",
+    "printoptions",
     "rand",
     "randn",
     "save",
@@ -2062,10 +2064,14 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
 from torch import amp as amp, random as random, serialization as serialization
-from torch._tensor_str import set_printoptions
+from torch._tensor_str import get_printoptions, printoptions, set_printoptions
 from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
+
+
+get_printoptions.__module__ = __name__
+printoptions.__module__ = __name__
 
 
 ################################################################################
