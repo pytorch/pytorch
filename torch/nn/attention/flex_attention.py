@@ -1334,6 +1334,7 @@ def _apply_kernel_options(
         # CPU doesn't support returning max yet
         # TODO: support CPU for returning max
         raise NotImplementedError("Returning max scores is not supported on CPU.")
+        kernel_options["OUTPUT_MAX"] = False
 
     return kernel_options
 

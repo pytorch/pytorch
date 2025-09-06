@@ -247,39 +247,18 @@ def flex_attention(
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
-
-    # Create zero-sized tensors when auxiliary outputs are not needed to save memory
-    if kernel_options.get("OUTPUT_LOGSUMEXP", True):
-        logsumexp = empty_strided(
-            logsumexp_shape,
-            None,
-            dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
-            device=query.get_device(),
-        )
-    else:
-        # Create zero-sized tensor when logsumexp won't be written
-        logsumexp = empty_strided(
-            [0],
-            None,
-            dtype=torch.float32,
-            device=query.get_device(),
-        )
-
-    if kernel_options.get("OUTPUT_MAX", False):
-        max_scores = empty_strided(
-            logsumexp_shape,  # Same shape as logsumexp
-            None,
-            dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
-            device=query.get_device(),
-        )
-    else:
-        # Create zero-sized tensor when max_scores won't be written
-        max_scores = empty_strided(
-            [0],
-            None,
-            dtype=torch.float32,
-            device=query.get_device(),
-        )
+    logsumexp = empty_strided(
+        logsumexp_shape,
+        None,
+        dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
+    max_scores = empty_strided(
+        logsumexp_shape,  # Same shape as logsumexp
+        None,
+        dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
