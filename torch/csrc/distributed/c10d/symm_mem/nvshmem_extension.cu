@@ -2,10 +2,12 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <ATen/ceil_div.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 
@@ -75,41 +77,11 @@ void nvshmemx_cumodule_init(uintptr_t module) {
     "nvshmemx_cumodule_init failed");
 }
 
-static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
-
-nvshmem_team_t group_to_team(
-    const std::string& group_name,
-    const std::vector<int>& global_ranks) {
-  auto it = group_name_to_team_.find(group_name);
-  if (it != group_name_to_team_.end()) {
-    return it->second;
-  }
-  TORCH_CHECK(global_ranks.size() > 1);
-  int stride = global_ranks[1] - global_ranks[0];
-  for (size_t r = 1; r < global_ranks.size(); ++r) {
-    TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
-  }
-
-  nvshmem_team_t team;
-  NVSHMEM_CHECK(
-      nvshmem_team_split_strided(
-          NVSHMEM_TEAM_WORLD,
-          global_ranks[0],
-          stride,
-          global_ranks.size(),
-          nullptr,
-          0,
-          &team),
-          "nvshmem_team_split_strided failed");
-  group_name_to_team_[group_name] = team;
-  TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
-  return team;
-}
-
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto& team_manager = TeamManager::get();
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
   int team_size = nvshmem_team_n_pes(team);
   TORCH_CHECK(root < team_size, "root must be smaller than group size");
@@ -159,7 +131,8 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto& team_manager = TeamManager::get();
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
   void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
@@ -843,31 +816,42 @@ void all_to_all_vdev_2d_offset(
       stream);
 }
 
+/* Tiled Communication */
+
 using Shape2D = nvshmemx::shape<int64_t, int64_t>;
 using Stride2D = nvshmemx::stride<int64_t, int64_t>;
 
 template <typename T>
-__global__ void tile_reduce_kernel(T* src_ptr, T* dst_ptr, Shape2D shape, Stride2D strides, int64_t root, nvshmem_team_t team) {
+__global__ void tile_reduce_kernel(
+    T* src_ptr, T* dst_ptr, Shape2D shape, Stride2D strides, int64_t root, nvshmem_team_t* teams) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
+  auto team = teams[blockIdx.x];
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID && " invalid team\n");
   auto layout = nvshmemx::make_layout(shape, strides);
   auto src_tensor = nvshmemx::Tensor(src_ptr, layout);
   auto dst_tensor = nvshmemx::Tensor(dst_ptr, layout);
-  // src_tensor and dst_tensor are already the tiles to operate on, thus we set
-  // the start_coord to 0
-  auto start_coord = nvshmemx::make_shape(0, 0);
-  nvshmemx::tile_sum_reduce<decltype(src_tensor), decltype(dst_tensor), Shape2D, nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(
-      team, src_tensor, dst_tensor, start_coord, shape, root, 0 /* unused */);
+  auto [rows, cols] = shape;
+  auto rows_per_block = at::ceil_div(rows, (int64_t)gridDim.x);
+  auto start_row = rows_per_block * blockIdx.x;
+  auto start_coord = nvshmemx::make_shape(start_row, 0);
+  auto boundary = nvshmemx::make_shape(std::min(rows_per_block, rows - start_row), cols);
+  uint64_t flag = 0;
+  constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
+  nvshmemx::tile_sum_reduce<decltype(src_tensor), decltype(dst_tensor), Shape2D, algo>(
+      team, src_tensor, dst_tensor, start_coord, shape, root, flag /* unused */);
+  nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
 #endif
 }
 
-#define AT_DISPATCH_FLOAT(scalar_type, name, ...)         \
-  AT_DISPATCH_SWITCH(                                                  \
-      scalar_type, name, \
+#define AT_DISPATCH_FLOAT(scalar_type, name, ...) \
+  AT_DISPATCH_SWITCH(                             \
+      scalar_type, name,                          \
       AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
 
-void tile_reduce(at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::string group_name) {
+void tile_reduce(
+    at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::string group_name) {
   /* Perform a tile reduce operation on the input tensor, with the root rank
    * receiving the reduced tensor. */
   TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
@@ -879,10 +863,23 @@ void tile_reduce(at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::s
   c10::cuda::CUDAGuard guard(in_tile.device());
   auto hdl = c10d::symmetric_memory::rendezvous(in_tile, group_name);
   c10d::symmetric_memory::rendezvous(out_tile, group_name);
-  nvshmem_team_t team = group_to_team(group_name, hdl->get_rank_to_global_rank());
-  TORCH_CHECK(root < nvshmem_team_n_pes(team), "root must be smaller than group size");
+
+  // Ideally 16 bytes per thread
+  int nblocks = at::ceil_div(
+      in_tile.numel() * in_tile.element_size(),
+      (int64_t)THREADS_PER_BLOCK * 16);
+  nblocks = std::min(nblocks, 32);
+
+  // Need one team per block
+  auto& team_manager = TeamManager::get();
+  auto [teams, teams_dev] = team_manager.get_n_teams(
+      group_name, hdl->get_rank_to_global_rank(), nblocks);
+  TORCH_CHECK(
+      root < nvshmem_team_n_pes(teams[0]),
+      "root must be smaller than group size");
   auto stream = at::cuda::getCurrentCUDAStream();
 
+  // Prepare launch parameters
   auto shape = nvshmemx::make_shape(in_tile.sizes()[0], in_tile.sizes()[1]);
   auto stride = nvshmemx::make_stride(in_tile.strides()[0], in_tile.strides()[1]);
   void* src_ptr = in_tile.data_ptr();
@@ -893,12 +890,12 @@ void tile_reduce(at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::s
       &shape,
       &stride,
       &root,
-      &team};
+      &teams_dev};
 
   AT_DISPATCH_FLOAT(in_tile.scalar_type(), "tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
-        dim3(1),
+        dim3(nblocks),
         dim3(THREADS_PER_BLOCK),
         args,
         0,

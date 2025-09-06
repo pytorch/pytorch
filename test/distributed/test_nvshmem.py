@@ -649,7 +649,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
-        full_size = 8
+        full_size = 1024
         dtype = torch.float
         full_inp = symm_mem.empty(
             full_size, full_size, dtype=dtype, device=self.device
@@ -658,22 +658,19 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
             full_size, full_size, dtype=dtype, device=self.device
         ).fill_(0)
 
-        tile_size = 4
-        # Tile the input (right bottom quadrant)
-        inp = full_inp[tile_size:full_size, tile_size:full_size]
-        # Tile the output (right bottom quadrant)
-        out = full_out[tile_size:full_size, tile_size:full_size]
+        tile_size = full_size // self.world_size
+        slice_ut = slice(tile_size, 2 * tile_size)
+        inp_tile = full_inp[slice_ut, slice_ut]
+        out_tile = full_out[slice_ut, slice_ut]
 
         # Reduce the tile
         root = 0
-        torch.ops.symm_mem.tile_reduce(inp, out, root, group_name)
+        torch.ops.symm_mem.tile_reduce(inp_tile, out_tile, root, group_name)
 
         # Check data
         expected = torch.zeros_like(full_out)
         if self.rank == root:
-            expected[tile_size:full_size, tile_size:full_size] = (
-                self.world_size * (self.world_size - 1) / 2
-            )
+            expected[slice_ut, slice_ut] = self.world_size * (self.world_size - 1) / 2
         torch.testing.assert_close(full_out, expected)
 
 
