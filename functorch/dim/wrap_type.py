@@ -26,18 +26,8 @@ FUNC_TYPES = (
 PROPERTY_TYPES = (GetSetDescriptorType, property)
 
 
-def _py_wrap_method(orig, __torch_function__):
-    def impl(*args, **kwargs):
-        return __torch_function__(orig, None, args, kwargs)
-
-    return impl
-
-
-def wrap_type(use_c, to_patch, pattern, __torch_function__):
-    if use_c:
-        wrap_method = _wrap_method
-    else:
-        wrap_method = _py_wrap_method
+def wrap_type(to_patch, pattern, __torch_function__):
+    wrap_method = _wrap_method
 
     all = {}
     for t in reversed(pattern.mro()[:-1]):  # skip object

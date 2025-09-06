@@ -32,13 +32,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoDill,
-    skipIfRocm,
     skipIfXpu,
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
     xfailIfLinux,
@@ -96,7 +94,7 @@ TEST_CUDA_IPC = (
     and sys.platform != "darwin"
     and sys.platform != "win32"
     and not IS_JETSON
-    and not TEST_WITH_ROCM
+    #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
@@ -1865,7 +1863,6 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -2490,7 +2487,6 @@ except RuntimeError as e:
                 self.assertFalse(pin_memory_thread.is_alive())
 
     # Takes 2.5min to finish, see https://github.com/pytorch/pytorch/issues/46065
-    @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
     @slowTest
     def test_proper_exit(self):
@@ -3134,7 +3130,6 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
     @skipIfXpu
-    @skipIfRocm
     @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
     def test_pin_memory_no_cuda(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
