@@ -1,5 +1,6 @@
 // @generated
 // @lint-ignore-every CLANGTIDY HOWTOEVEN
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
@@ -7,7 +8,6 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cpu/vec/functional.h>
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
