@@ -152,7 +152,7 @@ def sample_vllm_test_library():
             "title": "Language Models Test (Extended Generation) 2.8 release failure",
             "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
             "package_install": [
-                "git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8"
+                "--no-build-isolation","git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8"
             ],
             "steps": [
                 "pytest -v -s models/language/generation/test_mistral.py",
