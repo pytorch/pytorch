@@ -54,6 +54,7 @@ from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
+    _unstable_customized_partition_wrapper,
     cache_on_self,
     cmp,
     device_need_guard,
@@ -4472,7 +4473,10 @@ class Scheduler:
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
         # benefit to cudagraph
-        if not torch._inductor.config.triton.cudagraphs:
+        if (
+            not torch._inductor.config.triton.cudagraphs
+            and _unstable_customized_partition_wrapper.wrapper is None
+        ):
             return True
 
         # avoid duplicating logs when should_partition is called multiple times
