@@ -640,11 +640,18 @@ if(USE_CUDA AND NOT USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
   if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-      ${CUDA_LIBRARIES}
-      CUDA::cusparse_static
-      CUDA::cufft_static_nocallback
-    )
+    if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+          ${CUDA_LIBRARIES}
+          CUDA::cusparse_static
+          CUDA::cufft_static_nocallback)
+    else()
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+          ${CUDA_LIBRARIES}
+          CUDA::cusparse_static
+          CUDA::cufft_static)
+    endif()
+
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
        CUDA::cusolver_static
