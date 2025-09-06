@@ -186,7 +186,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name ${mac_version}
+_PYTHON_HOST_PLATFORM=${mac_version} python setup.py bdist_wheel -d "$whl_tmp_dir"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
