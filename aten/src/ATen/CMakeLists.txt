@@ -232,6 +232,14 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+  if(DEFINED ENV{FA_MAX_JOBS} AND CMAKE_GENERATOR STREQUAL "Ninja")
+    set(FA_MAX_JOBS_STRING_VALUE $ENV{FA_MAX_JOBS})
+    math(EXPR FA_MAX_JOBS_INTEGER_VALUE "${FA_MAX_JOBS_STRING_VALUE}")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS flash_attention_pool=${FA_MAX_JOBS_INTEGER_VALUE})
+    set_property(TARGET flash_attention PROPERTY JOB_POOL_COMPILE flash_attention_pool)
+    set_property(TARGET flash_attention PROPERTY JOB_POOL_LINK flash_attention_pool)
+  endif()
 endif()
 
 if(USE_FLASH_ATTENTION)
