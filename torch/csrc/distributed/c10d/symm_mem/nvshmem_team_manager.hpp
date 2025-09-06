@@ -31,7 +31,7 @@ class TeamManager {
     return manager;
   }
 
-  // Get the team for a group.
+  // Get a team for a group.
   nvshmem_team_t get_team(
       const std::string& group_name,
       const std::vector<int>& global_ranks) {
@@ -43,6 +43,8 @@ class TeamManager {
   }
 
   // Get n teams for a group.
+  // The first element of the returned pair is the team pool on host side.
+  // The second element of the returned pair is the team pool on device side.
   std::pair<const nvshmemTeamPool_t&, nvshmem_team_t*> get_n_teams(
       const std::string& group_name,
       const std::vector<int>& global_ranks,
@@ -118,6 +120,7 @@ class TeamManager {
     return team_pool;
   }
 
+ private:
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, nvshmemTeamPool_t> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
