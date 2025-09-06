@@ -85,7 +85,7 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 # Create an isolated directory to store this builds pytorch checkout and conda
 # installation
 if [[ -z "$MAC_PACKAGE_WORK_DIR" ]]; then
-    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_conda_${DESIRED_PYTHON}_$(date +%H%M%S)"
+    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_${DESIRED_PYTHON}_$(date +%H%M%S)"
 fi
 mkdir -p "$MAC_PACKAGE_WORK_DIR" || true
 if [[ -n ${GITHUB_ACTIONS} ]]; then
@@ -125,7 +125,6 @@ popd
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export MACOSX_DEPLOYMENT_TARGET=11.0
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
@@ -134,24 +133,16 @@ case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
     3.14)
         echo "Using 3.14t deps"
         NUMPY_PINNED_VERSION="==2.1.0"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
     3.13t)
         echo "Using 3.13 deps"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-        desired_python="3.13"
         RENAME_WHEEL=false
         ;;
     3.13)
@@ -176,11 +167,6 @@ case $desired_python in
         ;;
 esac
 
-# Install into a fresh env
-tmp_env_name="wheel_py$python_nodot"
-conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
-source activate "$tmp_env_name"
-
 PINNED_PACKAGES=(
     "numpy${NUMPY_PINNED_VERSION}"
 )
@@ -200,7 +186,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name ${mac_version}
+_PYTHON_HOST_PLATFORM=${mac_version} python setup.py bdist_wheel -d "$whl_tmp_dir"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
