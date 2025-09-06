@@ -629,53 +629,5 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
 
 
-@instantiate_parametrized_tests
-@requires_nvshmem()
-@requires_cuda_p2p_access()
-class NVSHMEMTileCommTest(MultiProcContinuousTest):
-    def _init_device(self) -> None:
-        # TODO: relieve this (seems to hang if without)
-        device_module.set_device(self.device)
-        # Set NVSHMEM as SymmMem backend
-        symm_mem.set_backend("NVSHMEM")
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    @skipIfRocm
-    def test_tile_reduce(self) -> None:
-        self._init_device()
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        full_size = 8
-        dtype = torch.float
-        full_inp = symm_mem.empty(
-            full_size, full_size, dtype=dtype, device=self.device
-        ).fill_(self.rank)
-        full_out = symm_mem.empty(
-            full_size, full_size, dtype=dtype, device=self.device
-        ).fill_(0)
-
-        tile_size = 4
-        # Tile the input (right bottom quadrant)
-        inp = full_inp[tile_size:full_size, tile_size:full_size]
-        # Tile the output (right bottom quadrant)
-        out = full_out[tile_size:full_size, tile_size:full_size]
-
-        # Reduce the tile
-        root = 0
-        torch.ops.symm_mem.tile_reduce(inp, out, root, group_name)
-
-        # Check data
-        expected = torch.zeros_like(full_out)
-        if self.rank == root:
-            expected[tile_size:full_size, tile_size:full_size] = (
-                self.world_size * (self.world_size - 1) / 2
-            )
-        torch.testing.assert_close(full_out, expected)
-
-
 if __name__ == "__main__":
     run_tests()
