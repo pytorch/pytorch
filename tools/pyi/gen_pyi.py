@@ -1377,6 +1377,20 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "_make_dtensor": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_dtensor",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt]",
+                        "local_tensor: Tensor",
+                        "requires_grad: _bool",
+                    ],
+                    "S",
+                )
+            ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
             "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
             "__setitem__": [
