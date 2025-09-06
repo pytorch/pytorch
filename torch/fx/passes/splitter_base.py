@@ -1,13 +1,16 @@
 # mypy: allow-untyped-defs
 import argparse
 import copy
+import json
 import logging
+import os
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, Literal, NamedTuple, Optional
 
 import torch
+from torch._logging import trace_structured
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 from torch.fx.passes.graph_manipulation import get_size_of_node
@@ -32,12 +35,43 @@ __all__ = [
     "Subgraph",
     "SplitResult",
     "generate_inputs_for_submodules",
+    "NodeEvent",
+    "NodeEventTracker",
 ]
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MIN_ACC_MODULE_SIZE = 1
 DEFAULT_SKIP_FUSION = False
 DEFAULT_ALLOW_NON_TENSOR = False
+
+# ENV var and constants for node tracker
+
+TRACKER_DUMP_PATH = "_fx_net_tracker"
+NODES_SUFFIX = "_nodes.txt"
+ALL_SUFFIX = "_all.txt"
+
+ENV_FX_NET_ACC_SPLITTER_TRACKER_MODE = "FX_NET_ACC_SPLITTER_TRACKER_MODE"
+ENV_FX_NET_ACC_SPLITTER_TRACKER_DUMP_PATH = "FX_NET_ACC_SPLITTER_TRACKER_DUMP_PATH"
+ENV_FX_NET_ACC_SPLITTER_TRACKER_TRACKED_NODES = (
+    "FX_NET_ACC_SPLITTER_TRACKER_TRACKED_NODES"
+)
+
+DUMP_PREFIX = os.environ.get(
+    ENV_FX_NET_ACC_SPLITTER_TRACKER_DUMP_PATH, TRACKER_DUMP_PATH
+)
+
+"""
+Different modes of the event tracker for local debugging:
+"0": No local dumps. Information available by setting breakpoints and visually inspect in pdb.
+"1": Dump all events to DUMP_PREFIX_all.txt
+"2": In addition to events dump, track nodes specified by ENV_FX_NET_ACC_SPLITTER_TRACKER_TRACKED_NODES
+     recursively and dump to DUMP_PREFIX_nodex.txt
+"3": In addition to events dump, track all nodes with more than 1 event recursively and dump to DUMP_PREFIX_nodex.txt
+In addition to the above local dumps, tracker is always enabled and dumps via trace_structured.
+"""
+TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
+    ENV_FX_NET_ACC_SPLITTER_TRACKER_MODE, "0"
+)  # type: ignore[assignment]
 
 
 class _SplitterSettingBase:
@@ -100,6 +134,145 @@ class _SplitterSettingBase:
 
 
 @compatibility(is_backward_compatible=False)
+class NodeEvent:
+    """
+    An event in graph split that happened on a node.
+    source: Subject of the event
+    desc: readable description
+    dep: Optional dependency, usually the node that caused the event.
+    """
+
+    def __init__(
+        self, source: torch.fx.Node, desc: str, dep: Optional[torch.fx.Node] = None
+    ):
+        self.source = source
+        self.desc = desc
+        self.dep = dep
+
+    def to_str(self):
+        # source: The name of the subject of the event.
+        # desc: description of the event, in the format of <event_type>|<explanation>
+        # dep: The name of the cause of this event, which is another node, or #
+        # if it's caused by the subject node
+        return f"{self.source.name}: {self.desc} {self.dep.name if self.dep else '#'}"
+
+
+@compatibility(is_backward_compatible=False)
+class NodeEventTracker:
+    """
+    Tracks node events during the splitter execution.
+    """
+
+    def __init__(self, tracker_mode, dump_prefix):
+        self.tracker_mode = tracker_mode
+        self.dump_prefix = dump_prefix
+        # list of events
+        self.events = []
+        # dict from node name to event index
+        self.node_events = {}
+        self.writer = print
+
+    def add(self, node: torch.fx.Node, desc: str, dep: Optional[torch.fx.Node] = None):
+        """
+        Add a new event to the tracker.
+        """
+        event = NodeEvent(node, desc, dep)
+        self.events.append(event)
+        if node.name not in self.node_events:
+            self.node_events[node.name] = []
+        self.node_events[node.name].append(len(self.events) - 1)
+
+    def print_node(self, node_name, recursive=False, tab="", writer=None):
+        """
+        Print a node and its events.
+        @param recursive: if True, print nodes that caused the events on this current node.
+        @param tab: Indentation for dependencies.
+        @param writer: function to write to file. If None, use print.
+        """
+        if not writer:
+            writer = self.writer
+        for idx in self.node_events.get(node_name, []):
+            event = self.events[idx]
+            writer(tab + event.to_str())
+            if recursive and event.dep is not None:
+                self.print_node(
+                    event.dep.name, recursive=True, tab="| " + tab, writer=writer
+                )
+
+    def to_dict(self):
+        """
+        Create dict dump on all events.
+        """
+        ret: dict[str, list[str]] = {}
+        for name in self.node_events.keys():
+            ret[name] = []
+            for idx in self.node_events.get(name, []):
+                event = self.events[idx]
+                ret[name].append(event.to_str())
+        return ret
+
+    def print_all(self, writer=None):
+        """
+        Print all nodes in a list.
+        @param writer: function to write to file. If None, use print.
+        """
+        if not writer:
+            writer = self.writer
+        for name in self.node_events.keys():
+            writer(f"Node: {name}:")
+            self.print_node(name, recursive=False, tab="  ", writer=writer)
+
+    def dump(self):
+        """
+        Function to be invoked at the end of the finder execution to printout tracked events specified by the mode.
+        """
+        # dump via trace_structured
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_net_acc_splitter_finder_events",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(self.to_dict()),
+        )
+
+        def writeln(f):
+            def fn(x):
+                return f.write(x + "\n")
+
+            return fn
+
+        # Mode 0: no local dump
+        # Mode >=1: Dump all events to file
+        if self.tracker_mode >= 1:
+            with open(self.dump_prefix + ALL_SUFFIX, "w") as f:
+                self.print_all(writeln(f))
+
+        def dump_selected_nodes(nodes):
+            with open(self.dump_prefix + NODES_SUFFIX, "w") as f:
+                for node_name in nodes:
+                    writeln(f"===== Tracking node {node_name} =====")
+                    self.print_node(
+                        node_name, recursive=True, tab="|-", writer=writeln(f)
+                    )
+                    writeln(f"===== End of tracking node {node_name} =====")
+
+        # Mode 2: Dump specific nodes in recursive manner.
+        # Mode 3: Dump all nodes with more than 1 event in recursive manner.
+        if self.tracker_mode == 2 or self.tracker_mode == 3:
+            nodes = (
+                os.environ.get(ENV_FX_NET_ACC_SPLITTER_TRACKER_TRACKED_NODES, "").split(
+                    ","
+                )
+                if self.tracker_mode == 2
+                else [
+                    name for name, events in self.node_events.items() if len(events) > 1
+                ]
+            )
+            dump_selected_nodes(nodes)
+
+
+@compatibility(is_backward_compatible=False)
 class FxNetAccNodesFinder:
     """
     Finds a set of nodes that can be supported on ACC, excluding nodes that have non-tensor
@@ -125,6 +298,8 @@ class FxNetAccNodesFinder:
         self.allow_non_tensor = allow_non_tensor
         self.acc_nodes: NodeSet = set()
 
+        self.tracker = NodeEventTracker(int(TRACKER_MODE), DUMP_PREFIX)
+
     def reduce_acc_nodes_non_tensor_input_helper(self, cpu_worklist: NodeList):
         """
         Transitively excludes nodes from ACC supported set.
@@ -139,7 +314,9 @@ class FxNetAccNodesFinder:
             for user in node.users:
                 if user in self.acc_nodes:
                     self.acc_nodes.remove(user)
+                    self.tracker.add(user, "acc_del|user_of_new_cpu_node", node)
                     if not is_node_output_tensor(user):
+                        self.tracker.add(user, "new_cpu_node|non_tensor_output")
                         cpu_worklist.append(user)
 
     def reduce_acc_nodes_non_tensor_input(self):
@@ -156,6 +333,7 @@ class FxNetAccNodesFinder:
                 continue
             if is_node_output_tensor(node):
                 continue
+            self.tracker.add(node, "new_cpu_node|callable_non_tensor_input")
             non_tensor_cpu_nodes.append(node)
 
         self.reduce_acc_nodes_non_tensor_input_helper(non_tensor_cpu_nodes)
@@ -174,6 +352,9 @@ class FxNetAccNodesFinder:
                 for user in acc_node.users:
                     if user not in self.acc_nodes:
                         new_cpu_nodes.append(acc_node)
+                        self.tracker.add(
+                            acc_node, "acc_del|non_tensor_output_with_cpu_user", user
+                        )
                         break
 
             if not new_cpu_nodes:
@@ -186,17 +367,22 @@ class FxNetAccNodesFinder:
 
     def __call__(self) -> NodeSet:
         submodules = dict(self.module.named_modules())
-        self.acc_nodes = {
-            n
-            for n in self.module.graph.nodes
-            if n.op in CALLABLE_NODE_OPS
-            and self.operator_support.is_node_supported(submodules, n)
-        }
+        self.acc_nodes = set()
+        for n in self.module.graph.nodes:
+            if n.op not in CALLABLE_NODE_OPS:
+                self.tracker.add(n, "init_cpu|not_callable")
+                continue
+            if not self.operator_support.is_node_supported(submodules, n):
+                self.tracker.add(n, "init_cpu|operator_support")
+                continue
+
+            self.tracker.add(n, "init_acc|callable_and_operator_supported")
+            self.acc_nodes.add(n)
 
         if not self.allow_non_tensor:
             self.reduce_acc_nodes_non_tensor_input()
             self.reduce_acc_nodes_non_tensor_output()
-
+        self.tracker.dump()
         return self.acc_nodes
 
 
