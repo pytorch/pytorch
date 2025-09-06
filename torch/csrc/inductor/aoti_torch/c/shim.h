@@ -220,6 +220,9 @@ aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_layout(AtenTensorHandle tensor, int32_t* ret_layout);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);

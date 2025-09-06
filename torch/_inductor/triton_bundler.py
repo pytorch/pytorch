@@ -183,6 +183,7 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+
             # Put the values back since we need it to use now
             (
                 kernel.fn.fn,
@@ -190,7 +191,9 @@ class TritonBundler:
                 kernel.fn.used_global_vals,
                 kernel.fn.repr,
                 kernel.launchers,
+                hash_lock,
             ) = old_values
+            kernel.fn._hash_lock = hash_lock
 
     @classmethod
     def collect_static_autotuners(

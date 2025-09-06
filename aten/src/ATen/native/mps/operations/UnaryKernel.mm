@@ -50,6 +50,7 @@ REGISTER_UNARY_TI_DISPATCH(log2);
 REGISTER_UNARY_TI_DISPATCH(log);
 REGISTER_UNARY_TI_DISPATCH(log1p);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
+REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 } // namespace at::native

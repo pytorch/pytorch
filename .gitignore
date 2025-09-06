@@ -32,6 +32,7 @@ coverage.xml
 aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
+aten/src/ATen/hip/HIPConfig.h
 benchmarks/.data
 caffe2/cpp_test/
 dist/
