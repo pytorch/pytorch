@@ -3,6 +3,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
@@ -312,8 +314,9 @@ inline void convert(const int32_t* src, int64_t* dst, int64_t n) {
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<int64_t>::size());
   svbool_t pg_64 = svwhilelt_b64(0ull, Vectorized<int64_t>::size());
 #pragma unroll
-  for (int64_t i = 0; i < n - fraction; i += Vectorized<int64_t>::size())
+  for (int64_t i = 0; i < n - fraction; i += Vectorized<int64_t>::size()) {
     svst1_s64(pg_64, dst + i, svunpklo_s64(svldnt1_s32(pg_32, src + i)));
+  }
 #pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<int64_t>::size()) {
     pg_32 = svwhilelt_b32(i, n);
@@ -345,6 +348,8 @@ inline void convert(const int64_t* src, float* dst, int64_t n) {
   }
 }
 
+#ifndef CPU_CAPABILITY_SVE128
+
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int32_t>::size();
@@ -361,6 +366,8 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
     svst1_f32(pg, dst + i, svcvt_f32_s32_x(pg, src_vec));
   }
 }
+
+#endif
 
 template <>
 inline void convert(const bool* src, int64_t* dst, int64_t n) {
