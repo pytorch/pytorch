@@ -393,10 +393,10 @@ elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
   test_hf_perf
 elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
-elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
-  test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
   test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
+  test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
