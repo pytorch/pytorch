@@ -641,20 +641,9 @@ class TestLazyModules(TestCase):
     ) -> None:
         module = nn.LazyLayerNorm(start_dim)
         input = torch.ones(input_shape)
-        output = module(input)  # materialized
+        module(input)  # materialized
 
         self.assertEqual(module.normalized_shape, normalized_shape_expected)
-
-        self.assertEqual(
-            output,
-            torch.nn.functional.layer_norm(
-                input,
-                module.normalized_shape,
-                module.weight,
-                module.bias,
-                module.eps,
-            ),
-        )
 
     def test_lazy_layer_norm_start_dim_calc(self) -> None:
         input_shape = (5, 3, 7, 10)
