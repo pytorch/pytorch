@@ -71,6 +71,7 @@ from .functions import (
     UserMethodVariable,
     WrapperUserFunctionVariable,
     WrapperUserMethodVariable,
+    CommunicationFunctionVariable,
 )
 from .higher_order_ops import (
     FunctionalCallVariable,
