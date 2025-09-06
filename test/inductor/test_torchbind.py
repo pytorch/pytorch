@@ -174,7 +174,7 @@ class TestTorchbind(TestCase):
                 custom_objs_config = file
             elif file.endswith("/custom_obj_0"):
                 custom_obj_0 = file
-            elif file.endswith(".json") and "metadata" not in file:
+            elif file.endswith("wrapper.json") and "metadata" not in file:
                 extern_json = file
 
         self.assertIsNotNone(custom_objs_config)
