@@ -370,6 +370,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         return name in [
             "ElectraForQuestionAnswering",
             "MegatronBertForQuestionAnswering",
+            "GPT2ForSequenceClassification",
         ]
 
     def _get_model_cls_and_config(self, model_name):
