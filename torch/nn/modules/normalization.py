@@ -347,7 +347,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
 
     def initialize_parameters(self, input) -> None:
         """
-        Infers ``normalized_shape`` based on ``dim`` and ``input`` also initializes parameters.
+        Infers ``normalized_shape`` based on ``start_dim`` and ``input`` also initializes parameters.
         """
 
         input_shape = input.shape
