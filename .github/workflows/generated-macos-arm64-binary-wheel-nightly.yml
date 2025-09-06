@@ -56,13 +56,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.4"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -77,13 +75,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -99,8 +93,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -111,33 +103,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -196,13 +164,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -217,13 +183,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -239,8 +201,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -251,33 +211,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -336,13 +272,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -357,13 +291,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -379,8 +309,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -391,33 +319,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -476,13 +380,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.0"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -497,13 +399,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -519,8 +417,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -531,33 +427,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -616,13 +488,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.0"
+          freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -637,13 +507,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -659,8 +525,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -671,33 +535,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -756,13 +596,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14.0-rc.2"
+          freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -777,13 +615,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -799,8 +633,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -811,33 +643,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -896,13 +704,11 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14.0-rc.2"
+          freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -917,13 +723,9 @@ jobs:
         working-directory: pytorch
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -939,8 +741,6 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -951,33 +751,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
