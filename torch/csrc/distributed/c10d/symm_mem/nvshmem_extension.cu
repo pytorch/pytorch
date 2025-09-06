@@ -867,26 +867,26 @@ __global__ void tile_reduce_kernel(T* src_ptr, T* dst_ptr, Shape2D shape, Stride
       scalar_type, name, \
       AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
 
-void tile_reduce(at::Tensor& input, at::Tensor& out, int64_t root, std::string group_name) {
+void tile_reduce(at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::string group_name) {
   /* Perform a tile reduce operation on the input tensor, with the root rank
    * receiving the reduced tensor. */
-  TORCH_CHECK(input.dtype() == at::kFloat, "Only float is supported");
-  TORCH_CHECK(input.dim() == 2 && out.dim() == 2, "Only 2D tensors are supported");
-  TORCH_CHECK_EQ(input.dtype(), out.dtype());
-  TORCH_CHECK_EQ(input.sizes(), out.sizes());
-  TORCH_CHECK_EQ(input.strides(), out.strides());
+  TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
+  TORCH_CHECK(in_tile.dim() == 2 && out_tile.dim() == 2, "Only 2D tensors are supported");
+  TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
+  TORCH_CHECK_EQ(in_tile.sizes(), out_tile.sizes());
+  TORCH_CHECK_EQ(in_tile.strides(), out_tile.strides());
 
-  c10::cuda::CUDAGuard guard(input.device());
-  auto hdl = c10d::symmetric_memory::rendezvous(input, group_name);
-  c10d::symmetric_memory::rendezvous(out, group_name);
+  c10::cuda::CUDAGuard guard(in_tile.device());
+  auto hdl = c10d::symmetric_memory::rendezvous(in_tile, group_name);
+  c10d::symmetric_memory::rendezvous(out_tile, group_name);
   nvshmem_team_t team = group_to_team(group_name, hdl->get_rank_to_global_rank());
   TORCH_CHECK(root < nvshmem_team_n_pes(team), "root must be smaller than group size");
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  auto shape = nvshmemx::make_shape(input.sizes()[0], input.sizes()[1]);
-  auto stride = nvshmemx::make_stride(input.strides()[0], input.strides()[1]);
-  void* src_ptr = input.data_ptr();
-  void* dst_ptr = out.mutable_data_ptr();
+  auto shape = nvshmemx::make_shape(in_tile.sizes()[0], in_tile.sizes()[1]);
+  auto stride = nvshmemx::make_stride(in_tile.strides()[0], in_tile.strides()[1]);
+  void* src_ptr = in_tile.data_ptr();
+  void* dst_ptr = out_tile.mutable_data_ptr();
   void* args[] = {
       &src_ptr,
       &dst_ptr,
@@ -895,7 +895,7 @@ void tile_reduce(at::Tensor& input, at::Tensor& out, int64_t root, std::string g
       &root,
       &team};
 
-  AT_DISPATCH_FLOAT(input.scalar_type(), "tile_reduce", [&]() {
+  AT_DISPATCH_FLOAT(in_tile.scalar_type(), "tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
         dim3(1),

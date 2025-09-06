@@ -54,8 +54,8 @@ void all_to_all_vdev_2d_offset(
     std::string group_name);
 
 void tile_reduce(
-    at::Tensor& input,
-    at::Tensor& out,
+    at::Tensor& in_tile,
+    at::Tensor& out_tile,
     int64_t root,
     std::string group_name);
 
