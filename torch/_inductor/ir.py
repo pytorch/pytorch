@@ -4841,7 +4841,7 @@ class TemplateBuffer(OperationBuffer):
                 return ops.load(inp.get_name(), indexer(index))
 
             deps.reads |= dependencies.extract_read_writes(
-                dummy, inp.get_size(), (), normalize=True
+                dummy, inp.get_size(), (), normalize=normalize
             ).reads
 
         return deps
