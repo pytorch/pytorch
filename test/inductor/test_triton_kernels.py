@@ -4,6 +4,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import os
 
 import torch
 import torch._dynamo.testing
@@ -1280,8 +1281,11 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    @common_utils.parametrize("dump_launch_params", ["0", "1"])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_equal_to_1_arg(self, dynamic):
+    def test_triton_kernel_equal_to_1_arg(self, dynamic, dump_launch_params):
+        os.environ["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = dump_launch_params
+
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
