@@ -79,7 +79,7 @@ void nvshmemx_cumodule_init(uintptr_t module) {
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  auto team_manager = c10d::nvshmem_extension::TeamManager::get();
+  auto& team_manager = TeamManager::get();
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
   int team_size = nvshmem_team_n_pes(team);
@@ -130,7 +130,7 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto team_manager = c10d::nvshmem_extension::TeamManager::get();
+  auto& team_manager = TeamManager::get();
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
@@ -814,74 +814,6 @@ void all_to_all_vdev_2d_offset(
       0,
       stream);
 }
-
-/* Tiled Communication */
-
-using Shape2D = nvshmemx::shape<int64_t, int64_t>;
-using Stride2D = nvshmemx::stride<int64_t, int64_t>;
-
-template <typename T>
-__global__ void tile_reduce_kernel(T* src_ptr, T* dst_ptr, Shape2D shape, Stride2D strides, int64_t root, nvshmem_team_t team) {
-#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
-  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
-#else
-  auto layout = nvshmemx::make_layout(shape, strides);
-  auto src_tensor = nvshmemx::Tensor(src_ptr, layout);
-  auto dst_tensor = nvshmemx::Tensor(dst_ptr, layout);
-  // src_tensor and dst_tensor are already the tiles to operate on, thus we set
-  // the start_coord to 0
-  auto start_coord = nvshmemx::make_shape(0, 0);
-  nvshmemx::tile_sum_reduce<decltype(src_tensor), decltype(dst_tensor), Shape2D, nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(
-      team, src_tensor, dst_tensor, start_coord, shape, root, 0 /* unused */);
-#endif
-}
-
-#define AT_DISPATCH_FLOAT(scalar_type, name, ...)         \
-  AT_DISPATCH_SWITCH(                                                  \
-      scalar_type, name, \
-      AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
-
-void tile_reduce(at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::string group_name) {
-  /* Perform a tile reduce operation on the input tensor, with the root rank
-   * receiving the reduced tensor. */
-  TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
-  TORCH_CHECK(in_tile.dim() == 2 && out_tile.dim() == 2, "Only 2D tensors are supported");
-  TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
-  TORCH_CHECK_EQ(in_tile.sizes(), out_tile.sizes());
-  TORCH_CHECK_EQ(in_tile.strides(), out_tile.strides());
-
-  c10::cuda::CUDAGuard guard(in_tile.device());
-  auto hdl = c10d::symmetric_memory::rendezvous(in_tile, group_name);
-  c10d::symmetric_memory::rendezvous(out_tile, group_name);
-  auto team_manager = c10d::nvshmem_extension::TeamManager::get();
-  nvshmem_team_t team = team_manager.get_team(group_name, hdl->get_rank_to_global_rank());
-  TORCH_CHECK(root < nvshmem_team_n_pes(team), "root must be smaller than group size");
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  auto shape = nvshmemx::make_shape(in_tile.sizes()[0], in_tile.sizes()[1]);
-  auto stride = nvshmemx::make_stride(in_tile.strides()[0], in_tile.strides()[1]);
-  void* src_ptr = in_tile.data_ptr();
-  void* dst_ptr = out_tile.mutable_data_ptr();
-  void* args[] = {
-      &src_ptr,
-      &dst_ptr,
-      &shape,
-      &stride,
-      &root,
-      &team};
-
-  AT_DISPATCH_FLOAT(in_tile.scalar_type(), "tile_reduce", [&]() {
-    nvshmemx_collective_launch(
-        (const void*)tile_reduce_kernel<scalar_t>,
-        dim3(1),
-        dim3(THREADS_PER_BLOCK),
-        args,
-        0,
-        stream);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  });
-}
-
 } // namespace c10d::nvshmem_extension
 
 
@@ -893,5 +825,4 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
-  m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/Exception.h>
 #include <string>
@@ -17,10 +18,10 @@
 namespace c10d::nvshmem_extension {
 
 // This corresponds to max nblocks
-constexpr int MAX_N_TEAMS = 32;
+constexpr int MAX_N_TEAMS = 128;
 
 // A pool of teams for each group. These are duplicate teams.
-using nvshmemTeamPool_t = std::vector<nvshmem_team_t>;
+using TeamPool = std::vector<nvshmem_team_t>;
 
 // Manage all the team business. Singleton.
 class TeamManager {
@@ -35,9 +36,8 @@ class TeamManager {
   nvshmem_team_t get_team(
       const std::string& group_name,
       const std::vector<int>& global_ranks) {
-    bool pool_updated = false; // unused
-    auto& team_pool =
-        group_to_team_pool(group_name, global_ranks, 1, pool_updated);
+    auto [team_pool, pool_updated] =
+        group_to_team_pool(group_name, global_ranks, 1);
     // Return the fist available team
     return team_pool[0];
   }
@@ -45,21 +45,22 @@ class TeamManager {
   // Get n teams for a group.
   // The first element of the returned pair is the team pool on host side.
   // The second element of the returned pair is the team pool on device side.
-  std::pair<const nvshmemTeamPool_t&, nvshmem_team_t*> get_n_teams(
+  // This API must be call with a device guard.
+  std::pair<const TeamPool&, nvshmem_team_t*> get_n_teams(
       const std::string& group_name,
       const std::vector<int>& global_ranks,
       const int need_n) {
     // Get the team pool with the requested number of teams
-    bool pool_updated = false;
-    auto& team_pool =
-        group_to_team_pool(group_name, global_ranks, need_n, pool_updated);
+    auto [team_pool, pool_updated] =
+        group_to_team_pool(group_name, global_ranks, need_n);
     // Check if the pool already exists in device memory
     nvshmem_team_t* team_pool_dev = nullptr;
     constexpr auto pool_bytes = sizeof(nvshmem_team_t) * MAX_N_TEAMS;
     auto it = team_pool_devptrs_.find(group_name);
     if (it == team_pool_devptrs_.end()) {
       // If not, allocate a new pool in device memory
-      C10_CUDA_CHECK(cudaMalloc((void**)&team_pool_dev, pool_bytes));
+      team_pool_dev = reinterpret_cast<nvshmem_team_t*>(
+          c10::cuda::CUDACachingAllocator::raw_alloc(pool_bytes));
       team_pool_devptrs_[group_name] = team_pool_dev;
     } else {
       team_pool_dev = it->second;
@@ -67,42 +68,48 @@ class TeamManager {
     // Update the pool in device memory if host side pool is updated
     if (pool_updated) {
       TORCH_INTERNAL_ASSERT(team_pool.size() == MAX_N_TEAMS);
-      C10_CUDA_CHECK(cudaMemcpy(
-          team_pool_dev, team_pool.data(), pool_bytes, cudaMemcpyHostToDevice));
+      auto stream = at::cuda::getCurrentCUDAStream();
+      C10_CUDA_CHECK(cudaMemcpyAsync(
+          team_pool_dev,
+          team_pool.data(),
+          pool_bytes,
+          cudaMemcpyHostToDevice,
+          stream));
     }
-    return std::make_pair(team_pool, team_pool_dev);
+    return std::make_pair(std::cref(team_pool), team_pool_dev);
   }
 
  private:
   // Get the team pool for a group. If the pool doesn't exist, create it. If the
   // pool exists but is not large enough, create more teams.
-  const nvshmemTeamPool_t& group_to_team_pool(
+  // The first element of the returned pair is the team pool on host side.
+  // The second element of the returned pair is a boolean indicating if the pool
+  // is updated.
+  std::pair<const TeamPool&, bool> group_to_team_pool(
       const std::string& group_name,
       const std::vector<int>& global_ranks,
-      const int need_n,
-      bool& pool_updated) {
+      const int need_n) {
     TORCH_CHECK(need_n < MAX_N_TEAMS, "Too many teams requested");
 
     // Insert a new team pool if not exists
-    auto pair = group_name_to_team_pool_.emplace(
-        group_name, nvshmemTeamPool_t(MAX_N_TEAMS, NVSHMEM_TEAM_INVALID));
-    // pair.first is an iterator to the inserted element or the existing element
-    auto& team_pool = pair.first->second;
-    // pair.second is true if the element is inserted, false if the element
-    // already exists
-    pool_updated = pair.second;
-
-    // Some checks before we create new teams
-    TORCH_CHECK(global_ranks.size() > 1);
-    int stride = global_ranks[1] - global_ranks[0];
-    for (size_t r = 1; r < global_ranks.size(); ++r) {
-      TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
-    }
+    auto [it, inserted] = group_name_to_team_pool_.emplace(
+        group_name, TeamPool(MAX_N_TEAMS, NVSHMEM_TEAM_INVALID));
+    auto& team_pool = it->second;
+    bool pool_updated = inserted;
 
     // Create new teams if what's requested is more than what we have
+    int stride = 0; // stride in globe, uninitialized
     for (int i = 0; i < need_n; ++i) {
       if (team_pool[i] != NVSHMEM_TEAM_INVALID) {
         continue;
+      }
+      // Some checks before we create new teams
+      if (stride == 0) { // Check only once
+        TORCH_CHECK(global_ranks.size() > 1);
+        stride = global_ranks[1] - global_ranks[0];
+        for (size_t r = 1; r < global_ranks.size(); ++r) {
+          TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
+        }
       }
       nvshmem_team_t team = NVSHMEM_TEAM_INVALID;
       nvshmem_team_split_strided(
@@ -117,12 +124,12 @@ class TeamManager {
       team_pool[i] = team;
       pool_updated = true;
     }
-    return team_pool;
+    return std::make_pair(std::cref(team_pool), pool_updated);
   }
 
  private:
   // A map from group name to team pool for that group.
-  std::unordered_map<std::string, nvshmemTeamPool_t> group_name_to_team_pool_;
+  std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
   std::unordered_map<std::string, nvshmem_team_t*> team_pool_devptrs_;
 };
