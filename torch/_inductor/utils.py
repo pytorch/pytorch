@@ -1842,7 +1842,7 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     Check if we should use the contiguous subgraph transform.
     This transform makes the second matrix contiguous before the matmul.
     """
-    decompose_k_threshold = config.triton.decompose_k_threshold
+    contiguous_threshold = config.rocm.contiguous_threshold
 
     # Similar conditions to decompose_k but for contiguous transform
     from torch._inductor.virtualized import V
@@ -1851,8 +1851,8 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         bool(torch.version.hip)  # Only relevant on AMD
         and V.graph.sizevars.statically_known_true(
             sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
+                sympy.Ge(k, contiguous_threshold * m),
+                sympy.Ge(k, contiguous_threshold * n),
             )
         )
         and not V.graph.aot_mode
