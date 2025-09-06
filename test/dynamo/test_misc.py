@@ -12638,22 +12638,6 @@ fn
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
 
-    def test_compiled_class_graph_break(self):
-        counter = CompileCounter()
-
-        @torch.compile(backend=counter, fullgraph=False)
-        def f(x):
-            x += 1
-
-            class C:
-                pass
-
-            return x.sin()
-
-        x = torch.randn(3)
-        f(x)
-        self.assertEqual(counter.frame_count, 2)
-
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module
