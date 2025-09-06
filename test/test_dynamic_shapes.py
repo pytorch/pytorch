@@ -528,6 +528,54 @@ class TestPySymInt(TestCase):
             """[Eq(s97, 2)]""",
         )
 
+    def test_sym_wrap(self):
+        from torch.fx.experimental.symbolic_shapes import sym_wrap
+
+        cnt = CompileCounterWithBackend("eager")
+        def f(x, x1, y, z):
+            return x + x1 + y + z + 2, torch.randn(x + x1)
+
+        s0 = sym_wrap(4, "s0")
+        s1 = sym_wrap(5, "s1")
+        f1 = sym_wrap(3.2, "f1")
+        assert s0 + s1 + 2 <= 32  # guard added in token shape env (but no propagation yet)
+        fn = torch.compile(f, fullgraph=True, backend=cnt)
+        out = fn(s0, s0, 2*s0, f1)
+        print(out)
+        print(fn(1, 1, 2, 0.07))
+        self.assertEqual(cnt.frame_count, 1)
+        fn(1, 1, 3, -0.5)  # guard failure: y == 2*x
+        self.assertEqual(cnt.frame_count, 2)  # NB: for this recompile we just allocate 3 new symints; SymTokens aren't involved in this call
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 2
+            def forward(self, x):
+                return x + self.a
+
+        cnt.clear()
+        gn = torch.compile(Foo(), fullgraph=True, backend=cnt)
+        self.assertEqual(gn(2), 4)
+        gn.a = 4
+        self.assertEqual(gn(4), 8)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_sym_wrap_disabled(self):
+        from torch.fx.experimental.symbolic_shapes import sym_wrap
+
+        @torch._dynamo.disable
+        def g(x):
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + 2, g(x) + 2
+
+        s0 = sym_wrap(2, "s0")
+        out = f(s0)
+        breakpoint()
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
