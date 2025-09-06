@@ -1929,9 +1929,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
