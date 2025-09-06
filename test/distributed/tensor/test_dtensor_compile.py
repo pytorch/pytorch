@@ -24,6 +24,7 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Sh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
+    loss_parallel,
     parallelize_module,
     PrepareModuleInput,
     PrepareModuleOutput,
@@ -220,7 +221,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
             group1 = x.get_group(mesh_dim=1)
             return size, coord, group0, group1
 
-        # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
+        # Can't be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
@@ -274,6 +275,46 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    @skipIfHpu
+    def test_dtensor_dynamic_slice(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            return [
+                t.redistribute(
+                    device_mesh=x.device_mesh, placements=[Replicate()]
+                ).to_local()[0]
+                for t in torch.tensor_split(x, 2)
+            ]
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    @skipIfHpu
+    def test_dtensor_dynamic_loss_parallel_log_softmax(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            t = torch.nn.functional.log_softmax(x, x.ndim - 1, dtype=torch.float32)
+            return t.redistribute(
+                device_mesh=x.device_mesh, placements=[Replicate()]
+            ).to_local()[0]
+
+        with loss_parallel():
+            x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(1)], run_check=False)
+            ref = fn(x)
+
+            opt_fn = torch.compile(
+                fn, backend="aot_eager", fullgraph=True, dynamic=True
+            )
+            res = opt_fn(x)
         self.assertEqual(res, ref)
 
     def test_dtensor_attribute_access_on_intermediate(self):

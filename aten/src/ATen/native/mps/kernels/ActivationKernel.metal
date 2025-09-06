@@ -33,21 +33,15 @@ struct shrink_backward_functor {
 
 REGISTER_UNARY_ALPHA_OP(hardshrink, float, float, float);
 REGISTER_UNARY_ALPHA_OP(hardshrink, half, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_ALPHA_OP(hardshrink, bfloat, bfloat, bfloat);
-#endif
 
 REGISTER_UNARY_ALPHA_OP(softshrink, float, float, float);
 REGISTER_UNARY_ALPHA_OP(softshrink, half, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_ALPHA_OP(softshrink, bfloat, bfloat, bfloat);
-#endif
 
 REGISTER_BINARY_ALPHA_OP(shrink_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, half, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
-#endif
 
 struct hardsigmoid_functor {
   template <typename T>
@@ -67,15 +61,11 @@ struct hardsigmoid_backward_functor {
 
 REGISTER_UNARY_OP(hardsigmoid, float, float);
 REGISTER_UNARY_OP(hardsigmoid, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_OP(hardsigmoid, bfloat, bfloat);
-#endif
 
 REGISTER_BINARY_OP(hardsigmoid_backward, float, float);
 REGISTER_BINARY_OP(hardsigmoid_backward, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat);
-#endif
 
 struct hardswish_functor {
   template <typename T>
@@ -103,15 +93,11 @@ struct hardswish_backward_functor {
 
 REGISTER_UNARY_OP(hardswish, float, float);
 REGISTER_UNARY_OP(hardswish, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_OP(hardswish, bfloat, bfloat);
-#endif
 
 REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
-#endif
 
 struct leaky_relu_functor {
   template <typename T>
@@ -135,12 +121,8 @@ struct leaky_relu_backward_functor {
 
 REGISTER_UNARY_ALPHA_OP(leaky_relu, float, float, float);
 REGISTER_UNARY_ALPHA_OP(leaky_relu, half, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_ALPHA_OP(leaky_relu, bfloat, bfloat, bfloat);
-#endif
 
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
-#endif

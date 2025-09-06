@@ -126,7 +126,7 @@ class BertSelfAttention(nn.Module):
 
             if self.position_embedding_type == "relative_key":
                 # these were einsum ops in the positional code because they are not easy to fit to existing matmul operators
-                # eventhough they are degenerate matmuls
+                # even though they are degenerate matmuls
                 relative_position_scores = (q * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores
             elif self.position_embedding_type == "relative_key_query":

@@ -202,7 +202,7 @@ inline void setTensorMetadata(
 }
 
 // Register function pointer of Tensor BackendMetadata for serialization.
-TORCH_API inline void TensorBackendMetaRegistry(
+inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
     const BackendMetaPtr& get_fptr,
     const BackendMetaPtr& set_fptr) {

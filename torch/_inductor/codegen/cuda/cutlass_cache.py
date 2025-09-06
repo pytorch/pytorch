@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ from typing import Any, Optional
 
 import torch._inductor.config as config
 from torch._inductor.codecache import cutlass_key
+from torch._inductor.codegen.cuda import cutlass_utils, serialization
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch, get_cuda_version
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.runtime.cache_dir_utils import cache_dir
@@ -27,14 +29,26 @@ def get_config_request_key(
     instantiation_level: str,
 ) -> str:
     """
-    Return a key for the full ops, based on cutlass key, arch, cuda version, and instantiation level.
+    Return a key for the full ops, based on cutlass key, arch, cuda version, instantiation level, and serialization.py file hash.
     """
+
+    # Get hash of serialization.py and cutlass_utils.py files using their module file paths
+    def get_file_hash(file_module):
+        file_path = inspect.getfile(file_module)
+        with open(file_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    serialization_hash = get_file_hash(serialization)
+    cutlass_utils_hash = get_file_hash(cutlass_utils)
+
     hash_target = "-".join(
         [
             cutlass_key().hex(),
             arch,
             cuda_version,
             instantiation_level,
+            serialization_hash,
+            cutlass_utils_hash,
         ]
     )
     return hashlib.sha256(hash_target.encode("utf-8")).hexdigest()[0:8]

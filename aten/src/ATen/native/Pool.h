@@ -17,7 +17,7 @@ using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& g
 DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel)
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel)
 
-// averge pooling has same signature for forward and backward
+// average pooling has same signature for forward and backward
 using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int64_t kW, int64_t kH,
     int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
@@ -26,7 +26,7 @@ using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel)
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel)
 
-// averge pooling has same signature for forward and backward
+// average pooling has same signature for forward and backward
 using avg_pool3d_fn = void(*)(const Tensor& output, const Tensor& input,
     int64_t kW, int64_t kH, int64_t kD, int64_t dW, int64_t dH, int64_t dD,
     int64_t padW, int64_t padH, int64_t padD, bool count_include_pad,

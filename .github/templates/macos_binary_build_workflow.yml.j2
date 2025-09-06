@@ -47,9 +47,6 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 0
-{%- if cross_compile_arm64 %}
-  CROSS_COMPILE_ARM64: 1
-{% endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -71,11 +68,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Populate binary env
         run: |
@@ -113,12 +105,33 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
-            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
-          else
-            conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
-          fi
+
+          EXTRA_CONDA_INSTALL_FLAGS=""
+          CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
+          case $DESIRED_PYTHON in
+            3.14t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
+            3.14)
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
+            3.13t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+              desired_python="3.13"
+              ;;
+            *)
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
+              ;;
+          esac
+
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 

@@ -28,7 +28,9 @@ void c10_cuda_check_implementation(
   std::string check_message;
 #ifndef STRIP_ERROR_MESSAGES
   check_message.append("CUDA error: ");
-  check_message.append(cudaGetErrorString(cuda_error));
+  const char* error_string = cudaGetErrorString(cuda_error);
+  check_message.append(error_string);
+  check_message.append(c10::cuda::get_cuda_error_help(cuda_error));
   check_message.append(c10::cuda::get_cuda_check_suffix());
   check_message.append("\n");
   if (include_device_assertions) {

@@ -72,9 +72,9 @@ class CacheArtifactFactory:
     @classmethod
     def register(cls, artifact_cls: type[CacheArtifact]) -> type[CacheArtifact]:
         artifact_type_key = artifact_cls.type()
-        assert (
-            artifact_cls.type() not in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        assert artifact_cls.type() not in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        )
         cls._artifact_types[artifact_type_key] = artifact_cls
         setattr(
             CacheInfo,
@@ -85,9 +85,9 @@ class CacheArtifactFactory:
 
     @classmethod
     def _get_artifact_type(cls, artifact_type_key: str) -> type[CacheArtifact]:
-        assert (
-            artifact_type_key in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        assert artifact_type_key in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        )
         return cls._artifact_types[artifact_type_key]
 
     @classmethod
@@ -133,6 +133,10 @@ class CacheInfo:
 
     @property
     def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
+    @property
+    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
     def add(self, artifact: CacheArtifact) -> None:
@@ -182,21 +186,21 @@ class CacheArtifactManager:
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on
         a potentially different process
 
-    NOTE: There's no FB/FC guarentees, results of cache artifacts will not be
+    NOTE: There's no FB/FC guarantees, results of cache artifacts will not be
           used unless code version matches.
     """
 
     # Protected by the compile_lock
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
     # internal data structure of the _serializer
     # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[
-        tuple[str, list[CacheArtifact]]
-    ] = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
+        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    )
     _cache_info: CacheInfo = CacheInfo()
 
     @classmethod

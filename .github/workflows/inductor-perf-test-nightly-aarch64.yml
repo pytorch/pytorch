@@ -48,7 +48,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-label-type:
@@ -114,6 +116,7 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "linux.arm64.m7g.metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
 

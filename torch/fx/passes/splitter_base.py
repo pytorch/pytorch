@@ -222,7 +222,7 @@ class SplitResult(NamedTuple):
         split_module: root module after splitting.
         submodule_inputs: a dict that maps submodule name to its inputs.
         non_acc_submodule_prefix: the prefix for non acc submodules. For
-            acc submodule the prefix is alwasy "_run_on_acc_".
+            acc submodule the prefix is always "_run_on_acc_".
     """
 
     split_module: torch.fx.GraphModule
@@ -719,7 +719,7 @@ class _SplitterBase:
         """
         # Dict that maps node to its users and ignore users that
         # are in the subgraph that has greater tag
-        deps = self.find_reverse_deps(tag_id=int(tag.split("_")[-1]))
+        deps = self.find_reverse_deps(tag_id=int(tag.rsplit("_", maxsplit=1)[-1]))
         self.update_reverse_deps_for_fusions(deps)
 
         # Parent nodes of the subgraph

@@ -32,6 +32,15 @@ std::ostream& operator<<(std::ostream& os, const Placement& placement) {
   return os;
 }
 
+namespace {
+void assertCudaDeviceHasIndex(const c10::Device& device) {
+  if (device.is_cuda()) {
+    TORCH_CHECK(
+        device.has_index(), "CUDA device in placement must have an index");
+  }
+}
+} // namespace
+
 Placement::Placement(std::optional<c10::Device> defaultDevice)
     : Placement({}, defaultDevice) {}
 
@@ -39,16 +48,20 @@ Placement::Placement(
     const std::unordered_map<c10::Device, c10::Device>& deviceMap,
     std::optional<c10::Device> defaultDevice) {
   for (const auto& [srcDevice, dstDevice] : deviceMap) {
-    deviceMap_.try_emplace(
-        normalizeDevice(srcDevice), normalizeDevice(dstDevice));
+    assertCudaDeviceHasIndex(srcDevice);
+    assertCudaDeviceHasIndex(dstDevice);
+
+    deviceMap_.try_emplace(srcDevice, dstDevice);
   }
+
   if (defaultDevice.has_value()) {
-    defaultDevice_ = normalizeDevice(defaultDevice.value());
+    assertCudaDeviceHasIndex(defaultDevice.value());
+    defaultDevice_ = defaultDevice.value();
   }
 }
 
 c10::Device Placement::getMappedDevice(const c10::Device& srcDevice) const {
-  auto it = deviceMap_.find(normalizeDevice(srcDevice));
+  auto it = deviceMap_.find(srcDevice);
   if (it != deviceMap_.end()) {
     return it->second;
   }

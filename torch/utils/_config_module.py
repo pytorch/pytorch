@@ -52,17 +52,17 @@ class _Config(Generic[T]):
         alias: If set, the directly use the value of the alias.
         env_name_force: If set, this environment variable has precedence over
             everything after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
             after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         justknob: If this pytorch installation supports justknobs, that will
-            override defaults, but will not override the user_override precendence.
-        default: This value is the lowest precendance, and will be used if nothing is
+            override defaults, but will not override the user_override precedence.
+        default: This value is the lowest precedence, and will be used if nothing is
             set.
 
     Environment Variables:
@@ -112,7 +112,7 @@ class _Config(Generic[T]):
 
     @staticmethod
     def string_or_list_of_string_to_list(
-        val: Optional[Union[str, list[str]]]
+        val: Optional[Union[str, list[str]]],
     ) -> Optional[list[str]]:
         if val is None:
             return None
@@ -135,8 +135,7 @@ if TYPE_CHECKING:
         env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
-    ) -> T:
-        ...
+    ) -> T: ...
 
 else:
 
@@ -323,9 +322,9 @@ class _ConfigEntry:
 
         # Ensure justknobs and envvars are allowlisted types
         if self.justknob is not None and self.default is not None:
-            assert isinstance(
-                self.default, bool
-            ), f"justknobs only support booleans, {self.default} is not a boolean"
+            assert isinstance(self.default, bool), (
+                f"justknobs only support booleans, {self.default} is not a boolean"
+            )
         if self.value_type is not None and (
             config.env_name_default is not None or config.env_name_force is not None
         ):
@@ -334,7 +333,9 @@ class _ConfigEntry:
                 str,
                 Optional[bool],
                 Optional[str],
-            ), f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            ), (
+                f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            )
 
 
 class ConfigModule(ModuleType):

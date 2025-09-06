@@ -231,7 +231,7 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
 
     # note: for uneven sharding, we need to specify the shape and stride because
     # DTensor would assume even sharding and compute shape/stride based on the
-    # assumption. Torchrec needs to pass in this information explicitely.
+    # assumption. Torchrec needs to pass in this information explicitly.
     # shape/stride are global tensor's shape and stride
     dtensor = DTensor.from_local(
         local_shards_wrapper,  # a torch.Tensor subclass
@@ -324,7 +324,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         # create a DTensor from the local shard for the current table
         # note: for uneven sharding, we need to specify the shape and stride because
         # DTensor would assume even sharding and compute shape/stride based on the
-        # assumption. Torchrec needs to pass in this information explicitely.
+        # assumption. Torchrec needs to pass in this information explicitly.
         dtensor = DTensor.from_local(
             local_shards,
             device_submesh,

@@ -144,7 +144,7 @@ jobs:
         run: |
           make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
       - name: Push nightly tags
-        if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' && matrix.build_platforms == 'linux/amd4' }}
+        if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' && matrix.platform == 'linux/amd4' }}
         run: |
           PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-runtime"
           CUDA_SUFFIX="-cu${CUDA_VERSION}"

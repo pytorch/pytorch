@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_baseexception.py b/test/dynamo/cpython/3_13/test_baseexception.py
-index e599b02c17d..3dc102e3b8a 100644
+index e599b02c17d..750d7a84fb4 100644
 --- a/test/dynamo/cpython/3_13/test_baseexception.py
 +++ b/test/dynamo/cpython/3_13/test_baseexception.py
-@@ -1,10 +1,61 @@
+@@ -1,10 +1,64 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_baseexception.py
 +
 +import sys
 +import torch
@@ -65,7 +68,7 @@ index e599b02c17d..3dc102e3b8a 100644
  
      """Tests for anything relating to exception objects themselves (e.g.,
      inheritance hierarchy)"""
-@@ -78,9 +129,6 @@ class ExceptionClassTests(unittest.TestCase):
+@@ -78,9 +132,6 @@ class ExceptionClassTests(unittest.TestCase):
                  last_depth = depth
          finally:
              inheritance_tree.close()
@@ -75,7 +78,7 @@ index e599b02c17d..3dc102e3b8a 100644
          self.assertEqual(len(exc_set), 0, "%s not accounted for" % exc_set)
  
      interface_tests = ("length", "args", "str", "repr")
-@@ -142,7 +190,7 @@ class ExceptionClassTests(unittest.TestCase):
+@@ -142,7 +193,7 @@ class ExceptionClassTests(unittest.TestCase):
          gc.collect()
  
  
@@ -84,7 +87,7 @@ index e599b02c17d..3dc102e3b8a 100644
  
      """Test usage of exceptions"""
  
-@@ -208,5 +256,5 @@ class UsageTests(unittest.TestCase):
+@@ -208,5 +259,5 @@ class UsageTests(unittest.TestCase):
          self.catch_fails("spam")
  
  

@@ -13,6 +13,8 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -24,10 +26,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
-#ifdef USE_DISTRIBUTED
-#include <torch/csrc/distributed/rpc/py_rref.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
-#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
@@ -649,7 +647,7 @@ inline InferredType tryToInferContainerType(
           "."));
     } else {
       // TODO: this message is not correct anymore, since this InferredType is
-      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // used from a bunch of circumstances unrelated to tracing. We can reuse
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
           "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",

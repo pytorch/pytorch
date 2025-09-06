@@ -101,7 +101,13 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
         fake_args = [convert_to_fake(arg) for arg in proxy_args]
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
-        mod._infer_parameters(mod, fake_args, fake_kwargs)
+        try:
+            mod._infer_parameters(mod, fake_args, fake_kwargs)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+            )
 
 
 @contextmanager
@@ -903,7 +909,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @functools.cache
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
-        supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
+        supported = {
+            torch.nn.Module.__setattr__,
+            torch.nn.Module.__init__,
+            torch.nn.Module.__delattr__,
+        }
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
@@ -983,7 +993,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward
 
         if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
+            source = self.get_source_by_walking_mro(name)
         else:
             source = None
 
@@ -1011,7 +1021,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                source = self.get_source_by_walking_mro(name)
             else:
                 source = None
 
@@ -1026,9 +1036,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(
-                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
-                )
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, source=source),
                     args,
@@ -1087,9 +1095,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     # Handle submodules
                     self.is_state_mutated = True
 
-            if method is torch.nn.Module.__setattr__ and isinstance(
-                args[1], variables.DeletedVariable
-            ):
+            if (
+                method is torch.nn.Module.__setattr__
+                and isinstance(args[1], variables.DeletedVariable)
+            ) or method is torch.nn.Module.__delattr__:
                 # Trace through __delattr__ to track mutations on the module
                 # members like `_modules``.
                 return tx.inline_user_function_return(

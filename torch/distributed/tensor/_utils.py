@@ -284,19 +284,19 @@ def compute_global_tensor_shape(
     if isinstance(placements[0], Replicate):
         return shape
     elif isinstance(placements[0], Shard):
-        local_shape = torch.tensor(list(shape))
+        local_shape = torch.tensor(list(shape), device=mesh.device_type)
         gathered_shaped_tensors = [
             torch.empty_like(local_shape, device=local_shape.device)
             for _ in range(mesh.size())
         ]
-        funcol.all_gather_inplace(gathered_shaped_tensors, local_shape)
+        funcol.all_gather_inplace(gathered_shaped_tensors, local_shape, mesh)
         sharded_dim_sum = 0
         shard_dim = placements[0].dim
         other_dims = [d for d in range(mesh.ndim) if d != shard_dim]
         for shape_tensor in gathered_shaped_tensors:
             if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
                 raise RuntimeError(
-                    "Non-sharded dimentions should have identical size across ranks."
+                    "Non-sharded dimensions should have identical size across ranks."
                 )
             shape_tensor_list = shape_tensor.tolist()
             sharded_dim_sum += shape_tensor_list[shard_dim]

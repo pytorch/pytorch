@@ -106,7 +106,7 @@ def _normalization_device(
     elif isinstance(device, str):
         device = torch.device(device)
 
-    # variable devcie can only be torch.device type or int type
+    # variable device can only be torch.device type or int type
     if isinstance(device, torch.device):
         if device.type != custom_backend_name:
             raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
@@ -426,9 +426,9 @@ def _get_custom_mod_func(func_name: str):
     it is marked as private. It is a convenience function for backend implementers to
     more easily call the hooks into their backend extensions.
     """
-    assert isinstance(
-        func_name, str
-    ), f"func_name must be `str`, but got `{type(func_name)}`."
+    assert isinstance(func_name, str), (
+        f"func_name must be `str`, but got `{type(func_name)}`."
+    )
     backend_name = _get_privateuse1_backend_name()
     custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
     function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]

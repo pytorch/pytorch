@@ -359,8 +359,8 @@ void SimpleValue::setAttr(
         throw(
             ErrorReport(loc)
             << "Assignment to attribute '" << field
-            << "' cannot be of a type that contains class "
-            << "'" << classType->repr_str() << "'.\n"
+            << "' cannot be of a type that contains class " << "'"
+            << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported");
       }
@@ -824,6 +824,84 @@ SugaredValuePtr SugaredEnumClass::iter(
   auto enum_values_list_constant = std::make_shared<SimpleValue>(
       m.graph()->insertConstant(enum_value_ivalues, loc));
   return enum_values_list_constant;
+}
+
+std::shared_ptr<SugaredValue> TorchCheckValue::call(
+    const SourceRange& loc,
+    GraphFunction& m,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  if (args.size() + kwargs.size() < 1 || args.size() + kwargs.size() > 2) {
+    throw(
+        ErrorReport(loc) << "torch._check() expects 1 or 2 arguments, got "
+                         << (args.size() + kwargs.size()));
+  }
+
+  NamedValue* cond_arg = nullptr;
+  NamedValue* message_arg = nullptr;
+  bool found_cond_kwarg = false;
+  bool found_message_kwarg = false;
+
+  for (const auto& kwarg : kwargs) {
+    if (kwarg.name() == "cond") {
+      if (found_cond_kwarg) {
+        throw(
+            ErrorReport(loc)
+            << "torch._check() got multiple values for argument 'cond'");
+      }
+      cond_arg = const_cast<NamedValue*>(&kwarg);
+      found_cond_kwarg = true;
+    } else if (kwarg.name() == "message") {
+      if (found_message_kwarg) {
+        throw(
+            ErrorReport(loc)
+            << "torch._check() got multiple values for argument 'message'");
+      }
+      message_arg = const_cast<NamedValue*>(&kwarg);
+      found_message_kwarg = true;
+    } else {
+      throw(
+          ErrorReport(loc) << "torch._check() got unexpected keyword argument '"
+                           << kwarg.name() << "'");
+    }
+  }
+
+  if (args.size() >= 1) {
+    if (found_cond_kwarg) {
+      throw(
+          ErrorReport(loc)
+          << "torch._check() got multiple values for argument 'cond'");
+    }
+    cond_arg = const_cast<NamedValue*>(&args[0]);
+  }
+
+  if (args.size() >= 2) {
+    if (found_message_kwarg) {
+      throw(
+          ErrorReport(loc)
+          << "torch._check() got multiple values for argument 'message'");
+    }
+    message_arg = const_cast<NamedValue*>(&args[1]);
+  }
+
+  if (!cond_arg) {
+    throw(
+        ErrorReport(loc) << "torch._check() missing required argument 'cond'");
+  }
+
+  std::vector<NamedValue> assert_args;
+  assert_args.push_back(*cond_arg);
+
+  if (message_arg) {
+    assert_args.push_back(*message_arg);
+  } else {
+    Value* default_msg = insertConstant(*m.graph(), std::string(""), loc);
+    assert_args.emplace_back(loc, "message", default_msg);
+  }
+
+  emitBuiltinCall(loc, *m.graph(), Symbol::aten("_assert"), assert_args, {});
+  return std::make_shared<NoneValue>();
 }
 
 } // namespace torch::jit

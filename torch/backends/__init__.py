@@ -131,10 +131,12 @@ from torch.backends import (
     cusparselt as cusparselt,
     kleidiai as kleidiai,
     mha as mha,
+    miopen as miopen,
     mkl as mkl,
     mkldnn as mkldnn,
     mps as mps,
     nnpack as nnpack,
     openmp as openmp,
+    opt_einsum as opt_einsum,
     quantized as quantized,
 )

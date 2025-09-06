@@ -178,14 +178,18 @@ class _Formatter:
                     self.int_mode = False
                     break
 
+            self.sci_mode = (
+                nonzero_finite_max / nonzero_finite_min > 1000.0
+                or nonzero_finite_max > 1.0e8
+                or nonzero_finite_min < 1.0e-4
+                if PRINT_OPTS.sci_mode is None
+                else PRINT_OPTS.sci_mode
+            )
+
             if self.int_mode:
                 # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
                 # to indicate that the tensor is of floating type. add 1 to the len to account for this.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                ):
-                    self.sci_mode = True
+                if self.sci_mode:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
@@ -195,12 +199,7 @@ class _Formatter:
                         self.max_width = max(self.max_width, len(value_str) + 1)
             else:
                 # Check if scientific representation should be used.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                    or nonzero_finite_min < 1.0e-4
-                ):
-                    self.sci_mode = True
+                if self.sci_mode:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
@@ -208,9 +207,6 @@ class _Formatter:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}f}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
-
-        if PRINT_OPTS.sci_mode is not None:
-            self.sci_mode = PRINT_OPTS.sci_mode
 
     def width(self):
         return self.max_width

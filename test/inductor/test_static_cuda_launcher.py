@@ -13,11 +13,10 @@ from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfRocm
-from torch.testing._internal.triton_utils import requires_cuda
-from torch.torch_version import TorchVersion
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-@requires_cuda
+@requires_cuda_and_triton
 class TestStaticCudaLauncher(TestCase):
     def setUp(self):
         super().setUp()
@@ -138,36 +137,6 @@ class TestStaticCudaLauncher(TestCase):
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
-        self.assertEqual(new_arg0, arg0)
-
-    # TODO: floats don't work properly, triton seems to think they're all tl.float32
-    # despite type annotations.
-    # There's also not really a good way for me to make a float16 in python...
-    @skipIfRocm
-    def test_floats(self):
-        @triton.jit
-        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
-            x = tl.load(arg0)
-            y = arg1 + arg2 + arg3
-            tl.store(arg0, x + y)
-
-        arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
-
-        args = (arg0, 1.0, 1.0, 1.0)
-
-        compiled_kernel = floats[1,](*args)
-        launcher = self._make_launcher(compiled_kernel)
-        if TorchVersion(triton.__version__) >= TorchVersion("3.4.0"):
-            self.assertEqual(launcher.arg_tys, "Offd")
-        else:
-            self.assertEqual(launcher.arg_tys, "Offf")
-        # TODO this line fails on Triton 3.4.0 (https://github.com/triton-lang/triton/issues/6176)
-        # Add the check back when this is fixed in Triton
-        # self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
-        new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
-        device_interface = get_interface_for_device("cuda")
-        stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run(1, 1, 1, stream, new_arg0, 1.0, 1.0, 1.0)
         self.assertEqual(new_arg0, arg0)
 
     @skipIfRocm
@@ -427,7 +396,7 @@ def kernel_many_args(out_tensor, {decl}):
         self.assertEqual(buf0, buf1)
 
 
-@requires_cuda
+@requires_cuda_and_triton
 @torch._inductor.config.patch(
     {"use_static_cuda_launcher": True, "strict_static_cuda_launcher": True}
 )

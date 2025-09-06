@@ -23,18 +23,32 @@ AliasAnalyzer::AliasAnalyzer(
     maybe_update_aliases_from_schema(node, schemas);
   }
 
+  maybe_extend_lifetimes(graph);
+
+  // squash_deep_aliases this will populate aliases_
+  // with a mapping from each alias to its backed
+  // source (i.e., the value that owns the underlying
+  // dataptr for said alias)
+  squash_deep_aliases(graph);
+
   // set all non-aliasing outputs. outputs
   // that are aliased will be set later when
   // lifetimes are extended
   for (const auto* output : graph.outputs()) {
     if (!is_alias(output)) {
-      values_associated_with_outputs_.insert(output);
+      values_associated_with_outputs_.emplace(output);
     }
   }
 
-  maybe_extend_lifetimes(graph);
   log_state();
-}
+
+  alive_values_at_time_.resize(graph.nodes().size());
+  for (const auto& [v, lifetime] : lifetimes_) {
+    for (const auto t : c10::irange(lifetime.start, lifetime.end + 1)) {
+      alive_values_at_time_[t].emplace_back(v);
+    }
+  }
+} // namespace torch::nativert
 
 bool /* applied */ AliasAnalyzer::update_aliases_if_packed_listunpack(
     const Node& node,
@@ -52,18 +66,18 @@ bool /* applied */ AliasAnalyzer::update_aliases_if_packed_listunpack(
   }
 
   const auto& list_elems = list->getListElements();
-  TORCH_CHECK_EQ(list_elems.size(), node.numOutputs());
+  TORCH_CHECK(list_elems.size() == node.numOutputs());
 
   for (const auto j : c10::irange(node.numOutputs())) {
     const Value* input = list_elems.at(j);
     const Value* output = node.outputs().at(j);
 
-    TORCH_CHECK_NE(input, output);
+    TORCH_CHECK(input != output);
 
     create_or_update_lifetime(input, i);
     create_or_update_lifetime(output, i);
 
-    aliases_[output].insert(input);
+    aliases_[output].emplace(input);
   }
 
   return true;
@@ -96,7 +110,7 @@ void AliasAnalyzer::maybe_update_aliases_from_schema(
         VLOG(1) << node.target()
                 << " may contain input/output alias: " << input->id() << " -> "
                 << output->id();
-        aliases_[output].insert(input);
+        aliases_[output].emplace(input);
       }
     }
   }
@@ -106,6 +120,56 @@ void AliasAnalyzer::create_or_update_lifetime(const Value* value, size_t i) {
   if (auto [lifetimeIt, inserted] = lifetimes_.try_emplace(value, i, i);
       !inserted) {
     lifetimeIt->second.end = i;
+  }
+}
+
+void AliasAnalyzer::squash_deep_aliases(const Graph& graph) {
+  for (auto& node : graph.nodes()) {
+    for (const auto& output : node.outputs()) {
+      auto aliasIt = aliases_.find(output);
+      if (aliasIt == aliases_.end()) {
+        continue;
+      }
+
+      c10::FastSet<const Value*> filtered_srcs;
+
+      auto& srcs = aliasIt->second;
+      for (const auto* src : srcs) {
+        // check if this source is an alias itself,
+        // making 'output' a deep alias (i.e.,
+        // an alias of an alias)
+
+        // we want aliases_[x] to return the value from which x
+        // inherits its dataptr.
+        // as such, we want to add values that do not meet this
+        // criteria (i.e., those that are aliases).
+        // in practice, there can only be 1 value that meets this
+        // criteria (at a time), but there are some cases where
+        // this is ambiguous (e.g., where the spec doesn't exist,
+        // dealing with variadics)
+        auto srcAliasIt = aliases_.find(src);
+        if (srcAliasIt == aliases_.end()) {
+          filtered_srcs.emplace(src);
+          continue;
+        }
+
+        // since we are going from the beginning of the graph
+        // to the end of the graph we can assume that these
+        // aliases, which have already been visited, have already
+        // been squashed.
+        auto& srcs_of_src = srcAliasIt->second;
+        for (const auto* src_of_src : srcs_of_src) {
+          // if the source of the source is not an alias
+          // (i.e., it has ownership over it's data ptr)
+          // then we want to add it as a source of 'output'
+          if (aliases_.find(src_of_src) == aliases_.end()) {
+            filtered_srcs.emplace(src_of_src);
+          }
+        }
+      }
+
+      srcs = std::move(filtered_srcs);
+    }
   }
 }
 
@@ -129,10 +193,11 @@ void AliasAnalyzer::maybe_extend_lifetimes(const Graph& graph) {
 
           VLOG(1) << "extended EOL of value " << src->id() << " to " << eol;
 
-          extended.insert(src);
+          extended.emplace(src);
 
-          if (eol == graph.nodes().size() - 1 /* aliases output */) {
-            values_associated_with_outputs_.insert(src);
+          if (aliases_.find(src) == aliases_.end() &&
+              eol == graph.nodes().size() - 1 /* aliases output */) {
+            values_associated_with_outputs_.emplace(src);
           }
         }
       }

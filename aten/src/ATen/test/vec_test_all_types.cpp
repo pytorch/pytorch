@@ -5,7 +5,7 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
-    class Arithmetics : public ::testing::Test {};
+    class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
     template <typename T>
@@ -61,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitTests : public ::testing::Test {};
+    template <typename T>
     class Quantization8BitWithTailTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
@@ -79,6 +81,7 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+    using Quantization8BitTestedTypes = ::testing::Types<vqint8, vquint8>;
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
@@ -89,7 +92,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
-    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
@@ -116,6 +119,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatReducedFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(Quantization8BitTests, Quantization8BitTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
@@ -687,7 +691,7 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
-    TYPED_TEST(Arithmetics, Plus) {
+    TYPED_TEST(Arithmetic, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -699,7 +703,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
-    TYPED_TEST(Arithmetics, Minus) {
+    TYPED_TEST(Arithmetic, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -711,7 +715,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-    TYPED_TEST(Arithmetics, Multiplication) {
+    TYPED_TEST(Arithmetic, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
@@ -720,7 +724,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-    TYPED_TEST(Arithmetics, Division) {
+    TYPED_TEST(Arithmetic, Division) {
         using vec = TypeParam;
         TestSeed seed;
         test_binary<vec>(
@@ -1496,6 +1500,68 @@ namespace {
             },
             test_case);
     }
+#ifndef _WIN32
+    TYPED_TEST(Quantization8BitTests, Transpose) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto M = 4;
+        constexpr auto N = 64;
+        constexpr auto L = M * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = M;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::native::utils::transpose<uint8_t>(
+            M, N,
+            reinterpret_cast<uint8_t*>(x), ld_src,
+            reinterpret_cast<uint8_t*>(y), ld_dst);
+        for (int64_t j = 0; j < N; j++) {
+          for (int64_t i = 0; i < M; i++) {
+            ref[j * ld_dst + i] = c10::load(&(x[i * ld_src + j]));
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, PackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 8;
+        constexpr auto N = 128;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::pack_vnni4(x, y, ld_src, K, N);
+        int64_t _K = K / 4;
+        for (int64_t k = 0; k < _K; k++) {
+          for(int64_t n = 0; n < N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[k * N * 4 + n * 4 + l] =
+                  c10::load(&(x[k * ld_src * 4 + l * ld_src + n]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
     TYPED_TEST(FunctionalTests, Map) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;

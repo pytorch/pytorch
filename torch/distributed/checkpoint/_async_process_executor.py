@@ -44,6 +44,8 @@ class _AsyncCheckpointRequest:
     checkpoint_request_id: _CheckpointRequestIdentifier
     storage_writer: Optional[StorageWriter] = None
     planner: Optional[SavePlanner] = None
+    no_dist: bool = False
+    use_collectives: bool = True
 
 
 @dataclass(init=False)
@@ -150,6 +152,8 @@ class _AsyncCheckpointProcess:
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         # Create a unique identifier to locate requests/responses
         # from the checkpoint daemon process.
@@ -159,6 +163,8 @@ class _AsyncCheckpointProcess:
             checkpoint_request_id=checkpoint_request_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         self._send(async_cp_request)
         result = self._wait_for_response()
@@ -172,6 +178,8 @@ class _AsyncCheckpointProcess:
         checkpoint_request_id: _CheckpointRequestIdentifier,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -180,6 +188,8 @@ class _AsyncCheckpointProcess:
             checkpoint_id=checkpoint_request_id.checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         return metadata
 
@@ -188,6 +198,8 @@ class _AsyncCheckpointProcess:
         pg_init_info: _ProcessGroupInitInfo,
         parent_conn,
     ) -> None:
+        # Phase 1: Process Group Initialization
+        # Only needs to execute once during the lifetime of the checkpoint background process.
         try:
             _init_logger(pg_init_info.global_rank)
 
@@ -208,8 +220,15 @@ class _AsyncCheckpointProcess:
 
             logger.info("Checkpoint background process is running...")
             parent_conn.send(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+        except BaseException as e:  # noqa: B036
+            logger.error(
+                f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
+            )
+            parent_conn.send(e)
+            return
 
-            # Serving loop.
+        # Phase 2: Serving Loop
+        try:
             while True:
                 logger.info("Waiting for checkpoint save request...")
                 obj = parent_conn.recv()
@@ -224,22 +243,25 @@ class _AsyncCheckpointProcess:
                     f"Received async checkpoint request with id={obj.checkpoint_request_id.checkpoint_id}"  # noqa: G004
                 )
 
-                response = _AsyncCheckpointProcess._execute_save(
-                    obj.staged_state_dict,
-                    checkpoint_request_id=obj.checkpoint_request_id,
-                    storage_writer=obj.storage_writer,
-                    planner=obj.planner,
-                )
-                parent_conn.send(response)
-                logger.info(
-                    f"Submitted checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
-                )
-        except BaseException as e:
-            logger.error(
-                f"Checkpoint background process encountered an exception: {e}"  # noqa: G004
-            )
-            parent_conn.send(e)
-            raise
+                try:
+                    response = _AsyncCheckpointProcess._execute_save(
+                        obj.staged_state_dict,
+                        checkpoint_request_id=obj.checkpoint_request_id,
+                        storage_writer=obj.storage_writer,
+                        planner=obj.planner,
+                        no_dist=obj.no_dist,
+                        use_collectives=obj.use_collectives,
+                    )
+                    parent_conn.send(response)
+                    logger.info(
+                        f"Completed checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
+                    )
+                except BaseException as e:  # noqa: B036
+                    logger.error(
+                        f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
+                    )
+                    parent_conn.send(e)
+                    # Continue serving loop - don't exit process
         finally:
             logger.info("Checkpoint background process is shutting down...")
             dist.destroy_process_group()
@@ -262,6 +284,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
@@ -289,6 +313,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
 
     def execute_save(
@@ -299,6 +325,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Future:
         """
         NOTE:
@@ -329,6 +357,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
 

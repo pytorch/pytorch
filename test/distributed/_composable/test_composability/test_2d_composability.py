@@ -277,19 +277,19 @@ class TestFullyShard2DTraining(FSDPTest):
                 loss = model(inp).sum()
 
             fwd_comm_counts = fwd_comm_mode.get_comm_counts()
-            self.assertEqual(len(fwd_comm_counts), 2)
+            self.assertEqual(len(fwd_comm_counts), 1)
             self.assertEqual(fwd_comm_counts[funcol.all_reduce], num_mlps)
-            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], 0)
             ref_loss = ref_model(inp).sum()
             self.assertEqual(loss, ref_loss)
 
             with CommDebugMode() as bwd_comm_mode:
                 loss.backward()
             bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-            self.assertEqual(len(bwd_comm_counts), 3)
+            self.assertEqual(len(bwd_comm_counts), 2)
             # First MLP's input gradient does not need to be all-reduced
             self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
-            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], 0)
             self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_mlps)
             ref_loss.backward()
 
@@ -553,21 +553,6 @@ class TestNew2dParallelTraining(DTensorTestBase):
                     if type(p2) is DTensor:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_raise_invalid_tp_composition(self):
-        with self.assertRaisesRegex(
-            RuntimeError, r"Found TP device_mesh on the \d dimension of its parent mesh"
-        ):
-            mesh_2d = init_device_mesh(
-                self.device_type, (2, self.world_size // 2), mesh_dim_names=("tp", "dp")
-            )
-            parallelize_plan = {
-                "net1": ColwiseParallel(),
-                "net2": RowwiseParallel(),
-            }
-            parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

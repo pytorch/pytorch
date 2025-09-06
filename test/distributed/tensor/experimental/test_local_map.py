@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-from functools import partial
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -50,8 +49,7 @@ def mm_allreduce_forward(device_mesh, A, B):
     return funcol.all_reduce(partial_sum_tensor, "sum", device_mesh).wait()
 
 
-@partial(
-    local_map,
+@local_map(
     out_placements=replicate,
     in_placements=(None, col_wise, row_wise),
 )
@@ -90,7 +88,7 @@ class TestLocalMap(DTensorTestBase):
         )  # row-wisely sharded W tensor
 
         # Test 1: use the function returned from calling local_map
-        # get the function wrapped with DTensor/Tensor convertion
+        # get the function wrapped with DTensor/Tensor conversion
         # mm_allreduce_forward is a function that applies to Tensors with manual collective
         # local_mm_allreduce_forward is the function that does the same but applies to
         # DTensors' `_local_tensor`.

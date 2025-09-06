@@ -66,7 +66,7 @@ template <typename scalar_t>
 scalar_t upsample_get_value_bounded(
     constant scalar_t* data,
     uint3 dim,
-    array<ulong, 5> strides,
+    ::metal::array<ulong, 5> strides,
     uint n,
     uint c,
     uint z,
@@ -131,7 +131,7 @@ template <typename scalar_t>
 void upsample_increment_value_bounded(
     device AtomicType_t<scalar_t>* data,
     uint3 dim,
-    array<ulong, 5> strides,
+    ::metal::array<ulong, 5> strides,
     uint n,
     uint c,
     uint z,
@@ -852,6 +852,4 @@ INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
 INSTANTIATE_UPSAMPLE_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_UPSAMPLE_ALL(bfloat);
-#endif

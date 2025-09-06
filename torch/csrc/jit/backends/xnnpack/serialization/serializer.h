@@ -37,7 +37,7 @@ class XNNSerializer {
 
   // Serialize add node, we are serializing the argument needed to call
   // xnn_define_add2. Serializing these values, and at run time we build
-  // teh graph by re running xnn_define_add2
+  // the graph by re running xnn_define_add2
   void serializeAddNode(
       uint32_t input1_id,
       uint32_t input2_id,

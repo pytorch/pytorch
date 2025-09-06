@@ -917,9 +917,6 @@ class CppGemmTemplate(CppTemplate):
 
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
-        only_one_input = (
-            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
-        )
 
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
@@ -1019,6 +1016,9 @@ class CppGemmTemplate(CppTemplate):
         assert micro_gemm is not None
         pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
         micro_gemm.use_local_vnni_blocking(not pre_block_weights)
+        only_one_input = (
+            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
+        ) and not pre_block_weights  # If weights are blocked, use the second input
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
@@ -1094,6 +1094,18 @@ class CppGemmTemplate(CppTemplate):
         new_size = [padded_n // block_n, k, block_n]
         return new_size, padded_n
 
+    @staticmethod
+    def _maybe_remove_storage_offset(node: ir.IRNode):
+        if node.get_layout().offset == 0:
+            return node
+        # node may be contiguous but still have a non-zero storage offset.
+        # GEMM_TEMPLATE emits code like:
+        #   W.data_ptr[node.offset + ...]
+        # but runtime W.data_ptr (after normalize_shapes()) already includes this offset.
+        # To avoid double-offsetting, we remove the offset in the node also in the generated code.
+        #   W.data_ptr[...]
+        return ir.ExternKernel.copy_input(node)
+
     @classmethod
     def prep_weight(
         cls,
@@ -1149,6 +1161,7 @@ class CppGemmTemplate(CppTemplate):
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
+            new_inputs[1] = cls._maybe_remove_storage_offset(W)
 
         if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None

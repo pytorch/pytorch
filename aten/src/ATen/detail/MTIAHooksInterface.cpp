@@ -21,6 +21,10 @@ bool isMTIAHooksBuilt() {
 
 } // namespace detail
 
+bool MTIAHooksInterface::isAvailable() const {
+  return detail::isMTIAHooksBuilt() && detail::getMTIAHooks().deviceCount() > 0;
+}
+
 C10_DEFINE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs)
 
 } // namespace at

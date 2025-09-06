@@ -2,7 +2,9 @@ import random
 from typing import Any
 
 import torch
-from torch._C._distributed_c10d import (
+
+# Import centralized distributed components
+from torch.distributed._distributed_c10d import (
     _resolve_process_group,
     FakeWork,
     ProcessGroup,
@@ -63,10 +65,9 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-if not torch._running_with_deploy():
-    lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
-    for op, meta_func in _META_FUNCTIONS.items():
-        lib_impl.impl(op, meta_func, "Meta")
+lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
+for op, meta_func in _META_FUNCTIONS.items():
+    lib_impl.impl(op, meta_func, "Meta")
 
 # List of collective operation functions including functional collectives
 # Note: The following collectives might be deprecated soon hence not adding them

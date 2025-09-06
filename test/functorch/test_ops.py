@@ -399,6 +399,38 @@ skip_noncontig = {
     "as_strided_copy",
 }
 
+bool_unsupported_ordered_ops = {
+    "topk",
+    "argmin",
+    "ceil",
+    "argmax",
+    "floor",
+}
+bool_ordered_op_db = tuple(
+    filter(lambda op: op.name in bool_unsupported_ordered_ops, op_db)
+)
+
+complex_unsupported_ordered_ops = {
+    "sort",
+    "topk",
+    "lt",
+    "argmin",
+    "le",
+    "ge",
+    "amax",
+    "maximum",
+    "minimum",
+    "clamp",
+    "amin",
+    "gt",
+    "ceil",
+    "argmax",
+    "floor",
+}
+complex_ordered_op_db = tuple(
+    filter(lambda op: op.name in complex_unsupported_ordered_ops, op_db)
+)
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -2967,6 +2999,39 @@ class TestOperators(TestCase):
             expected_fn(torch.ones_like(expected_o)),
             actual_fn(torch.ones_like(actual_o)),
         )
+
+    @ops(bool_ordered_op_db, dtypes=[torch.bool])
+    def test_ordered_bool_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
+
+    @ops(
+        complex_ordered_op_db,
+        dtypes=[torch.complex32, torch.complex64, torch.complex128],
+    )
+    def test_ordered_complex_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
 
 
 only_for = ("cpu", "cuda")

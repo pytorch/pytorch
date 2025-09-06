@@ -67,5 +67,73 @@ def pad_sequence(
     padding_value: float = 0.0,
     padding_side: Literal["left", "right"] = "right",
 ) -> Tensor: ...
+
+# Upsample functions used by torch.nn.functional.interpolate
+def upsample_nearest1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_nearest2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_nearest3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_linear1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_bilinear2d_aa(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_bilinear2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_trilinear3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_bicubic2d_aa(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_bicubic2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
 def flatten_dense_tensors(tensors: list[Tensor]) -> Tensor: ...
 def unflatten_dense_tensors(flat: Tensor, tensors: list[Tensor]) -> list[Tensor]: ...

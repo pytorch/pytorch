@@ -24,10 +24,24 @@ struct ContiguousLayoutBuffer {
   ContiguousLayoutBuffer& operator=(const ContiguousLayoutBuffer& other) =
       delete;
 
+  std::optional<size_t> get_offset_from_ptr(void* offset_ptr) const {
+    void* raw_ptr = data_ptr_.get();
+    if (!raw_ptr || !offset_ptr) {
+      return std::nullopt;
+    }
+
+    auto offset = reinterpret_cast<uint8_t*>(offset_ptr) -
+        reinterpret_cast<uint8_t*>(raw_ptr);
+
+    return offset < 0 || static_cast<size_t>(offset) >= size_
+        ? std::nullopt
+        : std::optional(offset);
+  }
+
   void* get_ptr_with_offset(size_t offset) {
     void* raw_ptr = data_ptr_.get();
-    TORCH_CHECK_NOTNULL(raw_ptr);
-    TORCH_CHECK_LE(offset, size_);
+    TORCH_CHECK(raw_ptr != nullptr);
+    TORCH_CHECK(offset <= size_);
     return reinterpret_cast<void*>(
         reinterpret_cast<uint8_t*>(raw_ptr) + offset);
   }
@@ -47,7 +61,7 @@ struct ContiguousLayoutBuffer {
   void clear(size_t size) {
     VLOG(1) << "clearing first " << size << "bytes of layout buffer of size "
             << size_;
-    TORCH_CHECK_LE(size, size_);
+    TORCH_CHECK(size <= size_);
     std::memset(data_ptr_.get(), 0, size);
   }
 
@@ -112,8 +126,8 @@ struct ContiguousStorageImplBuffer {
   }
 
   c10::StorageImpl& at(size_t i) {
-    TORCH_CHECK_LT(i, size_)
-        << "requested storage index " << i << " out of bounds " << size_;
+    TORCH_CHECK(
+        i < size_, "requested storage index ", i, " out of bounds ", size_);
     return buffer_[i];
   }
 
@@ -124,7 +138,7 @@ struct ContiguousStorageImplBuffer {
   }
 
   c10::StorageImpl& to_managed(at::StorageImpl& s) {
-    TORCH_CHECK_LT(size_, capacity_);
+    TORCH_CHECK(size_ < capacity_);
     return *(new (&buffer_[size_++]) at::StorageImpl(
         at::StorageImpl::use_byte_size_t(),
         static_cast<int64_t>(s.nbytes()),
@@ -148,10 +162,32 @@ class LayoutManager {
       torch::nativert::LayoutManagerSettings settings = {});
   ~LayoutManager() = default;
 
+// this is a debugging function. it will slow thing down SIGNIFICANTLY
+// so please ensure this isn't called unless you really need it
+//
+// it checks a few things in between node executions...
+//
+// 1. ensures all 'alive' values are within the bounds of their lifetimes
+//    - this is the definition of a sanity check since the live-sets are built
+//      from the lifetimes lol. if this fails, something is very very wrong
+// 2. ensures that all planned values are within the bounds of their
+//    allocated storage buffer slices
+//      - if the value is an alias, ensure the alias is within the bounds
+//        of the source value
+// 3. ensures that all planned value data-ptrs are non-overlapping
+#ifndef NDEBUG
+  void assert_no_overlapping_storages(
+      size_t
+          graph_node_idx /* the graph node that is currently being computed */)
+      const;
+#endif
+
+ private:
+  friend class LayoutManagerGuard;
+
   void allocate();
   void deallocate_and_plan();
 
- private:
 #ifdef LayoutPlannerTests_TEST_FRIENDS
   LayoutPlannerTests_TEST_FRIENDS;
 #endif
@@ -178,6 +214,9 @@ class LayoutManager {
 
   std::vector<const at::Tensor*> planned_tensors_;
   std::vector<size_t> planned_tensors_max_nbytes_local_;
+#ifndef NDEBUG
+  c10::FastMap<ValueId, size_t> value_to_vector_idx_map_;
+#endif
 
   ContiguousLayoutBuffer layout_buffer_;
   ContiguousStorageImplBuffer storage_impl_buffer_;

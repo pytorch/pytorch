@@ -1,8 +1,8 @@
 diff --git a/test/dynamo/cpython/3_13/test_generator_stop.py b/test/dynamo/cpython/3_13/test_generator_stop.py
-index bc235ceb00e..cb2a85255cb 100644
+index bc235ceb00e..e3ff8d346a7 100644
 --- a/test/dynamo/cpython/3_13/test_generator_stop.py
 +++ b/test/dynamo/cpython/3_13/test_generator_stop.py
-@@ -1,9 +1,60 @@
+@@ -1,9 +1,63 @@
  from __future__ import generator_stop
  
 +# ======= BEGIN Dynamo patch =======
@@ -10,6 +10,9 @@ index bc235ceb00e..cb2a85255cb 100644
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_generator_stop.py
 +
 +import sys
 +import torch
@@ -64,7 +67,7 @@ index bc235ceb00e..cb2a85255cb 100644
      def test_stopiteration_wrapping(self):
          def f():
              raise StopIteration
-@@ -30,5 +81,5 @@ class TestPEP479(unittest.TestCase):
+@@ -30,5 +84,5 @@ class TestPEP479(unittest.TestCase):
                        'were not properly set')
  
  

@@ -1724,8 +1724,27 @@ body.on('drop', () => {
 selection_to_div[''] = body
   .append('div')
   .text(
-    'Drag and drop a file to load a local snapshot. No data from the snapshot is uploaded.',
+    'Drag and drop or select a file to load a local snapshot. No data from the snapshot is uploaded.',
   );
+
+const fileInput = body.append('input')
+  .attr('type', 'file')
+  .attr('multiple', true)    // allow several snapshots at once
+  .style('margin-left', '8px')
+  .on('change', function () {
+    Array.from(this.files).forEach(file => {
+      add_snapshot(file.name, unique_name => {
+        const reader = new FileReader();
+        reader.onload = e =>
+          finished_loading(unique_name, e.target.result);
+        reader.readAsArrayBuffer(file);
+      });
+    });
+    this.value = null;                       // reset so the same file can be picked again
+    snapshot_select.node().selectedIndex =
+      snapshot_select.node().options.length - 1;
+    selected_change();                       // refresh the UI
+  });
 
 let next_unique_n = 1;
 function add_snapshot(name, loader) {

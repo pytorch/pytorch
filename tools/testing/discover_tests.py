@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_test_module(test: str) -> str:
-    return test.split(".")[0]
+    return test.split(".", maxsplit=1)[0]
 
 
 def discover_tests(

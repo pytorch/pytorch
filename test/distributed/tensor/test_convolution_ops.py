@@ -5,7 +5,7 @@ import copy
 
 import torch
 import torch.nn as nn
-from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed import DeviceMesh
 from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
@@ -48,7 +48,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_comms
     def test_downsampling_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 3, 512, 1024)
@@ -118,7 +118,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_depthwise_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 256, 128, 256)
@@ -186,9 +186,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_conv_backward_none_grad_inp(self):
-        device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
-        )
+        device_mesh = self.build_device_mesh()
         conv = nn.Conv2d(64, 64, 3, padding=1).train()
         x = torch.randn(1, 64, 32, 32)
         x_dt = DTensor.from_local(x, device_mesh, [Replicate()])

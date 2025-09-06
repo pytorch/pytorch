@@ -4,6 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 """
 
 import functools
+import sys
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
@@ -15,8 +16,16 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-NodePattern.__module__ = "torch.ao.quantization.utils"
+if sys.version_info < (3, 12):
+    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    NodePattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    NodePattern = TypeAliasType(
+        "NodePattern", Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    )
+
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -28,10 +37,27 @@ QuantizerCls = Any
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[
-    Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
-]
-Pattern.__module__ = "torch.ao.quantization.utils"
+
+if sys.version_info < (3, 12):
+    Pattern = Union[
+        Callable,
+        tuple[Callable, Callable],
+        tuple[Callable, tuple[Callable, Callable]],
+        Any,
+    ]
+    Pattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    Pattern = TypeAliasType(
+        "Pattern",
+        Union[
+            Callable,
+            tuple[Callable, Callable],
+            tuple[Callable, tuple[Callable, Callable]],
+            Any,
+        ],
+    )
 
 
 # TODO: maybe rename this to MatchInputNode

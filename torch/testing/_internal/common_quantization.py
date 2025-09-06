@@ -611,7 +611,7 @@ def _group_quantize_tensor_symmetric(w, n_bit=4, groupsize=32):
 
 
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
-    # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+    # source: https://github.com/meta-pytorch/gpt-fast/blob/main/quantize.py
     # default setup for affine quantization of activations
     x_dtype = x.dtype
     x = x.float()

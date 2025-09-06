@@ -1945,7 +1945,7 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     example_input = example_input.to(torch.float)
     q_config_mapping = torch.ao.quantization.get_default_qconfig_mapping()
 
-    # if they passed in fusion paramter, make sure to test that
+    # if they passed in fusion parameter, make sure to test that
     if fused:
         model = torch.ao.quantization.fuse_modules(model, model.get_fusion_modules())
 

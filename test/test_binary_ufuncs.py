@@ -79,7 +79,7 @@ if TEST_SCIPY:
 class TestBinaryUfuncs(TestCase):
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
     # TODO: below contiguous tensor results are compared with a variety of noncontiguous results.
-    #   It would be interesting to have the lhs and rhs have different discontiguities.
+    #   It would be interesting to have the lhs and rhs have different discontinuities.
 
     # Helper for comparing torch tensors and NumPy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
@@ -2521,7 +2521,7 @@ class TestBinaryUfuncs(TestCase):
             # Verify Value
             self.assertEqual(torch_result, expected)
             # Verify Sign
-            # Use double copysign to verify the correctnes of 0.0 and -0.0, since
+            # Use double copysign to verify the correctness of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
             # Special case: NaN conversions between FP32 and FP16 is not bitwise

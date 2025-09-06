@@ -228,17 +228,6 @@ std::string processErrorMsg(std::string str) {
   return str;
 }
 
-static std::string formatMessage(const char* format, va_list fmt_args) {
-  constexpr size_t ERROR_BUF_SIZE = 1024;
-  std::string error_buf(ERROR_BUF_SIZE, '\0');
-  auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
-  if (res < 0) {
-    res = 0;
-  }
-  error_buf.resize(res);
-  return error_buf;
-}
-
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {
   try {
     TORCH_INTERNAL_ASSERT(
@@ -248,13 +237,6 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
     std::rethrow_exception(e_ptr);
   }
   CATCH_ALL_ERRORS(return)
-}
-
-TypeError::TypeError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
 }
 
 void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {

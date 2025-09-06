@@ -132,6 +132,8 @@ class TORCH_API Context {
   static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
+  static bool ckSupported();
+  static bool hasEigenSparse();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -161,6 +163,12 @@ class TORCH_API Context {
   }
   static bool hasROCM() {
     return detail::getCUDAHooks().hasROCM();
+  }
+  static bool hasCKSDPA() {
+    return detail::getCUDAHooks().hasCKSDPA();
+  }
+  static bool hasCKGEMM() {
+    return detail::getCUDAHooks().hasCKGEMM();
   }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
@@ -205,6 +213,8 @@ class TORCH_API Context {
   void setBenchmarkCuDNN(bool);
   int benchmarkLimitCuDNN() const;
   void setBenchmarkLimitCuDNN(int);
+  bool immediateMiopen() const;
+  void setImmediateMiopen(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   bool deterministicMkldnn() const;
@@ -250,7 +260,7 @@ class TORCH_API Context {
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
-  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  at::ROCmFABackend getROCmFAPreferredBackend();
   void setROCmFAPreferredBackend(at::ROCmFABackend);
 
   // Note [Enabling Deterministic Operations]
@@ -431,7 +441,8 @@ class TORCH_API Context {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
-      at::SDPBackend::cudnn_attention};
+      at::SDPBackend::cudnn_attention,
+      at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -439,6 +450,7 @@ class TORCH_API Context {
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
   bool benchmark_cudnn = false;
+  bool immediate_miopen = false;
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
@@ -602,6 +614,10 @@ inline bool hasKleidiAI() {
 
 inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
+}
+
+inline bool hasEigenSparse() {
+  return globalContext().hasEigenSparse();
 }
 
 inline bool hasMAGMA() {

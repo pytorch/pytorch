@@ -204,7 +204,7 @@ class RNNBase(Module):
 
         self.reset_parameters()
 
-    def _init_flat_weights(self):
+    def _init_flat_weights(self) -> None:
         self._flat_weights = [
             getattr(self, wn) if hasattr(self, wn) else None
             for wn in self._flat_weights_names
@@ -214,7 +214,7 @@ class RNNBase(Module):
         ]
         self.flatten_parameters()
 
-    def __setattr__(self, attr, value):
+    def __setattr__(self, attr, value) -> None:
         if hasattr(self, "_flat_weights_names") and attr in self._flat_weights_names:
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
@@ -360,7 +360,7 @@ class RNNBase(Module):
 
     def check_forward_args(
         self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -387,7 +387,7 @@ class RNNBase(Module):
             s += ", bidirectional={bidirectional}"
         return s.format(**self.__dict__)
 
-    def _update_flat_weights(self):
+    def _update_flat_weights(self) -> None:
         if not torch.jit.is_scripting():
             if self._weights_have_changed():
                 self._init_flat_weights()
@@ -615,7 +615,7 @@ class RNN(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -652,6 +652,9 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        """
+        Runs the forward pass.
+        """
         self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
@@ -971,7 +974,7 @@ class LSTM(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         super().__init__("LSTM", *args, **kwargs)
@@ -998,7 +1001,7 @@ class LSTM(RNNBase):
         input: Tensor,
         hidden: tuple[Tensor, Tensor],  # type: ignore[override]
         batch_sizes: Optional[Tensor],
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         self.check_hidden_size(
             hidden[0],
@@ -1304,7 +1307,7 @@ class GRU(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:

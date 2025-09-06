@@ -302,7 +302,7 @@ class TestFunctionalizationRngOps(TestCase):
         fwd_compiler = functools.partial(count_philox_rand, freq=1)
         bwd_compiler = functools.partial(count_philox_rand, freq=0)
         aot_fn = aot_function(fn, fwd_compiler, bwd_compiler)
-        # We cant check accuracy here because rand_like generated different rand numbers than dropout
+        # We can't check accuracy here because rand_like generated different rand numbers than dropout
         res = aot_fn(x, y)
         res.sum().backward()
 
@@ -316,7 +316,7 @@ class TestFunctionalizationRngOps(TestCase):
 
         # Ensure the decomp is happening
         aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=1))
-        # We cant check accuracy here because rand_like generated different rand numbers than dropout
+        # We can't check accuracy here because rand_like generated different rand numbers than dropout
         aot_fn(x)
 
 

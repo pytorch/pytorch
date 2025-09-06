@@ -27,6 +27,7 @@ from .ctx_manager import (
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
@@ -34,7 +35,6 @@ from .ctx_manager import (
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
-    SetFullgraphVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -80,11 +80,11 @@ from .higher_order_ops import (
 )
 from .iter import (
     CountIteratorVariable,
-    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
+    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -140,6 +140,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -148,6 +149,7 @@ from .user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -166,7 +168,6 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
-    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
@@ -199,7 +200,7 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
-    "SetFullgraphVariable",
+    "ErrorOnGraphBreakVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",

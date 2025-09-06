@@ -643,47 +643,43 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  // From https://stackoverflow.com/a/3057522/23845
-  // TODO: does C++14 have a stdlib template for this?
-  template <typename T>
-  struct identity {
-    typedef T type;
-  };
-
   template <typename T>
   ArrayRef<T> generic_sizes() {
-    return _generic_sizes(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  ArrayRef<int64_t> _generic_sizes(identity<int64_t>) {
-    return sizes();
-  }
-  ArrayRef<c10::SymInt> _generic_sizes(identity<c10::SymInt>) {
-    return sym_sizes();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return sizes();
+    } else {
+      return sym_sizes();
+    }
   }
 
   template <typename T>
   ArrayRef<T> generic_strides() {
-    return _generic_strides(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  ArrayRef<int64_t> _generic_strides(identity<int64_t>) {
-    return strides();
-  }
-  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) {
-    return sym_strides();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return strides();
+    } else {
+      return sym_strides();
+    }
   }
 
   template <typename T>
   T generic_storage_offset() {
-    return _generic_storage_offset(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  int64_t _generic_storage_offset(identity<int64_t>) {
-    return storage_offset();
-  }
-  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) {
-    return sym_storage_offset();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return storage_offset();
+    } else {
+      return sym_storage_offset();
+    }
   }
 
   /**
@@ -812,6 +808,43 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  c10::SymBool sym_is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return sym_is_contiguous_custom(memory_format);
+    }
+    return sym_is_contiguous_default(memory_format);
+  }
+
+  template <typename T>
+  T is_contiguous_default_impl(at::MemoryFormat memory_format) const {
+    if (!has_symbolic_sizes_strides_) {
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        return is_channels_last_contiguous_;
+      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+        return is_channels_last_3d_contiguous_;
+      }
+      return is_contiguous_;
+    }
+
+    // Handle dynamic shapes.
+    const auto& symbolic = symbolic_shape_meta().is_contiguous(memory_format);
+
+    if constexpr (std::is_same_v<T, bool>) {
+      return symbolic.guard_bool(__FILE__, __LINE__);
+    } else {
+      return symbolic;
+    }
+  }
+
+  bool is_contiguous_default(at::MemoryFormat memory_format) const {
+    return is_contiguous_default_impl<bool>(memory_format);
+  }
+
+  c10::SymBool sym_is_contiguous_default(at::MemoryFormat memory_format) const {
+    return is_contiguous_default_impl<c10::SymBool>(memory_format);
+  }
+
   /**
    * Whether or not a tensor is laid out in contiguous memory.
    *
@@ -825,30 +858,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_contiguous_custom(memory_format);
     }
     return is_contiguous_default(memory_format);
-  }
-
-  // These are factored into separate functions in case subclasses
-  // want to use them
-  bool is_contiguous_default(at::MemoryFormat memory_format) const {
-    if (has_symbolic_sizes_strides_) {
-      if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
-            __FILE__, __LINE__);
-      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta()
-            .is_channels_last_3d_contiguous()
-            .guard_bool(__FILE__, __LINE__);
-      }
-      return symbolic_shape_meta().is_contiguous().guard_bool(
-          __FILE__, __LINE__);
-    }
-
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-    }
-    return is_contiguous_;
   }
 
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
@@ -873,9 +882,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  SymBool sym_is_non_overlapping_and_dense_default() const {
+    if (has_symbolic_sizes_strides_) {
+      return symbolic_shape_meta().is_non_overlapping_and_dense();
+    } else {
+      return is_non_overlapping_and_dense_;
+    }
+  }
+
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().is_non_overlapping_and_dense().guard_bool(
+      return sym_is_non_overlapping_and_dense_default().guard_bool(
           __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
@@ -968,9 +985,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for a tensor to have rank, but not well defined sizes.
    */
   // sizes_strides_policy_ >= CustomStrides
-  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+
   virtual bool is_strides_like_custom(at::MemoryFormat memory_format) const;
-  virtual bool is_non_overlapping_and_dense_custom() const;
+
+  virtual c10::SymBool sym_is_non_overlapping_and_dense_custom() const;
+
+  bool is_non_overlapping_and_dense_custom() const {
+    return sym_is_non_overlapping_and_dense_custom().guard_bool(
+        __FILE__, __LINE__);
+  }
+
+  virtual c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const;
+
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const {
+    return sym_is_contiguous_custom(memory_format)
+        .guard_bool(__FILE__, __LINE__);
+  }
+
   // sizes_strides_policy_ >= CustomSizes
   // Currently this method only exists to be overwritten by subclasses such as
   // NestedTensorImpl.
@@ -1004,9 +1036,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::SymInt sym_storage_offset_custom() const;
 
  public:
-  /**
-   * True if this tensor has storage. See storage() for details.
-   */
+/**
+ * True if this tensor has storage. See storage() for details.
+ */
 #ifdef DEBUG
   // Allow subclasses to check that their storage_ is never getting set in debug
   // builds.
@@ -1016,11 +1048,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #endif
       bool
       has_storage() const
-  // NOTE: we devirtualize this because it arguably shouldn't be an
-  // error just to ask subclasses if they have storage.
-  // This used to throw for most subclasses, but OpaqueTensorImpl
-  // wanted it to successfully return false, so we went ahead and made
-  // it a non-error.
+// NOTE: we devirtualize this because it arguably shouldn't be an
+// error just to ask subclasses if they have storage.
+// This used to throw for most subclasses, but OpaqueTensorImpl
+// wanted it to successfully return false, so we went ahead and made
+// it a non-error.
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
     return storage_;
@@ -2054,6 +2086,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
@@ -2447,11 +2480,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_strides_like(at::MemoryFormat::ChannelsLast3d);
   }
 
+  bool is_non_overlapping_and_dense_or_false() const {
+    return sym_is_non_overlapping_and_dense().guard_or_false(
+        __FILE__, __LINE__);
+  }
+
   bool is_non_overlapping_and_dense() const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return is_non_overlapping_and_dense_custom();
     }
     return is_non_overlapping_and_dense_default();
+  }
+
+  SymBool sym_is_non_overlapping_and_dense() const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return sym_is_non_overlapping_and_dense_custom();
+    }
+    return sym_is_non_overlapping_and_dense_default();
   }
 
   // if this returns true, then it is guaranteed that this tensor has symbolic

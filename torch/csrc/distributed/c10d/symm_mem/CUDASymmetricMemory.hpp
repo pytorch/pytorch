@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -14,12 +15,14 @@ struct AllocationRef : public c10::intrusive_ptr_target {
   HandleType handle;
   size_t block_size;
   int device_idx;
+  bool is_multicast;
 
   AllocationRef(
       void* ptr,
       HandleType handle,
       size_t block_size,
-      int device_idx);
+      int device_idx,
+      bool is_multicast = false);
 
   ~AllocationRef();
 };
@@ -49,24 +52,14 @@ class CUDASymmetricMemory : public SymmetricMemory {
   bool has_multicast_support() override;
   void* get_multicast_ptr() override;
 
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override;
-
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override;
-
   void barrier(int channel, size_t timeout_ms) override;
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override;
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
   int get_world_size() override;
+  c10::Device get_device() override;
+  bool world_within_direct_access() override;
 
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
@@ -123,6 +116,9 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   std::shared_mutex mutex_;
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
+  c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type
+      handle_type_ = c10::cuda::CUDACachingAllocator::
+          Expandable_Segments_Handle_Type::UNSPECIFIED;
 };
 
 } // namespace c10d::symmetric_memory

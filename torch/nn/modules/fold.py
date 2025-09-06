@@ -147,6 +147,9 @@ class Fold(Module):
         self.stride = stride
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.fold(
             input,
             self.output_size,
@@ -157,6 +160,9 @@ class Fold(Module):
         )
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return (
             "output_size={output_size}, kernel_size={kernel_size}, "
             "dilation={dilation}, padding={padding}, stride={stride}".format(
@@ -312,11 +318,17 @@ class Unfold(Module):
         self.stride = stride
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.unfold(
             input, self.kernel_size, self.dilation, self.padding, self.stride
         )
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return (
             "kernel_size={kernel_size}, dilation={dilation}, padding={padding},"
             " stride={stride}".format(**self.__dict__)

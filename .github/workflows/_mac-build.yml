@@ -123,7 +123,7 @@ jobs:
             else
               # The runner has access to the S3 bucket via IAM profile without the need
               # for any credential
-              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"0
+              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
               echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
 
@@ -152,17 +152,14 @@ jobs:
         env:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
+          # TODO: Remove me later, and properly activate venv
+          PATH="$VENV_PATH/bin:$PATH"
+          export PATH
 
           # NB: Same trick as Linux, there is no need to initialize sccache with the risk of getting
           # it hangs or timeout at initialization. The cache will be started automatically
           export SKIP_SCCACHE_INITIALIZATION=1
-          ${CONDA_RUN} .ci/pytorch/macos-build.sh
+          .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'

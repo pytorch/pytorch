@@ -1106,7 +1106,8 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-#ifdef _WIN32
+    // On windows CPU is support compiled autograd.
+#if defined(_WIN32) && (defined(USE_CUDA) || defined(USE_ROCM))
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
@@ -1384,7 +1385,8 @@ struct IValuePacker<std::vector<T>> {
     }
     std::vector<T> result;
     auto lst = t.toList();
-    for (const at::IValue& elt : lst) {
+    for (size_t i = 0; i < lst.size(); ++i) {
+      const at::IValue& elt = lst.get(i);
       result.emplace_back(IValuePacker<T>::unpack(elt));
     }
     return result;

@@ -258,7 +258,7 @@ DECLARE_HOST_ALLOCATOR(
     CUDACachingHostAllocator,
     CUDACachingHostAllocatorImpl,
     raw_local_deleter,
-    caching_host_allocator);
+    caching_host_allocator)
 
 REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 

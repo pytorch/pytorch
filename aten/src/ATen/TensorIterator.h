@@ -388,7 +388,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   /// Return scalar value from original_tensor_base if it is defined. When
   /// common_dtype is Half, casting scalar input to common_dtype might overflow.
-  /// If the scalar is aleady given in the type of Half, then return scalar
+  /// If the scalar is already given in the type of Half, then return scalar
   /// value from tensor_base.
   template <typename T>
   T original_scalar_value(int64_t arg) {
@@ -502,7 +502,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// kernels
   bool can_use_32bit_indexing() const;
 
-  /// An "iteratable" object that recursively splits this iterator into
+  /// An "iterable" object that recursively splits this iterator into
   /// sub-iterators that can use 32-bit indexing.
   SplitUntil32Bit with_32bit_indexing() const;
 
@@ -878,7 +878,7 @@ class TORCH_API TensorIteratorConfig final {
 
   // Sets the enforce_linear_iteration_ flag, which is false by default.
   // If true, iteration goes in the same order as a C-contiguous tensor
-  // is layed out in memory. i.e. last dimension iterates fastest.
+  // is laid out in memory. i.e. last dimension iterates fastest.
   //
   // This iteration order can be less efficient and may even prevent
   // vectorization. So only use if the correctness of your kernel depends on it.

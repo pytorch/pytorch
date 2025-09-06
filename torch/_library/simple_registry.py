@@ -28,9 +28,10 @@ class SimpleLibraryRegistry:
         self._data = {}
 
     def find(self, qualname: str) -> "SimpleOperatorEntry":
-        if qualname not in self._data:
-            self._data[qualname] = SimpleOperatorEntry(qualname)
-        return self._data[qualname]
+        res = self._data.get(qualname, None)
+        if res is None:
+            self._data[qualname] = res = SimpleOperatorEntry(qualname)
+        return res
 
 
 singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()

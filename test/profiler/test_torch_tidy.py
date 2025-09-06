@@ -1,18 +1,5 @@
 # Owner(s): ["oncall: profiler"]
 
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    None
-
 import gc
 import re
 import textwrap
@@ -24,14 +11,25 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-from torch._C._profiler import _TensorMetadata
+from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
 from torch.profiler import _utils, profile
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-Json = dict[str, Any]
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
 
-from torch._C._profiler import _ExtraFields_PyCall
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
+Json = dict[str, Any]
 
 
 def find_node_with_name(nodes, name):

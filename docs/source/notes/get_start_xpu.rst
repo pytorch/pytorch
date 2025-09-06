@@ -24,13 +24,8 @@ For Intel Client GPU
 +-------------------------------------+----------------------------------------------------------------------------------------------------+
 | Supported OS                        | Validated Hardware                                                                                 |
 +=====================================+====================================================================================================+
-|| Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
+|| Windows 11 & Ubuntu 24.04/25.04    || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 ||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                               |
-||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
-||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
-||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
-+-------------------------------------+----------------------------------------------------------------------------------------------------+
-|| Ubuntu 24.04 & WSL2 (Ubuntu 24.04) || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 ||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
 ||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
 ||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
@@ -107,7 +102,7 @@ If you are migrating code from ``cuda``, you would change references from ``cuda
 The following points outline the support and limitations for PyTorch with Intel GPU:
 
 #. Both training and inference workflows are supported.
-#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to Use Inductor on Windows with CPU/XPU <https://pytorch.org/tutorials/prototype/inductor_windows.html>`_.
+#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to use torch.compile on Windows CPU/XPU <https://pytorch.org/tutorials/unstable/inductor_windows.html>`_.
 #. Data types such as FP32, BF16, FP16, and Automatic Mixed Precision (AMP) are all supported.
 
 Examples

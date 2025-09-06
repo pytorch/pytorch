@@ -12,7 +12,8 @@ UndefinedTensorImpl::UndefinedTensorImpl()
   set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
-bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
+c10::SymBool UndefinedTensorImpl::sym_is_contiguous_custom(
+    MemoryFormat format) const {
   return is_contiguous_default(format);
 }
 IntArrayRef UndefinedTensorImpl::strides_custom() const {

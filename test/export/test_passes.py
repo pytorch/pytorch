@@ -1303,6 +1303,49 @@ default](args = (%x, %b_state), kwargs = {})
             )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_to(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.ops.aten.to.device(x, device="cuda:0", dtype=torch.float32)
+                return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,  # noqa: B950
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_submod(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    x = x.to(device="cuda:0")
+                    return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.submod_1.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.submod_1.code.strip("\n"),
+            """\
+def forward(self, arg0_1):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,  # noqa: B950
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass(self):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):

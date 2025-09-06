@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 This module provides utilities for analyzing and optimizing Python bytecode.
 Key functionality includes:
@@ -18,8 +16,13 @@ import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Union
+from typing import Any, TYPE_CHECKING, Union
 
+
+if TYPE_CHECKING:
+    # TODO(lucaskabela): consider moving Instruction into this file
+    # and refactoring in callsite; that way we don't have to guard this import
+    from .bytecode_transformation import Instruction
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
@@ -33,7 +36,7 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
-if sys.version_info >= (3, 12):
+if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 if sys.version_info >= (3, 13):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD_NO_INTERRUPT"])
@@ -45,7 +48,7 @@ HASFREE = set(dis.hasfree)
 stack_effect = dis.stack_effect
 
 
-def get_indexof(insts):
+def get_indexof(insts: list["Instruction"]) -> dict["Instruction", int]:
     """
     Get a mapping from instruction memory address to index in instruction list.
     Additionally checks that each instruction only appears once in the list.
@@ -57,12 +60,12 @@ def get_indexof(insts):
     return indexof
 
 
-def remove_dead_code(instructions):
+def remove_dead_code(instructions: list["Instruction"]) -> list["Instruction"]:
     """Dead code elimination"""
     indexof = get_indexof(instructions)
     live_code = set()
 
-    def find_live_code(start):
+    def find_live_code(start: int) -> None:
         for i in range(start, len(instructions)):
             if i in live_code:
                 return
@@ -71,6 +74,7 @@ def remove_dead_code(instructions):
             if inst.exn_tab_entry:
                 find_live_code(indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
+                assert inst.target is not None
                 find_live_code(indexof[inst.target])
             if inst.opcode in TERMINAL_OPCODES:
                 return
@@ -102,7 +106,7 @@ def remove_dead_code(instructions):
     return [inst for i, inst in enumerate(instructions) if i in live_code]
 
 
-def remove_pointless_jumps(instructions):
+def remove_pointless_jumps(instructions: list["Instruction"]) -> list["Instruction"]:
     """Eliminate jumps to the next instruction"""
     pointless_jumps = {
         id(a)
@@ -112,11 +116,11 @@ def remove_pointless_jumps(instructions):
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
-def propagate_line_nums(instructions):
+def propagate_line_nums(instructions: list["Instruction"]) -> None:
     """Ensure every instruction has line number set in case some are removed"""
     cur_line_no = None
 
-    def populate_line_num(inst):
+    def populate_line_num(inst: "Instruction") -> None:
         nonlocal cur_line_no
         if inst.starts_line:
             cur_line_no = inst.starts_line
@@ -127,12 +131,12 @@ def propagate_line_nums(instructions):
         populate_line_num(inst)
 
 
-def remove_extra_line_nums(instructions):
+def remove_extra_line_nums(instructions: list["Instruction"]) -> None:
     """Remove extra starts line properties before packing bytecode"""
 
     cur_line_no = None
 
-    def remove_line_num(inst):
+    def remove_line_num(inst: "Instruction") -> None:
         nonlocal cur_line_no
         if inst.starts_line is None:
             return
@@ -152,12 +156,14 @@ class ReadsWrites:
     visited: set[Any]
 
 
-def livevars_analysis(instructions, instruction):
+def livevars_analysis(
+    instructions: list["Instruction"], instruction: "Instruction"
+) -> set[Any]:
     indexof = get_indexof(instructions)
     must = ReadsWrites(set(), set(), set())
     may = ReadsWrites(set(), set(), set())
 
-    def walk(state, start):
+    def walk(state: ReadsWrites, start: int) -> None:
         if start in state.visited:
             return
         state.visited.add(start)
@@ -177,6 +183,7 @@ def livevars_analysis(instructions, instruction):
             if inst.exn_tab_entry:
                 walk(may, indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
+                assert inst.target is not None
                 walk(may, indexof[inst.target])
                 state = may
             if inst.opcode in TERMINAL_OPCODES:
@@ -197,19 +204,19 @@ class StackSize:
     high: Union[int, float]
     fixed_point: FixedPointBox
 
-    def zero(self):
+    def zero(self) -> None:
         self.low = 0
         self.high = 0
         self.fixed_point.value = False
 
-    def offset_of(self, other, n):
+    def offset_of(self, other: "StackSize", n: int) -> None:
         prior = (self.low, self.high)
         self.low = min(self.low, other.low + n)
         self.high = max(self.high, other.high + n)
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
 
-    def exn_tab_jump(self, depth):
+    def exn_tab_jump(self, depth: int) -> None:
         prior = (self.low, self.high)
         self.low = min(self.low, depth)
         self.high = max(self.high, depth)
@@ -217,7 +224,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions) -> Union[int, float]:
+def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {
@@ -238,6 +245,7 @@ def stacksize_analysis(instructions) -> Union[int, float]:
                 eff = stack_effect(inst.opcode, inst.arg, jump=False)
                 stack_sizes[next_inst].offset_of(stack_size, eff)
             if inst.opcode in JUMP_OPCODES:
+                assert inst.target is not None, f"missing target: {inst}"
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
@@ -246,11 +254,6 @@ def stacksize_analysis(instructions) -> Union[int, float]:
                 # on why depth is computed this way.
                 depth = inst.exn_tab_entry.depth + int(inst.exn_tab_entry.lasti) + 1
                 stack_sizes[inst.exn_tab_entry.target].exn_tab_jump(depth)
-
-    if False:
-        for inst in instructions:
-            stack_size = stack_sizes[inst]
-            print(stack_size.low, stack_size.high, inst)
 
     low = min(x.low for x in stack_sizes.values())
     high = max(x.high for x in stack_sizes.values())

@@ -34,7 +34,7 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
     case 14:
       switch (minor) {
         case 0:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+          return true;
         case 4:
           return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
         default:
@@ -42,19 +42,7 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
           return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
       }
     case 13:
-      switch (minor) {
-        case 0:
-          return true;
-        case 1:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
-        case 2:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
-        case 3:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-        default:
-          TORCH_WARN("Can't check whether running on 13.", minor, "+ returning one for 13.3+");
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-      }
+      return true;
     default:
       TORCH_WARN("Checking for unexpected MacOS ", major, ".", minor, " returning false");
       return false;

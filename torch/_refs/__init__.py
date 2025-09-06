@@ -385,7 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -396,10 +396,12 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    # Type checking
-    # TODO: make common validations available as utils
     for shape in shapes:
-        assert isinstance(shape, Sequence)
+        if not isinstance(shape, Sequence):
+            raise RuntimeError(
+                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
+                shape,
+            )
 
     # Computes common shape
     common_shape: list[Union[int, torch.SymInt]] = [
@@ -407,13 +409,30 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
+            if is_nested_int(shape[idx]):
+                # Broadcasting is allowed for (j0, 1) or (j0, j0);
+                # not (j0, j1), (j0, 5), etc.
+                if is_nested_int(common_shape[idx]) and guard_or_false(
+                    shape[idx] == common_shape[idx]
+                ):
+                    continue
+            else:
+                if guard_or_false(shape[idx] == common_shape[idx]):
+                    continue
+
+            if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+
+            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
+                # broadcast case .
+                continue
+            else:
+                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -2773,10 +2792,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2830,7 +2846,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
                 # through), and is load bearing for our Inductor lowerings
                 # (which assume that size oblivious tests are OK to determine
                 # if a shape is permissibly zero.)
-                guard_size_oblivious(tensor.shape[0] == 0),
+                guard_or_false(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
@@ -2998,7 +3014,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 @register_decomposition(aten.expand)
-def expand(a: Tensor, *shape) -> Tensor:
+def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
@@ -3270,6 +3286,8 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     normalized_ndim = len(normalized_shape)
     torch._check(
         normalized_ndim >= 1,
@@ -3281,7 +3299,7 @@ def native_layer_norm(
     # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
     # therefore we use tuple(normalized_shape)
     torch._check(
-        weight is None or weight.shape == tuple(normalized_shape),
+        weight is None or sym_eq(weight.shape, tuple(normalized_shape)),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
         + str(weight.shape)  # type: ignore[union-attr]
@@ -3289,7 +3307,7 @@ def native_layer_norm(
         + str(normalized_shape),
     )
     torch._check(
-        bias is None or bias.shape == tuple(normalized_shape),
+        bias is None or sym_eq(bias.shape, tuple(normalized_shape)),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
         + str(bias.shape)  # type: ignore[union-attr]
@@ -3298,7 +3316,9 @@ def native_layer_norm(
     )
     torch._check(
         input.ndim >= normalized_ndim
-        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        and sym_eq(
+            input.shape[(input.ndim - normalized_ndim) :], tuple(normalized_shape)
+        ),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
         + ", expected input with shape "
@@ -4178,7 +4198,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 @register_decomposition(aten.squeeze.dims)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
@@ -4193,7 +4213,8 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    dims = tuple(d for d in dims if guard_size_oblivious(a.shape[d] == 1))
+    # would it be better if we just not allow 1 for unbacked at runtiume?
+    dims = tuple(d for d in dims if guard_or_false(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
     if len(dims) == 1:
@@ -5588,26 +5609,9 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return prims.fill(e, fill_value)  # type: ignore[arg-type]
+    return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
-def _get_shape_permutation_like(
-    a: TensorLikeType, layout: torch.layout
-) -> tuple[ShapeType, StrideType]:
-    assert layout == torch.strided
-
-    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
-    shape = [a.shape[l] for l in physical_layout]
-
-    permutation = [0] * len(shape)
-    for p, l in enumerate(physical_layout):
-        permutation[l] = p
-
-    return (shape, permutation)
-
-
-@register_decomposition(aten.full_like)
-@out_wrapper()
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
@@ -5619,36 +5623,16 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    dtype = a.dtype if dtype is None else dtype
-    layout = a.layout if layout is None else layout
-    device = a.device if device is None else device
-
-    if memory_format != torch.preserve_format:
-        result = torch.full(
-            a.shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-        return result.to(memory_format=memory_format)
-
-    else:
-        shape, permutation = _get_shape_permutation_like(a, layout)
-        result = torch.full(
-            shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-        if permutation == list(range(len(permutation))):
-            return result
-        return result.permute(permutation).clone()
+    e = torch.empty_like(
+        a,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
+    return fill(e, fill_value)
 
 
 @register_decomposition(aten.zeros_like)
@@ -6107,7 +6091,7 @@ def bucketize(
     if n_boundaries == 0:
         return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
-    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
+    # each element of `a` belongs to. We use binary search to achieve logarithmic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
     start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)

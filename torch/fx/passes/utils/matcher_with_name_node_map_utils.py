@@ -88,7 +88,7 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             ignore_literals,
         )
 
-    def match(self, graph: Graph) -> list[InternalMatch]:
+    def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """The returned InternalMatch will have name_node_map populated with a map
         from node name (str) to the target node, e.g.
         {"conv": target_conv_ndoe, "relu": target_relu_node}
@@ -107,7 +107,7 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             return relu, {"conv": conv, "relu": relu}
         ``` instead
         """
-        internal_matches = super().match(graph)
+        internal_matches = super().match(graph, node_name_match)
         for internal_match in internal_matches:
             for k, n in self.name_node_map.items():
                 internal_match.name_node_map[k] = internal_match.nodes_map[n]
