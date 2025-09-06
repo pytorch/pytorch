@@ -539,11 +539,11 @@ class TestLazyModules(TestCase):
             module = nn.LazyLayerNorm(start_dim=i)
             module(input)
 
-        forbidden_start_dims = itertools.chain(
+        forbidden_start_dims_example = itertools.chain(
             range(-rank - 1, -rank - 3, -1), range(rank, rank + 3)
         )
 
-        for i in forbidden_start_dims:
+        for i in forbidden_start_dims_example:
             with self.assertRaisesRegex(ValueError, f"start dim {i} is out of bound"):
                 module = nn.LazyLayerNorm(start_dim=i)
                 module(input)
