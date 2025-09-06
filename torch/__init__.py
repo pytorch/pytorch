@@ -102,6 +102,7 @@ __all__ = [
     "is_deterministic_algorithms_warn_only_enabled",
     "is_storage",
     "is_tensor",
+    "is_vulkan_available",
     "is_warn_always_enabled",
     "load",
     "lobpcg",
@@ -2247,6 +2248,11 @@ del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 def compiled_with_cxx11_abi() -> builtins.bool:
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return True
+
+
+def is_vulkan_available() -> builtins.bool:
+    r"""Returns whether PyTorch was built with Vulkan support."""
+    return torch._C._is_vulkan_available()
 
 
 from torch import _library as _library, _ops as _ops
