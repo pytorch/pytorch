@@ -18,6 +18,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
 #include <ATen/ops/random_native.h>
@@ -332,6 +333,14 @@ Tensor& bernoulli_mps_(Tensor& self, double p, std::optional<Generator> gen) {
 
 Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   return mps::bernoulli_mps_impl(self, p_, gen, __func__);
+}
+
+Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  // generate normal samples then exponentiate
+  mps::normal_mps_impl(self, mean, std, std::nullopt, std::nullopt, gen, "normal");
+  self.exp_();
+  return self;
 }
 
 // random_.from
