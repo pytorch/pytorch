@@ -15,9 +15,12 @@ from typing import (
     IO,
     Literal,
     NamedTuple,
+    Optional,
     overload,
     SupportsIndex,
+    Tuple,
     TypeVar,
+    Union,
 )
 from typing_extensions import ParamSpec, Protocol, runtime_checkable, Self, TypeAlias
 
@@ -33,6 +36,7 @@ from torch._C import (
     _functorch,
     _lazy,
     _lazy_ts_backend,
+    _linalg,
     _nn,
     _onnx,
     _VariableFunctions,
@@ -64,6 +68,13 @@ from torch.types import (
     Storage,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.return_types import (
+    qr as return_types_qr,
+    svd as return_types_svd,
+    _linalg_eigh as return_types_linalg_eigh,
+    _linalg_slogdet as return_types_linalg_slogdet,
+    _linalg_svd as return_types_linalg_svd,
+)
 
 # This module is defined in torch/csrc/Module.cpp
 
@@ -1383,6 +1394,356 @@ class _LinalgBackend:
     Default: _LinalgBackend
     Cusolver: _LinalgBackend
     Magma: _LinalgBackend
+
+# Defined in torch/csrc/_linalg.cpp
+
+# Exception type for linear algebra errors
+class _LinAlgError(RuntimeError): ...
+
+# Cross product functions
+def linalg_cross(
+    input: Tensor,
+    other: Tensor,
+    dim: _int = -1,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Cholesky decomposition
+def linalg_cholesky(
+    A: Tensor,
+    *,
+    upper: _bool = False,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+def linalg_cholesky_ex(
+    A: Tensor,
+    *,
+    upper: _bool = False,
+    check_errors: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+# Determinant
+def linalg_det(
+    A: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix inverse
+def linalg_inv(
+    A: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+def linalg_inv_ex(
+    A: Tensor,
+    *,
+    check_errors: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+# Condition number
+def linalg_cond(
+    A: Tensor,
+    p: Union[None, _int, _float, str] = None,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Diagonal
+def linalg_diagonal(
+    A: Tensor,
+    *,
+    offset: _int = 0,
+    dim1: _int = -2,
+    dim2: _int = -1,
+) -> Tensor: ...
+
+# Eigendecomposition
+def linalg_eig(
+    A: Tensor,
+    *,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+def linalg_eigh(
+    A: Tensor,
+    UPLO: str = "L",
+    *,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> return_types_linalg_eigh: ...
+
+def linalg_eigvals(
+    A: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+def linalg_eigvalsh(
+    A: Tensor,
+    UPLO: str = "L",
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Householder product
+def linalg_householder_product(
+    A: Tensor,
+    tau: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# LDL factorization
+def linalg_ldl_factor(
+    A: Tensor,
+    *,
+    hermitian: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+def linalg_ldl_factor_ex(
+    A: Tensor,
+    *,
+    hermitian: _bool = False,
+    check_errors: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor, Tensor]: ...
+
+def linalg_ldl_solve(
+    LD: Tensor,
+    pivots: Tensor,
+    B: Tensor,
+    *,
+    hermitian: _bool = False,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Least squares
+def linalg_lstsq(
+    A: Tensor,
+    B: Tensor,
+    rcond: Optional[_float] = None,
+    *,
+    driver: Optional[str] = None,
+    out: Optional[Tuple[Tensor, Tensor, Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]: ...
+
+# LU decomposition
+def linalg_lu(
+    A: Tensor,
+    *,
+    pivot: _bool = True,
+    out: Optional[Tuple[Tensor, Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor, Tensor]: ...
+
+def linalg_lu_factor(
+    A: Tensor,
+    *,
+    pivot: _bool = True,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+def linalg_lu_factor_ex(
+    A: Tensor,
+    *,
+    pivot: _bool = True,
+    check_errors: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor, Tensor]: ...
+
+def linalg_lu_solve(
+    LU: Tensor,
+    pivots: Tensor,
+    B: Tensor,
+    *,
+    left: _bool = True,
+    adjoint: _bool = False,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix multiplication
+def linalg_matmul(
+    input: Tensor,
+    other: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix exponential
+def linalg_matrix_exp(
+    A: Tensor,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix norms
+def linalg_matrix_norm(
+    A: Tensor,
+    ord: Union[_int, _float, str] = "fro",
+    dim: Tuple[_int, _int] = (-2, -1),
+    keepdim: _bool = False,
+    *,
+    dtype: Optional[_dtype] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix power
+def linalg_matrix_power(
+    A: Tensor,
+    n: _int,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Matrix rank
+def linalg_matrix_rank(
+    A: Tensor,
+    tol: Optional[_float] = None,
+    hermitian: _bool = False,
+    *,
+    atol: Optional[_float] = None,
+    rtol: Optional[_float] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Multi dot
+def linalg_multi_dot(
+    tensors: Tuple[Tensor, ...],
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Vector and matrix norms
+def linalg_norm(
+    A: Tensor,
+    ord: Optional[Union[_int, _float, str]] = None,
+    dim: Optional[Union[_int, Tuple[_int, ...]]] = None,
+    keepdim: _bool = False,
+    *,
+    dtype: Optional[_dtype] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Pseudoinverse
+def linalg_pinv(
+    A: Tensor,
+    rcond: Optional[_float] = None,
+    hermitian: _bool = False,
+    *,
+    atol: Optional[_float] = None,
+    rtol: Optional[_float] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# QR decomposition
+def linalg_qr(
+    A: Tensor,
+    mode: str = "reduced",
+    *,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> return_types_qr: ...
+
+# Sign and log determinant
+def linalg_slogdet(
+    A: Tensor,
+    *,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> return_types_linalg_slogdet: ...
+
+# Linear solve
+def linalg_solve(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: _bool = True,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+def linalg_solve_ex(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: _bool = True,
+    check_errors: _bool = False,
+    out: Optional[Tuple[Tensor, Tensor]] = None,
+) -> Tuple[Tensor, Tensor]: ...
+
+# Triangular solve
+def linalg_solve_triangular(
+    A: Tensor,
+    B: Tensor,
+    *,
+    upper: _bool,
+    left: _bool = True,
+    unitriangular: _bool = False,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# SVD
+def linalg_svd(
+    A: Tensor,
+    full_matrices: _bool = True,
+    *,
+    driver: Optional[str] = None,
+    out: Optional[Tuple[Tensor, Tensor, Tensor]] = None,
+) -> return_types_linalg_svd: ...
+
+def linalg_svdvals(
+    A: Tensor,
+    *,
+    driver: Optional[str] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Tensor inverse
+def linalg_tensorinv(
+    A: Tensor,
+    ind: _int = 2,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Tensor solve
+def linalg_tensorsolve(
+    A: Tensor,
+    B: Tensor,
+    dims: Optional[Tuple[_int, ...]] = None,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Vandermonde matrix
+def linalg_vander(
+    x: Tensor,
+    N: Optional[_int] = None,
+    *,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Vector dot product
+def linalg_vecdot(
+    x: Tensor,
+    y: Tensor,
+    *,
+    dim: _int = -1,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
+
+# Vector norm
+def linalg_vector_norm(
+    x: Tensor,
+    ord: Union[_int, _float] = 2,
+    dim: Optional[Union[_int, Tuple[_int, ...]]] = None,
+    keepdim: _bool = False,
+    *,
+    dtype: Optional[_dtype] = None,
+    out: Optional[Tensor] = None,
+) -> Tensor: ...
 
 # mypy error:
 # Detected enum "torch._C.BatchNormBackend" in a type stub with zero
