@@ -3,6 +3,7 @@
 import contextlib
 import os
 import unittest
+from unittest import skipUnless
 
 import numpy as np
 import sympy
@@ -18,7 +19,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import run_and_get_code, sympy_index_symbol
+from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -569,6 +570,7 @@ class LoopOrderingTest(TestCase):
             "test_configs.max_mm_configs": 4,
         }
     )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
     def test_interaction_with_triton_template(self):
         """
         Make sure the dependency prefix for TritonTempalate and its
@@ -589,6 +591,23 @@ class LoopOrderingTest(TestCase):
         FileCheck().check("def call(").check_count(
             ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
         ).run(code[0])
+
+    def test_fuse_with_scalar_shared_memory(self):
+        """
+        Make sure if we can fuse two nodes sharing a scalar before,
+        we can still do it with LOAF applied.
+
+        This is not really a big deal. But some tests rely on this and
+        less number of kernels has some small benefits.
+        """
+
+        @torch.compile
+        def f(x):
+            return torch.mean(x)
+
+        x = torch.randn([5, 5], device=GPU_TYPE)
+        out, code = run_and_get_code(f, x)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
 
 
 @inductor_config.patch(
