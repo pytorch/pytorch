@@ -92,17 +92,17 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
-template <typename T, typename UnderlyingContainer = std::vector<T>>
+template <typename T>
 struct OptionalArray {
-  std::optional<UnderlyingContainer> list;
+  std::optional<std::vector<T>> list;
 
   OptionalArray() = default;
-  OptionalArray(UnderlyingContainer val) : list(std::move(val)) {}
+  OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
   OptionalArray& operator=(std::optional<ArrayRef<T>> ref) {
     if (ref) {
-      list = UnderlyingContainer(ref->begin(), ref->end());
+      list = std::vector<T>(ref->begin(), ref->end());
     } else {
       list = std::nullopt;
     }
@@ -112,7 +112,7 @@ struct OptionalArray {
   // Used when saving an argument for the backwards pass.
   OptionalArray& operator=(c10::OptionalArrayRef<T> ref) {
     if (ref) {
-      list = UnderlyingContainer(ref->begin(), ref->end());
+      list = std::vector<T>(ref->begin(), ref->end());
     } else {
       list = std::nullopt;
     }
