@@ -645,6 +645,17 @@ def get_args_parser() -> ArgumentParser:
           featuring a single L3 cache per socket.""",
     )
 
+    parser.add_argument(
+        "--signals-to-handle",
+        "--signals_to_handle",
+        action=env,
+        type=str,
+        default="SIGTERM,SIGINT,SIGHUP,SIGQUIT",
+        help="Comma-separated list of signals to handle and forward to subprocesses. "
+        "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
+        "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
     #
     # Positional arguments.
     #
@@ -861,6 +872,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         logs_specs=logs_specs,
         event_log_handler=args.event_log_handler,
         numa_options=numa_options,
+        signals_to_handle=args.signals_to_handle,
     )
 
     with_python = not args.no_python
