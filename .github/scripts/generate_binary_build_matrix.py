@@ -42,78 +42,94 @@ CUDA_AARCH64_ARCHES = ["13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "12.6": (
-        "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    "12.6": " | ".join(
+        f"{dep}; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        for dep in (
+            "nvidia-cuda-nvrtc-cu12==12.6.77",
+            "nvidia-cuda-runtime-cu12==12.6.77",
+            "nvidia-cuda-cupti-cu12==12.6.80",
+            "nvidia-cudnn-cu12==9.10.2.21",
+            "nvidia-cublas-cu12==12.6.4.1",
+            "nvidia-cufft-cu12==11.3.0.4",
+            "nvidia-curand-cu12==10.3.7.77",
+            "nvidia-cusolver-cu12==11.7.1.2",
+            "nvidia-cusparse-cu12==12.5.4.2",
+            "nvidia-cusparselt-cu12==0.7.1",
+            "nvidia-nccl-cu12==2.27.5",
+            "nvidia-nvshmem-cu12==3.3.20",
+            "nvidia-nvtx-cu12==12.6.77",
+            "nvidia-nvjitlink-cu12==12.6.85",
+            "nvidia-cufile-cu12==1.11.1.6",
+        )
     ),
-    "12.8": (
-        "nvidia-cuda-nvrtc-cu12==12.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.8.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.3.3.83; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.9.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    "12.8": " | ".join(
+        f"{dep}; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        for dep in (
+            "nvidia-cuda-nvrtc-cu12==12.8.93",
+            "nvidia-cuda-runtime-cu12==12.8.90",
+            "nvidia-cuda-cupti-cu12==12.8.90",
+            "nvidia-cudnn-cu12==9.10.2.21",
+            "nvidia-cublas-cu12==12.8.4.1",
+            "nvidia-cufft-cu12==11.3.3.83",
+            "nvidia-curand-cu12==10.3.9.90",
+            "nvidia-cusolver-cu12==11.7.3.90",
+            "nvidia-cusparse-cu12==12.5.8.93",
+            "nvidia-cusparselt-cu12==0.7.1",
+            "nvidia-nccl-cu12==2.27.5",
+            "nvidia-nvshmem-cu12==3.3.20",
+            "nvidia-nvtx-cu12==12.8.90",
+            "nvidia-nvjitlink-cu12==12.8.93",
+            "nvidia-cufile-cu12==1.13.1.3",
+        )
     ),
-    "13.0": (
-        "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu13==9.12.0.46; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas==13.0.0.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft==12.0.0.15; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand==10.4.0.35; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver==12.0.3.29; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse==12.6.2.49; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu13==3.3.24; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    "13.0": " | ".join(
+        f"{dep}; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        for dep in (
+            "nvidia-cuda-nvrtc==13.0.48",
+            "nvidia-cuda-runtime==13.0.48",
+            "nvidia-cuda-cupti==13.0.48",
+            "nvidia-cudnn-cu13==9.12.0.46",
+            "nvidia-cublas==13.0.0.19",
+            "nvidia-cufft==12.0.0.15",
+            "nvidia-curand==10.4.0.35",
+            "nvidia-cusolver==12.0.3.29",
+            "nvidia-cusparse==12.6.2.49",
+            "nvidia-cusparselt-cu13==0.8.0",
+            "nvidia-nccl-cu13==2.27.7",
+            "nvidia-nvshmem-cu13==3.3.24",
+            "nvidia-nvtx==13.0.39",
+            "nvidia-nvjitlink==13.0.39",
+            "nvidia-cufile==1.15.0.42",
+        )
     ),
-    "xpu": (
-        "intel-cmplr-lib-rt==2025.2.1 | "
-        "intel-cmplr-lib-ur==2025.2.1 | "
-        "intel-cmplr-lic-rt==2025.2.1 | "
-        "intel-sycl-rt==2025.2.1 | "
-        "oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-sycl-blas==2025.2.0 | "
-        "onemkl-sycl-dft==2025.2.0 | "
-        "onemkl-sycl-lapack==2025.2.0 | "
-        "onemkl-sycl-rng==2025.2.0 | "
-        "onemkl-sycl-sparse==2025.2.0 | "
-        "dpcpp-cpp-rt==2025.2.1 | "
-        "intel-opencl-rt==2025.2.1 | "
-        "mkl==2025.2.0 | "
-        "intel-openmp==2025.2.1 | "
-        "tbb==2022.2.0 | "
-        "tcmlib==1.4.0 | "
-        "umf==0.11.0 | "
-        "intel-pti==0.13.1"
+    "xpu": " | ".join(
+        (
+            *(
+                f"{dep}; platform_system == 'Linux' and platform_machine == 'x86_64'"
+                for dep in (
+                    "oneccl-devel==2021.16.1",
+                    "oneccl==2021.16.1",
+                    "impi-rt==2021.16.1",
+                )
+            ),
+            "intel-cmplr-lib-rt==2025.2.1",
+            "intel-cmplr-lib-ur==2025.2.1",
+            "intel-cmplr-lic-rt==2025.2.1",
+            "intel-sycl-rt==2025.2.1",
+            "onemkl-sycl-blas==2025.2.0",
+            "onemkl-sycl-dft==2025.2.0",
+            "onemkl-sycl-lapack==2025.2.0",
+            "onemkl-sycl-rng==2025.2.0",
+            "onemkl-sycl-sparse==2025.2.0",
+            "dpcpp-cpp-rt==2025.2.1",
+            "intel-opencl-rt==2025.2.1",
+            "mkl==2025.2.0",
+            "intel-openmp==2025.2.1",
+            "tbb==2022.2.0",
+            "tcmlib==1.4.0",
+            "umf==0.11.0",
+            "intel-pti==0.13.1",
+        )
     ),
 }
 
@@ -385,6 +401,7 @@ def generate_wheels_matrix(
     return ret
 
 
-validate_nccl_dep_consistency("13.0")
-validate_nccl_dep_consistency("12.8")
-validate_nccl_dep_consistency("12.6")
+cuda_arch = ""
+for cuda_arch in CUDA_ARCHES:
+    validate_nccl_dep_consistency(cuda_arch)
+del cuda_arch
