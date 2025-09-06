@@ -170,9 +170,9 @@ esac
 PINNED_PACKAGES=(
     "numpy${NUMPY_PINNED_VERSION}"
 )
-retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements-build.txt"
-pip install requests ninja typing-extensions
-retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
+python -mvenv ~/${desired_python}-build
+source ~/${desired_python}-build
+retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
 retry brew install libomp
 
 # For USE_DISTRIBUTED=1 on macOS, this enables gloo, which needs libuv, which
