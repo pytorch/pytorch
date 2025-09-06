@@ -1639,10 +1639,8 @@ if(USE_CUDA)
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
   if(USE_FBGEMM_GENAI)
-    # Link fbgemm_genai to torch_cuda only for (1) CUDA build for SM100, or (2) ROCm build.
-    if((USE_CUDA AND NOT USE_ROCM AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0") OR (USE_ROCM))
-      target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
-    endif()
+    # Link fbgemm_genai to torch_cuda (only for (1) CUDA build for SM100).
+    target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
   endif()
 endif()
 
