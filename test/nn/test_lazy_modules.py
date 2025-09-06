@@ -523,14 +523,11 @@ class TestLazyModules(TestCase):
         )
 
     def test_lazy_layer_norm_out_of_bound_batch_dim(self) -> None:
-        input = torch.ones((20, 5, 10, 10))
-
         with self.assertRaisesRegex(
             ValueError,
             "start dim is 0 but layer norm is not indented to normalize over batch dimension",
         ):
-            module = nn.LazyLayerNorm(start_dim=0)
-            module(input)
+            nn.LazyLayerNorm(start_dim=0)
 
     def test_lazy_layer_norm_out_of_bound(self) -> None:
         input = torch.ones((20, 5, 10, 10))
