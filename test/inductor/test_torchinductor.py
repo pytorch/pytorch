@@ -4607,6 +4607,19 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    def test_conv1d_with_permute(self):
+        # fix https://github.com/pytorch/pytorch/issues/159462
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(1, 64, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                x = x.permute(0, 2, 1)
+                return self.conv(x)
+
+        self.common(ConvModel(), (torch.randn([32, 100, 1]),), check_lowp=False)
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
