@@ -1,3 +1,4 @@
+#!/bin/bash
 set -ex
 
 # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
@@ -49,29 +50,15 @@ for lib in "${OS_SO_PATHS[@]}"; do
   cp $lib $TRITON_ROCM_DIR/lib/
 done
 
-# Required ROCm libraries
-if [[ "${MAJOR_VERSION}" == "6" ]]; then
-  libamdhip="libamdhip64.so.6"
-else
-  libamdhip="libamdhip64.so.5"
-fi
-
 # Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
-  "${libamdhip}"
-  "libhsa-runtime64.so.1"
-  "libdrm.so.2"
-  "libdrm_amdgpu.so.1"
+  "libamdhip64.so"
+  "libhsa-runtime64.so"
+  "libdrm.so"
+  "libdrm_amdgpu.so"
+  "libamd_comgr.so"
+  "librocprofiler-register.so"
 )
-if [[ $ROCM_INT -ge 60400 ]]; then
-  ROCM_SO+=("libamd_comgr.so.3")
-else
-  ROCM_SO+=("libamd_comgr.so.2")
-fi
-
-if [[ $ROCM_INT -ge 60100 ]]; then
-  ROCM_SO+=("librocprofiler-register.so.0")
-fi
 
 for lib in "${ROCM_SO[@]}"; do
   file_path=($(find $ROCM_HOME/lib/ -name "$lib")) # First search in lib
@@ -92,10 +79,6 @@ for lib in "${ROCM_SO[@]}"; do
   fi
 
   cp $file_path $TRITON_ROCM_DIR/lib
-  # When running locally, and not building a wheel, we need to satisfy shared objects requests that don't look for versions
-  LINKNAME=$(echo $lib | sed -e 's/\.so.*/.so/g')
-  ln -sf $lib $TRITON_ROCM_DIR/lib/$LINKNAME
-
 done
 
 # Copy Include Files
