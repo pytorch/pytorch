@@ -13,9 +13,9 @@ pip install numpy==1.26.0
 cd ../llm-target-determinator
 
 torchrun \
-    --standalone \
-    --nnodes=1 \
-    --nproc-per-node=1 \
-    indexer.py \
-    --experiment-name indexer-files \
-    --granularity FILE
+  --standalone \
+  --nnodes=1 \
+  --nproc-per-node=1 \
+  indexer.py \
+  --experiment-name indexer-files \
+  --granularity FILE
