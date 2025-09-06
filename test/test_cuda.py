@@ -6857,7 +6857,7 @@ class TestCompileKernel(TestCase):
         """
 
         # Compile the kernel
-        from torch.cuda import _compile_kernel
+        from torch.cuda import _compile_kernel, get_device_properties
 
         add_kernel = _compile_kernel(kernel_source, "add_tensors")
 
@@ -6870,7 +6870,9 @@ class TestCompileKernel(TestCase):
         # Calculate grid and block dimensions
         threads_per_block = 256
         blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-        shared_mem = 64000
+
+        max_smem = get_device_properties().shared_memory_per_block_optin
+        shared_mem = (48 * 1024 + max_smem) // 2
 
         # Launch kernel
         add_kernel(
@@ -6883,6 +6885,17 @@ class TestCompileKernel(TestCase):
         # Verify results
         expected = a + b
         self.assertEqual(c, expected)
+
+        # Test error handling with more than supported shared memory size
+        shared_mem = max_smem * 2
+
+        with self.assertRaises(RuntimeError):
+            add_kernel(
+                grid=(blocks_per_grid, 1, 1),
+                block=(threads_per_block, 1, 1),
+                args=[a, b, c, N],
+                shared_mem=shared_mem
+            )
 
     @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
