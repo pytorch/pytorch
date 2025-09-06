@@ -16,6 +16,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# mypy: ignore-errors
+
+
 class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
     pass
 
@@ -768,6 +771,14 @@ class TestLazyModules(TestCase):
 
         normalized_shape = (7, 5, 10, 10)
         self._check_lazy_layer_norm_norm_state(normalized_shape, -4)
+
+    def test_lazy_layer_norm_backward(self):
+        mod = nn.LazyLayerNorm(start_dim=-1)
+        x = torch.ones(2, 3, 4, requires_grad=True)
+        y = mod(x).sum()
+        y.backward()
+        self.assertIsNotNone(mod.weight.grad)
+        self.assertIsNotNone(mod.bias.grad)
 
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
