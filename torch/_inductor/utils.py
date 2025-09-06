@@ -3496,6 +3496,12 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     `config_patches` (or falls back to the global config), this function ensures
     that the following configs are also enabled:
         - `aot_inductor.package_cpp_only`
+        - `aot_inductor.embed_kernel_binary`
+        - `aot_inductor.emit_multi_arch_kernel`
+
+    If `aot_inductor.dynamic_linkage` is set to True in the provided
+    `config_patches` (or falls back to the global config): 
+        - `aot_inductor.model_name_for_generated_files` is default to "aoti_model" if not set.
 
     Args:
         config_patches (dict[str, Any]): A dictionary of user-provided config
@@ -3519,6 +3525,9 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     compile_standalone = config_patches.get(
         "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
     )
+    dynamic_linkage = config_patches.get(
+        "aot_inductor.dynamic_linkage", config.aot_inductor.dynamic_linkage
+    )
     # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
     config_patches = config_patches.copy()
     if compile_standalone:
@@ -3530,6 +3539,7 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(
             config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
         )
+    if not dynamic_linkage:
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )

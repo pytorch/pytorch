@@ -363,6 +363,7 @@ class _ExportPackage:
             # we'll change this back to False once we enable weight deduping for standalone mode
             "aot_inductor.package_constants_in_so": standalone,
             "aot_inductor.compile_standalone": standalone,
+            "aot_inductor.dynamic_linkage": False,
         }
         aoti_files_map = {}
         model_names = []

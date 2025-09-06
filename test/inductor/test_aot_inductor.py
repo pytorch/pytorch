@@ -7127,7 +7127,12 @@ class TestAOTInductorConfig(TestCase):
             self.assertEqual(result, {})
 
     def test_compile_standalone_sets_package_cpp(self):
-        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        result = maybe_aoti_standalone_config(
+            {
+                "aot_inductor.compile_standalone": True,
+                "aot_inductor.dynamic_linkage": False,
+            }
+        )
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
         self.assertEqual(result["aot_inductor.compile_standalone"], True)
         self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
