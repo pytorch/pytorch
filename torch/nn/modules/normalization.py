@@ -342,7 +342,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        if not self.has_uninitialized_params():
+        if not self.has_uninitialized_params() and self.elementwise_affine:
             super().reset_parameters()
 
     def initialize_parameters(self, input) -> None:
