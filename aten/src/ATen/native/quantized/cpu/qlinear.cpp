@@ -1012,6 +1012,12 @@ static at::Tensor fp8_qlinear_onednn_ref(
           "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op sum");
     }
     y_f32.div_(output_scale);
+    if (x1.scalar_type() == c10::kFloat8_e4m3fn) {
+      // Avoid NaN
+      y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
+      // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+      y_f32 = y_f32.to(at::kHalf);
+    }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
     return x1;
   } else if (binary_post_op == "add") {
@@ -1038,6 +1044,12 @@ static at::Tensor fp8_qlinear_onednn_ref(
   y_f32.div_(output_scale);
   y_f32 = y_f32.view(output_size);
   auto out_dtype = output_dtype.has_value() ? output_dtype.value() : at::kFloat8_e4m3fn;
+  if (out_dtype == at::kFloat8_e4m3fn) {
+    // Avoid NaN
+    y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
+    // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+    return y_f32.to(at::kHalf).to(out_dtype);
+  }
   return y_f32.to(out_dtype);
 }
 
@@ -1118,7 +1130,7 @@ static at::Tensor linear_int8_with_onednn_weight(
 #if defined(__powerpc__)
   if (is_fp8) {
 #else
-  if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
 #endif
     // Fall back to ref impl on old platforms because not supported
     // Transpose weight to align with behavior in oneDNN
@@ -1155,12 +1167,13 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
   at::Tensor output = binary_post_op == "sum" ?
       other.value() :
       at::empty(
         dst_dims,
         at::device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : input.scalar_type()))
+            .dtype(out_dtype)
       );
   if (output.numel() == 0) {
     return output;
@@ -1195,6 +1208,16 @@ static at::Tensor linear_int8_with_onednn_weight(
     unary_post_op_args,
     unary_post_op_algorithm
   );
+  // Avoid NaN if output dtype is fp8
+  if (out_dtype == c10::kFloat8_e4m3fn) {
+    // To avoid NaN, we need to clamp the intermediate results (in fp32) to [-488, 488]
+    // before converting to fp8
+    auto post_ops = op_attr.get_post_ops();
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_linear, 1.0/output_scale, 0.0);
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_clip, -FP8E4M3_MAX, FP8E4M3_MAX);
+    op_attr.set_post_ops(post_ops);
+    output_scale = 1.0f;
+  }
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
