@@ -1767,6 +1767,52 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         out = f(MyTuple(a, b))
         self.assertTrue(same(a + 1, out))
 
+    def test_namedtuple_source_dynamic_attributes(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class MyNamedTupleSubclass(MyNamedTuple):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(tup):
+            c = torch.tensor(3.0)
+            tup.c = c  # Add dynamic attribute
+            return tup
+
+        extended_tup = MyNamedTupleSubclass(a=torch.tensor([1.0]), b=torch.tensor(2.0))
+        result = f(extended_tup)
+        # Verify the tuple has the expected structure
+        self.assertEqual(result.a, torch.tensor([1.0]))
+        self.assertEqual(result.b, torch.tensor(2.0))
+        self.assertTrue(hasattr(result, "c"))
+        self.assertEqual(result.c, torch.tensor(3.0))
+
+    def test_namedtuple_sourceless_dynamic_attributes(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class MyNamedTupleSubclass(MyNamedTuple):
+            pass
+
+        @torch.compile(backend="eager")
+        def f():
+            # Create namedtuple inside function (sourceless)
+            tup = MyNamedTupleSubclass(a=torch.tensor([1.0]), b=torch.tensor(2.0))
+            # Add dynamic attribute
+            tup.c = torch.tensor(3.0)
+            return tup
+
+        result = f()
+        # Verify the tuple has the expected structure
+        self.assertEqual(result.a, torch.tensor([1.0]))
+        self.assertEqual(result.b, torch.tensor(2.0))
+        # Verify the dynamic attribute is preserved
+        self.assertTrue(hasattr(result, "c"))
+        self.assertEqual(result.c, torch.tensor(3.0))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
