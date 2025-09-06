@@ -104,7 +104,7 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
-if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
     # After https://github.com/pytorch/pytorch/pull/161586, starts failing UBSAN so we can't even xfail.
     # Root cause seems to be SymInt issues in StorageImpl, see

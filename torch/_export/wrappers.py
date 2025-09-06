@@ -1,6 +1,11 @@
 # mypy: allow-untyped-defs
-from contextlib import contextmanager
 import functools
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable
 
 import torch
 import torch._custom_ops
@@ -188,7 +193,10 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         return is_traceable_wrapper_subclass_type(sometype)
 
     def wrapper(*args, **kwargs):
-        if not _is_traceable_wrapper_subclass_type(type(args[0])):
+        arg_type: type = type(args[0])
+        # Pacify mypy.
+        arg_type_hashable: Hashable = arg_type
+        if not _is_traceable_wrapper_subclass_type(arg_type_hashable):
             assert constructor_subclass.__qualname__.endswith("__init__")
             obj_name = constructor_subclass.__qualname__[: -len("__init__")]
             raise RuntimeError(

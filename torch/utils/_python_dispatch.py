@@ -525,6 +525,9 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     It does this by unsafely overwriting the storage field of the output tensor
     to be the same storage as the input.
     """
+    assert isinstance(func, torch._ops.OpOverload)
+    assert isinstance(args, tuple)
+    assert isinstance(outs, (list, tuple))
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:
@@ -564,6 +567,7 @@ and output of type {type(ret)}. But expected types to match."""
             for r in ret:
                 torch._functionalize_unsafe_set(r, arg)
         else:
+            assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
     for arg_idx, schema_arg in enumerate(schema_info.args):
