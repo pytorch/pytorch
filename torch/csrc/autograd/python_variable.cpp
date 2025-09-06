@@ -782,7 +782,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       (PyTypeObject*)cls,
       tensor,
       // false is the default
-      /* allow_preexisting_pyobj = */ false,
+      /*allow_preexisting_pyobj=*/false,
       // we checked __torch_dispatch__ above; avoid checking again.
       /*has_torch_dispatch_if_known=*/true);
   END_HANDLE_TH_ERRORS
@@ -844,7 +844,7 @@ static PyObject* THPVariable_make_dtensor(
       (PyTypeObject*)cls,
       tensor,
       // false is the default
-      /* allow_preexisting_pyobj = */ false,
+      /*allow_preexisting_pyobj=*/false,
       // we know DTensor has __torch_dispatch__ and we double-checked
       // above; avoid checking again.
       /*has_torch_dispatch_if_known=*/true);

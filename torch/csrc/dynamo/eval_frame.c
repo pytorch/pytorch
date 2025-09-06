@@ -567,10 +567,16 @@ static PyObject* set_eval_frame(
     // Set thread local callback. This will drive behavior of our shim, if/when it
     // is installed.
     eval_frame_callback_set(new_callback);
+
+    // Transfer owned reference from eval_frame_callback_get() to caller
+    // without Py_DECREF/Py_INCREF.
+  } else {
+    // We retain a reference to old_callback because it's still the
+    // eval_frame_callback, so we need to give the caller their
+    // own reference.
+    Py_INCREF(old_callback);
   }
 
-  // Transfer owned reference from eval_frame_callback_get() to caller
-  // without Py_DECREF/Py_INCREF.
   return old_callback;
 }
 
