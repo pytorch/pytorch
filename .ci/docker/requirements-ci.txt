@@ -358,10 +358,11 @@ pwlf==2.2.1
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
 
-# To build PyTorch itself
+# To build PyTorch itself (see also pyproject.toml)
+packaging>=24.2
 pyyaml
 pyzstd
-setuptools>=70.1.0
+setuptools>=77.0.0
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
