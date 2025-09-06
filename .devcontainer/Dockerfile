@@ -18,8 +18,9 @@ RUN apt-get install --no-install-recommends -y lsb-release wget software-propert
     sudo apt-get clean -y
 
 # Create Python virtual environment
-# RUN python3 -m venv /opt/venv
-# ENV PATH="/opt/venv/bin:$PATH"
+RUN python3 -m venv /opt/venv && \
+    chown -R vscode:vscode /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" VIRTUAL_ENV="/opt/venv"
 RUN pip3 install --upgrade pip
 
 # Install CLANG if version is specified
@@ -41,6 +42,7 @@ RUN if [ -n "$CUDA_VERSION" ]; then \
     CUDA_REPO_VERSION=$(echo ${CUDA_VERSION} | sed 's/\./\-/g'); \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
+    apt-get update && \
     apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_VERSION} && \
     apt-get clean -y; \
     fi
