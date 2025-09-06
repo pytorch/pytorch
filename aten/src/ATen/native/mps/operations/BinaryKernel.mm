@@ -53,6 +53,7 @@ void binary_op_kernel(const std::string func_name,
                   .add_input(input)
                   .add_input(other)
                   .check_all_same_dtype(false)
+                  .promote_inputs_to_common_dtype(true)
                   .build();
 
   lib.exec_binary_kernel(iter, func_name, alpha);
@@ -191,6 +192,14 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "fmod");
 }
 
+static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igamma");
+}
+
+static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igammac");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -216,4 +225,6 @@ REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
+REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
+REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 } // namespace at::native
