@@ -30,7 +30,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_nccl,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -38,12 +38,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 # MLP Layer
@@ -79,7 +84,7 @@ class ComposabilityTest(MultiProcessTestCase):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
-        return "nccl"
+        return backend
 
     def setUp(self):
         super().setUp()
@@ -100,9 +105,11 @@ class ComposabilityTest(MultiProcessTestCase):
     def device(self):
         return self.rank
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIGPU and not TEST_XPU, "Test requires 4+ GPUs"
+    )
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -143,11 +150,11 @@ class ComposabilityTest(MultiProcessTestCase):
                     x = layer(x)
                 return x
 
-        device = torch.device("cuda", self.device)
-        torch.cuda.set_device(self.device)
+        device = torch.device(device_type, self.device)
+        torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
-            backend="nccl",
+            backend=backend,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -192,9 +199,11 @@ class ComposabilityTest(MultiProcessTestCase):
 
         _dcp_test(self)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 8+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
+    )
     @parametrize(
         "ScheduleClass",
         [
@@ -213,11 +222,11 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        _device_raii = torch.device("cuda", self.device)
-        torch.cuda.set_device(self.device)
+        _device_raii = torch.device(device_type, self.device)
+        torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
-            backend="nccl",
+            backend=backend,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -228,7 +237,7 @@ class ComposabilityTest(MultiProcessTestCase):
         num_microbatches = 8
         dp_size = self.world_size // (tp_size * pp_size)
         device_mesh = init_device_mesh(
-            "cuda",
+            device_type,
             mesh_shape=(dp_size, pp_size, tp_size),
             mesh_dim_names=("dp", "pp", "tp"),
         )
