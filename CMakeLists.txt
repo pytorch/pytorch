@@ -888,6 +888,10 @@ IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
   message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
   set(USE_FBGEMM_GENAI off)
 endif()
+if(USE_FBGEMM_GENAI AND USE_CUDA AND NOT "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0")
+  message(WARNING "Unsupported CUDA arch for FBGEMM GenAI (only SM100 is supported, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
