@@ -88,7 +88,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cuda-nvrtc==13.0.48",
             "nvidia-cuda-runtime==13.0.48",
             "nvidia-cuda-cupti==13.0.48",
-            "nvidia-cudnn-cu13==9.12.0.46",
+            "nvidia-cudnn-cu13==9.13.0.50",
             "nvidia-cublas==13.0.0.19",
             "nvidia-cufft==12.0.0.15",
             "nvidia-curand==10.4.0.35",
