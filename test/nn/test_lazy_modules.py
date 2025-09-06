@@ -593,6 +593,7 @@ class TestLazyModules(TestCase):
                 )
 
                 self.assertEqual(module.weight, torch.ones(module.normalized_shape))
+
                 if bias:
                     self.assertNotIsInstance(module.bias, UninitializedParameter)
                     self.assertIsInstance(module.bias, Parameter)
