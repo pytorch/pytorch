@@ -797,7 +797,7 @@ class AOTFxirTestCase(InductorTestCase):
                 """
                 nonlocal called
                 called = True
-                super().compile_graph
+                return super().compile_graph(gm)
 
         class M(torch.nn.Module):
             def forward(self, x):
