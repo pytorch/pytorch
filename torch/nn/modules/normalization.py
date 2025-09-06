@@ -247,6 +247,57 @@ class LayerNorm(Module):
 
 
 class LazyLayerNorm(LazyModuleMixin, LayerNorm):
+    r"""A :class:`torch.nn.LayerNorm` module where `normalized_shape` is inferred.
+
+    This module is a lazy-initialized version of :class:`torch.nn.LayerNorm`.
+    In this module, the `weight` and `bias` of the affine transformation are of :class:`torch.nn.UninitializedParameter`
+    The `normalized_shape` of the layer is inferred from the `start_dim` argument and shape of the input
+    tensor during the first forward pass. After this the module becomes a regular :class:`torch.nn.LayerNorm` with regular `torch.nn.Parameter`
+
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        start_dim (int): The dimension starting from here to the end are normalized. Default: -1
+
+        .. math::
+            [\text{normalized\_shape} = input.shape[start_dim:]
+
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        elementwise_affine: a boolean value that when set to ``True``, this module
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`elementwise_affine` is ``True``). Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, *)`
+        - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> # NLP Example
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = torch.randn(batch, sentence_length, embedding_dim)
+        >>> # Normalize over the last dimension (i.e. the embedding_dim)
+        >>> lazy_layer_norm = nn.LazyLayerNorm(-1)
+        >>> # Activate module
+        >>> layer_norm(embedding)
+        >>>
+        >>> # Image Example
+        >>> N, C, H, W = 20, 5, 10, 10
+        >>> input = torch.randn(N, C, H, W)
+        >>> # Normalize over the last three dimensions (i.e. the channel and spatial dimensions)
+        >>> # as shown in the image below
+        >>> lazy_layer_norm = nn.LazyLayerNorm(-3)
+        >>> output = lazy_layer_norm(input)
+
+        .. image:: ../_static/img/nn/layer_norm.jpg
+        :scale: 50 %
+
+    """
+
     cls_to_become = LayerNorm  # type: ignore[assignment]
     weight: UninitializedParameter  # type: ignore[assignment]
     bias: UninitializedParameter  # type: ignore[assignment]
