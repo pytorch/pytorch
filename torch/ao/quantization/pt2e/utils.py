@@ -361,7 +361,7 @@ def _get_aten_graph_module_for_pattern(
         example_inputs,
         kwargs,
         strict=True,
-    ).module()
+    ).module(check_guards=False)
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]
