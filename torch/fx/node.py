@@ -99,6 +99,18 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
+    operator.iadd,
+    operator.isub,
+    operator.imul,
+    operator.itruediv,
+    operator.ifloordiv,
+    operator.imod,
+    operator.ipow,
+    operator.ilshift,
+    operator.irshift,
+    operator.iand,
+    operator.ior,
+    operator.ixor,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
 }
 
@@ -812,6 +824,14 @@ class Node(_NodeBase):
                 f"Did not find expected submodule target {self.target}"
             )
             return getattr(target_mod, "_is_impure", False)
+
+        if self.op == "call_method":
+            target_name = (
+                self.target if isinstance(self.target, str) else torch.typename(self.target)
+            )
+            # Check for functions with names ending in an underscore (e.g., 'add_') that are inplace in torch
+            if target_name.endswith("_"):
+                return True
 
         return False
 

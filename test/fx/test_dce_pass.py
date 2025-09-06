@@ -182,6 +182,22 @@ class TestDCE(TestCase):
             TestModule(), expect_dce_changes=False, modules_to_be_leafs={ReLUImpure}
         )
 
+    def test_keep_inplace_with_side_effects(self):
+        """
+        Test that DCE doesn't remove an inplace operation.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x.add_(2)
+                y = 2 * x
+                x.add_(y)
+                return y
+
+        self._run_dce_and_test(
+            TestModule(), expect_dce_changes=False
+        )
+
     def test_keep_torch_assert(self):
         """
         Test that DCE doesn't remove torch._assert since it has side effects.
