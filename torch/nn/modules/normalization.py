@@ -361,7 +361,7 @@ class LazyLayerNorm(LazyModuleMixin, LayerNorm):
                 f"start dim {self.start_dim} is out of bound for an input tensor with rank {rank}"
             )
 
-        self.normalized_shape = input_shape[start_dim_eff:]
+        self.normalized_shape = tuple(input_shape[start_dim_eff:])
 
         if self.has_uninitialized_params():
             with torch.no_grad():
