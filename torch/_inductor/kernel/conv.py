@@ -397,7 +397,11 @@ def convert_1x1_conv_to_mm(x, weight, bias):
         weight = L[aten.squeeze](weight, dim=-1)
     weight = L[aten.permute](weight, [1, 0])
 
-    x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
+    try:
+        x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
+    except Exception:
+        # Fallback to contiguous layout for compatibility with permute operations
+        x = ir.ExternKernel.require_contiguous(x)
     x_permute = list(range(rank))
     x_permute.append(x_permute.pop(1))
     x = L[aten.permute](x, x_permute)
