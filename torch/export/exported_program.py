@@ -1047,6 +1047,8 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _guards_code: list[str]
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
@@ -1083,6 +1085,8 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+
+        self._guards_code = _convert_guards_to_code(_get_shape_env(self._graph_module))
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1379,13 +1383,20 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.fx.GraphModule:
+    def module(self, check_guards=True) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
+
+        - When `check_guards=True` (default), a `_guards_fn` submodule is generated
+          and a call to a `_guards_fn` submodule is inserted right after placeholders
+          in the graph. This module checks guards on inputs.
+        - When `check_guards=False`, a subset of these checks are performed by a
+          forward pre-hook on the graph module. No `_guards_fn` submodule is generated.
+
         """
         from ._unlift import _unlift_exported_program_lifted_states
 
-        module = _unlift_exported_program_lifted_states(self)
+        module = _unlift_exported_program_lifted_states(self, check_guards=check_guards)
 
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
@@ -1677,3 +1688,25 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
+
+
+def _convert_guards_to_code(shape_env):
+    if shape_env is None:
+        return []
+
+    local_vars = {
+        var
+        for var, sources in shape_env.var_to_sources.items()
+        if all(
+            not isinstance(source, torch._dynamo.source.ConstantSource)
+            for source in sources
+        )
+    }
+    py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
+        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+    )
+    return [
+        py_printer.doprint(guard.expr)
+        for guard in shape_env.guards
+        if guard.expr.free_symbols.issubset(local_vars)
+    ]

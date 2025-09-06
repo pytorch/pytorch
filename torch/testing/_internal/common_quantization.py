@@ -3394,7 +3394,7 @@ def _generate_qdq_quantized_model(
 
     maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
     with maybe_no_grad:
-        export_model = export_for_training(mod, inputs, strict=True).module()
+        export_model = export_for_training(mod, inputs, strict=True).module(check_guards=False)
         quantizer = (
             quantizer
             if quantizer

@@ -1250,7 +1250,7 @@ def aot_inductor_minifier_wrapper(
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
-    gm = exported_program.module()
+    gm = exported_program.module(check_guards=False)
     assert isinstance(gm, torch.fx.GraphModule)
 
     args, kwargs = exported_program.example_inputs
@@ -1279,7 +1279,7 @@ def aot_inductor_minifier_wrapper(
             tuple_inputs = tuple(flat_example_inputs)
             flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
             func(
-                flattened_ep.module(),
+                flattened_ep.module(check_guards=False),
                 tuple_inputs,
                 inductor_configs=config_copy,
                 package_path=package_path,
