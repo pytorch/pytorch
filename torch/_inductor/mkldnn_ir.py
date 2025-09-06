@@ -911,6 +911,42 @@ class LinearUnary(ExternKernelAlloc):
         pass
 
 
+class Gelu(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=torch.ops.mkldnn._gelu.default,
+            cpp_kernel_name="aoti_torch_cpu__gelu",
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        super().codegen(wrapper)
+
+    @classmethod
+    def create(cls, x, algorithm):
+        x = cls.require_contiguous(cls.realize_input(x))
+        device = x.get_device()
+        assert device is not None
+        node = Gelu(
+            layout=FixedLayout(device=device, dtype=x.get_dtype(), size=list(x.get_size())),
+            inputs=[x],
+            constant_args=[algorithm],
+        )
+        return _create_output_node(node)
+
+    def apply_constraint(self):
+        pass
+
+
 class LinearBinary(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn._linear_pointwise.binary"
 
