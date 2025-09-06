@@ -266,6 +266,18 @@ class _CudaKernel:
 
             stream = torch.cuda.current_stream()
 
+        # kernels require more than 48KB shared memory require explicit opt-in
+        if shared_mem >= 48 * 1024:
+            # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
+            cudaFuncAttributeMaxDynamicSharedMemorySize = 8
+            _check_cuda(
+                libcuda.cuFuncSetAttribute(
+                    self.func,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    shared_mem,
+                )
+            )
+
         _check_cuda(
             libcuda.cuLaunchKernel(
                 self.func,
