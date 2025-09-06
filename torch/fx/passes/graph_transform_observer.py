@@ -43,7 +43,8 @@ class GraphTransformObserver:
         self.log_url = log_url
 
         self.active = (
-            self.log_url is not None or inductor_config.trace.provenance_tracking
+            self.log_url is not None
+            or inductor_config.trace.provenance_tracking_level == 1
         )
 
         if self.active:

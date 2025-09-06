@@ -220,19 +220,17 @@ TuningResultsValidator::TuningResultsValidator() {
       []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
 #ifdef USE_ROCM
-  // rocm
+  // hip
   {
-#ifdef _WIN32
-    std::string rocm_version = HIP_VERSION_BUILD_NAME;
-#else
-    std::string rocm_version = ROCM_BUILD_INFO;
-#endif
+    // HIP version is more accurate than ROCm version.  User's environment could be a stock
+    // ROCm install but with a mix of newer components, making ROCm version meaningless.
+    std::string hip_version = c10::str(TORCH_HIP_VERSION);
     RegisterValidator(
-       "ROCM_VERSION",
-       [rocm_version]() { return rocm_version; },
-       [rocm_version](auto&& k) {
-        TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
-        return rocm_version == k ? OK : FAIL;
+       "HIP_VERSION",
+       [hip_version]() { return hip_version; },
+       [hip_version](auto&& k) {
+        TUNABLE_LOG1("HIP_VERSION validation: expect ", k, " to match ", hip_version);
+        return hip_version == k ? OK : FAIL;
       });
   }
   // gfx arch
