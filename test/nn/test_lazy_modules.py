@@ -525,7 +525,7 @@ class TestLazyModules(TestCase):
     def test_lazy_layer_norm_out_of_bound_batch_dim(self) -> None:
         with self.assertRaisesRegex(
             ValueError,
-            "start dim is 0 but layer norm is not indented to normalize over batch dimension",
+            "start dim is 0 but layer norm is not intended to normalize over batch dimension",
         ):
             nn.LazyLayerNorm(start_dim=0)
 
