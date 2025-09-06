@@ -16,8 +16,8 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-    # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
-    unset HIP_PLATFORM
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
 fi
 
 mkdir -p "$pytest_reports_dir" || true

@@ -2,7 +2,7 @@
 
 set -ex
 
-if [[ -d "/usr/local/cuda/" ]];  then
+if [[ -d "/usr/local/cuda/" ]]; then
   with_cuda=/usr/local/cuda/
 else
   with_cuda=no
@@ -22,12 +22,12 @@ function install_ucx() {
   git submodule update --init --recursive
 
   ./autogen.sh
-  ./configure --prefix=$UCX_HOME      \
-      --enable-mt                     \
-      --with-cuda=$with_cuda          \
-      --with-rocm=$with_rocm          \
-      --enable-profiling              \
-      --enable-stats
+  ./configure --prefix=$UCX_HOME \
+    --enable-mt \
+    --with-cuda=$with_cuda \
+    --with-rocm=$with_rocm \
+    --enable-profiling \
+    --enable-stats
   time make -j
   sudo make install
 
@@ -44,7 +44,7 @@ function install_ucc() {
 
   ./autogen.sh
 
-  if [[ -n "$CUDA_VERSION"  && $CUDA_VERSION == 13* ]]; then
+  if [[ -n "$CUDA_VERSION" && $CUDA_VERSION == 13* ]]; then
     NVCC_GENCODE="-gencode=arch=compute_86,code=compute_86"
   else
     # We only run distributed tests on Tesla M60 and A10G
@@ -53,9 +53,9 @@ function install_ucc() {
 
   if [[ -n "$ROCM_VERSION" ]]; then
     if [[ -n "$PYTORCH_ROCM_ARCH" ]]; then
-      amdgpu_targets=`echo $PYTORCH_ROCM_ARCH | sed 's/;/ /g'`
+      amdgpu_targets=$(echo $PYTORCH_ROCM_ARCH | sed 's/;/ /g')
     else
-      amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
+      amdgpu_targets=$(rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs)
     fi
     for arch in $amdgpu_targets; do
       HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
@@ -64,11 +64,11 @@ function install_ucc() {
     HIP_OFFLOAD="all-arch-no-native"
   fi
 
-  ./configure --prefix=$UCC_HOME          \
-    --with-ucx=$UCX_HOME                  \
-    --with-cuda=$with_cuda                \
+  ./configure --prefix=$UCC_HOME \
+    --with-ucx=$UCX_HOME \
+    --with-cuda=$with_cuda \
     --with-nvcc-gencode="${NVCC_GENCODE}" \
-    --with-rocm=$with_rocm                \
+    --with-rocm=$with_rocm \
     --with-rocm-arch="${HIP_OFFLOAD}"
   time make -j
   sudo make install

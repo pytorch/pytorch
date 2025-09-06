@@ -50,7 +50,6 @@ test_python_mps() {
   assert_git_not_dirty
 }
 
-
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -218,7 +217,6 @@ pip_benchmark_deps() {
   python -mpip install --no-input requests cython scikit-learn six
 }
 
-
 test_torchbench_perf() {
   print_cmake_info
 
@@ -267,7 +265,7 @@ test_torchbench_smoketest() {
     echo "Launching torchbench inference performance run for backend ${backend} and dtype ${dtype}"
     local dtype_arg="--${dtype}"
     if [ "$dtype" == notset ]; then
-        dtype_arg="--float32"
+      dtype_arg="--float32"
     fi
     touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
     for model in "${models[@]}"; do
@@ -328,7 +326,7 @@ test_aoti_torchbench_smoketest() {
   echo "Launching torchbench inference performance run for AOT Inductor and dtype ${dtype}"
   local dtype_arg="--${dtype}"
   if [ "$dtype" == notset ]; then
-      dtype_arg="--float32"
+    dtype_arg="--float32"
   fi
   touch "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv"
   for model in "${models[@]}"; do

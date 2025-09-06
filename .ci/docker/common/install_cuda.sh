@@ -18,7 +18,7 @@ function install_cuda {
   major_minor=${version%.*}
   rm -rf /usr/local/cuda-${major_minor} /usr/local/cuda
   if [[ ${arch_path} == 'sbsa' ]]; then
-      runfile="${runfile}_sbsa"
+    runfile="${runfile}_sbsa"
   fi
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
@@ -43,8 +43,8 @@ function install_cudnn {
 }
 
 function install_nvshmem {
-  cuda_major_version=$1      # e.g. "12"
-  nvshmem_version=$2         # e.g. "3.3.9"
+  cuda_major_version=$1 # e.g. "12"
+  nvshmem_version=$2    # e.g. "3.3.9"
 
   case "${arch_path}" in
     sbsa)
@@ -71,7 +71,7 @@ function install_nvshmem {
   wget -q "${url}"
   tar xf "${filename}${suffix}"
   cp -a "${filename}/include/"* /usr/local/cuda/include/
-  cp -a "${filename}/lib/"*     /usr/local/cuda/lib64/
+  cp -a "${filename}/lib/"* /usr/local/cuda/lib64/
 
   # cleanup
   cd ..
@@ -165,21 +165,27 @@ function install_130 {
 }
 
 # idiomatic parameter and option handling in sh
-while test $# -gt 0
-do
-    case "$1" in
-    12.4) install_124;
-        ;;
-    12.6|12.6.*) install_126;
-        ;;
-    12.8|12.8.*) install_128;
-        ;;
-    12.9|12.9.*) install_129;
-        ;;
-    13.0|13.0.*) install_130;
-        ;;
-    *) echo "bad argument $1"; exit 1
-        ;;
-    esac
-    shift
+while test $# -gt 0; do
+  case "$1" in
+    12.4)
+      install_124
+      ;;
+    12.6 | 12.6.*)
+      install_126
+      ;;
+    12.8 | 12.8.*)
+      install_128
+      ;;
+    12.9 | 12.9.*)
+      install_129
+      ;;
+    13.0 | 13.0.*)
+      install_130
+      ;;
+    *)
+      echo "bad argument $1"
+      exit 1
+      ;;
+  esac
+  shift
 done

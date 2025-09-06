@@ -19,11 +19,11 @@ function write_sccache_stub() {
   output=$1
   binary=$(basename "${output}")
 
-  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "${binary}")" "$(which "${binary}")" > "${output}"
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache %s \"\$@\"\nelse\n  exec %s \"\$@\"\nfi" "$(which "${binary}")" "$(which "${binary}")" >"${output}"
   chmod a+x "${output}"
 }
 
-if which sccache > /dev/null; then
+if which sccache >/dev/null; then
   # Create temp directory for sccache shims
   tmp_dir=$(mktemp -d)
   trap 'rm -rfv ${tmp_dir}' EXIT
@@ -41,7 +41,7 @@ else
   # backends (specifically the gloo backend), so test that this case works too
   USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel --plat-name macosx_11_0_arm64
 fi
-if which sccache > /dev/null; then
+if which sccache >/dev/null; then
   print_sccache_stats
 fi
 
