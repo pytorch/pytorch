@@ -4039,6 +4039,9 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        Additionally, we must make sure that if node1 reads a buffer and
+        node2 writes it, that they have identical memory access patterns
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -4081,6 +4084,26 @@ class Scheduler:
                 why("intermediate nodes between node1 & node2")
                 return False
 
+        # handle write after read dependency
+        for wd in node2.read_writes.writes:
+            if not isinstance(wd, MemoryDep):
+                continue
+            wds = [wd]
+            for o in node2.get_outputs():
+                if o.node.name != wd.name:
+                    continue
+                for m in o.get_mutations():
+                    from dataclasses import replace
+                    wds.append(replace(wd, name=m))
+            for wd_m in wds:
+                for rd in node1.read_writes.reads:
+                    if not isinstance(rd, MemoryDep):
+                        continue
+                    if not self.fusable_read_and_write(rd, wd_m):
+                        why("write after read cannot be satisfied")
+                        return False
+        # for out in node2.outputs:
+        #     if out.get_mutations() in node1.read_w
         return True
 
     def fusable_weak_dep(
