@@ -1022,8 +1022,11 @@ def conv(fake_mode, func, *args, **kwargs):
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
         else:
+            # Expand 1d -> 2d.
             if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-                kwargs["input"] = kwargs["input"].to(memory_format=torch.contiguous_format)
+                kwargs["input"] = kwargs["input"].to(
+                    memory_format=torch.contiguous_format
+                )
                 kwargs["input"].unsqueeze_(2)
                 kwargs["weight"].unsqueeze_(2)
                 if len(kwargs["stride"]) == 1:
@@ -1050,7 +1053,8 @@ def conv(fake_mode, func, *args, **kwargs):
             mem_fmt = torch._C._conv_determine_backend_memory_format(
                 kwargs["input"], kwargs["weight"], conv_backend
             )
-            if k ==3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+            # revert 2d -> 1d
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
                 kwargs["input"].squeeze_(2)
                 kwargs["weight"].squeeze_(2)
                 if len(kwargs["stride"]) == 2:
@@ -1058,10 +1062,12 @@ def conv(fake_mode, func, *args, **kwargs):
                     kwargs["padding"].pop(0)
                     kwargs["dilation"].pop(0)
                     kwargs["output_padding"].pop(0)
+
     def convert(t, mem_fmt):
         if t is None:
             return t
         if mem_fmt is not None:
+            # channels last only support 4d, try to expand dim then convert it back later.
             if t.dim() == 3 and mem_fmt == torch.channels_last:
                 t.unsqueeze_(2)
                 t = t.to(memory_format=mem_fmt)
