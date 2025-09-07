@@ -65,10 +65,7 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    xfailIfDistributedNotSupported,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -13734,6 +13731,22 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    def test_expand_copy_export_handles_implicit_true(self):
+        class ExpandModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, implicit):
+                return torch.expand_copy(x, [3, 3], implicit=implicit)
+
+        model = ExpandModel()
+        x = torch.ones([3])
+
+        model(x, False)
+        model(x, True)
+        export(model, (x, False))
+        export(model, (x, True))
+
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -15539,7 +15552,6 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15557,7 +15569,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15573,7 +15584,6 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15587,7 +15597,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15605,7 +15614,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
@@ -16657,6 +16665,27 @@ def forward(self, x, y):
 
         ep = export(M(), inp)
         FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_item(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+                self.b = 5.0
+
+            def forward(self, y):
+                at = torch.tensor(self.a)
+                # This becomes 5
+                a = at.item()
+                bt = torch.tensor(self.b)
+                # This becomes 5.0
+                b = bt.item()
+                return a * b * y
+
+        ep = export(M(), (torch.ones(3),))
+        FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
 
