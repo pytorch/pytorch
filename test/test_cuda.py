@@ -6879,7 +6879,7 @@ class TestCompileKernel(TestCase):
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
             args=[a, b, c, N],
-            shared_mem=shared_mem
+            shared_mem=shared_mem,
         )
 
         # Verify results
@@ -6894,7 +6894,7 @@ class TestCompileKernel(TestCase):
                 grid=(blocks_per_grid, 1, 1),
                 block=(threads_per_block, 1, 1),
                 args=[a, b, c, N],
-                shared_mem=shared_mem
+                shared_mem=shared_mem,
             )
 
     @tf32_on_and_off(0.005)
