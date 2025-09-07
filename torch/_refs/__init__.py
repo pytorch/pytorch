@@ -449,6 +449,38 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
         *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
+    def should_expand(a: ShapeType, b: ShapeType) -> bool:
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_or_false,
+            sym_and,
+            sym_or,
+        )
+
+        if len(a) != len(b):
+            return True
+
+        for x, y in zip(a, b):
+            if guard_or_false(x != y):
+                # We know they are not the same.
+                return True
+
+            # They are the same or we do not know if they are the same or not.
+            # 1==1 no-broadcast
+            # u0==1 and 1==u0 cases. We broadcast!
+            if guard_or_false(sym_and(x == 1, y == 1)):
+                pass
+            elif guard_or_false(sym_or(x == 1, y == 1)):
+                # assume broadcasting.
+                return True
+
+            # u0==u1 assume the same, no broadcasting!
+            torch._check(
+                x == y,
+                "sizes assumed to be the same due to unbacked broadcasting semantics",
+            )
+
+        return False
+
     def __maybe_broadcast(x, shape):
         if x is None:
             return None
@@ -458,7 +490,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if not utils.same_shape(x.shape, common_shape):
+            if should_expand(x.shape, common_shape):
                 return x.expand(common_shape)
 
             return x
