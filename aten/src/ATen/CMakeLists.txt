@@ -255,48 +255,77 @@ endif()
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  if(USE_CUDA)
+    # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
+    # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
+    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
+    list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
 
-  if(USE_ROCM)
-    # Only include the kernels we want to build to avoid increasing binary size.
-    file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
-    set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
+      "${FBGEMM_GENAI_SRCS}/common/*.cpp"
+    )
 
-    # Add additional HIPCC compiler flags for performance
-    set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
-      -mllvm
-      -amdgpu-coerce-illegal-types=1
-      -mllvm
-      -enable-post-misched=0
-      -mllvm
-      -greedy-reverse-local-assignment=1
-      -fhip-new-launch-api)
+    # Combine all source files into a single list
+    list(APPEND fbgemm_genai_all_sources
+      ${fbgemm_genai_native_cuda_cu}
+      ${fbgemm_genai_native_cuda_cpp}
+    )
 
-    # Only compile for gfx942 for now.
-    # This is rather hacky, I could not figure out a clean solution :(
-    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
-    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
-    list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
-    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
-
-    hip_add_library(
-      fbgemm_genai STATIC
-      ${fbgemm_genai_native_rocm_hip}
-      HIPCC_OPTIONS ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
-    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
+    # Now, create the library and provide the sources at the same time
+    add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
 
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+
+    set(fbgemm_genai_mx8mx8bf16_grouped
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+    )
 
     target_include_directories(fbgemm_genai PUBLIC
-      # FBGEMM version of Composable Kernel is used due to some customizations
-      ${FBGEMM_THIRD_PARTY}/composable_kernel/include
-      ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-      ${FBGEMM_GENAI_DIR}/include/
-      ${FBGEMM_GENAI_DIR}/common/include/
+      ${FBGEMM_THIRD_PARTY}/cutlass/include
+      ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+      ${fbgemm_genai_mx8mx8bf16_grouped}
+      ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
+      ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
     )
+  else()
+    if(USE_ROCM)
+      # Only include the kernels we want to build to avoid increasing binary size.
+      file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
+        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+      set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+      # Add additional HIPCC compiler flags for performance
+      set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
+        -mllvm
+        -amdgpu-coerce-illegal-types=1
+        -mllvm
+        -enable-post-misched=0
+        -mllvm
+        -greedy-reverse-local-assignment=1
+        -fhip-new-launch-api)
+
+      hip_add_library(
+        fbgemm_genai STATIC
+        ${fbgemm_genai_native_rocm_hip}
+        HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+      set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+
+      target_include_directories(fbgemm_genai PUBLIC
+        # FBGEMM version of Composable Kernel is used due to some customizations
+        ${FBGEMM_THIRD_PARTY}/composable_kernel/include
+        ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
+        ${FBGEMM_THIRD_PARTY}/cutlass/include
+        ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+        ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
+        ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
+      )
+    endif()
   endif()
 endif()
 
@@ -639,6 +668,13 @@ if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
+
+  # Add FBGEMM_GENAI include directories for torch_ops.h
+  if(USE_FBGEMM_GENAI)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
+  endif()
+
   if($ENV{ATEN_STATIC_CUDA})
     if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS

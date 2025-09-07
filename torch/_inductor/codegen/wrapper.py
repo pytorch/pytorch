@@ -1736,7 +1736,8 @@ class PythonWrapperCodegen(CodeGen):
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
-            self.estimate_peak = EfficientPeakEstimate()
+            if config.allow_buffer_reuse:
+                self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
