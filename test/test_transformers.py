@@ -1255,6 +1255,11 @@ class TestTransformers(NNTestCase):
         orig_status = torch._C._get_math_sdp_allow_fp16_bf16_reduction()
         # set math_sdp to allow lower precision q/k/v
         torch._C._set_math_sdp_allow_fp16_bf16_reduction(True)
+
+        def fn(query, key, value, mask):
+            return torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, mask, 0.0, False)
+
         for dtype in dtypes:
 
             def rand_tensor(*shape):
@@ -1264,14 +1269,11 @@ class TestTransformers(NNTestCase):
             query = rand_tensor(*size)
             key = rand_tensor(*size)
             value = rand_tensor(*size)
-            # Construct sparse mask to pass the check at::areAnyTensorSubclassLike({attn, *attn_mask})
-            # and thus do attn = attn.add(*attn_mask) to generate mixed dtype inputs for matmul
-            indices = torch.tensor([[0, 0, 0, 0], [0, 1, 2, 3], [0, 1, 2, 3]])
-            values = torch.rand(4, dtype=torch.float)
-            sparse_mask = torch.sparse_coo_tensor(indices, values, (1, 4, 4), device=device, dtype=torch.float)
+            # create float mask to generate mixed dtype inputs for matmul
+            mask = torch.rand((1, 4, 4), device=device, dtype=torch.float)
             # There should be no inconsistent dtypes error
-            torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, sparse_mask, 0.0, False)
+            compiled_fn = torch.compile(fn)
+            compiled_fn(query, key, value, mask)
         torch._C._set_math_sdp_allow_fp16_bf16_reduction(orig_status)
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
