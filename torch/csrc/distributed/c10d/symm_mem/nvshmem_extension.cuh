@@ -57,6 +57,7 @@ void tile_reduce(
     at::Tensor& in_tile,
     at::Tensor& out_tile,
     int64_t root,
-    std::string group_name);
+    std::string group_name,
+    std::string reduce_op = "sum");
 
 } // namespace c10d::nvshmem_extension

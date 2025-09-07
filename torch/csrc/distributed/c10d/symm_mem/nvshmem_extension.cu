@@ -851,9 +851,14 @@ __global__ void tile_reduce_kernel(
       AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
 
 void tile_reduce(
-    at::Tensor& in_tile, at::Tensor& out_tile, int64_t root, std::string group_name) {
+    at::Tensor& in_tile,
+    at::Tensor& out_tile,
+    int64_t root,
+    std::string group_name,
+    std::string reduce_op) {
   /* Perform a tile reduce operation on the input tensor, with the root rank
    * receiving the reduced tensor. */
+  TORCH_CHECK(reduce_op == "sum", "tile_reduce: only sum is supported for now");
   TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
   TORCH_CHECK(in_tile.dim() == 2 && out_tile.dim() == 2, "Only 2D tensors are supported");
   TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
