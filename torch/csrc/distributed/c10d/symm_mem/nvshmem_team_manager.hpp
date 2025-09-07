@@ -88,7 +88,7 @@ class TeamManager {
     return std::make_pair(std::cref(team_pool), team_pool_dev);
   }
 
-  ~TeamManager() {
+  ~TeamManager() noexcept {
     // Free the team pools in device memory
     // Note that we do it in a best effort manner because the team pool is
     // managed by a static TeamManager and the destruction order of static
