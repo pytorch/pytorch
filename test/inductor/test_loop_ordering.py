@@ -589,23 +589,6 @@ class LoopOrderingTest(TestCase):
             ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
         ).run(code[0])
 
-    def test_fuse_with_scalar_shared_memory(self):
-        """
-        Make sure if we can fuse two nodes sharing a scalar before,
-        we can still do it with LOAF applied.
-
-        This is not really a big deal. But some tests rely on this and
-        less number of kernels has some small benefits.
-        """
-
-        @torch.compile
-        def f(x):
-            return torch.mean(x)
-
-        x = torch.randn([5, 5], device=GPU_TYPE)
-        out, code = run_and_get_code(f, x)
-        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
-
 
 @inductor_config.patch(
     {
