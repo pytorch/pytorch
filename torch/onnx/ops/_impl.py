@@ -1,6 +1,5 @@
 # flake8: noqa: B950
 import math
-import typing
 from typing import Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -24,7 +23,9 @@ _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
 )
 
 
-def _onnx_op(op_type: str, opset_version: int) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+def _onnx_op(
+    op_type: str, opset_version: int
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator to register an ONNX operator with a custom implementation."""
 
     def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
