@@ -56,6 +56,7 @@ import torch.utils._pytree as pytree
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
+from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
@@ -1146,7 +1147,10 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
-    elif isinstance(a, torch.Tensor):
+    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
+        unwrapped_tensor = get_unwrapped(a)
+        r.update(go(unwrapped_tensor, path))
+    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
@@ -1282,6 +1286,7 @@ def compute_unbacked_bindings(
         return None
 
     fs = shape_env.pending_fresh_unbacked_symbols
+
     pending = set(fs)
     if not pending:
         return None
@@ -4365,11 +4370,15 @@ class ShapeEnv:
         tensor_size: Sequence[IntLikeType],
         source: Source,
         symbolic_context: SymbolicContext,
+        hint_overrides: Optional[dict[int, int]] = None,
     ) -> list[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), (
             f"Expect size to be a plain tuple of ints but got {tensor_size}"
         )
         from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        if not hint_overrides:
+            hint_overrides = {}
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
@@ -4377,7 +4386,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
-                val,
+                val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
@@ -4497,12 +4506,16 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        hint_overrides: Optional[dict[int, int]] = None,
     ) -> tuple[
         tuple[IntLikeType, ...],
         tuple[IntLikeType, ...],
         IntLikeType,
     ]:
         dim = len(ex_size)
+
+        if not hint_overrides:
+            hint_overrides = {}
 
         # Reimplement the legacy behavior
         if symbolic_context is None:
@@ -4558,7 +4571,7 @@ class ShapeEnv:
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 
         size: list[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
-            ex_size, source, symbolic_context
+            ex_size, source, symbolic_context, hint_overrides=hint_overrides
         )
         stride = self._compute_symbolic_stride(
             source,
@@ -4574,7 +4587,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint,
+                hint=hint if i not in hint_overrides else hint_overrides[i],
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -4711,7 +4724,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[int | float | bool],
         source: Optional[Source] = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
@@ -6263,7 +6276,7 @@ class ShapeEnv:
                 return
             self._resimplify_floor_div_axioms = False
             new_items = {}
-            for k, v in axioms.items():
+            for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
@@ -7870,7 +7883,9 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        fake_mode = detect_fake_mode()
+        assert fake_mode is not None
+        rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 

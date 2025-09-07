@@ -1,0 +1,15 @@
+version: 1
+paths:
+include:
+  - "**/*.py"
+exclude:
+  - ".*"
+  - ".*/**"
+  - "**/.*/**"
+  - "**/.*"
+  - "**/_*/**"
+  - "**/_*.py"
+  - "**/test/**"
+  - "**/benchmarks/**"
+  - "**/test_*.py"
+  - "**/*_test.py"

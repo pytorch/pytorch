@@ -17,52 +17,7 @@
 
 namespace torch::nativert {
 
-namespace {
-
-c10::Device inferTargetDevice(
-    const Node& node,
-    const std::unordered_map<std::string, torch::nativert::TensorMeta>&
-        tensorValuesMeta,
-    const Placement& placement) {
-  if (node.target() == "prim.Input" || node.target() == "prim.Output") {
-    return c10::Device(c10::DeviceType::CPU);
-  }
-
-  std::vector<c10::Device> devices;
-  for (auto& output : node.outputs()) {
-    if (output->type() == Type::Kind::Tensor) {
-      auto it = tensorValuesMeta.find(std::string{output->name()});
-      if (it != tensorValuesMeta.end()) {
-        devices.emplace_back(it->second.device());
-      }
-    } else if (output->type() == Type::Kind::TensorList) {
-      for (const auto& el : output->getListElements()) {
-        auto it = tensorValuesMeta.find(std::string{el->name()});
-        if (it != tensorValuesMeta.end()) {
-          devices.emplace_back(it->second.device());
-        }
-      }
-    }
-  }
-
-  if (devices.empty()) {
-    return c10::Device(c10::DeviceType::CPU);
-  } else {
-    for (size_t i = 1; i < devices.size(); ++i) {
-      if (!torch::nativert::isSameDevice(devices[0], devices[i])) {
-        LOG(WARNING) << "Node " << node
-                     << " has outputs on multiple devices: " << devices[0]
-                     << " and " << devices[i];
-      }
-    }
-
-    return placement.getMappedDevice(devices[0]);
-  }
-}
-
-} // namespace
-
-inline constexpr std::string_view kSymIntOps[] = {
+inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "_operator.floordiv",
     "_operator.mod",
     "torch.sym_int",
@@ -72,7 +27,7 @@ inline constexpr std::string_view kSymIntOps[] = {
     "torch.sym_min",
 };
 
-inline constexpr std::string_view kSymBoolOps[] = {
+inline constexpr std::array<std::string_view, 8> kSymBoolOps = {
     "_operator.eq",
     "_operator.ne",
     "_operator.le",
@@ -83,14 +38,14 @@ inline constexpr std::string_view kSymBoolOps[] = {
     "torch.sym_not",
 };
 
-inline constexpr std::string_view kSymFloatOps[] = {
+inline constexpr std::array<std::string_view, 4> kSymFloatOps = {
     "torch._sym_sqrt",
     "math.trunc",
     "_operator.neg",
     "_operator.truediv",
 };
 
-inline constexpr std::string_view kScalarBinaryOps[] = {
+inline constexpr std::array<std::string_view, 4> kScalarBinaryOps = {
     "_operator.mul",
     "_operator.add",
     "_operator.sub",
@@ -122,13 +77,19 @@ void KernelFactory::registerHandler(
   });
 }
 
+/* static */ bool KernelFactory::isHandlerRegistered(
+    const std::string& handler) {
+  return getKernelFactoryRegistry().withLock([&](auto&& reg) {
+    return reg.handlers.find(handler) != reg.handlers.end();
+  });
+}
+
 ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
-    std::shared_ptr<Weights> weights,
+    const std::shared_ptr<Weights>& weights,
     const torch::nativert::ExecutorConfig& executorConfig,
-    const Placement& placement,
-    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc) {
+    const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+        pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
   std::vector<ConstFoldingExecution> constFoldingExecutions;
@@ -145,18 +106,11 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
   for (const auto& node : graph.nodes()) {
     std::string target = std::string(node.target());
 
-    c10::Device targetDevice =
-        inferTargetDevice(node, graph.tensorValuesMeta(), placement);
-
     bool matched = false;
     for (const auto& [_, handler] : handlers) {
-      if (handler.match(node, executorConfig, targetDevice)) {
-        auto [kernel, delegate] = handler(
-            node,
-            weights,
-            executorConfig,
-            pytorchStreamReader.get(),
-            targetDevice);
+      if (handler.match(node, executorConfig)) {
+        auto [kernel, delegate] =
+            handler(node, weights, executorConfig, pytorchStreamReader.get());
         if (kernel) {
           nodeKernels.push_back(std::move(kernel));
         }
@@ -212,24 +166,25 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       for (const auto& attr : node.attributes()) {
         if (std::holds_alternative<std::unique_ptr<Graph>>(attr.value)) {
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
-          auto executionKernels = initializeNodeKernels(
-              *subgraph, weights, executorConfig, placement);
-          CHECK(executionKernels.delegateExecutors.empty())
-              << "HigherOrderKernel does not support delegates";
-          CHECK(executionKernels.constFoldingExecutions.size() == 0)
-              << "HigherOrderKernel does not support const folding";
+          auto executionKernels =
+              initializeNodeKernels(*subgraph, weights, executorConfig);
+          TORCH_CHECK(
+              executionKernels.delegateExecutors.empty(),
+              "HigherOrderKernel does not support delegates");
+          TORCH_CHECK(
+              executionKernels.constFoldingExecutions.empty(),
+              "HigherOrderKernel does not support const folding");
           if (executorConfig.maxParallelOps > 1) {
-            graphExecutors.emplace_back(
-                std::unique_ptr<GraphExecutorBase>(new ParallelGraphExecutor(
-                    *subgraph,
-                    std::move(executionKernels.nodeKernels),
-                    executorConfig)));
+            graphExecutors.emplace_back(std::make_unique<ParallelGraphExecutor>(
+                *subgraph,
+                std::move(executionKernels.nodeKernels),
+                executorConfig));
           } else {
-            graphExecutors.emplace_back(std::unique_ptr<GraphExecutorBase>(
-                new torch::nativert::SerialGraphExecutor(
+            graphExecutors.emplace_back(
+                std::make_unique<torch::nativert::SerialGraphExecutor>(
                     *subgraph,
                     std::move(executionKernels.nodeKernels),
-                    executorConfig)));
+                    executorConfig));
           }
         }
       }
@@ -240,7 +195,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
     } else if (c10::starts_with(node.target(), "torch.ops")) {
-      nodeKernels.push_back(std::make_unique<C10Kernel>(&node, targetDevice));
+      nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
       if (opsWithoutStaticDispatchCount.find(opName) ==
@@ -253,7 +208,8 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     }
   }
 
-  if (executorConfig.enableStaticCPUKernels) {
+  if (executorConfig.enableStaticCPUKernels &&
+      !opsWithoutStaticDispatchCount.empty()) {
     std::stringstream ss;
     for (const auto& [op, count] : opsWithoutStaticDispatchCount) {
       ss << op << ": " << count << ", \n";

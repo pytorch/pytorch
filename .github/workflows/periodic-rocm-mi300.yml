@@ -59,9 +59,9 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 

@@ -793,11 +793,13 @@ static void _get_tensors_to_save(
         if (is_executable) {
           // TODO: We should really just ALWAYS throw an error here, but
           // doing so will break some internal tests. We should fix those.
-          throw torch::TypeError(
-              "save_for_backward can only save variables, but argument %ld is of "
-              "type %s",
-              i,
-              Py_TYPE(obj)->tp_name);
+          TORCH_CHECK_TYPE(
+              false,
+              fmt::format(
+                  "save_for_backward can only save variables, but argument {} is of "
+                  "type {}",
+                  i,
+                  Py_TYPE(obj)->tp_name));
         }
       }
     }

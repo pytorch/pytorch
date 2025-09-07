@@ -74,6 +74,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(BufferError, PyExc_BufferError, retstmnt)              \
   _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
@@ -283,19 +284,12 @@ struct PyTorchError : public std::exception {
   std::string msg;
 };
 
-// Declare a printf-like function on gcc & clang
-// The compiler can then warn on invalid format specifiers
-#ifdef __GNUC__
-#define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX) \
-  __attribute__((format(printf, FORMAT_INDEX, VA_ARGS_INDEX)))
-#else
-#define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
-#endif
-
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
+  TORCH_PYTHON_API TypeError() = default;
+  TORCH_PYTHON_API TypeError(std::string msg_)
+      : PyTorchError(std::move(msg_)) {}
   using PyTorchError::PyTorchError;
-  TORCH_PYTHON_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_TypeError;
   }

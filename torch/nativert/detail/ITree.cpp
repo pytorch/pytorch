@@ -46,7 +46,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec,
                std::vector<c10::IValue>& ivalues) {
               const auto& tuple = nested.toTupleRef().elements();
-              TORCH_CHECK_EQ(tuple.size(), spec.children().size());
+              TORCH_CHECK(tuple.size() == spec.children().size());
               for (size_t i = 0; i < tuple.size(); i++) {
                 itreeFlatten(tuple[i], spec.children(i), ivalues);
               }
@@ -60,7 +60,7 @@ class PytreeNodeRegistry {
                const c10::IValue& nested,
                const ITreeSpec& spec) {
               const auto& tuple = nested.toTupleRef().elements();
-              TORCH_CHECK_EQ(tuple.size(), spec.children().size());
+              TORCH_CHECK(tuple.size() == spec.children().size());
               for (size_t i = 0; i < tuple.size(); i++) {
                 ivalueApply(fn, tuple[i], spec.children(i));
               }
@@ -119,7 +119,7 @@ class PytreeNodeRegistry {
               const auto& contextKeys = spec.contextKeys();
               // allow the dict size less than the spec, missing key will be
               // filled with empty tensor
-              TORCH_CHECK_LE(dict.size(), contextKeys.size());
+              TORCH_CHECK(dict.size() <= contextKeys.size());
               size_t i = 0;
               for (const auto& key : contextKeys) {
                 auto it = dict.find(key);
@@ -143,7 +143,7 @@ class PytreeNodeRegistry {
               c10::Dict<c10::IValue, c10::IValue> dict(
                   c10::AnyType::get(), c10::AnyType::get());
               TORCH_CHECK(obj.is_array());
-              TORCH_CHECK_EQ(obj.size(), flats.size());
+              TORCH_CHECK(obj.size() == flats.size());
               dict.reserve(flats.size());
               for (size_t i = 0; i < flats.size(); i++) {
                 dict.insert(dynamicToIValue(obj[i]), std::move(flats[i]));
@@ -200,7 +200,7 @@ ITreeSpec makeITreeSpec(
   TORCH_CHECK(obj.is_object());
   TORCH_CHECK(obj.find("type") != obj.end());
   if (obj["type"].is_null()) {
-    TORCH_CHECK_EQ(obj["children_spec"].size(), 0);
+    TORCH_CHECK(obj["children_spec"].empty());
     TORCH_CHECK(obj["context"].is_null());
 
     const Value* value = values[start];
@@ -244,11 +244,11 @@ ITreeSpec itreeSpecLoads(
     const std::vector<const Value*>& values) {
   const auto obj = nlohmann::json::parse(json);
   TORCH_CHECK(obj.is_array());
-  TORCH_CHECK_EQ(obj.size(), 2);
-  TORCH_CHECK_EQ(obj[0].get<int64_t>(), kDefaultTreeSpecSerializationProtocol);
+  TORCH_CHECK(obj.size() == 2);
+  TORCH_CHECK(obj[0].get<int64_t>() == kDefaultTreeSpecSerializationProtocol);
   auto result = makeITreeSpec(obj[1], values, 0);
 
-  TORCH_CHECK_EQ(result.numIValues(), values.size());
+  TORCH_CHECK(result.numIValues() == values.size());
   return result;
 }
 
@@ -256,7 +256,7 @@ c10::IValue itreeUnflatten(
     std::vector<c10::IValue> ivalues,
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::itreeUnflatten");
-  TORCH_CHECK_EQ(ivalues.size(), spec.numIValues());
+  TORCH_CHECK(ivalues.size() == spec.numIValues());
   if (spec.isIValue()) {
     return std::move(ivalues[0]);
   }
@@ -299,20 +299,20 @@ std::vector<c10::IValue> itreeFlattenFromArgs(
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::itreeFlattenFromArgs");
   TORCH_CHECK(!spec.isIValue());
-  TORCH_CHECK_EQ(spec.children().size(), 2);
+  TORCH_CHECK(spec.children().size() == 2);
 
   std::vector<c10::IValue> ivalues;
   ivalues.reserve(spec.numIValues());
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
-  TORCH_CHECK_EQ(specArgs.children().size(), args.size());
+  TORCH_CHECK(specArgs.children().size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
     itreeFlatten(args[i], specArgs.children(i), ivalues);
   }
 
   const auto& specKwargs = spec.children(1);
   TORCH_CHECK(!specKwargs.isIValue());
-  TORCH_CHECK_EQ(specKwargs.context().size(), kwargs.size());
+  TORCH_CHECK(specKwargs.context().size() == kwargs.size());
   for (size_t i = 0; i < specKwargs.context().size(); i++) {
     itreeFlatten(
         kwargs.at(specKwargs.context()[i].get_ref<const std::string&>()),
@@ -329,11 +329,11 @@ void ivalueApplyFromArgs(
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::ivalueApplyFromArgs");
   TORCH_CHECK(!spec.isIValue());
-  TORCH_CHECK_EQ(spec.children().size(), 2);
+  TORCH_CHECK(spec.children().size() == 2);
 
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
-  TORCH_CHECK_EQ(specArgs.children().size(), args.size());
+  TORCH_CHECK(specArgs.children().size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
     ivalueApply(fn, args[i], specArgs.children(i));
   }
@@ -342,7 +342,7 @@ void ivalueApplyFromArgs(
   TORCH_CHECK(!specKwargs.isIValue());
 
   const auto& ctx = specKwargs.context();
-  TORCH_CHECK_EQ(ctx.size(), kwargs.size());
+  TORCH_CHECK(ctx.size() == kwargs.size());
 
   for (size_t i = 0; i < ctx.size(); i++) {
     ivalueApply(

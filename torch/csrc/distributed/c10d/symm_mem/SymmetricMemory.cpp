@@ -266,6 +266,61 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
+
+// MemPool Support
+
+// A map from device type to allocator for MemPool.
+// TODO: Consolidate with `AllocatorMap` above.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+class MemPoolAllocatorMap {
+ public:
+  MemPoolAllocatorMap(const MemPoolAllocatorMap&) = delete;
+  MemPoolAllocatorMap& operator=(const MemPoolAllocatorMap&) = delete;
+  static MemPoolAllocatorMap& get() {
+    static MemPoolAllocatorMap instance;
+    return instance;
+  }
+
+  // Register allocator for MemPool given device type
+  void register_mempool_allocator(
+      c10::DeviceType device_type,
+      std::shared_ptr<c10::Allocator> allocator) {
+    mempool_allocators_[device_type] = std::move(allocator);
+  }
+
+  // Get allocator for MemPool given device
+  std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
+    auto it = mempool_allocators_.find(device.type());
+    if (it == mempool_allocators_.end()) {
+      TORCH_CHECK(
+          false,
+          "SymmetricMemory MemPool did not find backend for device type ",
+          device.type());
+    }
+    return it->second;
+  }
+
+ private:
+  MemPoolAllocatorMap() = default;
+
+  std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
+      mempool_allocators_;
+};
+
+// Register allocator for MemPool given device type
+C10_EXPORT void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator) {
+  return MemPoolAllocatorMap::get().register_mempool_allocator(
+      device_type, std::move(allocator));
+}
+
+// Get allocator for MemPool given device
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device) {
+  return MemPoolAllocatorMap::get().get_mempool_allocator(device);
+}
+
 } // namespace c10d::symmetric_memory
 
 namespace {
@@ -342,7 +397,9 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
   m.def(
-      "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name, int? major_align=None) -> Tensor(a!)");
+      "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
+  m.def(
+      "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
 from packaging import version
@@ -21,7 +22,7 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -40,7 +41,6 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_csc
             or op.supports_sparse_bsr
             or op.supports_sparse_bsc)
-
 
 
 reduction_ops_with_sparse_support = [
@@ -367,6 +367,20 @@ class TestSparse(TestSparseBase):
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype, device, coalesced)
             _test_coalesce(t)  # this tests correctness
 
+    @onlyCUDA
+    @largeTensorTest("30GB", "cuda")
+    @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
+    @dtypes(torch.float)
+    def test_coalesce_accepts_large_tensor(self, device, dtype):
+        N = 22500000
+        NNZ = 272500000
+        rows = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        cols = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        indices = torch.stack([rows, cols], dim=0)
+        values = torch.randn(NNZ, dtype=dtype, device=device)
+        sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
+        sparse_matrix = sparse_matrix.coalesce()
+
     @dtypes(torch.double)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
@@ -458,7 +472,7 @@ class TestSparse(TestSparseBase):
                         torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
 
@@ -594,7 +608,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_hybrid(self, device, dtype, gradcheck):
 
@@ -950,7 +964,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
         # trivial checks
@@ -1240,7 +1254,7 @@ class TestSparse(TestSparseBase):
             # NOTE: indices are negative
             idx_dim_d_range = list(range(-sizes[d], 0))
             for idx_len in range(sizes[d], sizes[d] + 1):
-                # creates all possible valid indices into dim d of lenght idx_len
+                # creates all possible valid indices into dim d of length idx_len
                 for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
                     t_idx = torch.tensor(idx, dtype=torch.long, device=device)
 
@@ -1619,7 +1633,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -1641,7 +1655,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
         # https://github.com/pytorch/pytorch/issues/79914
@@ -3600,13 +3614,13 @@ class TestSparse(TestSparseBase):
 
 
     @dtypes(torch.double, torch.float)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
     @dtypes(torch.double, torch.float)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
@@ -3985,11 +3999,11 @@ class TestSparse(TestSparseBase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
-            # noncontigous diags
+            # non-contiguous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
-            # noncontigous offsets
+            # non-contiguous offsets
             yield (make_diags((3, 4)), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
-            # noncontigous diags + offsets
+            # non-contiguous diags + offsets
             yield (make_diags((3, 4), noncontiguous=True), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
             # correct dimensionality, 2d, 2d , and shapes match, but the number of diagonals is zero
             yield (make_diags((0, 3)), make_offsets([]), (3, 3))
@@ -4112,7 +4126,7 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-_sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs, sparse=True), dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
@@ -4164,8 +4178,8 @@ class TestSparseUnaryUfuncs(TestCase):
     @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
         # test 0x0 sparse_coo_tensor
-        indices = torch.empty(2, 0, dtype=torch.int64)
-        values = torch.empty(0, dtype=dtype)
+        indices = torch.empty(2, 0, dtype=torch.int64, device=device)
+        values = torch.empty(0, dtype=dtype, device=device)
         sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
         expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
         actual = op(sparse_0x0)
@@ -4624,7 +4638,7 @@ class TestSparseAny(TestCase):
 
             # However, invariants check can be disabled via
             # constructor's optional argument so that the invalid
-            # tensor is succesfully constructed:
+            # tensor is successfully constructed:
             r = create_invalid_tensor(check_invariants=False)
             self.assertEqual(r.layout, layout)
 
@@ -4646,7 +4660,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
         self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
 
-        # Test an attempt to re-use an activate context manager instance
+        # Test an attempt to reuse an activate context manager instance
         check_ctx2 = torch.sparse.check_sparse_tensor_invariants(True)
         with check_ctx:
             self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
@@ -5512,7 +5526,7 @@ class TestSparseAny(TestCase):
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
 
