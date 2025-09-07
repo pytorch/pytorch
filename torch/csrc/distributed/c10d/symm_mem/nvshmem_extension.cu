@@ -79,7 +79,7 @@ void nvshmemx_cumodule_init(uintptr_t module) {
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  auto& team_manager = TeamManager::get();
+  auto& team_manager = TeamManager::get(input.device());
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
   int team_size = nvshmem_team_n_pes(team);
@@ -130,7 +130,7 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto& team_manager = TeamManager::get();
+  auto& team_manager = TeamManager::get(input.device());
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
