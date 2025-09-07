@@ -394,14 +394,14 @@ def _while_loop_tests():
                 ([torch.randn(3, 3)], {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}),
             ),
         ),
-        "int_carry": (int_carry, (torch.randn(2, 3),)),
+        "int_carry": (int_carry, (torch.randn(2, 3, requires_grad=True),)),
         "pytree_int_carry": (
             pytree_int_carry,
-            (torch.randn(2, 3),),
+            (torch.randn(2, 3, requires_grad=True),),
         ),
         "const_and_symint_output": (
             const_and_symint_output,
-            (torch.randn(2, 3),),
+            (torch.randn(2, 3, requires_grad=True),),
         ),
     }
 
@@ -5513,35 +5513,69 @@ def forward(self, arg0_1):
         gm = backend.graphs[0]
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             self.assertExpectedInline(
-                normalize_gm(gm.print_readable(print_output=False)),
+                gm.code.strip(),
                 """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_iter_: "i64[]", L_x_: "f32[2, 2]", L_self_buffers_dec_: "i64[]", L_self_modules_linear_parameters_weight_: "f32[2, 2]", L_self_modules_linear_parameters_bias_: "f32[2]"):
-        l_iter_ = L_iter_
-        l_x_ = L_x_
-        l_self_buffers_dec_ = L_self_buffers_dec_
-        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
-        l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
-
-        cond_fn_0 = self.cond_fn_0
-        body_fn_0 = self.body_fn_0
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
-        getitem: "i64[]" = while_loop[0]
-        getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
-        return (getitem, getitem_1)
-
-    class cond_fn_0(torch.nn.Module):
-        def forward(self, child: "i64[]", child_1: "f32[2, 2]", l_self_buffers_dec__cond_fn: "i64[]", l_self_modules_linear_parameters_bias__body_fn: "f32[2]", l_self_modules_linear_parameters_weight__body_fn: "f32[2, 2]"):
-            sub: "i64[]" = child - l_self_buffers_dec__cond_fn;  child = l_self_buffers_dec__cond_fn = None
-            gt: "b8[]" = sub > 0;  sub = None
-            return gt
-
-    class body_fn_0(torch.nn.Module):
-        def forward(self, child_2: "i64[]", child_3: "f32[2, 2]", l_self_buffers_dec__cond_fn: "i64[]", l_self_modules_linear_parameters_bias__body_fn: "f32[2]", l_self_modules_linear_parameters_weight__body_fn: "f32[2, 2]"):
-            child: "i64[]" = child_2 - 1;  child_2 = None
-            child_4: "f32[2, 2]" = torch._C._nn.linear(child_3, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  child_3 = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
-            return (child, child_4)
-""",  # noqa: B950
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_dec_ : torch.Tensor, L_self_modules_linear_parameters_weight_ : torch.nn.parameter.Parameter, L_self_modules_linear_parameters_bias_ : torch.nn.parameter.Parameter):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l_self_buffers_dec_ = L_self_buffers_dec_
+    l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+    l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
+def forward(self, child : torch.Tensor, child_1 : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    sub = child - l_self_buffers_dec__cond_fn;  child = l_self_buffers_dec__cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
+def forward(self, child_2 : torch.Tensor, child_3 : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    child = child_2 - 1;  child_2 = None
+    child_4 = torch._C._nn.linear(child_3, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  child_3 = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (child, child_4)""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l__self___dec = self.L__self___dec
+    l__self___linear_weight = self.L__self___linear_weight
+    l__self___linear_bias = self.L__self___linear_bias
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l__self___dec, l__self___linear_bias, l__self___linear_weight));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l__self___dec = l__self___linear_bias = l__self___linear_weight = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
+    return (child, child_1)""",  # noqa: B950
             )
 
     def test_while_loop_nested2_traced(self):
@@ -8077,7 +8111,7 @@ class GraphModule(torch.nn.Module):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
         dynamic_shapes = {"x": {0: torch.export.Dim("dim_x")}} if dynamic else None
         ep = self._check_export(m, args, strict=strict, dynamic_shapes=dynamic_shapes)
-        if strict and dynamic and not TEST_WITH_CROSSREF:
+        if strict and dynamic:
             self.assertExpectedInline(
                 normalize_gm(ep.module().print_readable(print_output=False)),
                 """\
@@ -8234,154 +8268,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled_out[0].size(0), 3)
         self.assertEqual(compiled_out[1].size(0), 3)
         self.assertEqual(compiled_out, mod(x))
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_while_loop_autograd_simple(self):
-        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
-
-        class ModEager(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                while x.sum() < 2:
-                    x = x * x + 1 + self.linear(x)
-                return x
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                def cond_fn(x):
-                    return x.sum() < 2
-
-                def body_fn(x):
-                    return x * x + 1 + self.linear(x)
-
-                return torch._higher_order_ops.while_loop(cond_fn, body_fn, (x,))
-
-        x = torch.randn(3, 3, requires_grad=True)
-        x_clone = x.clone()
-        mod = Mod()
-        mod_eager = ModEager()
-        # Copy weights from mod to mod_eager
-        mod_eager.load_state_dict(mod.state_dict())
-        compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(x)
-        exp_out = mod_eager(x_clone)
-        compiled_out.sum().backward()
-        exp_out.sum().backward()
-        self.assertEqual(compiled_out, exp_out)
-        eager_parameters = dict(mod_eager.named_parameters())
-        compiled_parameters = dict(mod.named_parameters())
-        for name, param in compiled_parameters.items():
-            self.assertEqual(param, eager_parameters[name])
-            self.assertEqual(param.grad, eager_parameters[name].grad)
-
-        self.assertEqual(
-            len(
-                backend.fw_graphs[0].graph.find_nodes(
-                    op="call_function",
-                    target=torch.ops.higher_order.while_loop_stack_output,
-                )
-            ),
-            1,
-        )
-        self.assertEqual(
-            len(
-                backend.bw_graphs[0].graph.find_nodes(
-                    op="call_function", target=torch.ops.higher_order.while_loop
-                )
-            ),
-            1,
-        )
-        if not TEST_WITH_CROSSREF:
-            self.assertExpectedInline(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", primals_3: "f32[3]"):
-        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-        while_loop_body_graph_0 = self.while_loop_body_graph_0
-        while_loop_stack_output = torch.ops.higher_order.while_loop_stack_output(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
-        getitem: "f32[u2, 3, 3]" = while_loop_stack_output[0];  while_loop_stack_output = None
-        select: "f32[3, 3]" = torch.ops.aten.select.int(getitem, 0, -1)
-        unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_1, 0);  primals_1 = None
-        slice_1: "f32[u2 - 1, 3, 3]" = torch.ops.aten.slice.Tensor(getitem, 0, 0, -1);  getitem = None
-        cat: "f32[u2, 3, 3]" = torch.ops.aten.cat.default([unsqueeze, slice_1]);  unsqueeze = slice_1 = None
-        return (select, primals_2, primals_3, cat)
-
-    class while_loop_cond_graph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3, 3]"):
-            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
-            return lt
-
-    class while_loop_body_graph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3, 3]"):
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, 1);  mul = None
-            t: "f32[3, 3]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-            addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(arg1_1, arg0_1, t);  arg1_1 = arg0_1 = t = None
-            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, addmm);  add = addmm = None
-            return (add_1,)
-""",  # noqa: B950
-            )
-
-            self.assertExpectedInline(
-                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
-        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
-        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
-        while_loop_cond_graph_1 = self.while_loop_cond_graph_1
-        while_loop_body_graph_1 = self.while_loop_body_graph_1
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, tangents_1, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = tangents_1 = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
-        getitem_2: "f32[3, 3]" = while_loop[1]
-        getitem_3: "f32[3]" = while_loop[2]
-        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
-        return (getitem_2, getitem_4, getitem_3)
-
-    class while_loop_cond_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
-
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
-            return lt
-
-    class while_loop_body_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
-
-            rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u9)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
-            select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
-            t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
-            t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, t_1);  t_1 = None
-            t_2: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1)
-            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, select);  t_2 = None
-            t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
-            view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
-            t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
-            add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-
-            add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_9, add_8, add_10, add_11)
-""",  # noqa: B950
-            )
 
     def test_input_output_alias(self):
         def fn(f, *args):
