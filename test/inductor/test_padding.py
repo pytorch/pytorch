@@ -369,7 +369,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST or not HAS_TRANSFORMER, "Perf test not enabled")
     def test_longformer_small_bs(self):
         """
-        The model exists in both HF and TB. In TB it uses a samller batch size.
+        The model exists in both HF and TB. In TB it uses a smaller batch size.
         """
         self.test_longformer(bs=2)
 
@@ -410,7 +410,7 @@ class PaddingTest(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_padmm(self):
         """
-        Latency between origional matmul and padded matmul: 2.717 v.s. 2.356
+        Latency between original matmul and padded matmul: 2.717 v.s. 2.356
         """
         mat1_pad = torch.randn(8192, 30522, dtype=torch.float16)
         mat2_pad = torch.randn(30522, 768, dtype=torch.float16)
@@ -434,7 +434,7 @@ class PaddingTest(TestCaseBase):
         pad_time = benchmarker.benchmark_gpu(g)
 
         print(
-            f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
+            f"Latency between original matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
         )
         self.do_profiling(f, g, "No MM Padding", "With mm padding")
 
@@ -487,7 +487,7 @@ class PaddingTest(TestCaseBase):
         self.assertEqual(
             m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
-        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
+        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and one for backward
         forward_wrapper = wrapper_codes[0]
 
         # make sure the load for softmax is aligned

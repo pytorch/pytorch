@@ -55,7 +55,9 @@ struct Vectorizedqi {
 #endif
 
  public:
-  Vectorizedqi() {}
+  Vectorizedqi() {
+    vals = _mm512_setzero_si512();
+  }
   Vectorizedqi(__m512i v) : vals(v) {}
   operator __m512i() const {
     return vals;
@@ -123,22 +125,24 @@ typename std::enable_if_t<
 }
 
 template <typename T>
-typename std::enable_if_t<
-    std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>,
-    at::vec::Vectorized<
-        T>> inline convert_float_to_int8(at::vec::Vectorized<float> src) {
+at::vec::Vectorized<T> inline convert_float_to_int8(
+    at::vec::Vectorized<float> src);
+
+template <>
+at::vec::Vectorized<int8_t> inline convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
   // Convert from float32 to int32 with truncation
   __m512i x_values_int32 = _mm512_cvttps_epi32(src);
 
   // Convert from int32 to int16 using signed saturation
   __m512i xy_packed_v = _mm512_packs_epi32(x_values_int32, x_values_int32);
 
-  constexpr auto min_val = std::numeric_limits<T>::min();
-  constexpr auto max_val = std::numeric_limits<T>::max();
+  constexpr auto min_val = std::numeric_limits<int8_t>::min();
+  constexpr auto max_val = std::numeric_limits<int8_t>::max();
 
-  // Convert from int16 to uint8/int8 using unsigned saturation
-  __m512i xyzw_clamped_v =
-      pack_saturate_and_clamp<T>(xy_packed_v, xy_packed_v, min_val, max_val);
+  // Convert from int16 to int8 using unsigned saturation
+  __m512i xyzw_clamped_v = pack_saturate_and_clamp<int8_t>(
+      xy_packed_v, xy_packed_v, min_val, max_val);
   __m512i permute_mask_v = _mm512_set_epi32(
       0x0f,
       0x0b,
@@ -157,6 +161,21 @@ typename std::enable_if_t<
       0x04,
       0x00);
   return _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
+}
+
+template <>
+at::vec::Vectorized<uint8_t> inline convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // The type of *_val should be int32_t to ensure correct clamping behavior.
+  constexpr auto min_val = std::numeric_limits<int32_t>::min();
+  constexpr auto max_val = std::numeric_limits<int32_t>::max();
+  __m512 float32_min_val = _mm512_set1_ps(float(min_val));
+  __m512 float32_max_val = _mm512_set1_ps(float(max_val));
+  __m512 float32_src = _mm512_max_ps(src, float32_min_val);
+  float32_src = _mm512_min_ps(float32_src, float32_max_val);
+  __m512i int32_src_clamped = _mm512_cvttps_epi32(float32_src);
+  __m128i int8_src = _mm512_cvtepi32_epi8(int32_src_clamped);
+  return _mm512_castsi128_si512(int8_src);
 }
 
 template <typename T>

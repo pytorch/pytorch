@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+from torch.onnx import _constants as onnx_constants
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
     _constants,
@@ -50,7 +51,7 @@ def export_compat(
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    opset_version: int | None = _constants.TORCHLIB_OPSET,
+    opset_version: int | None = onnx_constants.ONNX_DEFAULT_OPSET,
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
@@ -70,7 +71,7 @@ def export_compat(
     legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        opset_version = _constants.TORCHLIB_OPSET
+        opset_version = onnx_constants.ONNX_DEFAULT_OPSET
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -107,7 +108,27 @@ def export_compat(
     dynamic_shapes_with_export_dim, need_axis_mapping = (
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
-    registry = _registration.ONNXRegistry().from_torchlib(opset_version=opset_version)
+
+    if opset_version < _constants.TORCHLIB_OPSET:
+        logger.warning(
+            "Setting ONNX exporter to use operator set version %s because "
+            "the requested opset_version %s is a lower version than we have implementations for. "
+            "Automatic version conversion will be performed, which may not be successful "
+            "at converting to the requested version. If version conversion is unsuccessful, "
+            "the opset version of the exported model will be kept at %s. "
+            "Please consider setting opset_version >=%s to leverage latest ONNX features",
+            _constants.TORCHLIB_OPSET,
+            opset_version,
+            _constants.TORCHLIB_OPSET,
+            _constants.TORCHLIB_OPSET,
+        )
+        registry_opset_version = _constants.TORCHLIB_OPSET
+    else:
+        registry_opset_version = opset_version
+
+    registry = _registration.ONNXRegistry().from_torchlib(
+        opset_version=registry_opset_version
+    )
     if custom_translation_table is not None:
         for torch_op, onnx_ops in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations

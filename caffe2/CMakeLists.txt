@@ -267,6 +267,7 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp"
   )
   if(BUILD_LAZY_TS_BACKEND)
     list(APPEND GENERATED_CXX_TORCH
@@ -580,6 +581,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -824,7 +826,6 @@ if(USE_MPS)
   if(CAN_COMPILE_METAL)
     add_dependencies(torch_cpu metallibs)
     target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
-    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_bfloat,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_bfloat.metallib)
   else()
     target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
   endif()
@@ -999,45 +1000,52 @@ elseif(USE_CUDA)
     # location, e.g.
     # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
-    find_path(NVSHMEM_LIB_DIR
+    find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
-      NAMES libnvshmem_host.so libnvshmem_host.so.3
-      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
-      DOC "The location of NVSHMEM library.")
+      NAMES nvshmem_host libnvshmem_host.so.3 NAMES_PER_DIR
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM host library.")
+    find_library(NVSHMEM_DEVICE_LIB
+      # Device lib is a `.a` file
+      NAMES nvshmem_device
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM device library.")
     find_path(NVSHMEM_INCLUDE_DIR
       NAMES nvshmem.h
-      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
       DOC "The location of NVSHMEM headers.")
+    message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
+    message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
+    message(STATUS "NVSHMEM_INCLUDE_DIR:  '${NVSHMEM_INCLUDE_DIR}'")
   endif()
 
   # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
-  if(NVSHMEM_LIB_DIR AND NVSHMEM_INCLUDE_DIR)
-    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_LIB_DIR}'")
+  if(NVSHMEM_HOST_LIB AND NVSHMEM_DEVICE_LIB AND NVSHMEM_INCLUDE_DIR)
+    message(STATUS "NVSHMEM found, building with NVSHMEM support")
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
     # Linking with nvshmem requires the source binary to be built with -rdc
     # which is not viable for libtorch_cuda. So we isolate the linking of
-    # nvshmem in nvshmem_extension.
-    add_library(nvshmem_extension SHARED
+    # nvshmem in torch_nvshmem.
+    add_library(torch_nvshmem SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
-    set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-    target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
-    target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
-    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
-    target_link_libraries(nvshmem_extension PRIVATE
-        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
-        # otherwise, we could just write `nvshmem_host`
-        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
-        nvshmem_device
+    set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_libraries(torch_nvshmem PRIVATE
+        ${NVSHMEM_HOST_LIB}
+        ${NVSHMEM_DEVICE_LIB}
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
-    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
-    target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
-    install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+    target_compile_definitions(torch_nvshmem PUBLIC USE_NVSHMEM)
+    target_link_libraries(torch_cuda PRIVATE torch_nvshmem)
+    install(TARGETS torch_nvshmem EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   else()
     message(STATUS "NVSHMEM not found, not building with NVSHMEM support.")
   endif()
@@ -1055,7 +1063,7 @@ elseif(USE_CUDA)
         UNFUSE_FMA                      # Addressing issue #121558
       )
     target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
-    target_include_directories(torch_cuda PUBLIC
+    target_include_directories(torch_cuda SYSTEM PUBLIC
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
@@ -1085,17 +1093,10 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-        )
-      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-        )
-      endif()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        CUDA::cusolver_static
+        ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+    )
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver
@@ -1122,6 +1123,11 @@ elseif(USE_CUDA)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
+  # Set driver api defined for PeerToPeerAccess
+  if(NOT WIN32)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/PeerToPeerAccess.cpp PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1")
+  endif()
+
 endif()
 
 if(USE_XPU)
@@ -1178,20 +1184,11 @@ if(USE_XPU)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
-    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
     if(USE_C10D_XCCL)
       target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
     endif()
-    if(MSVC)
-      # Windows
-      target_link_options(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
-    else()
-      # Linux
-      target_link_options(torch_xpu PRIVATE
-          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
-    endif()
+    target_link_libraries(torch_xpu PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,torch_xpu_ops>)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
@@ -1354,10 +1351,6 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
-    add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/tensorexpr
-      ${CMAKE_BINARY_DIR}/test_tensorexpr
-    )
     if(USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
       if(NOT WIN32)
@@ -1455,8 +1448,8 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(USE_CK_FLASH_ATTENTION)
-    target_compile_definitions(torch_hip PRIVATE USE_CK_FLASH_ATTENTION)
+  if(USE_ROCM_CK_SDPA)
+    target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 endif()
 
@@ -1778,6 +1771,10 @@ if(USE_ROCM)
   endif()
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+  if(USE_FBGEMM_GENAI)
+    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+  endif()
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake

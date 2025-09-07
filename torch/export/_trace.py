@@ -49,15 +49,13 @@ from torch._export.utils import (
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.graph_capture_wrappers import create_functional_call
 from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
 from torch._functorch._aot_autograd.schemas import GraphSignature
 from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
-from torch._functorch._aot_autograd.traced_function_transforms import (
-    create_functional_call,
-)
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,
@@ -206,7 +204,7 @@ def _strip_root(x):
 
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     """
-    In-place modifiy input graph module by replacing the export tracepoint with a new node
+    In-place modify input graph module by replacing the export tracepoint with a new node
     that has the same target and args, but with the _export_root stripped from path.
     """
     for node in gm.graph.nodes:
@@ -264,7 +262,7 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
-    # both. Unforunately we can't see what fake mode is attached to the shape
+    # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
     detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
     detected_shape_env = detect_shape_env(fake_inps + fake_vals)
@@ -386,7 +384,9 @@ def _get_param_buffer_mapping(
     param_lookup: dict[int, str] = {}
     buffer_lookup: dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup[id(param)] = name
+        if param_lookup.get(id(param)) is None:
+            # we only want to keep the first occurrence of a parameter to guarantee parity of original and traced module.
+            param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup[id(buffer)] = name
 
@@ -677,8 +677,8 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Since the graph module is flattened (no module heirarchy), we
-    # need to noramlize the module by replacing "." with "_". If we
+    # Since the graph module is flattened (no module hierarchy), we
+    # need to normalize the module by replacing "." with "_". If we
     # don't, it will try to save the weight to a submodule which no
     # longer exists.
     for name, fqn in param_buffer_table.items():
@@ -738,6 +738,10 @@ def _make_module_call_graph(
     return [*original, *additional]
 
 
+class _ExportModuleSpecTrackerDict(dict):
+    pass
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
@@ -790,7 +794,9 @@ def _export_to_torch_ir(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
-            module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = {}
+            module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
+                _ExportModuleSpecTrackerDict()
+            )
             ctx = nullcontext()
             if not isinstance(f, torch.fx.GraphModule):
                 ctx = _wrap_submodules(  # type: ignore[assignment]
@@ -806,7 +812,7 @@ def _export_to_torch_ir(
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
                     # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
@@ -882,6 +888,8 @@ def _export_to_aten_ir(
             new_output_node = list(new_gm.graph.nodes)[-1]
             assert old_output_node.op == "output" and new_output_node.op == "output"
             # make sure we don't override any meta
+            if "desc" in new_output_node.meta:
+                del new_output_node.meta["desc"]
             assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
@@ -1286,7 +1294,7 @@ def _get_module_call_graph(
             outputs=[],
             in_spec=specs["in_spec"],
             out_spec=specs["out_spec"],
-            forward_arg_names=None,  # we only propage forward_arg_names for the top level module
+            forward_arg_names=None,  # we only propagate forward_arg_names for the top level module
         )
 
     if len(preserve_module_call_signature) > 0:
@@ -1674,7 +1682,24 @@ def _export_to_aten_ir_make_fx(
                     for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
                         k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
 
-            with ctx, override_getattribute_for_subclasses(flat_args):
+            @contextmanager
+            def _maybe_restore_grad_state():
+                """
+                When pre-dispatch export accidentally change grad state, we restore it back.
+                This can happen when we are calling torch._C._set_grad_enabled directly in the
+                forward.
+                """
+                old_state = torch.is_grad_enabled()
+                try:
+                    yield
+                finally:
+                    torch._C._set_grad_enabled(old_state)
+
+            with (
+                ctx,
+                override_getattribute_for_subclasses(flat_args),
+                _maybe_restore_grad_state(),
+            ):
                 gm = make_fx(
                     wrapped_fn,
                     record_module_stack=True,
@@ -1725,6 +1750,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(
@@ -1737,9 +1763,10 @@ def _export_to_aten_ir_make_fx(
                 zip(input_names[param_len : param_len + buffer_len], named_buffers)
             ),
             buffers_to_mutate={},
+            parameters_to_mutate={},
             user_inputs_to_mutate={},
             in_spec=in_spec,
-            out_spec=out_spec,  # type: ignore[arg-type]
+            out_spec=out_spec.spec,
             backward_signature=None,
             input_tokens=[],
             output_tokens=[],
@@ -1899,6 +1926,9 @@ def _non_strict_export(
                 _strip_root, sig.inputs_to_parameters
             )
             sig.buffers_to_mutate = pytree.tree_map(_strip_root, sig.buffers_to_mutate)
+            sig.parameters_to_mutate = pytree.tree_map(
+                _strip_root, sig.parameters_to_mutate
+            )
 
             for node in gm.graph.nodes:
                 if "nn_module_stack" in node.meta:
@@ -2007,6 +2037,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    allow_complex_guards_as_runtime_asserts: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2031,7 +2062,7 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
@@ -2168,6 +2199,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep

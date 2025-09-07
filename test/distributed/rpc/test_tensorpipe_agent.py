@@ -23,7 +23,7 @@ from torch.testing._internal.distributed.rpc_utils import (
 
 
 # On CircleCI these tests are already run on CPU jobs, thus to save resources do
-# not run them on GPU jobs, since thet wouldn't provide additional test signal.
+# not run them on GPU jobs, since they wouldn't provide additional test signal.
 if not (IS_CI and torch.cuda.is_available()):
     globals().update(
         generate_tests(

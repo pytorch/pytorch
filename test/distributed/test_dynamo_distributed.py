@@ -1814,7 +1814,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         Note: comptime prints the guards before the time they get installed or not installed, so in both cases
         (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
-        with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
+        with a special 'guard source' which will cause them to not be installed.  So all we check for is the expected
         guard source 'local_fsdp_module'.
         """
         global GUARDS_FILE
@@ -1871,7 +1871,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_fsdp_skip_register_attr_or_module(self):
         """
-        ensure FSDP module is not registered as attrbutes
+        ensure FSDP module is not registered as attributes
         in the fx graph
         see `not source.guard_source().is_fsdp_module()`
         before calling `register_attr_or_module`

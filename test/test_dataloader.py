@@ -734,12 +734,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
-        self.sleeped = False
+        self.slept = False
 
     def __getitem__(self, idx):
-        if not self.sleeped:
+        if not self.slept:
             time.sleep(self.sleep_sec)
-            self.sleeped = True
+            self.slept = True
         return idx
 
     def __len__(self):
@@ -3132,6 +3132,15 @@ class TestDictDataLoader(TestCase):
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
+
+    @skipIfXpu
+    @skipIfRocm
+    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
+    def test_pin_memory_no_cuda(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for sample in loader:
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_device(self):
