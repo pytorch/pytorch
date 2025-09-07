@@ -80,7 +80,7 @@ void nvshmemx_cumodule_init(uintptr_t module) {
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  auto& team_manager = TeamManager::get();
+  auto& team_manager = TeamManager::get(input.device());
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
   int team_size = nvshmem_team_n_pes(team);
@@ -131,7 +131,7 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto& team_manager = TeamManager::get();
+  auto& team_manager = TeamManager::get(input.device());
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
@@ -859,8 +859,10 @@ void tile_reduce(
   TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
   TORCH_CHECK_EQ(in_tile.sizes(), out_tile.sizes());
   TORCH_CHECK_EQ(in_tile.strides(), out_tile.strides());
+  TORCH_CHECK_EQ(in_tile.device(), out_tile.device());
 
-  c10::cuda::CUDAGuard guard(in_tile.device());
+  auto device = in_tile.device();
+  c10::cuda::CUDAGuard guard(device);
   auto hdl = c10d::symmetric_memory::rendezvous(in_tile, group_name);
   c10d::symmetric_memory::rendezvous(out_tile, group_name);
 
@@ -871,7 +873,7 @@ void tile_reduce(
   nblocks = std::min(nblocks, 32);
 
   // Need one team per block
-  auto& team_manager = TeamManager::get();
+  auto& team_manager = TeamManager::get(device);
   auto [teams, teams_dev] = team_manager.get_n_teams(
       group_name, hdl->get_rank_to_global_rank(), nblocks);
   TORCH_CHECK(
