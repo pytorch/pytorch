@@ -171,7 +171,7 @@ PINNED_PACKAGES=(
     "numpy${NUMPY_PINNED_VERSION}"
 )
 python -mvenv ~/${desired_python}-build
-source ~/${desired_python}-build
+source ~/${desired_python}-build/bin/activate
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
 retry brew install libomp
 
