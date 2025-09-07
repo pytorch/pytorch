@@ -27,8 +27,7 @@ _GUARD_PG: Optional[dist.ProcessGroup] = None
 
 def get_compile_pg() -> Optional[dist.ProcessGroup]:
     if (
-        config.enable_compiler_collectives
-        and dist.is_available()
+        dist.is_available()
         and dist.is_initialized()
     ):
         global _COMPILE_PG

@@ -5010,6 +5010,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         choice_timings_fn: Callable[[Optional[int]], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
         allowed_prologue_inps: OrderedSet[str],
+        inputs_key: str,
     ) -> None:
         super().__init__(
             layout=layout,
@@ -5029,6 +5030,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             for choice in unfiltered_choices
         )
         self._make_kernel_renders: dict[Optional[int], Any] = {}
+        self.inputs_key = inputs_key
 
     @property
     def output_plannable(self) -> bool:
@@ -5082,6 +5084,53 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
         # Set the default to be the one without hint override
         self.make_kernel_render = self._make_kernel_renders[None]
+
+class AsyncMultiTemplateBuffer(MultiTemplateBuffer):
+    synced = False
+    key_to_other_buffers = {}
+
+    def __init__(
+        self,
+        name,
+        input_nodes,
+        layout,
+    ):
+        from .select_algorithm import create_inputs_key
+        super().__init__(
+            layout=layout,
+            inputs=input_nodes,
+            choice_timings_fn=None,
+            unfiltered_choices=[],
+            allowed_prologue_inps=OrderedSet({}),
+            inputs_key=create_inputs_key(input_nodes),
+        )
+
+        key_to_other_buffers[self.inputs_key] = self
+        self.name = name
+
+    # Can we make this async?
+    @staticmethod
+    def sync(autotune_results):
+        # Perform allgather
+        # We should spin this up when we are done autotuning
+        # Currently we do autotuning synchronously and 
+        # For each sent over result {mm1024,1024,...: (128, 128, 64, 5, 8)}
+        # do maybe_append_choice
+        # then call autotune select algorithm with the single choice???
+        # autotune_select_algorithm(
+        #     name,
+        #     choices,
+        #     kernel_inputs.nodes(),
+        #     layout,
+        # )
+        pass
+
+    def replace():
+        # Return ExternChoiceCaller or TritonTemplateBuffer
+        # Result of autotune_select_algorithm, in the scheduler
+        # Wait for sync to be true??
+        # This way, the scheduler logic is the exact same
+        pass
 
 
 class CUDATemplateBuffer(TemplateBuffer):

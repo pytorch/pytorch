@@ -2133,6 +2133,22 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
+        autotune_results = {}
+        for node in self.nodes:
+            if isinstance(node, SchedulerNode) and isinstance(
+                node.node, ir.MultiTemplateBuffer
+            ) and not isinstance(node.node, ir.AsyncMultiTemplateBuffer):
+                # We force autotuning here
+                # Still takes advantage of async precompile
+                # We need all the configs before fusion
+                multi_node = node.node
+                min_choice = multi_node.get_min_choice()
+                inputs_key = node.node.inputs_key
+                info_dict = min_choice.info_dict()
+
+                autotune_results[inputs_key] = info_dict
+
+        ir.AsyncMultiTemplateBuffer.sync(autotune_results)
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -3013,6 +3029,7 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+
         if not config.benchmark_fusion and not is_multi_template:
             return True
 

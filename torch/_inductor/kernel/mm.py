@@ -7,6 +7,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import counters
+from torch._dynamo.distributed import get_compile_pg
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -25,7 +26,7 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..ir import AsyncMultiTemplateBuffer, FlexibleLayout, is_triton
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     add_layout_constraint,
@@ -589,6 +590,7 @@ aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
 )
 
+autotuned_num = 0
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
@@ -688,6 +690,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         aten_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
+
+    if autotuned_num != 0:
+        return AsyncMultiTemplateBuffer(name, kernel_inputs.nodes(), layout)
 
     # options to tune from
     choices = (
