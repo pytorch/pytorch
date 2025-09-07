@@ -258,22 +258,22 @@ void setMHAParams(
   params.has_attn_bias = attn_bias.has_value();
   // Expect 4D dense tensor, 3D nested case (THD)
   TORCH_INTERNAL_ASSERT(
-      q.sizes().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      q.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      q.strides().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      q.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      k.sizes().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      k.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "K tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      k.strides().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      k.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "K tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      v.sizes().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      v.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "V tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      v.strides().size() == MAX_MHA_DIM - (uint8_t)is_nested,
+      v.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "V tensor has unexpected number of dims, please report a bug to PyTorch.");
   std::copy(q.sizes().begin(), q.sizes().end(), params.q_dim.begin());
   std::copy(q.strides().begin(), q.strides().end(), params.q_stride.begin());
