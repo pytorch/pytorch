@@ -2,6 +2,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <string>
 #include <unordered_map>
@@ -26,9 +27,15 @@ using TeamPool = std::vector<nvshmem_team_t>;
 // Manage all the team business. Singleton.
 class TeamManager {
  public:
+  // Constructor
+  explicit TeamManager(const c10::Device device) : device_(device) {}
+
   // Get single, global manager.
-  static TeamManager& get() {
-    static TeamManager manager;
+  static TeamManager& get(const c10::Device device) {
+    static TeamManager manager(device);
+    TORCH_CHECK(
+        manager.device_ == device,
+        "Detected use of TeamManager on multiple devices. This is not supported.");
     return manager;
   }
 
@@ -50,6 +57,8 @@ class TeamManager {
       const std::string& group_name,
       const std::vector<int>& global_ranks,
       const int need_n) {
+    // A device guard is required for malloc and memcpy below
+    c10::cuda::CUDAGuard guard(device_);
     // Get the team pool with the requested number of teams
     auto [team_pool, pool_updated] =
         group_to_team_pool(group_name, global_ranks, need_n);
@@ -79,6 +88,26 @@ class TeamManager {
     return std::make_pair(std::cref(team_pool), team_pool_dev);
   }
 
+  ~TeamManager() {
+    // Free the team pools in device memory
+    // Note that we do it in a best effort manner because the team pool is
+    // managed by a static TeamManager and the destruction order of static
+    // objects is undetermined. If the destructor is called after the CUDA
+    // context is destroyed, cudaFree would fail.
+    try {
+      // cudaFree generally implies a device synchronization, meaning it will
+      // block until all preceding CUDA operations on the device have completed
+      // before freeing the memory. Thus we don't need to worry about freeing
+      // the memory before CUDA kernels complete.
+      for (auto& [_, team_pool_dev] : team_pool_devptrs_) {
+        c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
+      }
+    } catch (...) {
+      // Ignore the error
+      std::cerr << "Failed to free the team pool in device memory, skipping\n";
+    }
+  }
+
  private:
   // Get the team pool for a group. If the pool doesn't exist, create it. If the
   // pool exists but is not large enough, create more teams.
@@ -90,6 +119,8 @@ class TeamManager {
       const std::vector<int>& global_ranks,
       const int need_n) {
     TORCH_CHECK(need_n < MAX_N_TEAMS, "Too many teams requested");
+    // Guarding the NVSHMEM API calls below just to be safe
+    c10::cuda::CUDAGuard guard(device_);
 
     // Insert a new team pool if not exists
     auto [it, inserted] = group_name_to_team_pool_.emplace(
@@ -128,6 +159,8 @@ class TeamManager {
   }
 
  private:
+  // Device where the team manager is created
+  const c10::Device device_;
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
