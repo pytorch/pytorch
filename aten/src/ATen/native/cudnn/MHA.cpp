@@ -146,7 +146,7 @@ namespace native {
 
 namespace fe = cudnn_frontend;
 
-#define MAX_MHA_DIM 4
+constexpr uint8_t MAX_MHA_DIM = 4;
 
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
