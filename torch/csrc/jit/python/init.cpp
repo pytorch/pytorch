@@ -1726,7 +1726,7 @@ void initJITBindings(PyObject* module) {
                       const py::args& args, const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true);
+                        op, symbol, args, kwargs, /*is_overload*/ true);
                   });
               auto func_dk =
                   py::cpp_function([op, symbol, allow_numbers_as_tensors](
@@ -1735,7 +1735,7 @@ void initJITBindings(PyObject* module) {
                                        const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
+                        op, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
               return py::make_tuple(
                   func, func_dk, py::cast(op->getTags().vec()));
