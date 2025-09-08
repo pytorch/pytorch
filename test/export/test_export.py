@@ -9739,6 +9739,62 @@ graph():
         inp = (torch.randn(2, 8),)
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
 
+    def test_issue_161807(self):
+        import contextlib
+        from collections import OrderedDict
+
+        class CustomModel(torch.nn.Module):
+            def __init__(self, kwargs=None):
+                super(CustomModel, self).__init__()
+                pass
+            def forward(self, *args):
+                x = args[0]
+                nested_tuple = (F.relu(x), F.relu(x) + 1)
+                nested_dict = OrderedDict([('out1', F.relu(x) + 2), ('out2', F.relu(x) + 3)])
+                return (x, nested_tuple, nested_dict)
+
+        input_tensor = torch.randn(1,3,224)
+        model = CustomModel(input_tensor)
+        model(input_tensor)
+        model.eval()
+
+        # Export the module
+        ep = torch.export.export(model, (input_tensor,), strict=False)
+        print('CallSpec with optimization: \n',ep.call_spec)
+
+        # CallSpec(in_spec=TreeSpec(tuple, None, [TreeSpec(tuple, None, [*]),
+        #       TreeSpec(dict, [], [])]), out_spec=TreeSpec(tuple, None, [*,
+        #       TreeSpec(tuple, None, [*,
+        #         *]),
+        #       TreeSpec(OrderedDict, ['out1', 'out2'], [*,
+        #         *])]))
+
+        # See OrderedDict
+
+        # Now try with optimization
+        import torch.fx.experimental.optimization as optimization
+
+        optimization_config = {
+            "conv_bn_fuse": True,
+            "remove_dropout": True,
+            "mkldnn_layout_optimize": False,
+        }
+        optimized_model = optimization.optimize_for_inference(model, optimization_config)
+        ep = torch.export.export(optimized_model, (input_tensor,), strict=False)
+
+        print('\n\nCallSpec with optimization: \n',ep.call_spec)
+
+        # CallSpec(in_spec=TreeSpec(tuple, None, [TreeSpec(tuple, None, [*]),
+        #       TreeSpec(dict, [], [])]), out_spec=TreeSpec(tuple, None, [*,
+        #       TreeSpec(tuple, None, [*,
+        #         *]),
+        #       TreeSpec(immutable_dict, ['out1', 'out2'], [*,
+        #         *])]))
+
+        # See immutable_dict
+
+        assert False
+
     def test_export_with_fake_tensor_inputs(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
