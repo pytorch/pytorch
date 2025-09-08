@@ -131,36 +131,7 @@ jobs:
           set -eux
 
           # Get these wheels ready, the vllm renaming logic is copied from its .buildkite/scripts/upload-wheels.sh
-          docker exec -t "${container_name}" bash -c "
-            set -eux
-
-            nightly=\$(unzip -p torch-* '**/METADATA' | grep '^Version: ' | cut -d' ' -f2 | cut -d'.' -f4)
-
-            pushd externals/vllm/wheels
-            for package in xformers flashinfer-python vllm; do
-              pushd \$package
-              auditwheel repair --plat \$PLATFORM *.whl \
-                --exclude libc10* --exclude libtorch* --exclude libcu* --exclude libnv*
-              repair_wheel=\$(find wheelhouse -name *\${PLATFORM}*)
-              repair_wheel=\$(basename \${repair_wheel})
-              popd
-
-              cp \${package}/wheelhouse/\${repair_wheel} .
-              version=\$(unzip -p \$repair_wheel '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
-
-              if [[ \$package == vllm ]]; then
-                new_wheel=\${repair_wheel/\$version/1.0.0.\$nightly}
-              else
-                major_version=\$(echo \$version | tr '.+' '.' | cut -d'.' -f1-3)
-                new_wheel=\${repair_wheel/\$version/\$major_version.\$nightly}
-              fi
-
-              mv -- \$repair_wheel \$new_wheel
-              rm -rf \$package
-            done
-            popd
-          "
-
+          docker exec -t "${container_name}" bash -c /pytorch/.github/scripts/prepare_vllm_wheels.sh
           docker exec -t "${container_name}" chown -R 1000:1000 /artifacts
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
