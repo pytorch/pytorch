@@ -769,7 +769,87 @@ def main() -> None:
 <input_file2> [input_file3 ...] <output_file>. The last argument is the output file, all preceding arguments are \
 input files to combine.",
     )
+    parser.add_argument(
+        "--visualize",
+        nargs="+",
+        metavar=("input_file", "args"),
+        help="Create a DAG visualization of multiple traces showing operation flow from ops to kernels. \
+Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arguments required (1 input, dtype, output)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["png", "svg"],
+        default="png",
+        help="Output format for visualization (default: png)",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable parallel processing for trace analysis and DAG building (default: True for multiple traces)",
+    )
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel processing and use single-threaded mode",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        help="Maximum number of worker processes for parallel processing (default: number of CPU cores)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable DAG caching to disk (default: caching enabled)",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear the DAG cache directory before processing",
+    )
+    parser.add_argument(
+        "--color",
+        choices=["time", "diff", "mem-utilization", "compute-utilization", "roofline"],
+        default="time",
+        help="Coloring mode for kernel nodes: 'time' colors by kernel runtime percentage (default), 'diff' colors by duration difference between profiles, 'mem-utilization' colors by memory bandwidth utilization %, 'compute-utilization' colors by compute utilization %, 'roofline' colors by roofline analysis (darker = lower utilization)",
+    )
+    parser.add_argument(
+        "--diff-baseline",
+        help="Path to baseline profile for diff coloring. Required when --color=diff is used.",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        help="Limit the height of the visualization to only show this many levels of non-kernel nodes above kernels. For example, height=1 shows only direct parents of kernels. Default: no height limit.",
+    )
     args = parser.parse_args()
+
+    # Validate color/diff-baseline arguments
+    if args.color == "diff" and not args.diff_baseline:
+        print("Error: --diff-baseline is required when --color=diff is used")
+        return
+    if args.diff_baseline and args.color != "diff":
+        print(
+            "Warning: --diff-baseline specified but --color is not 'diff'. Ignoring --diff-baseline."
+        )
+
+    # Handle cache clearing
+    if args.clear_cache:
+        cache_dir = get_cache_dir()
+        if os.path.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+            print(f"Cleared cache directory: {cache_dir}")
+        else:
+            print(f"Cache directory does not exist: {cache_dir}")
+
+    # Determine parallelization settings
+    use_parallel = (
+        not args.no_parallel
+    )  # Default is True unless --no-parallel is specified
+    if args.parallel:
+        use_parallel = True
+
+    use_cache = not args.no_cache  # Default is True unless --no-cache is specified
 
     if args.diff:
         p1 = JsonProfile(args.diff[0], args.diff[1], dtype=args.diff[4])
@@ -812,6 +892,85 @@ input files to combine.",
 
         combined.dump(output_file)
         print(f"Successfully combined {', '.join(input_files)} into {output_file}")
+    if args.visualize:
+        if len(args.visualize) < 3:
+            print(
+                "Error: --visualize requires at least 3 arguments: <input_file1> <dtype> <output_file>"
+            )
+            return
+
+        input_files = args.visualize[:-2]  # All but last 2 arguments
+        dtype = args.visualize[-2]  # Second to last argument
+        output_file = args.visualize[-1]  # Last argument
+
+        print(
+            f"Creating multi-trace DAG visualization from {len(input_files)} traces..."
+        )
+        print(f"Using parallel processing: {use_parallel}")
+        print(f"Using caching: {use_cache}")
+        print(f"Output format: {args.format}")
+        if args.max_workers:
+            print(f"Max workers: {args.max_workers}")
+
+        if len(input_files) == 1:
+            # Single trace visualization (backward compatibility)
+            profile = JsonProfile(input_files[0], dtype=dtype)
+
+            # Check if trace needs augmentation and augment if needed
+            if not profile._is_trace_augmented():
+                print(f"Augmenting trace to add performance statistics...")
+                profile.augment_trace()
+                print("Trace augmentation completed.")
+
+            # Handle baseline profile for diff coloring
+            baseline_profile = None
+            if args.color == "diff" and args.diff_baseline:
+                baseline_profile = JsonProfile(args.diff_baseline, dtype=dtype)
+                # Also check and augment baseline profile if needed
+                if not baseline_profile._is_trace_augmented():
+                    print(f"Augmenting baseline trace to add performance statistics...")
+                    baseline_profile.augment_trace()
+                    print("Baseline trace augmentation completed.")
+
+            dag = profile.create_trace_dag_visualization(
+                output_file,
+                format=args.format,
+                color_mode=args.color,
+                baseline_profile=baseline_profile,
+                height=args.height,
+            )
+            print(f"DAG visualization completed and saved to {output_file}")
+            print(
+                f"Found {len(dag.nodes)} nodes and {len(dag.edges)} edges in the trace DAG"
+            )
+        else:
+            # Handle baseline profile for diff coloring
+            baseline_profile = None
+            if args.color == "diff" and args.diff_baseline:
+                baseline_profile = JsonProfile(args.diff_baseline, dtype=dtype)
+                # Check and augment baseline profile if needed
+                if not baseline_profile._is_trace_augmented():
+                    print(f"Augmenting baseline trace to add performance statistics...")
+                    baseline_profile.augment_trace()
+                    print("Baseline trace augmentation completed.")
+
+            # Multi-trace visualization with parallel and caching options
+            multi_dag = create_multi_trace_visualization(
+                input_files,
+                output_file,
+                dtype,
+                use_cache=use_cache,
+                use_parallel=use_parallel,
+                max_workers=args.max_workers,
+                format=args.format,
+                height=args.height,
+                color_mode=args.color,
+                baseline_profile=baseline_profile,
+            )
+            print(f"Multi-trace DAG visualization completed and saved to {output_file}")
+            print(
+                f"Combined {len(input_files)} traces with {len(multi_dag.nodes)} unique nodes"
+            )
 
 
 if __name__ == "__main__":
