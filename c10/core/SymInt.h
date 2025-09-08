@@ -556,3 +556,26 @@ inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
 }
 
 } // namespace c10
+
+#include <limits>
+
+namespace std {
+
+template <>
+class numeric_limits<c10::SymInt> {
+ public:
+  static constexpr bool is_specialized = true;
+
+  static constexpr int64_t max() noexcept {
+    return std::numeric_limits<int64_t>::max();
+  }
+
+  static constexpr int64_t min() noexcept {
+    return std::numeric_limits<int64_t>::min();
+  }
+
+  static constexpr bool is_signed = true;
+  static constexpr bool is_integer = true;
+};
+
+} // namespace std

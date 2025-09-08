@@ -93,6 +93,47 @@ class TestConvolutionNN(NNTestCase):
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
+    def test_huge_padding(self):
+        class Conv1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=1,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv1", module=self.conv1)
+
+        input_data = torch.randn(1, 16, 100)
+        model = Conv1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv1(input_data)
+
+        class ConvTransposed1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transposed1d = nn.ConvTranspose1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=2,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv_transposed1d", module=self.conv_transposed1d)
+
+        input_data = torch.randn(1, 16, 100)
+        model = ConvTransposed1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv_transposed1d(input_data)
+
     def test_invalid_conv1d(self):
         for dtype in [
             torch.half,
