@@ -818,11 +818,11 @@ def _reorder_communication_preserving_peak_memory_internal(
     )
     headers = [
         "Collective node",
-        "comm_time",
-        "comp_time",
-        "initial exposed",
-        "final exposed",
-        "improvement",
+        "comm_time(us)",
+        "comp_time(us)",
+        "initial exposed(us)",
+        "final exposed(us)",
+        "improvement(us)",
         "limiting factor",
         "moves",
         "grouped",
@@ -832,11 +832,11 @@ def _reorder_communication_preserving_peak_memory_internal(
     rows = [
         [
             node_summary(snode),
-            node_info.comm_time,
-            node_info.comp_time,
-            node_info.initial_exposed,
-            node_info.final_exposed,
-            node_info.improvement,
+            node_info.comm_time / 1e3,
+            node_info.comp_time / 1e3,
+            node_info.initial_exposed / 1e3,
+            node_info.final_exposed / 1e3,
+            node_info.improvement / 1e3,
             node_info.limiting_factor,
             node_info.moves,
             node_info.grouped,
@@ -1212,6 +1212,8 @@ def _sink_waits_iterative_internal(
         snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
         for snode in snodes
     }
+    for snode, ms in runtimes.items():
+        print(f"XXX_RUNTIME {snode.get_name()} -> {ms}")
 
     curr: Optional[BaseSchedulerNode] = snodes[-1]
 
@@ -1512,11 +1514,11 @@ def _sink_waits_iterative_internal(
 
     headers = [
         "Wait node",
-        "comm_time",
-        "comp_time",
-        "initial exposed",
-        "final exposed",
-        "improvement",
+        "comm_time(us)",
+        "comp_time(us)",
+        "initial exposed(us)",
+        "final exposed(us)",
+        "improvement(us)",
         "limiting factor",
         "grouped",
         "grouped_info",
@@ -1527,11 +1529,11 @@ def _sink_waits_iterative_internal(
     rows = [
         [
             node_summary(snode),
-            info.comm_time,
-            info.comp_time,
-            info.initial_exposed,
-            info.final_exposed,
-            info.improvement,
+            info.comm_time / 1e3,
+            info.comp_time / 1e3,
+            info.initial_exposed / 1e3,
+            info.final_exposed / 1e3,
+            info.improvement / 1e3,
             info.limiting_factor,
             info.grouped,
             info.grouped_info,
@@ -1578,7 +1580,7 @@ def sink_waits_iterative(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerN
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     """
-    Returns estimated op runtime in nanoseconds (ns)
+    Returns estimated op runtime in milliseconds (ms)
     """
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()

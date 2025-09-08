@@ -198,7 +198,17 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
-    if config.bucket_fx_collectives_trie is not None:
+    if config.bucket_fx_collectives_all is not None:
+        from torch._inductor.fx_passes.bucketing import __bucket_collectives_trie
+
+        GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
+            lambda graph: __bucket_collectives_trie(
+                graph.owning_module, config.bucket_fx_collectives_all
+            )
+        )
+        collectives_bucketing = True
+
+    elif config.bucket_fx_collectives_trie is not None:
         from torch._inductor.fx_passes.bucketing import bucket_collectives_trie
 
         GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
@@ -277,6 +287,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # wait_ag0 = wait_bucket[0]
         # wait_ag1 = wait_bucket[1]
         # user1(wait_ag1)
+        gm.recompile()
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "PRE_TOPO_SORT",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(False),
+        )
         stable_topological_sort(gm.graph)
 
     # Keep these last, since they introduce mutation. Look at

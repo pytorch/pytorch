@@ -60,7 +60,9 @@ def bucket_all_gather_all(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    ag_buckets = bucket_all_gather_by_mb_all(gm, bucket_cap_mb_by_bucket_idx)
+    ag_buckets = bucket_all_gather_by_mb_all(
+        gm, bucket_cap_mb_by_bucket_idx, None, mode
+    )
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets, mode)
@@ -94,10 +96,13 @@ def bucket_reduce_scatter_all(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    rs_buckets = bucket_reduce_scatter_by_mb_all(gm, bucket_cap_mb_by_bucket_idx, None, mode)
+    rs_buckets = bucket_reduce_scatter_by_mb_all(
+        gm, bucket_cap_mb_by_bucket_idx, None, mode
+    )
     if len(rs_buckets) == 0:
-        return
+        return rs_buckets
     merge_reduce_scatter(gm, rs_buckets, mode)
+    return rs_buckets
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
@@ -185,7 +190,7 @@ def greedy_bucket_collective_by_mb(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
+    node_descendants = collect_node_descendants(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -237,7 +242,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendents[node]
+            cur_bucket_descendents |= node_descendants[node]
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     trace_structured(
@@ -268,7 +273,6 @@ def greedy_bucket_collective_by_mb_all(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
     log = ""
 
     nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
@@ -280,63 +284,106 @@ def greedy_bucket_collective_by_mb_all(
                 group_key = node_group_key(coll_node)
                 nodes_groups[group_key].append(coll_node)
 
-    buckets: list[list[torch.fx.Node]] = []
-    for group_key, nodes in nodes_groups.items():
-        log += f"\n GROUP[{group_key}]: {nodes}"
-        cur_bucket: list[torch.fx.Node] = []
-        cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
-        cur_bucket_size_bytes: int = 0
-        cur_bucket_id: int = 0
-        bucket_size_bytes = int(
-            bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
+    node_descendants = collect_node_descendants(gm.graph)
+    log = []
+    for group_key, ns_group in nodes_groups.items():
+        log.append(
+            f"\n \nBUCKETING KEY:{group_key} {len(ns_group)} -> GROUP:{ns_group}"
         )
-
-        def _add_bucket(bucket_ns, bucket_descendents):
-            if len(cur_bucket) <= 1:
-                nonlocal log
-                log += f"\n cur_bucket <= 1 {cur_bucket} SKIP"
-                return False
-            buckets.append(bucket_ns)
-            bucket_ns_set = OrderedSet(bucket_ns)
-            for n, descendents in node_descendents.items():
-                if descendents & bucket_ns_set:
-                    node_descendents[n] |= bucket_descendents
-            return True
-
-        for node in nodes:
-            if node in cur_bucket_descendents:
-                # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
-                log += (
-                    f"\n{node} SKIP in cur_bucket_descendents cur_bucket:{cur_bucket}"
-                )
-                continue
-            assert "val" in node.meta
-            n_val = node.meta["val"]
-            out_size_bytes = n_val.numel() * n_val.element_size()
-            n_input_val = node.all_input_nodes[0].meta["val"]
-            in_size_bytes = n_input_val.numel() * n_input_val.element_size()
-            size_bytes = max(out_size_bytes, in_size_bytes)
-            if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
-                # Current bucket is full, create new bucket
-                _add_bucket(cur_bucket, cur_bucket_descendents)
-                cur_bucket = []
-                cur_bucket_size_bytes = 0
-                cur_bucket_id += 1
-                cur_bucket_descendents = OrderedSet()
-            cur_bucket_size_bytes += size_bytes
-            cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendents[node]
-        _add_bucket(cur_bucket, cur_bucket_descendents)
-    log += f"\nBUCKETS:{str(buckets)}"
+        buckets = _greedy_bucket(
+            ns_group, bucket_cap_mb_by_bucket_idx, node_descendants, log, try_left=16
+        )
+    num_total = sum(len(ns) for ns in nodes_groups.values())
+    num_bucketed = sum(len(bucket) for bucket in buckets)
+    log.append(
+        f"\n XXX TOTAL:{num_total} num_bucketed:{num_bucketed} perc:{num_bucketed / num_total}"
+    )
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
             "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
             "encoding": "string",
         },
-        payload_fn=lambda: log,
+        payload_fn=lambda: "".join(log),
     )
     return buckets
+
+    # buckets: list[list[torch.fx.Node]] = []
+    # for group_key, _nodes in nodes_groups.items():
+    #     node_descendants = collect_node_descendants(gm.graph)
+    #     nodes = sorted(_nodes, key=lambda n: len(node_descendants[n]))
+    #     log += f"\n GROUP[{group_key}]: {nodes}"
+    #     cur_bucket: list[torch.fx.Node] = []
+    #     cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
+    #     cur_bucket_size_bytes: int = 0
+    #     cur_bucket_id: int = 0
+    #     bucket_size_bytes = int(
+    #         bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
+    #     )
+
+    #     def _add_bucket(bucket_ns, bucket_descendents):
+    #         nonlocal node_descendants
+    #         if len(cur_bucket) <= 1:
+    #             nonlocal log
+    #             log += f"\n cur_bucket <= 1 {cur_bucket} SKIP"
+    #             return False
+    #         buckets.append(bucket_ns)
+    #         bucket_ns_set = OrderedSet(bucket_ns)
+    #         for n, descendents in node_descendants.items():
+    #             if (n in bucket_ns_set) or (descendents & bucket_ns_set):
+    #                 node_descendants[n] |= bucket_descendents
+    #         return True
+
+    #     for node in nodes:
+    #         node_desc = node_descendants[node]
+    #         bucket_n_in_node_desc = True
+    #         for bucket_n in cur_bucket:
+    #             if bucket_n in node_desc:
+    #                 log += (
+    #                     f"\ni {node} SKIP BUCKET_NODE {bucket_n} in NODE_DESC"
+    #                 )
+    #                 bucket_n_in_node_desc = True
+    #                 break
+    #         if bucket_n_in_node_desc:
+    #             break
+    #         if node in cur_bucket_descendents:
+    #             # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
+    #             log += (
+    #                 f"\n{node} SKIP in cur_bucket_descendents cur_bucket:{cur_bucket}"
+    #             )
+    #             continue
+    #         assert "val" in node.meta
+    #         n_val = node.meta["val"]
+    #         out_size_bytes = n_val.numel() * n_val.element_size()
+    #         n_input_val = node.all_input_nodes[0].meta["val"]
+    #         in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+    #         size_bytes = max(out_size_bytes, in_size_bytes)
+    #         if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
+    #             # Current bucket is full, create new bucket
+    #             _add_bucket(cur_bucket, cur_bucket_descendents)
+    #             cur_bucket = []
+    #             cur_bucket_size_bytes = 0
+    #             cur_bucket_id += 1
+    #             cur_bucket_descendents = OrderedSet()
+    #         cur_bucket_size_bytes += size_bytes
+    #         cur_bucket.append(node)
+    #         cur_bucket_descendents |= node_descendants[node]
+    #         cur_bucket_set = set(cur_bucket)
+    #         for n, descendents in node_descendants.items():
+    #             if (n in cur_bucket_set) or (descendents & cur_bucket_set):
+    #                 node_descendants[n] |= cur_bucket_descendents
+
+    #     _add_bucket(cur_bucket, cur_bucket_descendents)
+    # log += f"\nBUCKETS:{str(buckets)}"
+    # trace_structured(
+    #     "artifact",
+    #     metadata_fn=lambda: {
+    #         "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
+    #         "encoding": "string",
+    #     },
+    #     payload_fn=lambda: log,
+    # )
+    # return buckets
 
 
 def bucket_all_gather_by_mb(
@@ -375,9 +422,7 @@ def bucket_all_gather_by_mb(
         return (group_name,)
 
     group_key_fn = (
-        _ag_group_key
-        if mode and "multidtype" in mode
-        else _ag_group_key_multidtype
+        _ag_group_key if mode and "multidtype" in mode else _ag_group_key_multidtype
     )
 
     return greedy_bucket_collective_by_mb(
@@ -393,19 +438,28 @@ def bucket_all_gather_by_mb_all(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:
         _, group_size, group_name = node.args
         dtype = node.meta["val"].dtype
-        nnms = _get_nn_module_stack_path(node)
         assert isinstance(group_name, str)
-        return (group_name, dtype, nnms)
+        return (group_name, dtype)
+
+    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+        _, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        return group_name
+
+    group_key_fn = (
+        _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
+    )
 
     return greedy_bucket_collective_by_mb_all(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_all_gather_into_tensor,
-        _ag_group_key,
+        group_key_fn,
         filter_wait_node,
     )
 
@@ -445,9 +499,7 @@ def bucket_reduce_scatter_by_mb(
         return (group_name, reduce_op)
 
     group_key_fn = (
-        _rs_group_key_multidtype
-        if mode and "multidtype" in mode
-        else _rs_group_key
+        _rs_group_key_multidtype if mode and "multidtype" in mode else _rs_group_key
     )
 
     return greedy_bucket_collective_by_mb(
@@ -479,9 +531,7 @@ def bucket_reduce_scatter_by_mb_all(
         return (group_name, reduce_op)
 
     group_key_fn = (
-        _rs_group_key_multidtype
-        if mode and "multidtype" in mode
-        else _rs_group_key
+        _rs_group_key_multidtype if mode and "multidtype" in mode else _rs_group_key
     )
 
     return greedy_bucket_collective_by_mb_all(
@@ -530,10 +580,16 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     rs_ins = [_rs_in.to(out_dtype) for _rs_in, out_dtype in zip(_rs_ins, out_dtypes)]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     reduce_dtype_size_bytes = _dtype_size_bytes(reduce_dtype)
-    numel_mults = [_dtype_size_bytes(x.dtype) // reduce_dtype_size_bytes for x in rs_ins]
-    new_out_split_sizes = [x.numel() * mult // group_size for x, mult in zip(rs_ins, numel_mults)]
+    numel_mults = [
+        _dtype_size_bytes(x.dtype) // reduce_dtype_size_bytes for x in rs_ins
+    ]
+    new_out_split_sizes = [
+        x.numel() * mult // group_size for x, mult in zip(rs_ins, numel_mults)
+    ]
 
-    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size, reduce_dtype, numel_mults)
+    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(
+        rs_ins, group_size, reduce_dtype, numel_mults
+    )
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
@@ -543,7 +599,10 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
         )
     )
     new_out_flat = new_rs_out.split(new_out_split_sizes, 0)
-    new_outs = [x.view(dtype).view(s) for x, s, dtype in zip(new_out_flat, new_out_sizes, out_dtypes)]
+    new_outs = [
+        x.view(dtype).view(s)
+        for x, s, dtype in zip(new_out_flat, new_out_sizes, out_dtypes)
+    ]
     return new_outs
 
 
@@ -633,7 +692,10 @@ def all_gather_merge_fn_to_trace_custom_ops(
 ) -> list[torch.Tensor]:
     ag_ins = [_ag_in.to(out_dtype) for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    ins_split_sizes_bytes = [ag_in.numel() * _dtype_size_bytes(out_dtype) for ag_in, out_dtype in zip(ag_ins, out_dtypes)]
+    ins_split_sizes_bytes = [
+        ag_in.numel() * _dtype_size_bytes(out_dtype)
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes)
+    ]
     bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
@@ -666,7 +728,7 @@ def all_gather_merge_fn_to_trace(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype], # ignored in this implementation
+    out_dtypes: list[torch.dtype],  # ignored in this implementation
     rank: int,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
@@ -701,7 +763,7 @@ def all_gather_merge_fn_to_trace_functional(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype], # ignored in this implementation
+    out_dtypes: list[torch.dtype],  # ignored in this implementation
     rank: int,
     use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
@@ -884,12 +946,14 @@ def merge_reduce_scatter(
                 g.erase_node(wait_n)
                 g.erase_node(rs_n)
 
+
 def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:
     assert len(dtypes) > 0
     if len(OrderedSet(dtypes)) == 1:
         return dtypes[0]
 
     return torch.uint8
+
 
 def merge_all_gather(
     gm: torch.fx.GraphModule,
@@ -1141,9 +1205,112 @@ def _get_nn_module_stack_path(n) -> str:
         if "layers" in key:
             s = val[0]
             layer_num = int(val[0].split(".")[1])
-            layer_group = layer_num // 4
+            layer_group = layer_num // 32
             return f"layer_group_{layer_group}"
     return ""
+
+
+def _greedy_bucket(
+    ns,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    node_descendants,
+    log,
+    try_left=3,
+):
+    if len(ns) <= 1:
+        return []
+
+    buckets: list[list[torch.fx.Node]] = []
+    cur_bucket: list[torch.fx.Node] = []
+    cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    bucket_size_bytes = int(bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024)
+    left_ns = []
+
+    def _add_bucket(bucket_ns, bucket_descendents):
+        if len(bucket_ns) <= 1:
+            log.append(f"\n cur_bucket <= 1 {bucket_ns} SKIP")
+            return False
+        # sorted_bucket_ns = sorted(bucket_ns, key=lambda n: -len(node_descendants[n]))
+        # sorted_bucket_ns = bucket_ns
+        # d = {n: -len(node_descendants[n]) for n in sorted_bucket_ns}
+        # log += f"\n _ADD_BUCKET(sorted:{d})"
+        buckets.append(bucket_ns)
+        # bucket_ns_set = OrderedSet(bucket_ns)
+        # print(f"XXX ADD_BUCKET:{bucket_ns}")
+        # print(f"XXX BUCKET_DESC:{bucket_descendents}")
+        # for n, descendents in node_descendants.items():
+        #     if n in bucket_ns or descendents & bucket_ns_set:
+        #         node_descendants[n] |= bucket_descendents
+        return True
+
+    # We want to maximize number of bucketed nodes
+    sorted_ns = sorted(ns, key=lambda n: len(node_descendants[n]))
+    d = {n: len(node_descendants[n]) for n in sorted_ns}
+    log.append(f"\n SORTED:{d}")
+    log.append(f"\n sorted_ns: {sorted_ns}")
+    for node in sorted_ns:
+        node_desc = node_descendants[node]
+        if node in cur_bucket_descendents or any(bn in node_desc for bn in cur_bucket):
+            log.append(
+                f"\n {node} SKIP, in cur_bucket_descendents for cur_bucket:{cur_bucket}"
+            )
+            # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
+            left_ns.append(node)
+            continue
+        assert "val" in node.meta
+        n_val = node.meta["val"]
+        out_size_bytes = n_val.numel() * n_val.element_size()
+        n_input_val = node.all_input_nodes[0].meta["val"]
+        in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+        size_bytes = max(out_size_bytes, in_size_bytes)
+        if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
+            # Current bucket is full, create new bucket
+            if not _add_bucket(cur_bucket, cur_bucket_descendents):
+                left_ns.extend(cur_bucket)
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+            cur_bucket_descendents = OrderedSet()
+        cur_bucket_size_bytes += size_bytes
+        # print(f"XXX CUR_BUCKET_BEFORE[{node}]:{cur_bucket}")
+        cur_bucket.append(node)
+        log.append(f"\nXXX CUR_BUCKET++:{cur_bucket}")
+        # print(f"XXX CUR_BUCKET_DESC_BEFORE[{node}]:{cur_bucket_descendents}")
+        # print(f"XXX CUR_BUCKET_APPEND node:{node} DESCENDENTS:{node_descendants[node]}")
+        cur_bucket_descendents |= node_descendants[node]
+        # print(f"XXX CUR_BUCKET_DESC_ADD[{node}]:{cur_bucket_descendents}")
+        cur_bucket_set = OrderedSet(cur_bucket)
+        for n, descendents in node_descendants.items():
+            if n in cur_bucket_set or descendents & cur_bucket_set:
+                node_descendants[n] |= cur_bucket_descendents
+    if not _add_bucket(cur_bucket, cur_bucket_descendents):
+        left_ns.extend(cur_bucket)
+    # Nothing was bucketed
+    if len(buckets) == 0:
+        return _greedy_bucket(
+            ns[:-1],
+            bucket_cap_mb_by_bucket_idx,
+            node_descendants,
+            log,
+            try_left,
+        )
+
+    # Something was bucketed
+    # Try to bucket the rest.
+    if try_left > 0 and len(left_ns) > 1:
+        ns_to_bucket = left_ns
+        # first one should become last if all others are descendents
+        left_buckets = _greedy_bucket(
+            ns_to_bucket,
+            bucket_cap_mb_by_bucket_idx,
+            node_descendants,
+            log,
+            try_left=try_left - 1,
+        )
+        buckets.extend(left_buckets)
+    return buckets
 
 
 def bucket_collectives_trie(gm, config):
@@ -1161,8 +1328,9 @@ def bucket_collectives_trie(gm, config):
         },
         payload_fn=lambda: g_str,
     )
+    node_descendants = collect_node_descendants(gm.graph)
     root_cts = get_collectives_trie(gm)
-    trie_log = ""
+    log = []
 
     def should_bucket(ctype):
         if ctype == CType.AG:
@@ -1220,108 +1388,35 @@ def bucket_collectives_trie(gm, config):
             group_key = (path, dtype_key, nn_module_stack_path)
             ns_groups[group_key].append(n)
 
-        def _greedy_bucket(
-            ns,
-            bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-            node_descendents,
-            try_left=3,
-        ):
-            if len(ns) <= 1:
-                return []
-
-            buckets: list[list[torch.fx.Node]] = []
-            cur_bucket: list[torch.fx.Node] = []
-            cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
-            cur_bucket_size_bytes: int = 0
-            cur_bucket_id: int = 0
-            bucket_size_bytes = int(
-                bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
-            )
-            left_ns = []
-
-            def _add_bucket(bucket_ns, bucket_descendents):
-                if len(cur_bucket) <= 1:
-                    nonlocal trie_log
-                    trie_log += f"\n cur_bucket <= 1 {cur_bucket} SKIP"
-                    return False
-                buckets.append(bucket_ns)
-                bucket_ns_set = OrderedSet(bucket_ns)
-                for n, descendents in node_descendents.items():
-                    if descendents & bucket_ns_set:
-                        node_descendents[n] |= bucket_descendents
-                return True
-
-            for node in ns:
-                if node in cur_bucket_descendents:
-                    nonlocal trie_log
-                    trie_log += f"\n {node} SKIP, in cur_bucket_descendents for cur_bucket:{cur_bucket}"
-                    # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
-                    left_ns.append(node)
-                    continue
-                assert "val" in node.meta
-                n_val = node.meta["val"]
-                out_size_bytes = n_val.numel() * n_val.element_size()
-                n_input_val = node.all_input_nodes[0].meta["val"]
-                in_size_bytes = n_input_val.numel() * n_input_val.element_size()
-                size_bytes = max(out_size_bytes, in_size_bytes)
-                if (
-                    cur_bucket_size_bytes + size_bytes > bucket_size_bytes
-                    and cur_bucket
-                ):
-                    # Current bucket is full, create new bucket
-                    if not _add_bucket(cur_bucket, cur_bucket_descendents):
-                        left_ns.extend(cur_bucket)
-                    cur_bucket = []
-                    cur_bucket_size_bytes = 0
-                    cur_bucket_id += 1
-                    cur_bucket_descendents = OrderedSet()
-                cur_bucket_size_bytes += size_bytes
-                cur_bucket.append(node)
-                cur_bucket_descendents |= node_descendents[node]
-            if not _add_bucket(cur_bucket, cur_bucket_descendents):
-                left_ns.extend(cur_bucket)
-            # if try_left > 0 and len(left_ns) > 1:
-            #     ns_to_bucket = left_ns
-            #     # first one should become last if all others are descendents
-            #     left_buckets = _greedy_bucket(
-            #         ns_to_bucket,
-            #         bucket_cap_mb_by_bucket_idx,
-            #         node_descendents,
-            #         try_left=try_left - 1,
-            #     )
-            #     buckets.extend(left_buckets)
-            if len(buckets) == 0:
-                return _greedy_bucket(
-                    ns[1:],
-                    bucket_cap_mb_by_bucket_idx,
-                    node_descendents,
-                    try_left,
-                )
-            return buckets
-
         ret_buckets = []
         for group_key, ns_group in ns_groups.items():
-            nonlocal trie_log
-            trie_log += (
+            log.append(
                 f"\n \nBUCKETING KEY:{group_key} {len(ns_group)} -> GROUP:{ns_group}"
             )
-            # Recalculating node_descendents before bucketing each group
-            node_descendents = collect_node_descendants(gm.graph)
             g_buckets = _greedy_bucket(
-                ns_group, bucket_cap_mb_by_bucket_idx, node_descendents, try_left=0
+                ns_group,
+                bucket_cap_mb_by_bucket_idx,
+                node_descendants,
+                log,
+                try_left=16,
             )
-            trie_log += f"\n BUCKETING KEY: {group_key} {len(ns_group)} -> G_BUCKETS:{g_buckets}"
+
+            log.append(
+                f"\n BUCKETING KEY: {group_key} {len(ns_group)} -> G_BUCKETS:{g_buckets}"
+            )
             total_ns = len(ns_group)
             total_bucketed = 0
             for bucket_idx, g_bucket in enumerate(g_buckets):
-                trie_log += (
+                log.append(
                     f"\n {group_key} -> BUCKET[{bucket_idx}]{len(g_bucket)}: {g_bucket}"
                 )
                 for g_n in g_bucket:
                     ct.n_to_bucket[g_n] = bucket_idx
                 total_bucketed += len(g_bucket)
             perc = total_bucketed / total_ns
-            trie_log += f"\n BUCKETING_RESULT {group_key} bucketed:{total_bucketed} total_ns:{total_ns} percent:{perc}"
+            log.append(
+                f"\n BUCKETING_RESULT {group_key} bucketed:{total_bucketed} total_ns:{total_ns} percent:{perc}"
+            )
             ret_buckets.extend(g_buckets)
         return ret_buckets
 
@@ -1330,12 +1425,13 @@ def bucket_collectives_trie(gm, config):
         if path:
             path += "-"
         path += f"{ct.ctype}({ct.group_name})"
-        nonlocal trie_log
-        trie_log += f"\n\n CTreeNode[{path}] ctype:{ct.ctype}   ns:{list(ct.n_to_parent_n.keys())}"
+        log.append(
+            f"\n\n CTreeNode[{path}] ctype:{ct.ctype}   ns:{list(ct.n_to_parent_n.keys())}"
+        )
         if should_bucket(ct.ctype):
             bs = bucket_ct(ct)
             final_buckets[ct.ctype].extend(bs)
-            trie_log += f"\n TRIE_BUCKET {path} {ct.ctype}: BUCKETS:{bs}"
+            log.append(f"\n TRIE_BUCKET {path} {ct.ctype}: BUCKETS:{bs}")
 
         for _ct in ct.children_cts.values():
             _dfs(_ct, path)
@@ -1343,12 +1439,12 @@ def bucket_collectives_trie(gm, config):
     for ct in root_cts.values():
         _dfs(ct, "")
 
-    trie_log += f"\n FINAL_BUCKETS:{final_buckets}"
+    log.append(f"\n FINAL_BUCKETS:{final_buckets}")
 
     ag_buckets = []
     rs_buckets = []
     for ctype, ctype_bs in final_buckets.items():
-        trie_log += f"\n FINAL_BUCKET[{ctype}]:{ctype_bs}"
+        log.append(f"\n FINAL_BUCKET[{ctype}]:{ctype_bs}")
         if ctype == CType.AG:
             ag_buckets.extend(ctype_bs)
         elif ctype == CType.RS:
@@ -1356,26 +1452,54 @@ def bucket_collectives_trie(gm, config):
         else:
             assert False
 
-    trie_log += f"\n NUM_AG_BUCKETS:{len(ag_buckets)}: {ag_buckets}"
-    trie_log += f"\n NUM_RS_BUCKETS:{len(rs_buckets)}: {rs_buckets}"
+    total_num_ag_rs = 0
+    bucketed_ag_rs = OrderedSet()
+    log.append(f"\n NUM_AG_BUCKETS:{len(ag_buckets)}: {ag_buckets}")
+    log.append(f"\n NUM_RS_BUCKETS:{len(rs_buckets)}: {rs_buckets}")
     for i, ag_bucket in enumerate(ag_buckets):
-        trie_log += f"\n AG_BUCKET[{i}]:{len(ag_bucket)} nodes:{ag_bucket}"
+        log.append(f"\n AG_BUCKET[{i}]:{len(ag_bucket)} nodes:{ag_bucket}")
+        for n in ag_bucket:
+            bucketed_ag_rs.add(n)
+    for n in gm.graph.nodes:
+        ckey = get_collective_key(n)
+        if ckey.ctype == CType.AG or ckey.ctype == CType.RS:
+            total_num_ag_rs += 1
+
+    # for n in gm.graph.nodes:
+    #     if is_all_gather_into_tensor(n) or is_reduce_scatter_tensor(n):
+    #         total_num_ag_rs += 1
     merge_all_gather(gm, ag_buckets, "custom_ops")
     for i, rs_bucket in enumerate(rs_buckets):
-        trie_log += f"\n RS_BUCKET[{i}]:{len(rs_bucket)} nodes:{rs_bucket}"
+        log.append(f"\n RS_BUCKET[{i}]:{len(rs_bucket)} nodes:{rs_bucket}")
+        for n in rs_bucket:
+            bucketed_ag_rs.add(n)
     merge_reduce_scatter(gm, rs_buckets, "custom_ops")
+    rs_buckets = bucket_reduce_scatter_all(
+        gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype"
+    )
+    for rs_bucket in rs_buckets:
+        for n in rs_bucket:
+            bucketed_ag_rs.add(n)
+
+    num_bucketed_ag_rs = len(bucketed_ag_rs)
+    percent = -1
+    if total_num_ag_rs != 0:
+        percent = num_bucketed_ag_rs / total_num_ag_rs
+    log.append(
+        f"\nXXX TOTAL_NUM_AG_RS:{total_num_ag_rs} BUCKETED:{num_bucketed_ag_rs} PERCENT:{percent}"
+    )
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
-            "name": "fx_bucketing_collectives_trie",
+            "name": "fx_bucketing_collectives_TRIE",
             "encoding": "string",
         },
-        payload_fn=lambda: trie_log,
+        payload_fn=lambda: "".join(log),
     )
-    bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")
 
 
 def __bucket_collectives_trie(gm, config):
+    print(f"XXX __BUCKET_COLLECTIVES_TRIE")
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] = lambda id: 2000
-    bucket_all_gather_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops")
-    bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops")
+    bucket_all_gather_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")
+    bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")

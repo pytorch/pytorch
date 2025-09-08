@@ -406,7 +406,7 @@ reorder_iterative_use_runtime_estimations: bool = True
 sink_iterative_use_runtime_estimations: bool = True
 reorder_for_compute_comm_overlap_broadcast_runtime_estimations: bool = True
 
-reorder_sink_runtime_estimations_comm_mult: float = 2.0
+reorder_sink_runtime_estimations_comm_mult: float = 4.0
 reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
 # Ratio of comm_time to cover deviations of comm_time from estimations
 reorder_iterative_extra_comm_comp_overlap: float = 1.0
@@ -419,9 +419,9 @@ sink_iterative_peak_memory_budget: float = 0.2
 # which can result in collective hangs.
 reorder_iterative_unsafe_collectives_reorder: bool = True
 sink_waits_iterative_unsafe_collectives_reorder: bool = True
-
+bucket_fx_collectives_all = None
 bucket_fx_collectives_trie = ["ag", "rs"]
-bucket_fx_collectives_trie_use_nn_module_stack = True
+bucket_fx_collectives_trie_use_nn_module_stack = False
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
