@@ -37,7 +37,6 @@ class TestFullyShardFrozen(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_train_mixed_requires_grad_per_group(self):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
