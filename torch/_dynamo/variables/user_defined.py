@@ -1442,6 +1442,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj_from_class is subobj
             and self.cls_source is not None
             and self.source is not None
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
         )
 
         if isinstance(subobj, property):
