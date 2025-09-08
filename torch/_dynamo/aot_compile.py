@@ -111,6 +111,7 @@ def aot_compile_fullgraph(
     hooks: Hooks,
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
 ) -> Any:
+    from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import compile_context, CompileContext, TracingContext
 
@@ -149,9 +150,30 @@ def aot_compile_fullgraph(
             )
         )
         dynamo_output = capture_output.dynamo_output
+
+        if not hooks.guard_filter_fn:
+            from torch._dynamo.types import GuardFilterEntry
+
+            def new_guard_filter_fn(
+                guard_entries: list[GuardFilterEntry],
+            ) -> list[bool]:
+                return [
+                    (
+                        not (
+                            g.is_global
+                            or g.guard_type
+                            in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                        )
+                    )
+                    for g in guard_entries
+                ]
+
+            hooks.guard_filter_fn = new_guard_filter_fn
+
         check_fn = dynamo_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
+
         assert check_fn.guards_state is not None
 
     backend_input = capture_output.backend_input
