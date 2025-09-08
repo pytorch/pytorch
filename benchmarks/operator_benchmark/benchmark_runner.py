@@ -63,6 +63,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--benchmark-name",
+        "--benchmark_name",
+        help="Name of the benchmark to store results to",
+        default="PyTorch operator benchmark",
+    )
+
+    parser.add_argument(
         "--list-tests",
         "--list_tests",
         help="List all test cases without running them",
