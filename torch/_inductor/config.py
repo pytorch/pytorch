@@ -1579,18 +1579,18 @@ class aot_inductor:
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
 
-class cuda:
-    """Settings for cuda backend, today this consists of cutlass"""
+class cutlass:
+    """Settings for cutlass backend, today this consists of cutlass"""
 
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch: Optional[str] = None
+    cuda_arch: Optional[str] = None
 
     # CUDA version to use for CUDA template kernel compilation.
     # e.g. "11.4", "12.1", etc.
     # When version is None, Inductor uses torch.version.cuda.
-    version: Optional[str] = None
+    cuda_version: Optional[str] = None
 
     # Optimization level for the host compiler.
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
@@ -1612,7 +1612,12 @@ class cuda:
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+            os.path.join(
+                os.path.dirname(torch.__file__),
+                "../third_party/torch-xpu-tla"
+                if torch.xpu.is_available()
+                else "../third_party/cutlass/",
+            ),
         )
     )
 
