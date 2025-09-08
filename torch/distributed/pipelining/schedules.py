@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
@@ -1746,6 +1746,26 @@ at time_step %s when running action %s",
         self._update_losses(self._stages, losses)
 
 
+class _PipelineContext:
+    def __init__(
+        self,
+        schedule_ref: _PipelineSchedule,
+        arg_mbs: Optional[list[tuple]] = None,
+        kwarg_mbs: Optional[list[dict]] = None,
+        target_mbs: Optional[list] = None,
+        losses: Optional[list] = None,
+    ):
+        self.schedule_ref = schedule_ref
+        self.arg_mbs = arg_mbs
+        self.kwarg_mbs = kwarg_mbs
+        self.target_mbs = target_mbs
+        self.losses = losses
+
+
+class _CustomFunctionProtocol(Protocol):
+    def __call__(self, action: _Action, ctx: _PipelineContext) -> None: ...
+
+
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """
     Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
@@ -1753,6 +1773,44 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Action to custom function mapping
+        self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        self.backward_counter: Counter[int] = Counter()
+
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+
+    def register_custom_function(
+        self,
+        computation_type: _ComputationType,
+        custom_function: _CustomFunctionProtocol,
+    ) -> None:
+        """
+        Register a custom function to be executed for a specific computation type.
+
+        Args:
+            computation_type: The computation type for which to register the custom function
+            custom_function: The function to execute when this computation type is encountered.
+                Must have signature: (stage: _PipelineStageBase, mb_index: int, *args, **kwargs) -> None
+        """
+        # Ensure that the computation type is valid
+        if computation_type not in (
+            FORWARD,
+            FULL_BACKWARD,
+            BACKWARD_INPUT,
+            BACKWARD_WEIGHT,
+            OVERLAP_F_B,
+        ):
+            raise ValueError(
+                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
+BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
+            )
+        self._comp_type_to_function_map[computation_type] = custom_function
 
     def _prepare_schedule_with_comms(
         self,
@@ -1874,10 +1932,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
         )
 
-        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-        fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-
         # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
 
@@ -1934,20 +1988,22 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         assert (
                             stage_idx,
                             mb_index,
-                        ) not in fwd_recv_ops, (
+                        ) not in self.fwd_recv_ops, (
                             "Recv twice for {stage_idx=} {mb_index=} without executing forward"
                         )
-                        fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        self.fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_fwd_recv_ops(mb_index)
                         )
                     elif comp_type == RECV_B:
                         assert (
                             stage_idx,
                             mb_index,
-                        ) not in bwd_recv_ops, (
+                        ) not in self.bwd_recv_ops, (
                             "Recv twice for {stage_idx=} {mb_index=} without executing backward"
                         )
-                        bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        if self.rank == 3:
+                            pass
+                        self.bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_bwd_recv_ops(mb_index)
                         )
                     elif comp_type == UNSHARD:
@@ -1978,10 +2034,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in fwd_recv_ops, (
+                            ) in self.fwd_recv_ops, (
                                 f"Computing {action=} before receiving input"
                             )
-                            _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.fwd_recv_ops.pop((stage_idx, mb_index))
+                            )
 
                         output = stage.forward_one_chunk(
                             mb_index,
@@ -2009,14 +2067,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in bwd_recv_ops, (
+                            ) in self.bwd_recv_ops, (
                                 f"Attempted to run compute {action=} before receiving input"
                             )
-                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.bwd_recv_ops.pop((stage_idx, mb_index))
+                            )
                         loss = self._maybe_get_loss(stage, mb_index)
-                        backward_counter[stage_idx] += 1
+                        self.backward_counter[stage_idx] += 1
                         last_backward = (
-                            backward_counter[stage_idx] == self._n_microbatches
+                            self.backward_counter[stage_idx] == self._n_microbatches
                         )
                         grad_scale_factor = (
                             self._n_microbatches if self.scale_grads else 1
@@ -2043,10 +2103,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in bwd_recv_ops, (
+                            ) in self.bwd_recv_ops, (
                                 f"Attempted to run compute {action=} before receiving input"
                             )
-                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.bwd_recv_ops.pop((stage_idx, mb_index))
+                            )
                         loss = self._maybe_get_loss(stage, mb_index)
                         stage.backward_one_chunk(
                             mb_index,
@@ -2063,10 +2125,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     elif comp_type == BACKWARD_WEIGHT:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
-                        backward_counter[stage_idx] += 1
+                        self.backward_counter[stage_idx] += 1
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_idx]
+                            last_backward=self.backward_counter[stage_idx]
                             == self._n_microbatches,
                         )
                     else:
@@ -2087,10 +2149,28 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
                 raise e
 
-        # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
-            if action.computation_type == OVERLAP_F_B:
+            if action.computation_type in self._comp_type_to_function_map:
+                stages = []
+                mb_indices = []
+                if action.sub_actions is not None:
+                    for sub_a in action.sub_actions:
+                        stages.append(stage_index_to_stage[sub_a.stage_index])
+                        assert sub_a.microbatch_index is not None
+                        mb_indices.append(sub_a.microbatch_index)
+                else:
+                    stages.append(stage_index_to_stage[action.stage_index])
+                    assert action.microbatch_index is not None
+                    mb_indices.append(action.microbatch_index)
+                ctx = _PipelineContext(
+                    self,
+                    arg_mbs,
+                    kwarg_mbs,
+                    target_mbs,
+                    losses,
+                )
+                self._comp_type_to_function_map[action.computation_type](action, ctx)
+            elif action.computation_type == OVERLAP_F_B:
                 assert action.sub_actions is not None, "sub_actions must be set"
                 with record_function("PP::OverlapFwdBwd"):
                     for sub_a in action.sub_actions:
