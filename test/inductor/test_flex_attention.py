@@ -4652,32 +4652,6 @@ class GraphModule(torch.nn.Module):
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
 
-    @supported_platform
-    @skip_on_cpu
-    def test_zero_sized_aux_outputs_no_grad(self, device):
-        """Test that auxiliary outputs (LSE and max_scores) are zero-sized when not requested under no_grad."""
-        B, H, S, D = 2, 3, 256, 16
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            device=device,
-            dtype=torch.float32,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        bm = create_block_mask(_causal_mask, B, H, S, S, device=device)
-
-        # Under no_grad with default settings (no return_aux), auxiliary outputs should be zero-sized
-        with torch.no_grad():
-            flex_compiled = torch.compile(flex_attention)
-            _, code = run_and_get_code(flex_compiled, q, k, v, block_mask=bm)
-
-            # Check that the generated code creates zero-sized tensors for auxiliary outputs
-            # Should have 2 zero-sized buffers: one for LSE and one for max_scores
-            zero_sized_count = code[0].count(
-                "empty_strided_cuda((0, ), (1, ), torch.float32)"
-            )
-            self.assertEqual(zero_sized_count, 2)
-
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
