@@ -1736,13 +1736,12 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        # placements = previous_spec.placements
-        # placements = grad_output._spec.placements
         output_dtensor = RedistributeBackward.apply(
             grad_output,
             previous_spec,
             ctx.async_op,
             ctx.backward_dtype,
+            ctx.original_dtype,
         )
         return (
             output_dtensor,
