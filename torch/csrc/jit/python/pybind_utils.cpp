@@ -855,8 +855,9 @@ std::optional<py::object> _maybe_handle_torch_function(
     const py::args& args,
     const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
-  size_t total_arg_num = args.size() + kwargs.size();
-  for (const auto i : c10::irange(args.size())) {
+  const auto args_size = args.size();
+  size_t total_arg_num = args_size + kwargs.size();
+  for (const auto i : c10::irange(args_size)) {
     is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
         args[i].ptr(),
