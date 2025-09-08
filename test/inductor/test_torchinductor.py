@@ -2998,7 +2998,7 @@ class CommonTemplate:
         x = torch.rand(10)
 
         with x.device:
-            out = torch.compile(fn)(x)
+            out = torch.compile(fn, backend=lambda gm, _: gm)(x)
             ref = fn(x)
             for a, b in zip(out, ref):
                 self.assertTrue(torch.allclose(a, b))
