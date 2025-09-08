@@ -3,6 +3,7 @@ import torch
 import torch_openreg._C  # type: ignore[misc]
 
 from . import meta  # noqa: F401
+from .amp import get_amp_supported_dtype  # noqa: F401
 
 
 _initialized = False
@@ -58,10 +59,6 @@ def _lazy_init():
         return
     torch_openreg._C._init()
     _initialized = True
-
-
-def get_amp_supported_dtype():
-    return [torch.float16]
 
 
 from .random import *  # noqa: F403
