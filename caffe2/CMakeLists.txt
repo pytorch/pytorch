@@ -1638,6 +1638,10 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  if(USE_FBGEMM_GENAI)
+    # Link fbgemm_genai to torch_cuda (only for (1) CUDA build for SM100).
+    target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
+  endif()
 endif()
 
 # ---[ XPU library.
@@ -1759,9 +1763,10 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   if(USE_FBGEMM_GENAI)
-    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+    if(USE_ROCM)
+      target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+    endif()
   endif()
-
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})

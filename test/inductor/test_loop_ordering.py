@@ -3,11 +3,13 @@
 import contextlib
 import os
 import unittest
+from unittest import skipUnless
 
 import numpy as np
 import sympy
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -17,7 +19,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import run_and_get_code, sympy_index_symbol
+from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -476,6 +478,47 @@ class LoopOrderingTest(TestCase):
         expected_numbytes += tensor_fp8.nbytes + tensor_fp8_t.nbytes  # output
         self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
 
+    def test_outer_dimension_softmax(self):
+        """
+        This test repros the not able to fuse problem for outer dimension
+        softmax reported here: https://github.com/pytorch/pytorch/issues/93718
+
+        Perf data on h100:
+        - without loop ordering after fusion 0.564 ms
+        - with loop ordering after fusion 0.302 ms
+        This is 1.87x speedup.
+
+        """
+        x = torch.randn(32, 2**21, device=GPU_TYPE)
+
+        def f(x):
+            return F.softmax(x, dim=0)
+
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_outer_dimension_sum_fuse_with_pw(self):
+        """
+        Test the fusion of an outer dimension sum with a followed pointwise.
+        Perf data on h100:
+        - without loop ordering after fusion 0.436 ms
+        - with loop ordering after fusion 0.260 ms
+        This is 1.68x speedup.
+        """
+        x = torch.randn(32, 2**21, device=GPU_TYPE)
+
+        def f(x):
+            return x.sum(dim=0, keepdim=True) + x
+
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            optf = torch.compile(f)
+            print(f"ms={do_bench(lambda: optf(x))}")
+
     # Disable split reduction to make it easier to calculate the expected
     # number of bytes accessed. In this case, split reduction does not
     # help perf much.
@@ -519,6 +562,35 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
+    def test_interaction_with_triton_template(self):
+        """
+        Make sure the dependency prefix for TritonTempalate and its
+        prologue match.
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.randn([1, 1], device=GPU_TYPE)
+        y = torch.randn([64, 128], device=GPU_TYPE)
+
+        out, code = run_and_get_code(f, x, y)
+
+        # well when benchmark_kernel flag is on, we have one more .run
+        # call in the benchmarking code.
+        FileCheck().check("def call(").check_count(
+            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
+        ).run(code[0])
 
 
 @inductor_config.patch(
