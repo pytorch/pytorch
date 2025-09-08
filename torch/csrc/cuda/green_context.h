@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/driver_api.h>
 #include <cuda.h>
 #include <memory>
