@@ -190,7 +190,7 @@ _PYTHON_HOST_PLATFORM=${mac_version} python setup.py bdist_wheel -d "$whl_tmp_di
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
-if [[ $package_type != 'libtorch' && false ]]; then
+if [[ $package_type == 'libooootorch' ]]; then
     echo "delocating wheel dependencies"
     retry pip install https://github.com/matthew-brett/delocate/archive/refs/tags/0.10.4.zip
     echo "found the following wheels:"
