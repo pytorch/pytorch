@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -75,43 +76,13 @@ void nvshmemx_cumodule_init(uintptr_t module) {
     "nvshmemx_cumodule_init failed");
 }
 
-static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
-
-nvshmem_team_t group_to_team(
-    const std::string& group_name,
-    const std::vector<int>& global_ranks) {
-  auto it = group_name_to_team_.find(group_name);
-  if (it != group_name_to_team_.end()) {
-    return it->second;
-  }
-  TORCH_CHECK(global_ranks.size() > 1);
-  int stride = global_ranks[1] - global_ranks[0];
-  for (size_t r = 1; r < global_ranks.size(); ++r) {
-    TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
-  }
-
-  nvshmem_team_t team;
-  NVSHMEM_CHECK(
-      nvshmem_team_split_strided(
-          NVSHMEM_TEAM_WORLD,
-          global_ranks[0],
-          stride,
-          global_ranks.size(),
-          nullptr,
-          0,
-          &team),
-          "nvshmem_team_split_strided failed");
-  group_name_to_team_[group_name] = team;
-  TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
-  return team;
-}
-
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input.mutable_data_ptr();
   auto buffer_size = input.numel() * input.element_size();
+  auto& team_manager = TeamManager::get(input.device());
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   int team_size = nvshmem_team_n_pes(team);
   TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
@@ -160,7 +131,8 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto& team_manager = TeamManager::get(input.device());
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   void* input_ptr = input.data_ptr();
   void* output_ptr = out.mutable_data_ptr();
