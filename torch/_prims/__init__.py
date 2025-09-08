@@ -1446,7 +1446,7 @@ def _collapse_view_helper(
 
     # compute length
     length = shape[end]
-    if guard_or_true(length != 1):
+    if guard_or_true(length != 0):
         for idx in range(end - 1, start - 1, -1):
             # those are just show circuits, mm except
             if guard_or_false(shape[idx] == 0):
