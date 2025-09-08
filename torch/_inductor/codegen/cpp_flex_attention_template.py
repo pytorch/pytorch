@@ -689,10 +689,29 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
 FLEX_DECODING_TEMPLATE = r"""
   int64_t PARTITION_SIZE = {{partition_size}};
+
+  // Check if score / mask mod dependent on batch_size / num_head
+  // Go into a fast path if independent
+  bool bs_head_independent_mod = true;
+  int64_t first_num_kvblocks = kv_num_blocks[0];
+  int64_t first_full_num_kvblocks = full_kv_num_blocks[0];
+  for (const auto& b : c10::irange(batchSize_kvi)) {
+    for (const auto& h : c10::irange(num_head_kvi)) {
+      if (*(kv_num_blocks + b * num_kviStrideB + h * num_kviStrideH) != first_num_kvblocks
+          || *(full_kv_num_blocks + b * full_num_kviStrideB + h * full_num_kviStrideH) != first_full_num_kvblocks) {
+        bs_head_independent_mod = false;
+        break;
+      }
+    }
+  }
+
+  int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
   int64_t num_kvblocks_per_partition = PARTITION_SIZE / kvBlockSize;
-  int64_t actual_kvSize = kvSize / batchSize;
-  int64_t num_partitions =
-      (actual_kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
+  int64_t num_partitions = (num_kvblocks_per_seq + num_kvblocks_per_partition - 1) / num_kvblocks_per_partition;
+  if (!bs_head_independent_mod) {
+    num_partitions =
+        (kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
+  }
 
   // Allocate temp buf (accumulate type)
   int64_t _accum_buff_size =
@@ -769,16 +788,22 @@ FLEX_DECODING_TEMPLATE = r"""
       // 1) calculate the matmul(query, key) for this partition
       int64_t token_num = 0;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx : c10::irange(
-          kvblock_offset,
-          std::min(kvblock_offset + num_kvblocks_per_partition,
-            kv_indice_num + full_kv_indice_num))) {
+      int64_t n_idx_start = kvblock_offset;
+      int64_t n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num + full_kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx : c10::irange(
-          kvblock_offset,
-          std::min(kvblock_offset + num_kvblocks_per_partition,
-            kv_indice_num))) {
+      int64_t n_idx_start = kvblock_offset;
+      int64_t n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
 
@@ -871,18 +896,29 @@ FLEX_DECODING_TEMPLATE = r"""
       token_num = 0;
       bool skipped_partition = true;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx : c10::irange(
-          kvblock_offset,
-          std::min(kvblock_offset + num_kvblocks_per_partition,
-            kv_indice_num + full_kv_indice_num))) {
+      n_idx_start = kvblock_offset;
+      n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num + full_kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx : c10::irange(
-          kvblock_offset,
-          std::min(kvblock_offset + num_kvblocks_per_partition,
-            kv_indice_num))) {
+      n_idx_start = kvblock_offset;
+      n_idx_end = std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num);
+      if (!bs_head_independent_mod) {
+        n_idx_start = 0;
+        n_idx_end = kv_indice_num;
+      }
+      for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
+        if (!bs_head_independent_mod
+            && (n < partition_id * PARTITION_SIZE
+            || n >= std::min(partition_id * PARTITION_SIZE + PARTITION_SIZE, kvSize))) {
+          continue;
+        }
         skipped_partition = false;
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
 
