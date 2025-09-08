@@ -725,9 +725,9 @@ class NativeFunction:
             tags_inp.append("pt2_compliant_tag")
 
         tags: set[str] = set()
+        assert len(valid_tags) > 0
         for t in tags_inp:
-            assert len(valid_tags) > 0
-            # TODO: verify that the tag is valid and has an entry in tags.yaml
+            assert isinstance(t, str), f"tag is not a str: {t}"
             if t in valid_tags:
                 tags.add(t)
             else:
@@ -2056,7 +2056,9 @@ class Argument:
         default: str | None
         assert " " in arg, f"illegal argument '{arg}'"
         if "=" in arg:
-            assert arg.count("=") == 1, f"illegal argument with default value: '{arg}'"
+            assert (
+                arg.count("=") == 1 and arg.find(" ") < arg.find("=")
+            ), f"illegal argument with default value: '{arg}'"
             type_and_annot_and_name, default = arg.split("=")
             type_and_annot, name = type_and_annot_and_name.rsplit(" ", 1)
             name_and_default = f"{name}={default}"
@@ -2845,6 +2847,7 @@ class Precompute:
         # should replace which kernel arguments.
         add_args = []
         if " -> " not in src[-1]:
+            assert isinstance(src[-1], str)
             add_list = src[-1].split(",")
             add_args = [Argument.parse(name.strip()) for name in add_list]
             src = src[:-1]
