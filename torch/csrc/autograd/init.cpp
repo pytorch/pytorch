@@ -218,7 +218,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
       .def_property_readonly(
           "is_cpp_nested_tensor",
-          &torch::autograd::InputMetadata::is_cpp_nested_tensor);
+          &torch::autograd::InputMetadata::is_cpp_nested_tensor)
+      .def_property(
+          "allow_grad_dtype_mismatch",
+          &torch::autograd::InputMetadata::allow_grad_dtype_mismatch,
+          &torch::autograd::InputMetadata::set_allow_grad_dtype_mismatch);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
