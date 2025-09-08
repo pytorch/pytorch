@@ -209,7 +209,8 @@ PyObject* ParameterClass = nullptr;
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
-    bool allow_preexisting_pyobj = false);
+    bool allow_preexisting_pyobj = false,
+    std::optional<bool> has_torch_dispatch_if_known = std::nullopt);
 
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
@@ -777,7 +778,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      tensor,
+      // false is the default
+      /*allow_preexisting_pyobj=*/false,
+      // we checked __torch_dispatch__ above; avoid checking again.
+      /*has_torch_dispatch_if_known=*/true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -833,7 +840,14 @@ static PyObject* THPVariable_make_dtensor(
       /*storage_size=*/std::nullopt,
       extra_dispatch_keys);
   tensor.set_requires_grad(r.toBool(4));
-  return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      tensor,
+      // false is the default
+      /*allow_preexisting_pyobj=*/false,
+      // we know DTensor has __torch_dispatch__ and we double-checked
+      // above; avoid checking again.
+      /*has_torch_dispatch_if_known=*/true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -2093,7 +2107,8 @@ static void THPVariable_subclass_dealloc(PyObject* self) {
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
-    bool allow_preexisting_pyobj) {
+    bool allow_preexisting_pyobj,
+    std::optional<bool> has_torch_dispatch_if_known) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPVariableType),
@@ -2186,7 +2201,9 @@ static PyObject* THPVariable_NewWithVar(
       v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       const auto& var = THPVariable_Unpack(v);
       var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
-      if (check_has_torch_dispatch(obj)) {
+      if (has_torch_dispatch_if_known.has_value()
+              ? *has_torch_dispatch_if_known
+              : check_has_torch_dispatch(obj)) {
         var.unsafeGetTensorImpl()->set_python_dispatch(true);
       }
     }
