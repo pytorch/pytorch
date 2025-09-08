@@ -53,6 +53,7 @@ ENV INSTALLED_VISION ${VISION}
 # Install rocm
 ARG ROCM_VERSION
 COPY ./common/install_rocm.sh install_rocm.sh
+COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
