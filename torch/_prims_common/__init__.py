@@ -2007,12 +2007,11 @@ def are_strides_like_channels_last_or_false(
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        if not statically_known_true(min == 0):
-            # Assume stride is not 1, the consequence is min could be larger than needed,
-            # which would result in returning False for this function but not vice versa,
-            # so it's ok.
-            if guard_or_true(strides[d] > 1):
-                min *= shape[d]
+        # Assume stride is not 1, the consequence is min could be larger than needed,
+        # which would result in returning False for this function but not vice versa,
+        # so it's ok.
+        if guard_or_true(strides[d] > 1):
+            min *= shape[d]
     return True
 
 
