@@ -5254,6 +5254,35 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @skip_on_cpu
+    def test_flex_attention_poisoned_rel_logits(self, device):
+        B = 1
+        H = 1
+        S = 1025
+        D = 64
+        q, k, v = [
+            torch.randn(B, H, S, D, requires_grad=True, device=device) for _ in range(3)
+        ]
+        rel_logits = torch.randn(2 * B, H, S, S, device=device)
+        rel_logits[B:] = float("nan")
+        print("rel_logits", rel_logits)
+
+        def score_mod(score, b, h, q, kv):
+            return score + rel_logits[b, h, q, kv]
+
+        def causal(
+            b: torch.Tensor, h: torch.Tensor, q: torch.Tensor, kv: torch.Tensor
+        ) -> torch.Tensor:
+            return q >= kv
+
+        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        torch.compile(flex_attention)(
+            q, k, v, score_mod=score_mod, block_mask=block_mask
+        ).sum().backward()
+        assert k.grad.isfinite().all().item()
+        assert v.grad.isfinite().all().item()
+
+    @supported_platform
+    @skip_on_cpu
     def test_forward_pass_with_none_q_indices(self, device):
         N_BLOCKS = 4
         B, H, S, D = 1, 1, 128, 64
