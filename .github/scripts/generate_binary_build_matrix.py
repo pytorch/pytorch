@@ -104,6 +104,10 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
     "xpu": " | ".join(
         (
+            "intel-cmplr-lib-rt==2025.2.1",
+            "intel-cmplr-lib-ur==2025.2.1",
+            "intel-cmplr-lic-rt==2025.2.1",
+            "intel-sycl-rt==2025.2.1",
             *(
                 f"{dep}; platform_system == 'Linux' and platform_machine == 'x86_64'"
                 for dep in (
@@ -112,10 +116,6 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
                     "impi-rt==2021.16.1",
                 )
             ),
-            "intel-cmplr-lib-rt==2025.2.1",
-            "intel-cmplr-lib-ur==2025.2.1",
-            "intel-cmplr-lic-rt==2025.2.1",
-            "intel-sycl-rt==2025.2.1",
             "onemkl-sycl-blas==2025.2.0",
             "onemkl-sycl-dft==2025.2.0",
             "onemkl-sycl-lapack==2025.2.0",
