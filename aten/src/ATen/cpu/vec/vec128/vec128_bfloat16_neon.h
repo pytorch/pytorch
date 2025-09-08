@@ -14,6 +14,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
+#if !defined(CPU_CAPABILITY_SVE128)
 // Following vec128_half_neon.h, we only support aarch64.
 #if !defined(C10_MOBILE) && defined(__aarch64__)
 #ifdef __BIG_ENDIAN__
@@ -383,21 +384,6 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
   Vectorized lt(const Vectorized& other) const;
   Vectorized le(const Vectorized& other) const;
 
-#if defined(CPU_CAPABILITY_SVE) && defined(CPU_CAPABILITY_SVE128)
-
-  template <typename step_t>
-  static Vectorized<BFloat16> arange(
-      BFloat16 base = 0.f,
-      step_t step = static_cast<step_t>(1)) {
-    __at_align__ BFloat16 buffer[size()];
-    for (int64_t i = 0; i < size(); i++) {
-      buffer[i] = base + i * step;
-    }
-    return svget_neonq(svld1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(buffer)));
-  }
-
-#endif // CPU_CAPABILITY_SVE128
-
 }; // Vectorized<c10::BFloat16>
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
@@ -628,6 +614,7 @@ CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
 LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
+#endif
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
