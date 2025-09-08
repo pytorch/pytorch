@@ -1423,6 +1423,15 @@ class SIMDScheduling(BaseScheduling):
             if buf.has_tensor_output()
         ]
 
+        for buf in buffers:
+            if not buf.has_tensor_output() and isinstance(buf, ir.MutationOutput):
+                mutated_bufs = buf.get_mutation_buffers()
+                buf_sizes += [
+                    buf.get_layout().storage_size()
+                    for buf in mutated_bufs
+                    if buf.has_tensor_output()
+                ]
+
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
