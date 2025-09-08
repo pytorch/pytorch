@@ -118,7 +118,6 @@ EOF
         rm -rf HIP clr
     fi
 
-    # todo: read from pin file
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
     # Cleanup
@@ -184,7 +183,6 @@ install_centos() {
       sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
   done
 
-  # todo: read from pin file
   pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
   # Cleanup
