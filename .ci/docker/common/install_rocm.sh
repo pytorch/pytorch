@@ -182,6 +182,9 @@ install_centos() {
       sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
   done
 
+  # todo: read from pin file
+  pip_install "git+https://github.com/rocm/composable_kernel@7fe50dc3da2069d6645d9deb8c017a876472a977"
+
   # Cleanup
   yum clean all
   rm -rf /var/cache/yum
