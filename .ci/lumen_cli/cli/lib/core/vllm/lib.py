@@ -96,9 +96,8 @@ def sample_vllm_test_library():
             "num_gpus": 4,
             "steps": [
                 "pytest -v -s -x lora/test_chatglm3_tp.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "pytest -v -s -x lora/test_llama_tp.py",
-                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
+                "pytest -v -s -x lora/test_llm_with_multi_loras.py",
             ],
         },
         "vllm_distributed_test_28_failure_test": {
