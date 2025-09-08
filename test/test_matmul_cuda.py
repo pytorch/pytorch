@@ -307,6 +307,8 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(IS_JETSON, "not supported on Jetson")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -345,6 +347,8 @@ class TestMatmulCuda(InductorTestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(IS_JETSON, "not supported on Jetson")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -401,6 +405,8 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(IS_JETSON, "not supported on Jetson")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -435,6 +441,8 @@ class TestMatmulCuda(InductorTestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(IS_JETSON, "not supported on Jetson")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -490,6 +498,8 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(IS_JETSON, "not supported on Jetson")
+    @xfailIfSM100OrLater
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -789,8 +799,32 @@ class TestMatmulCuda(InductorTestCase):
         B = 2
         M, N, K = 32, 32, 32
 
+<<<<<<< HEAD
         def is_addmm():
             return "add" in op_name
+=======
+        with self.assertRaisesRegex(
+            RuntimeError, re.escape("Invalid scaling configuration")
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N + 1), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, re.escape("Invalid scaling configuration")
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N, 1), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+>>>>>>> 9ea46a40d65... Small fixes for Thor
 
         def is_batched():
             return "bmm" in op_name
