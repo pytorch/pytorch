@@ -28,9 +28,13 @@ inline std::vector<int64_t> get_2d_size_for_tensor(
 }
 
 inline at::Tensor get_2d_view(const at::Tensor& tensor) {
-  return tensor.is_contiguous()
-      ? tensor.view(get_2d_size_for_tensor(tensor))
-      : tensor.contiguous().view(get_2d_size_for_tensor(tensor));
+  auto stride = tensor.strides();
+  if (!std::is_sorted(stride.begin(), stride.end(), std::greater<int64_t>())) {
+    auto new_tensor = tensor.clone(at::MemoryFormat::Contiguous)
+                          .view(get_2d_size_for_tensor(tensor));
+    return new_tensor;
+  }
+  return tensor.view(get_2d_size_for_tensor(tensor));
 }
 
 inline std::vector<int64_t> compute_linear_output_sizes(
