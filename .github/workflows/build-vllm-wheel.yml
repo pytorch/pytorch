@@ -96,7 +96,7 @@ jobs:
             --tty \
             --detach \
             -e PLATFORM \
-            -e PYTHON_EXECUTABLE \
+            -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
