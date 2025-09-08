@@ -63,11 +63,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -208,11 +203,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -353,11 +343,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -498,11 +483,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -643,11 +623,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -788,11 +763,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -933,11 +903,6 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
