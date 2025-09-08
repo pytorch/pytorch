@@ -119,8 +119,8 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id
         loss.backward()
         if HAS_CUDA_AND_TRITON:
             self.assertExpectedInline(
-                "\n".join(order),
-                """\
+            "\n".join(order),
+            """\
     start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
     end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
     start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
