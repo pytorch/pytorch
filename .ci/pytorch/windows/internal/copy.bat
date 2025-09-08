@@ -1,12 +1,19 @@
-copy "%CUDA_PATH%\bin\cusparse*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\cublas*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\cudart*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\curand*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\cufft*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\cusolver*64_*.dll*" pytorch\torch\lib
+
+if %CUDA_VERSION% geq 130 (
+    set "dll_path=bin\x64"
+) else (
+    set "dll_path=bin"
+)
+
+copy "%CUDA_PATH%\%dll_path%\cusparse*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\cublas*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\cudart*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\curand*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\cufft*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\cusolver*64_*.dll*" pytorch\torch\lib
+copy "%CUDA_PATH%\%dll_path%\nvrtc*64_*.dll*" pytorch\torch\lib
 
 copy "%CUDA_PATH%\bin\cudnn*64_*.dll*" pytorch\torch\lib
-copy "%CUDA_PATH%\bin\nvrtc*64_*.dll*" pytorch\torch\lib
 copy "%CUDA_PATH%\extras\CUPTI\lib64\cupti64_*.dll*" pytorch\torch\lib
 copy "%CUDA_PATH%\extras\CUPTI\lib64\nvperf_host*.dll*" pytorch\torch\lib
 
