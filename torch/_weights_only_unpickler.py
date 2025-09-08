@@ -573,4 +573,7 @@ class Unpickler:
 
 
 def load(file, *, encoding: str = "ASCII"):
-    return Unpickler(file, encoding=encoding).load()
+    try:
+        return Unpickler(file, encoding=encoding).load()
+    except Exception as e:
+        raise RuntimeError(f"Unable to unpickle file due to error: {e}") from e
