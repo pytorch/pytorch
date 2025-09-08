@@ -841,7 +841,9 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func is torch.ops.higher_order.triton_kernel_wrapper_mutation or func is torch.ops.higher_order.triton_kernel_wrapper_functional:
+        is_triton = func in {torch.ops.higher_order.triton_kernel_wrapper_mutation,
+                             torch.ops.higher_order.triton_kernel_wrapper_functional}
+        if is_triton:
             from torch._higher_order_ops.triton_kernel_wrap import get_kernel
             # Special case - look in the triton flop registry for the kernel
             kernel_name = get_kernel(kwargs["kernel_idx"])
