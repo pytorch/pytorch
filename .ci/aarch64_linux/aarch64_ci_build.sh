@@ -8,8 +8,6 @@ if [[ "$GPU_ARCH_VERSION" == *"12.6"* ]]; then
     export TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
 elif [[ "$GPU_ARCH_VERSION" == *"12.8"* ]]; then
     export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
-elif [[ "$GPU_ARCH_VERSION" == *"12.9"* ]]; then
-    export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
 elif [[ "$GPU_ARCH_VERSION" == *"13.0"* ]]; then
     export TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
 fi
