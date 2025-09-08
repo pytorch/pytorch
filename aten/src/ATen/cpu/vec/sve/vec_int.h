@@ -348,6 +348,8 @@ inline void convert(const int64_t* src, float* dst, int64_t n) {
   }
 }
 
+#ifndef CPU_CAPABILITY_SVE128
+
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int32_t>::size();
@@ -364,6 +366,8 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
     svst1_f32(pg, dst + i, svcvt_f32_s32_x(pg, src_vec));
   }
 }
+
+#endif
 
 template <>
 inline void convert(const bool* src, int64_t* dst, int64_t n) {
