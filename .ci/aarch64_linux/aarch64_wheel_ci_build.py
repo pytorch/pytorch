@@ -74,7 +74,6 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     Package the cuda wheel libraries
     """
     folder = os.path.dirname(wheel_path)
-    wheelname = os.path.basename(wheel_path)
     os.mkdir(f"{folder}/tmp")
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
     libs_to_copy = [
