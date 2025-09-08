@@ -874,6 +874,25 @@ def forward(self, x):
         epm.const2[-1] = 321
         self.assertEqual(epm.const1[-1][-1], 321)
 
+    def test_storage_offset(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[:4]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
