@@ -10,25 +10,11 @@ from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_nvrtc_version(cuda_version: int) -> str:
-    # TODO: Expose this from native code
-    # Follows same logic as LazyNVRTC.cpp getLibVersion()
     major = cuda_version // 1000
-    minor = (cuda_version // 10) % 10
-
     if sys.platform == "win32":
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}{minor}"
-        elif major == 11:
-            return "112"
-        else:
-            return f"{major}0"
+        return f"{major}0"
     else:
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}.{minor}"
-        elif major == 11:
-            return "11.2"
-        else:
-            return str(major)
+        return str(major)
 
 
 # Load CUDA driver and NVRTC
