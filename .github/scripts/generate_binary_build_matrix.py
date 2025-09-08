@@ -38,7 +38,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["13.0-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -80,7 +80,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu13==9.12.0.46; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas==13.0.0.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft==12.0.0.15; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand==10.4.0.35; platform_system == 'Linux' and platform_machine == 'x86_64' | "
