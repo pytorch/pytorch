@@ -48,7 +48,8 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         self.target_dtype: torch.dtype = target_dtype
         self.block_size: int = block_size
         self._weight_scale_mapping: dict[str, str] = {}
-        self._scale_tensor_cache: dict[str, torch.Tensor] = {}
+        # Track which file contains each tensor
+        self._weight_map: dict[str, str] = {}
 
     def read_metadata(self) -> Any:
         self._load_quantization_metadata()
@@ -67,6 +68,9 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
     def _build_weight_scale_mapping(self, weight_map: dict[str, str]):
         """Analyze and build weight-scale tensor pairs from weight mapping."""
+        # Store the complete weight map for file location lookups
+        self._weight_map = weight_map
+
         for tensor_name in weight_map.keys():
             if tensor_name.endswith(".weight_scale_inv"):
                 weight_name = tensor_name.replace(".weight_scale_inv", ".weight")
@@ -123,6 +127,11 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         Returns:
             Dequantized tensor
         """
+        # Convert to float32 for computation
+        # Certain quantized dtypes like Float8_e4m3fn
+        # don't support multiplication on CPU yet in PyTorch.
+        upcasted_weight = weight.to(torch.float32)
+
         # Get original dimensions
         orig_shape = weight.shape
 
@@ -131,7 +140,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         block_rows, block_cols = expected_scale_shape
 
         # Create output tensor in target dtype
-        dequantized = weight.detach().clone().to(dtype=self.target_dtype)
+        dequantized = weight.detach().to(dtype=self.target_dtype, copy=True)
 
         # Apply scaling factors to each block
         for i in range(block_rows):
@@ -143,7 +152,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 col_end = min(col_start + self.block_size, orig_shape[1])
 
                 # Get the block
-                block = weight[row_start:row_end, col_start:col_end]
+                block = upcasted_weight[row_start:row_end, col_start:col_end]
 
                 scale = scale_inv[i, j]
                 block = block * scale
@@ -201,14 +210,26 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
             quantized_tensor = safetensor_file.get_slice(tensor_fqn)[weight_slices]
 
             # Load the corresponding scale inverse tensor
-            # For scale tensors, we typically need the full tensor for proper block alignment
-            if scale_fqn not in self._scale_tensor_cache:
-                scale_inv = safetensor_file.get_tensor(
-                    scale_fqn
-                )  # Load full scale tensor
-                self._scale_tensor_cache[scale_fqn] = scale_inv
+            # Use weight_map to find the correct file for the scale tensor
+            scale_file_name = self._weight_map.get(scale_fqn)
+            if scale_file_name is None:
+                raise ValueError(f"Scale tensor {scale_fqn} not found in weight_map")
+
+            # Check if scale tensor is in the same file as the weight tensor
+            weight_file_name = self._weight_map.get(tensor_fqn)
+
+            if scale_file_name == weight_file_name:
+                # Scale tensor is in the same file, use current handle
+                scale_inv = safetensor_file.get_tensor(scale_fqn)
             else:
-                scale_inv = self._scale_tensor_cache[scale_fqn]
+                # Scale tensor is in a different file, need to open it
+                from safetensors import safe_open  # type: ignore[import]
+
+                scale_file_path = Path(self.path) / scale_file_name
+                with safe_open(
+                    scale_file_path, framework="pt", device="cpu"
+                ) as scale_file:
+                    scale_inv = scale_file.get_tensor(scale_fqn)
 
             # Perform dequantization
             dequantized_tensor = self._dequantize_tensor(
