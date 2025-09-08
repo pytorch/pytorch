@@ -19,7 +19,7 @@ from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
-    from .cuda_template import ArgInfo
+    from .template import ArgInfo
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
@@ -46,7 +46,7 @@ from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.cutlass.cuda_template import CUDATemplate
+    from torch._inductor.codegen.cutlass.template import CUTLASSTemplate
 
 log = logging.getLogger(__name__)
 
@@ -423,7 +423,7 @@ class CUDATemplateKernel(CUDAKernel):
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
-        from torch._inductor.codegen.cutlass.cuda_template import CUTLASSTemplate
+        from torch._inductor.codegen.cutlass.template import CUTLASSTemplate
 
         return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
 
@@ -586,7 +586,7 @@ class CUDATemplateCaller(ChoiceCaller):
         ],
         bmreq: CUDABenchmarkRequest,
         supports_epilogue_fusion: bool,
-        template: "CUDATemplate",  # type: ignore[name-defined]
+        template: "CUTLASSTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
             dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
         ],  # type: ignore[type-arg]
