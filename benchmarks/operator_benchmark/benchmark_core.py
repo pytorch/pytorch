@@ -8,6 +8,7 @@ import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
+import psutil
 
 import benchmark_utils
 
@@ -371,7 +372,7 @@ class BenchmarkRunner:
         curr_test_total_time = 0
         time_trace = []
         peak_memory = 0
-        # TODO: Add conditional to measure peak memory usage
+        # TODO: Add conditional to measure peak memory usage for cpu (skiping cpu for now)
         sample_input = next(iter(test_case.op_bench.inputs.values()))
         device = sample_input.device
         device_module = torch.get_device_module(device.type)
@@ -381,8 +382,29 @@ class BenchmarkRunner:
             run_time_sec = launch_test(test_case, iters, print_per_iter)
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize(device)
+            # Memory measurement process 
             if hasattr(device_module, "max_memory_allocated"):
                 peak_memory = device_module.max_memory_allocated(device)
+            elif device == torch.device("cpu"):
+                # Method 1
+                # total = psutil.virtual_memory().total 
+                # percentage = psutil.Process(os.getpid()).memory_percent() 
+                # peak_memory = percentage * total
+                # Method 2
+                process = psutil.Process()
+                main_memory = process.memory_full_info().pss
+                # Add memory usage of all child processes
+                for child in process.children(recursive=True):
+                    try:
+                        child_mem = child.memory_full_info().pss
+                        main_memory += child_mem
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                        # Process might have terminated or doesn't support PSS, fall back to USS
+                        print(f"Failed to get PSS for {child}, falling back to USS")
+                        child_mem = child.memory_info().uss
+                        main_memory += child_mem
+
+                peak_memory = main_memory / 1024
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
