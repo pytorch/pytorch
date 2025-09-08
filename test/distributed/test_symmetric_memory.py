@@ -612,8 +612,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         stride = (64, 1)
         dtype = torch.float32
         device = self.device
-        group_name = "0"
-        return (shape, stride, dtype, device, group_name)
+        return (shape, stride, dtype, device)
 
     def _verify_symmetric_memory(self, symm_mem_hdl):
         self.assertEqual(symm_mem_hdl.world_size, self.world_size)
@@ -647,14 +646,15 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        group_name = dist.group.WORLD.group_name
+        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
         t = torch.empty((64, 64), device=self.device)
         self.assertIsNone(_SymmetricMemory.rendezvous(t))
 
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, group_name=group_name)
         symm_mem_hdl = _SymmetricMemory.rendezvous(t)
 
         del t
@@ -665,24 +665,31 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        group_name = dist.group.WORLD.group_name
+        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
         alloc_id = 42 + random.randint(0, 2147483647)
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+        t = _SymmetricMemory.empty_strided_p2p(
+            *alloc_args, group_name=group_name, alloc_id=alloc_id
+        )
         data_ptr = t.data_ptr()
 
         # Verify that persistent allocation would fail if there's an active
         # allocation with the same alloc_id.
         with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+            _SymmetricMemory.empty_strided_p2p(
+                *alloc_args, group_name=group_name, alloc_id=alloc_id
+            )
 
         # Verify that persistent allocation would succeed in lieu of activate
         # allocations with the same alloc_id, and the returned tensor would
         # have the same data pointer.
         del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=alloc_id)
+        t = _SymmetricMemory.empty_strided_p2p(
+            *alloc_args, group_name=group_name, alloc_id=alloc_id
+        )
         self.assertEqual(t.data_ptr(), data_ptr)
 
         symm_mem_hdl = _SymmetricMemory.rendezvous(t)
