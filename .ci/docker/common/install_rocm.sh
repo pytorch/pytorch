@@ -2,6 +2,9 @@
 
 set -ex
 
+# for pip_install function
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh" 
+
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
@@ -112,6 +115,9 @@ EOF
         popd
         rm -rf HIP clr
     fi
+
+    # todo: read from pin file
+    pip_install "git+https://github.com/rocm/composable_kernel@7fe50dc3da2069d6645d9deb8c017a876472a977"
 
     # Cleanup
     apt-get autoclean && apt-get clean
