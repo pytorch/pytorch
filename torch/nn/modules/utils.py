@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-import collections
+import collections.abc
 from itertools import repeat
 from typing import Any
 
@@ -10,7 +10,9 @@ __all__ = ["consume_prefix_in_state_dict_if_present"]
 def _ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
-            return tuple(x)
+            ret = tuple(x)
+            assert len(ret) == n
+            return ret
         return tuple(repeat(x, n))
 
     parse.__name__ = name
