@@ -11,7 +11,16 @@ def _ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
             ret = tuple(x)
-            assert len(ret) == n
+
+            # If the iterable is length 1, automatically expand to fill.  This
+            # matches the behavior of expand_param_if_needed.
+            if len(ret) == 1:
+                return tuple(repeat(ret[0], n))
+
+            # Otherwise assert the correct length.
+            assert len(ret) == n, (
+                f"Expected an iterable of length {n}, but got length {len(ret)}"
+            )
             return ret
         return tuple(repeat(x, n))
 
