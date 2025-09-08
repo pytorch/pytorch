@@ -845,9 +845,11 @@ def log_softmax(
 def logsumexp(
     self: TensorLikeType, dim: DimsType, keepdim: bool = False
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    
     if not isinstance(dim, Iterable):
         dim = (dim,)
-    if self.numel() == 0:
+    if guard_or_false(self.numel() == 0):
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
@@ -3840,6 +3842,8 @@ def _reshape_view_helper_core_alg(
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
     # Reshape may be given a shape with a -1 length
@@ -3847,7 +3851,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Special-cases tensors with no elements
-    if a.numel() == 0:
+    if guard_or_false(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3909,6 +3913,8 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 @out_wrapper()
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
@@ -3917,7 +3923,7 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         dims = (dims,)
 
     # Avoid modulo by zero
-    if a.numel() == 0:
+    if guard_or_false(a.numel() == 0):
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return a.clone()
 
@@ -4019,10 +4025,12 @@ def softmax(
     dim: int,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    if a.numel() == 0:
+    if guard_or_false(a.numel() == 0):
         a_exp = exp(a_)
     else:
         a_max = amax(a_, dim, keepdim=True)
@@ -5825,6 +5833,8 @@ def allclose(
 
 
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
     utils.check_same_dtype(a, b)
 
@@ -5837,7 +5847,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
             return False
 
     # Short-circuits if there are no elements to validate
-    if a.numel() == 0:
+    if guard_or_false(a.numel() == 0):
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
@@ -6607,7 +6617,9 @@ def _infer_scalar_type(obj):
 def _recursive_build(
     scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
 ):
-    if isinstance(obj, Tensor) and obj.numel() == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if isinstance(obj, Tensor) and guard_or_false(obj.numel() == 1):
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
     elif isinstance(obj, Tensor):
         # It is invalid to call ".tensor([...])" with a non-scalar tensor in eager mode
