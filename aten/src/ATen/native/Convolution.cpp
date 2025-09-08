@@ -676,6 +676,11 @@ static void check_shape_forward(const at::Tensor& input,
              ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
 
     for (const auto i : c10::irange(2, k)) {
+      // std::numeric_limits<T>::max can be 0 when T is SymInt
+      // So hardcode T to int64_t to get correct value of padding limit size.
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<int64_t>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<int64_t>::max() / 2));
       input_shape.push_back(at::symint::size<T>(input, i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
@@ -702,6 +707,11 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
+    for (const auto i : c10::irange(2, k)) {
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<int64_t>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<int64_t>::max() / 2));
+    }
     TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
