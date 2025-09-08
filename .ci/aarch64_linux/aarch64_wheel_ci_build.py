@@ -69,6 +69,22 @@ def replace_tag(filename) -> None:
         f.writelines(lines)
 
 
+def patch_library_rpath(folder: str, lib_name: str) -> None:
+    """Apply patchelf to set RPATH to $ORIGIN for a library in torch/lib"""
+    lib_path = f"{folder}/tmp/torch/lib/{lib_name}"
+    if os.path.exists(lib_path):
+        os.system(
+            f"cd {folder}/tmp/torch/lib/; "
+            f"patchelf --set-rpath '$ORIGIN' --force-rpath {lib_name}"
+        )
+
+def copy_and_patch_library(src_path: str, folder: str) -> None:
+    """Copy a library to torch/lib and patch its RPATH"""
+    if os.path.exists(src_path):
+        lib_name = os.path.basename(src_path)
+        shutil.copy2(src_path, f"{folder}/tmp/torch/lib/{lib_name}")
+        patch_library_rpath(folder, lib_name)
+
 def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     """
     Package the cuda wheel libraries
@@ -98,13 +114,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
 
         # Copy minimal libraries to unzipped_folder/torch/lib
         for lib_path in minimal_libs_to_copy:
-            if os.path.exists(lib_path):  # Check if file exists before copying
-                lib_name = os.path.basename(lib_path)
-                shutil.copy2(lib_path, f"{folder}/tmp/torch/lib/{lib_name}")
-                os.system(
-                    f"cd {folder}/tmp/torch/lib/; "
-                    f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
-                )
+            copy_and_patch_library(lib_path, folder)
     else:
         print("Bundling CUDA libraries with wheel")
         # Original logic for bundling system CUDA libraries
@@ -171,12 +181,20 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
 
         # Copy libraries to unzipped_folder/torch/lib
         for lib_path in libs_to_copy:
-            lib_name = os.path.basename(lib_path)
-            shutil.copy2(lib_path, f"{folder}/tmp/torch/lib/{lib_name}")
-            os.system(
-                f"cd {folder}/tmp/torch/lib/; "
-                f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
-            )
+            copy_and_patch_library(lib_path, folder)
+
+    # Fix RPATH for all existing torch libraries (not just copied CUDA libs)
+    torch_libs_to_patch = [
+        "libtorch.so",
+        "libtorch_cpu.so", 
+        "libtorch_cuda.so",
+        "libtorch_python.so",
+        "libc10.so",
+        "libc10_cuda.so"
+    ]
+    
+    for lib_name in torch_libs_to_patch:
+        patch_library_rpath(folder, lib_name)
 
     # Make sure the wheel is tagged with manylinux_2_28
     for f in os.scandir(f"{folder}/tmp/"):
