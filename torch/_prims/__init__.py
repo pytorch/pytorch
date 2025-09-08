@@ -1384,11 +1384,9 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
-# If must_be_valid is not None, do a torch._check that the collapse is valid else
-# return None, None.
-# When must_be_valid is False, this function returns None when validity is not decided.
-# When must_be_valid is True, this function generates a runtime assertion for validity
-# when it is not decided.
+# If the validity of the collapse cannot be determined (because of unbacked data) then `must_be_valid` determines the behavior:
+#     None: return None, None.
+#     str: Do a torch._check() to ensure the collapse is valid and if it isn't then fail with the provided string.
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int, must_be_valid: Optional[str]
 ) -> tuple[Optional[ShapeType], Optional[StrideType]]:
