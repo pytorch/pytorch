@@ -312,27 +312,51 @@ def bwd_dq_inner(
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
     hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N2), 1))
-    for start_n in range(0, hi):
-        dq = bwd_dq_block_mn(
-            {{gen_argdefs()}},
-            dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-            off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
-            stride_kn, stride_kd, stride_vn, stride_vd,
-            kv_indices, sparse_kv_num_blocks,
-            MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=not IS_DIVISIBLE
-        )
+    if not IS_DIVISIBLE:
+        for start_n in range(0, hi):
+            dq = bwd_dq_block_mn(
+                {{gen_argdefs()}},
+                dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+                off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+                stride_kn, stride_kd, stride_vn, stride_vd,
+                kv_indices, sparse_kv_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+            )
 
-        # Increment pointers.
-        offset = get_offset_for_next_block(
-            start_n, kv_indices, sparse_kv_num_blocks,
-            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
-        )
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, sparse_kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
+            )
 
-        kT_ptrs += offset * stride_kn
-        vT_ptrs += offset * stride_vn
+            kT_ptrs += offset * stride_kn
+            vT_ptrs += offset * stride_vn
 
-        offs_n2 += offset
+            offs_n2 += offset
+
+    else:
+        for start_n in range(0, hi):
+            dq = bwd_dq_block_mn(
+                {{gen_argdefs()}},
+                dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+                off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+                stride_kn, stride_kd, stride_vn, stride_vd,
+                kv_indices, sparse_kv_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                IS_FULL_BLOCKS,
+            )
+
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, sparse_kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
+            )
+
+            kT_ptrs += offset * stride_kn
+            vT_ptrs += offset * stride_vn
+
+            offs_n2 += offset
 
     return dq
 
@@ -358,7 +382,7 @@ def bwd_dq_block_mn(
     pre_mod_scores = qk
     n = get_bounded_indices(offs_n2[None, :], KV_LEN if CHECK_BLOCK_BOUNDARY else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
-    # that the M reads out of bounds prior to the last loop
+    # that the M reads out of bounds for the PIDS spanning the Q_LEN boundary
     m = get_bounded_indices(offs_m2[:, None], Q_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
 
     {{ modification(
@@ -372,10 +396,6 @@ def bwd_dq_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if CHECK_BLOCK_BOUNDARY:
-        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
-
     if not IS_FULL_BLOCKS:
         {{ modification(
             subgraph_number=2,
@@ -387,8 +407,6 @@ def bwd_dq_block_mn(
             n="n",
         ) | indent_except_first(2) }}
 
-        if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -412,8 +430,6 @@ def bwd_dq_block_mn(
         n="n",
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
-    if CHECK_BLOCK_BOUNDARY:
-        grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if WRITE_DQ:
@@ -433,8 +449,6 @@ def bwd_dq_block_mn(
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
-        if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -474,26 +488,46 @@ def bwd_dkdv_inner(
     # SPARSE_BLOCK_SIZE (i.e. no block-mask!)
     hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
 
-    for start_m in range(0, hi):
-        dk, dv = bwd_dkdv_block_mn(
-            {{gen_argdefs()}},
-            dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-            off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
-            stride_qm, stride_qd, stride_dom, stride_dod,
-            q_indices, sparse_q_num_blocks,
-            MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=not IS_DIVISIBLE,
-        )
-        # Increment pointers.
-        offset = get_offset_for_next_block(
-            start_m, q_indices, sparse_q_num_blocks,
-            SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
-        )
+    if not IS_DIVISIBLE:
+        for start_m in range(0, hi):
+            dk, dv = bwd_dkdv_block_mn(
+                {{gen_argdefs()}},
+                dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+                off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+            )
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_m, q_indices, sparse_q_num_blocks,
+                SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
+            )
 
-        qT_ptrs += offset * stride_qm
-        do_ptrs += offset * stride_dom
+            qT_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_dom
+            offs_m1 += offset
+    else:
+        for start_m in range(0, hi):
+            dk, dv = bwd_dkdv_block_mn(
+                {{gen_argdefs()}},
+                dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+                off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                IS_FULL_BLOCKS,
+            )
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_m, q_indices, sparse_q_num_blocks,
+                SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
+            )
 
-        offs_m1 += offset
+            qT_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_dom
+            offs_m1 += offset
 
     return dk, dv
 
@@ -524,7 +558,7 @@ def bwd_dkdv_block_mn(
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     m = get_bounded_indices(offs_m1[None, :], Q_LEN if CHECK_BLOCK_BOUNDARY else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
-    # that the n reads out of bounds prior to the last loop
+    # that the n reads out of bounds for the PIDS spanning the KV_LEN boundary
     n = get_bounded_indices(offs_n1[:, None], KV_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
 
     pre_mod_scores = qkT
