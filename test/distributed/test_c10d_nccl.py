@@ -29,7 +29,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 
 import test_c10d_common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+from test_c10d_common import (
+    ConvNet,
+    DoubleGpuNet,
+    FFTModel,
+    gpus_for_rank,
+    ModuleForDdpCommHook,
+)
 
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
@@ -2552,25 +2558,6 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params(self):
-        class FFTModel(nn.Module):
-            def __init__(self, hin, win, n_features):
-                super().__init__()
-                self.hin = hin
-                self.win = win
-                self.weight = nn.Parameter(
-                    torch.ones(
-                        (n_features, n_features, hin, win // 2 + 1), dtype=torch.cfloat
-                    )
-                )
-
-            def forward(self, x):
-                xc = torch.fft.rfft2(
-                    x, s=(self.hin, self.win), dim=(-2, -1), norm="ortho"
-                )
-                xcw = torch.einsum("nchw,cohw->nohw", xc, self.weight)
-                x = torch.fft.irfft2(xcw, dim=(-2, -1), norm="ortho")
-                return x
-
         process_group = self._get_process_group()
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         N, C, H, W = 1, 16, 64, 64
