@@ -1178,6 +1178,14 @@ class TestTensorCreation(TestCase):
         ref = torch.cat([x1.cpu(), x2.cpu()], dim=-1)
         self.assertEqual(res, ref)
 
+    @dtypes(torch.float)
+    def test_cat_multi_batch(self, device, dtype):
+        xs = [torch.randn(16, 16, device=device, dtype=dtype) for _ in range(130)]
+        xs_cpu = [x.cpu() for x in xs]
+        res = torch.cat(xs, dim=-1)
+        ref = torch.cat(xs_cpu, dim=-1)
+        self.assertEqual(res, ref)
+
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
     @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
@@ -1991,6 +1999,11 @@ class TestTensorCreation(TestCase):
         complexHalfTensor = torch.zeros(2, 2, device=device, dtype=torch.complex32)
         expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex32)
         self.assertEqual(complexHalfTensor, expected)
+
+    def test_zeros_bounds_checking(self, device):
+        # Test negative large integer
+        with self.assertRaisesRegex(RuntimeError, r"zeros: Dimension size must be non-negative."):
+            torch.zeros(-6744789213055875072, device=device)
 
     # TODO: this test should be updated
     def test_zeros_out(self, device):
