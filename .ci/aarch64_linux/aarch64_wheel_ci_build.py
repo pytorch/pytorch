@@ -186,7 +186,6 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     # Fix RPATH for all existing torch libraries (not just copied CUDA libs)
     torch_libs_to_patch = [
         "libtorch.so",
-        "libtorch_cpu.so", 
         "libtorch_cuda.so",
         "libtorch_python.so",
         "libc10.so",
