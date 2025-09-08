@@ -1394,21 +1394,6 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_size = get_mkldnn_matmul_min_size();
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
-static inline void mkldnn_matmul_use(const Tensor& batch1, const Tensor& batch2, const Tensor& self_or_result, const Scalar& beta, const Scalar& alpha){
-  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
-    try {
-      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
-  
-      return;
-    } catch (const std::exception& e) {
-      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
-      at::globalContext().setUserEnabledMkldnn(false);
-    }
-  }
-}
-
-
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1784,14 +1769,18 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
-
-  #if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
-  mkldnn_matmul_use(batch1, batch2, self_or_result, beta, alpha);
-  #elif !defined(__aarch64__)
-  mkldnn_matmul_use(batch1, batch2, self_or_result, beta, alpha);
+  #if (defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()) || !defined(__aarch64__)
+  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
+  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+    try {
+      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+      return;
+    } catch (const std::exception& e) {
+      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
+      at::globalContext().setUserEnabledMkldnn(false);
+    }
+  }
   #endif
-
-
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
