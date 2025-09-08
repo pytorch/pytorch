@@ -1186,6 +1186,15 @@ class TestTensorCreation(TestCase):
         ref = torch.cat(xs_cpu, dim=-1)
         self.assertEqual(res, ref)
 
+    @dtypes(torch.float)
+    @largeTensorTest("16GB")
+    def test_cat_large_tensor(self, device, dtype):
+        N = 2 ** 32 // dtype.itemsize
+        inps = [torch.randn(N, device=device, dtype=dtype), torch.randn(N // 128, device=device, dtype=dtype)]
+        res = torch.cat(inps, dim=0)
+        ref = torch.cat([x.cpu() for x in inps])
+        self.assertEqual(res, ref)
+
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
     @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
