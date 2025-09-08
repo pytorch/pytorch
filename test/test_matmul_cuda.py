@@ -316,7 +316,6 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -355,7 +354,6 @@ class TestMatmulCuda(TestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -412,7 +410,6 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -447,7 +444,6 @@ class TestMatmulCuda(TestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -455,6 +451,8 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
+        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
+            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
