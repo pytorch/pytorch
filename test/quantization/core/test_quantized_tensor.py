@@ -1409,6 +1409,9 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(y[0].numpy(), ref[0])
             self.assertEqual(y[1].numpy(), ref[1])
 
+        with self.assertRaisesRegex(ValueError, "input tensor is empty and has no data"):
+            torch.choose_qparams_optimized(torch.tensor([]), numel=0, n_bins=200, ratio=0.16, bit_width=8)
+
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:
             class M(torch.jit.ScriptModule):
