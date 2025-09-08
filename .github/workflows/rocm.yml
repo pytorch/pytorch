@@ -7,6 +7,8 @@ on:
       - release/*
     tags:
       - ciflow/rocm/*
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
   workflow_dispatch:
 
 concurrency:
