@@ -1379,7 +1379,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     Return the default backend for the given device.
 
     Args:
-        Union[str, torch.device]: The device to get the default backend for.
+        device (Union[str, torch.device]): The device to get the default backend for.
 
     Returns:
         The default backend for the given device as a lower case string.
@@ -1568,12 +1568,12 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, ``ucc``, or one that is registered by a third-party
+            ``nccl``, ``ucc``, ``xccl`` or one that is registered by a third-party
             plugin.
             Since 2.6, if ``backend`` is not provided, c10d will use a backend
             registered for the device type indicated by the `device_id` kwarg
             (if provided). The known default registrations today are: ``nccl``
-            for ``cuda``, ``gloo`` for ``cpu``.
+            for ``cuda``, ``gloo`` for ``cpu``, ``xccl`` for ``xpu``.
             If neither ``backend`` nor ``device_id`` is provided, c10d will
             detect the accelerator on the run-time machine and use a backend
             registered for that detected accelerator (or ``cpu``).
@@ -1584,6 +1584,8 @@ def init_process_group(
             process must have exclusive access to every GPU it uses, as sharing
             GPUs between processes can result in deadlock or NCCL invalid usage.
             ``ucc`` backend is experimental.
+            Default backend for the device can be queried with
+            :func:`get_default_backend_for_device`.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -1749,11 +1751,16 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
-            )
-            store, rank, world_size = next(rendezvous_iterator)
-            store.set_timeout(timeout)
+            if backend == "fake":
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
+            else:
+                rendezvous_iterator = rendezvous(
+                    not_none(init_method), rank, world_size, timeout=timeout
+                )
+                store, rank, world_size = next(rendezvous_iterator)
+                store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
@@ -1932,9 +1939,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
@@ -2033,8 +2040,12 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_options = ProcessGroupXCCL.Options()
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
-                backend_prefix_store, group_rank, group_size
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
@@ -3321,6 +3332,7 @@ def send_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_dst: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Sends picklable objects in ``object_list`` synchronously.
@@ -3341,6 +3353,10 @@ def send_object_list(
             ``device`` before sending. Default is ``None``.
         group_dst (int, optional): Destination rank on ``group``.
             Must specify one of ``dst`` and ``group_dst`` but not both
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
     Returns:
         ``None``.
 
@@ -3404,7 +3420,12 @@ def send_object_list(
     object_sizes_tensor = torch.cat(size_list)
 
     # Send object sizes
-    send(object_sizes_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_sizes_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_sizes_tensor, group_dst=group_dst, group=group)
 
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
@@ -3414,7 +3435,12 @@ def send_object_list(
     else:
         object_tensor = torch.cat(tensor_list)
 
-    send(object_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_tensor, group_dst=group_dst, group=group)
 
 
 @_exception_logger
@@ -3424,6 +3450,7 @@ def recv_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_src: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Receives picklable objects in ``object_list`` synchronously.
@@ -3441,6 +3468,10 @@ def recv_object_list(
         device (``torch.device``, optional): If not None, receives on this device.
             Default is ``None``.
         group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
 
     Returns:
         Sender rank. -1 if rank is not part of the group. If rank is part of the group,
@@ -3484,6 +3515,10 @@ def recv_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
+    group = _group_or_default_group(group)
+    group_src = _canonicalize_group_rank(group, src, group_src)
+    _check_not_self_rank(group, group_src, "source")
+
     if _rank_not_in_group(group):
         _warn_not_in_group("recv_object_list")
         return -1
@@ -3500,7 +3535,21 @@ def recv_object_list(
     )
 
     # Receive object sizes
-    rank_sizes = recv(object_sizes_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_sizes_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_sizes = get_global_rank(group, group_src)
+    else:
+        rank_sizes = recv(object_sizes_tensor, group=group, group_src=group_src)
 
     # Tensor to receive serialized objects into.
     object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -3509,7 +3558,21 @@ def recv_object_list(
         device=current_device,
     )
 
-    rank_objects = recv(object_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_objects = get_global_rank(group, group_src)
+    else:
+        rank_objects = recv(object_tensor, group=group, group_src=group_src)
     assert rank_sizes == rank_objects, (
         "Mismatch in return ranks for object sizes and objects."
     )
@@ -4778,6 +4841,11 @@ def barrier(
         None, if not async_op or if not part of the group
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
+    .. note:: `ProcessGroupNCCL` implements barrier as an all_reduce of a 1-element tensor. A device must be chosen
+       for allocating this tensor.  The device choice is made by checking in this order (1) the first device passed to
+       `device_ids` arg of barrier if not None, (2) the device passed to init_process_group if not None, (3) the device
+       that was first used with this process group, if another collective with tensor inputs has been performed, (4)
+       the device index indicated by the global rank mod local device count.
     """
     group = group or _get_default_group()
 
@@ -4804,9 +4872,11 @@ def barrier(
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
         opts.device = device
-        warnings.warn(  # warn only once
-            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
-        )
+        if group.rank() == 0:
+            warnings.warn(  # warn only once
+                "barrier(): using the device under current context. "
+                "You can specify `device_id` in `init_process_group` to mute this warning."
+            )
 
     work = group.barrier(opts=opts)
 
@@ -5011,8 +5081,8 @@ def split_group(
 
     """
     # check inputs
-    if split_ranks is None:
-        raise ValueError("split_ranks cannot be None")
+    if split_ranks is None or len(split_ranks) == 0:
+        raise ValueError("split_ranks cannot be None or empty")
 
     global _world
     default_pg = _get_default_group()
@@ -5021,7 +5091,6 @@ def split_group(
         raise RuntimeError(
             "No device associated with the default pg, not safe to split any process groups"
         )
-    _default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -5052,11 +5121,8 @@ def split_group(
         )
 
     # set the group_desc before the color or no_cloor split
-    group_desc = (
-        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
-        if group_desc is None
-        else group_desc
-    )
+    if hasattr(parent_backend, "comm_split_count") and group_desc is None:
+        group_desc = f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
 
     parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
@@ -5074,8 +5140,9 @@ def split_group(
     _check_valid_timeout(timeout)
 
     # find my group of ranks and my group local rank in split_ranks
-    my_group = None
-    group_rank = -1
+    # for ranks which are not in any split PGs, we just pass in this the first split group
+    # and None will be returned.
+    my_group = split_ranks[0]
 
     for split_group in split_ranks:
         if len(split_group) == 0:
@@ -5089,88 +5156,43 @@ def split_group(
         split_group = sorted(split_group)
         if parent_group_rank in split_group:
             my_group = split_group
-            group_rank = split_group.index(parent_group_rank)
             break
-    # if my rank does not belong to any sub group,
-    # no_color split should be called
-    if my_group is None or group_rank == -1:
-        parent_backend.perform_nocolor_split(device_id)  # type: ignore[attr-defined]
-        return None
 
     group_name = _process_group_name(my_group, use_hashed_name=False)
-    global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
-
-    prefix_store = PrefixStore(f"{group_name}/", default_store)
-    # We register the backend after initializing and timeout is set in pg_options.
-    pg: ProcessGroup = ProcessGroup(
-        prefix_store,
-        group_rank,
-        len(my_group),
+    split_pg = parent_pg.split_group(
+        my_group,
+        timeout=timeout,
+        opts=pg_options,
+        group_name=group_name,
+        group_desc=group_desc,
     )
-    pg.bound_device_id = device_id  # type: ignore[union-attr]
-    pg_options._timeout = timeout  # type: ignore[union-attr]
-    pg_options.split_from = parent_backend  # type: ignore[union-attr]
-    pg_options.split_color = _process_group_color(my_group)  # type: ignore[union-attr]
-    pg_options.global_ranks_in_group = global_ranks_in_my_group  # type: ignore[union-attr]
-    pg_options.group_name = group_name  # type: ignore[union-attr]
+    if split_pg is None:
+        return None
 
-    if parent_backend_str == Backend.NCCL:
-        backend_type = ProcessGroup.BackendType.NCCL
-        if not isinstance(pg_options, ProcessGroupNCCL.Options):
-            raise RuntimeError(
-                "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-            )
-        backend_class = ProcessGroupNCCL(
-            prefix_store, group_rank, len(my_group), pg_options
-        )
-    else:
-        assert parent_backend_str.upper() in Backend._plugins, (
-            f"Unknown c10d backend type {parent_backend_str.upper()}"
-        )
-        backend_plugin = Backend._plugins[parent_backend_str.upper()]
-        creator_fn = backend_plugin.creator_fn
-        extended_api = backend_plugin.extended_api
-        backend_type = ProcessGroup.BackendType.CUSTOM
-        if not extended_api:
-            backend_class = creator_fn(prefix_store, group_rank, len(my_group), timeout)
-        else:
-            dist_backend_opts = _DistributedBackendOptions()
-            dist_backend_opts.store = prefix_store
-            dist_backend_opts.group_rank = group_rank
-            dist_backend_opts.group_size = len(my_group)
-            backend_class = creator_fn(dist_backend_opts, pg_options)
-
-    pg._set_default_backend(backend_type)
-    backend_class._set_sequence_number_for_group()
-
-    pg._register_backend(torch.device("cuda"), backend_type, backend_class)
-
-    # set group_name and group_desc to backend
-    assert group_name is not None
-    assert group_desc is not None
-    pg._set_group_name(group_name)
-    pg._set_group_desc(group_desc)
-
-    # always eagerly initialize the backend in split_group
-    eager_backend = pg._get_backend(device_id)
-    eager_backend.eager_connect_single_device(device_id)
+    global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
+    split_pg.bound_device_id = device_id  # type: ignore[union-attr]
+    split_backend_class = split_pg._get_backend(torch.device("cuda"))
+    split_backend_class._set_sequence_number_for_group()
+    assert split_pg.group_name == group_name, (
+        f"group name should be set to {group_name} but got {split_pg.group_name}"
+    )
 
     # update global state
-    _world.pg_map[pg] = (backend, prefix_store)
-    _world.pg_names[pg] = group_name
-    _register_process_group(group_name, pg)
-    _world.pg_backend_config[pg] = str(backend_config)
+    _world.pg_map[split_pg] = (backend, split_pg.get_group_store())
+    _world.pg_names[split_pg] = group_name
+    _register_process_group(group_name, split_pg)
+    _world.pg_backend_config[split_pg] = str(backend_config)
     pg_tag = f"ptd:{group_name}"
-    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
-    _world.pg_to_tag[pg] = pg_tag
+    _world.tags_to_pg.setdefault(pg_tag, []).append(split_pg)
+    _world.pg_to_tag[split_pg] = pg_tag
 
     # Create the global rank to group rank mapping
-    _world.pg_group_ranks[pg] = {
+    _world.pg_group_ranks[split_pg] = {
         global_rank: group_rank
         for group_rank, global_rank in enumerate(global_ranks_in_my_group)
     }
 
-    return pg
+    return split_pg
 
 
 @_time_logger

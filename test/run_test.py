@@ -12,16 +12,16 @@ import shutil
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_SAVE_XML,
     TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
@@ -183,34 +182,19 @@ S390X_BLOCKLIST = [
     "dynamo/test_misc",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
-    "inductor/test_aot_inductor_arrayref",
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
-    "test_ao_sparsity",
-    "test_cpp_extensions_open_device_registration",
     "test_jit",
-    "test_metal",
-    "test_mps",
-    "dynamo/test_torchrec",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_coordinate_descent_tuner",
-    "test_jiterator",
-    "inductor/test_cpu_cpp_wrapper",
-    "export/test_converter",
-    "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
-    "functorch/test_ops",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor",
     "inductor/test_torchinductor_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
-    "test_binary_ufuncs",
-    "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
     "inductor/test_best_config",
@@ -229,9 +213,12 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
+    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
+    # sysctl -n hw.memsize is not available
+    "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
     "test_decomp",
     # https://github.com/pytorch/pytorch/issues/146698
@@ -242,7 +229,6 @@ S390X_BLOCKLIST = [
     # some false errors
     "doctests",
     # new failures to investigate and fix
-    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
     "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
@@ -251,6 +237,9 @@ S390X_BLOCKLIST = [
     "inductor/test_config",
     "test_public_bindings",
     "test_testing",
+    # depend on z3-solver
+    "fx/test_z3_gradual_types",
+    "test_proxy_tensor",
 ]
 
 XPU_BLOCKLIST = [
@@ -262,6 +251,7 @@ XPU_BLOCKLIST = [
     "profiler/test_profiler_tree",
     "profiler/test_record_function",
     "profiler/test_torch_tidy",
+    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -272,7 +262,6 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_extension_utils",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
@@ -660,26 +649,33 @@ def run_test(
     return ret_code
 
 
-def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+def install_cpp_extensions(extensions_dir, env=os.environ):
     # Wipe the build folder, if it exists already
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
+    build_dir = os.path.join(extensions_dir, "build")
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     # Build the test cpp extensions modules
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    return_code = shell(cmd, cwd=extensions_dir, env=env)
     if return_code != 0:
         return None, return_code
 
-    install_directory = ""
-    # install directory is the one that is named site-packages
-    for root, directories, _ in os.walk(
-        os.path.join(cpp_extensions_test_dir, "install")
-    ):
-        for directory in directories:
-            if "-packages" in directory:
-                install_directory = os.path.join(root, directory)
+    # Get the site-packages directory prepared for PYTHONPATH
+    platlib_path = sysconfig.get_paths()["platlib"]
+    platlib_rel = os.path.relpath(
+        platlib_path, os.path.splitdrive(platlib_path)[0] + os.sep
+    )
+    install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
     assert install_directory, "install_directory must not be empty"
     return install_directory, 0
@@ -826,8 +822,17 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    install_cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -914,7 +919,7 @@ def _test_autoload(test_directory, options, enable=True):
 
 def run_test_with_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
@@ -1250,7 +1255,6 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
     "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
@@ -1405,11 +1409,6 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (
-            TEST_WITH_CROSSREF
-            or TEST_CONFIG == "distributed"
-            or TEST_CONFIG == "default"
-        )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
         and not IS_MACOS
@@ -1474,6 +1473,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1560,7 +1560,7 @@ def get_selected_tests(options) -> list[str]:
     if options.einops:
         selected_tests = list(
             filter(
-                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
                 selected_tests,
             )
         )
@@ -1586,6 +1586,8 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
+            "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1935,13 +1937,14 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
-            print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
-            )
-            sys.exit(1)
+    try:
+        for pkg in packages:
+            version(pkg)
+    except PackageNotFoundError:
+        print_to_stderr(
+            f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+        )
+        sys.exit(1)
 
 
 def main():

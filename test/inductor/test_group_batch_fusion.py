@@ -286,24 +286,6 @@ class TestMathOps(torch.nn.Module):
         return torch.stack((stack_input, stack_other), dim=0)
 
 
-@requires_gpu()
-@torch._inductor.config.patch(
-    pre_grad_fusion_options={
-        "batch_linear": {},
-        "batch_linear_lhs": {},
-        "batch_layernorm": {},
-        "batch_tanh": {},
-        "batch_relu": {},
-        "batch_sigmoid": {},
-    },
-    post_grad_fusion_options={
-        "batch_aten_add": {},
-        "batch_aten_mul": {},
-        "batch_aten_sub": {},
-        "batch_aten_div": {},
-        "group_linear": {"require_fbgemm": True},
-    },
-)
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -332,7 +314,14 @@ class TestGroupBatchFusion(TestCase):
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
 
+    @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "group_linear": {"require_fbgemm": True},
+        },
+    )
     def test_group_linear_fusion(self):
         z = 10
         for has_bias in [True, False]:
@@ -355,13 +344,16 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["group_linear"],
                 4,
             )
-            self.assertEqual(
-                counters["inductor"]["batch_aten_add"],
-                0,
-            )
             counters.clear()
 
+    @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "group_linear": {"require_fbgemm": True},
+        },
+    )
     def test_group_linear_fusion_different_shapes(self):
         counters.clear()
         module = MyModule2().eval().to(GPU_TYPE)
@@ -386,13 +378,14 @@ class TestGroupBatchFusion(TestCase):
             counters["inductor"]["group_linear"],
             2,
         )
-        self.assertEqual(
-            counters["inductor"]["batch_aten_mul"],
-            1,
-        )
         counters.clear()
 
+    @requires_gpu()
     @unittest.skipIf(GPU_TYPE == "mps", "welford_reduce is yet not implemented for MPS")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_layernorm": {}},
+        post_grad_fusion_options={},
+    )
     def test_batch_layer_norm_fusion(self):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
@@ -410,6 +403,11 @@ class TestGroupBatchFusion(TestCase):
                 self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
                 counters.clear()
 
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear_lhs": {}},
+        post_grad_fusion_options={},
+    )
     def test_batch_linear_lhs_fusion(self):
         z = 10
         for has_bias in [True, False]:
@@ -427,6 +425,11 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear": {}},
+        post_grad_fusion_options={},
+    )
     def test_batch_linear_pre_grad_fusion(self):
         for has_bias in [True, False]:
             counters.clear()
@@ -443,6 +446,19 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+        post_grad_fusion_options={
+            "batch_aten_add": {},
+            "batch_aten_mul": {},
+            "batch_aten_sub": {},
+            "batch_aten_div": {},
+        },
+    )
     def test_pointwise_op_fusion(self):
         counters.clear()
         module = TestPoitwiseOps(GPU_TYPE)

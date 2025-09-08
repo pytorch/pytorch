@@ -2,9 +2,6 @@
 #define C10_MACROS_MACROS_H_
 #include <cassert>
 
-#ifdef _AIX
-#include <stdlib.h>
-#endif // _AIX
 /* Main entry for c10/macros.
  *
  * In your code, include c10/macros/Macros.h directly, instead of individual
@@ -26,6 +23,10 @@
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
 #include <c10/macros/Export.h>
+
+#ifdef _AIX
+#include <stdlib.h>
+#endif // _AIX
 
 #if defined(__clang__)
 #define __ubsan_ignore_float_divide_by_zero__ \
@@ -417,7 +418,8 @@ __host__ __device__
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
-#ifdef _AIX
+#ifdef _
+  
 // In AIX we do not have __assert_fail, so declare it here.
 void
 __assert_fail(
@@ -561,3 +563,5 @@ const char* function) noexcept {
 #endif
 
 #endif // C10_MACROS_MACROS_H_
+
+#include <torch/headeronly/macros/Macros.h>

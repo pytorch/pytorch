@@ -302,7 +302,7 @@ def _make_prim(
         else:
             return _prim_impl(*args, **kwargs)
 
-    name = schema.split("(")[0]
+    name = schema.split("(", maxsplit=1)[0]
     schema = schema[len(name) :]
 
     # register non-functional ops with old custom ops API
@@ -2174,7 +2174,7 @@ def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
 _resize_doc = """
   Gives a tensor with no elements a new shape, returning the modified tensor.
 
-  The tensor's strides are contiguous and its values are unitialized.
+  The tensor's strides are contiguous and its values are uninitialized.
   """
 
 # TODO: review support arbitrary resizes

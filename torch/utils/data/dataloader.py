@@ -5,6 +5,7 @@ To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
+
 from __future__ import annotations
 
 import functools
@@ -286,39 +287,8 @@ class DataLoader(Generic[_T_co]):
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
-
-        if pin_memory and pin_memory_device:
-            warnings.warn(
-                "pin_memory_device is deprecated, the current accelerator will be used as the device,"
-                f"ignore pin_memory_device='{pin_memory_device}'."
-            )
-        if pin_memory and not torch.accelerator.is_available():
-            warn_msg = (
-                "'pin_memory' argument is set as true but no accelerator is found, "
-                "then device pinned memory won't be used."
-            )
-            warnings.warn(warn_msg)
-
-        self.pin_memory = pin_memory and torch.accelerator.is_available()
-        self.pin_memory_device = (
-            acc.type
-            if self.pin_memory
-            and (acc := torch.accelerator.current_accelerator()) is not None
-            else ""
-        )
-
-        # Currently, pin_memory would raise error on the MPS backend (see
-        # https://github.com/pytorch/pytorch/issues/86060), so forcibly
-        # disable pin_memory on MPS. Remove this restriction once pinned
-        # memory allocation for MPS is fixed.
-        if self.pin_memory_device == "mps":
-            self.pin_memory = False
-            warn_msg = (
-                "'pin_memory' argument is set as true but not supported on MPS now, "
-                "then device pinned memory won't be used."
-            )
-            warnings.warn(warn_msg)
-
+        self.pin_memory = pin_memory
+        self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
@@ -684,10 +654,43 @@ class _BaseDataLoaderIter:
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        self._pin_memory = loader.pin_memory
+
+        if loader.pin_memory and loader.pin_memory_device:
+            warnings.warn(
+                "pin_memory_device is deprecated, the current accelerator will be used as the device,"
+                f"ignore pin_memory_device='{loader.pin_memory_device}'."
+            )
+        if loader.pin_memory and not torch.accelerator.is_available():
+            warn_msg = (
+                "'pin_memory' argument is set as true but no accelerator is found, "
+                "then device pinned memory won't be used."
+            )
+            warnings.warn(warn_msg)
+
+        # Enabling pin_memory in _BaseDataLoaderIter to support identical
+        # behavior in forked implementations using _BaseDataLoaderIter.
+        self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
+
+        # Set pin memory device based on the current accelerator.
         self._pin_memory_device = (
-            None if len(loader.pin_memory_device) == 0 else loader.pin_memory_device
+            acc.type
+            if self._pin_memory
+            and (acc := torch.accelerator.current_accelerator()) is not None
+            else None
         )
+
+        # Currently, pin_memory would raise error on the MPS backend (see
+        # https://github.com/pytorch/pytorch/issues/86060), so forcibly
+        # disable pin_memory on MPS. Remove this restriction once pinned
+        # memory allocation for MPS is fixed.
+        if self._pin_memory_device == "mps":
+            self._pin_memory = False
+            warn_msg = (
+                "'pin_memory' argument is set as true but not supported on MPS now, "
+                "device pinned memory won't be used."
+            )
+            warnings.warn(warn_msg)
+
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -1173,13 +1176,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device = torch.accelerator.current_device_index()
+            current_device_id = torch.accelerator.current_device_index()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
                     self._worker_result_queue,
                     self._data_queue,
-                    current_device,
+                    current_device_id,
                     self._pin_memory_thread_done_event,
                     self._pin_memory_device,
                 ),
@@ -1206,7 +1209,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
 
         # .pid can be None only before process is spawned (not the case, so ignore)
-        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
+        _utils.signal_handling._set_worker_pids(
+            id(self),
+            tuple(w.pid for w in self._workers),  # type: ignore[misc]
+        )
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)

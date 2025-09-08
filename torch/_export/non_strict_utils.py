@@ -330,7 +330,7 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    allow_complex_guards_as_runtime_asserts=False,
+    prefer_deferred_runtime_asserts_over_guards=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -365,6 +365,7 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
+        assert fake_mode is not None
     else:
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
@@ -381,8 +382,7 @@ def make_fake_inputs(
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                     trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
@@ -852,7 +852,7 @@ def _fakify_script_objects(
     mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
@@ -983,34 +983,65 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
+                if item is None:
+                    return dim + 1, (torch.unsqueeze, [dim])
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
+                    step = item.step or 1
+                    if item.start is None and item.stop is None and step == 1:
+                        # no-op
+                        return dim + 1, (lambda t: t, [])
                     return dim + 1, (
                         torch.ops.aten.slice,
-                        [dim, item.start, item.stop, item.step or 1],
+                        [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
 
-            items = args[1] if isinstance(args[1], tuple) else (args[1],)
-            dim = 0
-            # Sequence rewrites.
-            sequence = []
-            for item in items:
-                if (r := rewrite(dim, item)) is None:
-                    return func, args, kwargs
-                dim, call_spec = r
-                sequence.append(call_spec)
+            items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-            def run():
-                # Run sequence.
-                t = args[0]
-                for _method, _args in sequence:
-                    t = _method(t, *_args)
-                return t
+            has_symint = False
+            index_ellipsis = None
+            t = args[0]
+            n_none_slices = t.ndim + 1
+            for i, item in enumerate(items):
+                if isinstance(item, torch.SymInt) or (
+                    isinstance(item, slice)
+                    and any(
+                        isinstance(s, torch.SymInt)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                ):
+                    has_symint = True
+                if item is Ellipsis:
+                    index_ellipsis = i
+                if item is not None:
+                    n_none_slices -= 1
 
-            return run, [], {}
+            # only rewrite when there are symints
+            if has_symint:
+                if index_ellipsis is not None:
+                    none_slices = [slice(None)] * n_none_slices
+                    items[index_ellipsis : index_ellipsis + 1] = none_slices
+
+                dim = 0
+                # Sequence rewrites.
+                sequence = []
+                for item in items:
+                    if (r := rewrite(dim, item)) is None:
+                        return func, args, kwargs
+                    dim, call_spec = r
+                    sequence.append(call_spec)
+
+                def run():
+                    # Run sequence.
+                    t = args[0]
+                    for _method, _args in sequence:
+                        t = _method(t, *_args)
+                    return t
+
+                return run, [], {}
 
         return func, args, kwargs
 

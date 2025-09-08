@@ -124,20 +124,31 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=10.15
+export MACOSX_DEPLOYMENT_TARGET=11.0
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
-SETUPTOOLS_PINNED_VERSION="=46.0.0"
-PYYAML_PINNED_VERSION="=5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=true
 case $desired_python in
+    3.14t)
+        echo "Using 3.14 deps"
+        NUMPY_PINNED_VERSION="==2.1.0"
+        CONDA_ENV_CREATE_FLAGS="python-freethreading"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
+    3.14)
+        echo "Using 3.14t deps"
+        NUMPY_PINNED_VERSION="==2.1.0"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
     3.13t)
         echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=68.0.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
         desired_python="3.13"
@@ -145,37 +156,23 @@ case $desired_python in
         ;;
     3.13)
         echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=68.0.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
         echo "Using 3.12 deps"
-        SETUPTOOLS_PINNED_VERSION=">=68.0.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.11)
         echo "Using 3.11 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
-        ;;
-    3.9)
-        echo "Using 3.9 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     *)
-        echo "Using default deps"
-        NUMPY_PINNED_VERSION="=1.11.3"
+        echo "Unsupported version $desired_python"
+        exit 1
         ;;
 esac
 
@@ -184,16 +181,17 @@ tmp_env_name="wheel_py$python_nodot"
 conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
 source activate "$tmp_env_name"
 
-pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
+PINNED_PACKAGES=(
+    "numpy${NUMPY_PINNED_VERSION}"
+)
+retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements-build.txt"
+pip install requests ninja typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
-if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
-    export CMAKE_OSX_ARCHITECTURES=arm64
-fi
 export USE_MKLDNN=OFF
 export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
@@ -201,16 +199,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 CMAKE_FRESH=1 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
-    python setup.py bdist_wheel -d "$whl_tmp_dir"
-fi
+python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name ${mac_version}
 
 echo "Finished setup.py bdist_wheel at $(date)"
 

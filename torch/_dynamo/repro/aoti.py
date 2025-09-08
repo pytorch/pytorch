@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Utilities for debugging and reproducing issues in Ahead of Time with Inductor (AOTI) compilation.
 
@@ -26,8 +24,9 @@ import re
 import shutil
 import sys
 import textwrap
+from collections.abc import Sequence
 from importlib import import_module
-from typing import Any, Optional, Union
+from typing import Any, IO, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -54,7 +53,7 @@ use_buck = inductor_config.is_fbcode()
 
 
 class AOTIMinifierError(Exception):
-    def __init__(self, original_exception):
+    def __init__(self, original_exception: Union[str, Exception]) -> None:
         additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
         full_message = f"{additional_message}: {str(original_exception)}"
         super().__init__(full_message)
@@ -66,7 +65,7 @@ def dump_to_minify(
     compiler_name: str,
     command: str = "minify",
     options: Optional[dict[str, Any]] = None,
-):
+) -> None:
     """
     If command is "minify":
         Dump exported_program to `debug_dir/minifier/minifier_launcher.py`, with minify command.
@@ -111,8 +110,8 @@ def dump_to_minify(
             log.warning("No write permissions for %s", file_name)
 
 
-def get_module_string(gm):
-    def _convert_to_comment(s_):
+def get_module_string(gm: torch.fx.GraphModule) -> str:
+    def _convert_to_comment(s_: str) -> str:
         s = s_.split("\n")
         if len(s) == 1:
             return "# " + s_
@@ -132,21 +131,21 @@ def get_module_string(gm):
 
 
 def save_graph_repro_ep(
-    fd,
-    compiler_name,
+    fd: IO[Any],
+    compiler_name: str,
     *,
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
     args: Optional[tuple[Any]] = None,
     config_patches: Optional[dict[str, str]] = None,
-    stable_output=False,
-    save_dir=None,
-    command="run",
-    accuracy=None,
-    check_str=None,
-    module_in_comment=False,
-    strict=False,
-):
+    stable_output: bool = False,
+    save_dir: Optional[str] = None,
+    command: str = "run",
+    accuracy: Optional[Union[str, bool]] = None,
+    check_str: Optional[str] = None,
+    module_in_comment: bool = False,
+    strict: bool = False,
+) -> None:
     # Save graph for reproducing the error.
     # Either exported_program or gm will be saved, depending on which one is defined.
     # Only one of exported_program and gm should be defined.
@@ -166,7 +165,7 @@ def save_graph_repro_ep(
         gm = exported_program.module()
 
     # save a graph preview using gm
-    module_string = get_module_string(gm)
+    module_string = get_module_string(gm)  # type: ignore[arg-type]
     fd.write(module_string)
 
     # save a graph repro using exported_program
@@ -190,14 +189,14 @@ def save_graph_repro_ep(
 
 
 def dump_compiler_graph_state(
-    gm,
-    args,
-    compiler_name,
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: str,
     *,
-    config_patches=None,
-    accuracy=None,
-    strict=False,
-):
+    config_patches: Optional[dict[str, str]] = None,
+    accuracy: Optional[Union[str, bool]] = None,
+    strict: bool = False,
+) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -234,12 +233,12 @@ def dump_compiler_graph_state(
 
 
 def generate_compiler_repro_exported_program(
-    exported_program,
+    exported_program: ExportedProgram,
     *,
     options: Optional[dict[str, str]] = None,
-    stable_output=False,
-    save_dir=None,
-):
+    stable_output: bool = False,
+    save_dir: Optional[str] = None,
+) -> str:
     model_str = textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
@@ -261,8 +260,10 @@ isolate_fails_code_str = None
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
-
-    ep_path = os.path.join(save_dir, "exported_program.pt2")
+    if save_dir:
+        ep_path = os.path.join(save_dir, "exported_program.pt2")
+    else:
+        ep_path = "exported_program.pt2"
     torch.export.save(exported_program, ep_path)
 
     model_str += f"exported_program = torch.export.load('{ep_path}')\n"
@@ -271,7 +272,7 @@ isolate_fails_code_str = None
     return model_str
 
 
-def repro_load_args(load_args, save_dir):
+def repro_load_args(load_args: Any, save_dir: Optional[str]) -> tuple[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -297,19 +298,29 @@ def repro_load_args(load_args, save_dir):
     return tuple(args)
 
 
-def repro_common(options, exported_program):
+def repro_common(
+    options: Any, exported_program: ExportedProgram
+) -> tuple[torch.fx.GraphModule, Any, Any]:
     torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module()
     args, kwargs = exported_program.example_inputs
-    return mod, args, kwargs
+    return mod, args, kwargs  # type: ignore[return-value]
 
 
-def repro_get_args(options, exported_program, config_patches):
+def repro_get_args(
+    options: Any,
+    exported_program: ExportedProgram,
+    config_patches: Optional[dict[str, Any]],
+) -> tuple[torch.fx.GraphModule, Any, Any]:
     mod, args, kwargs = repro_common(options, exported_program)
     return mod, args, kwargs
 
 
-def repro_run(options, exported_program, config_patches):
+def repro_run(
+    options: Any,
+    exported_program: ExportedProgram,
+    config_patches: Optional[dict[str, Any]],
+) -> None:
     from torch._inductor import _aoti_compile_and_package_inner
 
     gm, args, kwargs = repro_common(options, exported_program)
@@ -337,7 +348,10 @@ def repro_run(options, exported_program, config_patches):
 
 
 def export_for_aoti_minifier(
-    gm, tuple_inputs, strict=False, skip_export_error=True
+    gm: torch.nn.Module,
+    tuple_inputs: tuple[Any],
+    strict: bool = False,
+    skip_export_error: bool = True,
 ) -> Optional[torch.nn.Module]:
     # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
     # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
@@ -372,7 +386,11 @@ def export_for_aoti_minifier(
     return None
 
 
-def repro_minify(options, exported_program, config_patches):
+def repro_minify(
+    options: Any,
+    exported_program: ExportedProgram,
+    config_patches: Optional[dict[str, Any]],
+) -> None:
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
     from torch._inductor.compile_fx import _aoti_flatten_inputs
@@ -397,7 +415,11 @@ def repro_minify(options, exported_program, config_patches):
             need_sync = True
             break
 
-    def module_fails(gm, flat_example_inputs, check_str=None):
+    def module_fails(
+        gm: torch.fx.GraphModule,
+        flat_example_inputs: list[Any],
+        check_str: Optional[str] = None,
+    ) -> bool:
         # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
         gm = export_for_aoti_minifier(
@@ -447,18 +469,18 @@ def repro_minify(options, exported_program, config_patches):
 
 
 def run_repro(
-    exported_program,
+    exported_program: ExportedProgram,
     *,
     config_patches: Optional[dict[str, str]] = None,
-    command="run",
+    command: str = "run",
     accuracy: Union[bool, str] = "",
-    save_dir=None,
-    tracing_mode=None,
-    check_str=None,
-    minifier_export_mode="python",
-    skip_export_error=True,
-    **more_kwargs,
-):
+    save_dir: Optional[str] = None,
+    tracing_mode: Optional[str] = None,
+    check_str: Optional[str] = None,
+    minifier_export_mode: str = "python",
+    skip_export_error: bool = True,
+    **more_kwargs: Any,
+) -> Any:
     for k in more_kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
@@ -486,7 +508,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser: argparse.ArgumentParser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

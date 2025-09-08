@@ -2351,7 +2351,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    # The test is flaky on ROCm and has been open and close multiple times
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     @skipIfRocm
     def test_circular_dependencies(self) -> None:
@@ -2369,6 +2369,7 @@ class TestImports(TestCase):
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
+                           "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            ]

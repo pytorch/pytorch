@@ -16,6 +16,10 @@ struct ExtendedAllocatorConfig {
     return instance().device_specific_option_;
   }
 
+  static const std::unordered_set<std::string>& getKeys() {
+    return keys_;
+  }
+
   void parseArgs(const std::string& env) {
     // Parse device-specific options from the environment variable
     ConfigTokenizer tokenizer(env);
@@ -37,11 +41,11 @@ struct ExtendedAllocatorConfig {
  private:
   // Device-specific option, e.g., memory limit for a specific device.
   std::atomic<size_t> device_specific_option_{0};
+  inline static std::unordered_set<std::string> keys_{
+      "device_specific_option_mb"};
 };
 
-REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
-  ExtendedAllocatorConfig::instance().parseArgs(env);
-})
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(ExtendedAllocatorConfig)
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =
@@ -120,4 +124,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AcceleratorAllocatorConfig::pinned_use_background_threads(), false);
+
+  env = "foo:123,bar:456";
+  ASSERT_THROW(c10::CachingAllocator::setAllocatorSettings(env), c10::Error);
 }

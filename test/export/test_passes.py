@@ -1303,6 +1303,49 @@ default](args = (%x, %b_state), kwargs = {})
             )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_to(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.ops.aten.to.device(x, device="cuda:0", dtype=torch.float32)
+                return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,  # noqa: B950
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_submod(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    x = x.to(device="cuda:0")
+                    return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, "cuda")
+        ep.graph_module.submod_1.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.submod_1.code.strip("\n"),
+            """\
+def forward(self, arg0_1):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,  # noqa: B950
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass(self):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
@@ -1337,6 +1380,38 @@ default](args = (%x, %b_state), kwargs = {})
         test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_example_inputs(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x, y, z):
+                return self.linear(x) + y + z
+
+        # Create model with example inputs on CPU
+        mod = Model()
+        example_args = (torch.rand(4, 4), torch.rand(4, 4))
+        example_kwargs = {"z": torch.tensor([1.0, 2.0, 3.0, 4.0])}
+
+        # Export with example inputs
+        ep = export(mod, example_args, example_kwargs)
+
+        # Verify initial state - all tensors should be on CPU
+        self.assertEqual(ep.example_inputs[0][0].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[0][1].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
+
+        # Move to CUDA
+        location = torch.device("cuda:0")
+        ep_cuda = move_to_device_pass(ep, location=location)
+
+        # Verify example_inputs moved to CUDA
+        self.assertEqual(ep_cuda.example_inputs[0][0].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[0][1].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[1]["z"].device, torch.device("cuda:0"))
 
     def test_constant_folding_pass(self):
         from torch.ao.quantization.observer import MappingType, PerGroup, PerToken

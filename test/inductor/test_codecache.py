@@ -29,9 +29,11 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
+    CustomPartitionerFn,
     get_hash_for_files,
 )
 from torch._inductor.graph import GraphLowering
@@ -45,7 +47,11 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    TEST_MULTIGPU,
+    with_tf32_off,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -55,7 +61,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
@@ -63,7 +68,13 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     requires_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
+
+
+try:
+    from . import custom_inductor_config
+except ImportError:
+    import custom_inductor_config
 
 
 if HAS_TRITON:
@@ -862,7 +873,7 @@ class TestFxGraphCache(TestCase):
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     def test_no_arguments_tensor_device_guards(self):
         """
         Usually, when there are example inputs, the device index of the inputs
@@ -892,7 +903,7 @@ class TestFxGraphCache(TestCase):
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     def test_tensor_device_guards_cpu_tensor(self):
         """
         CPU tensor arguments should still cache hit
@@ -996,9 +1007,10 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @with_tf32_off
     def test_flex_attention_caching(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
@@ -1453,7 +1465,7 @@ class TestFxGraphCache(TestCase):
         self.assertNotEqual(a, b)
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
-    @requires_cuda
+    @requires_cuda_and_triton
     @unittest.expectedFailure  # TODO: pass in optimize_mem at runtime
     def test_async_compile_cache(self):
         class SimpleFunction(torch.autograd.Function):
@@ -1796,7 +1808,9 @@ class TestStandaloneCompile(TestCase):
         assert not kwargs
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = os.path.join(temp_dir, "compiled_artifact.bin")
+            path = normalize_path_separator(
+                os.path.join(temp_dir, "compiled_artifact.bin")
+            )
 
             with fresh_cache():
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
@@ -1850,6 +1864,68 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(4)
         (result,) = compiled_artifact(4, x)
         self.assertEqual(result, x * 4)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
+    def test_split_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, a0, a1, b0, b1, c0, c1):
+                x = x + (a0**2) + (a1 / 2)
+                x = x + (b0**2) + (b1 / 2)
+                x = x + (c0**2) + (c1 / 2)
+                return x
+
+        seen = 0
+        splits = [4, 8]
+
+        def split(n):
+            nonlocal seen
+            if seen < splits[0]:
+                seen += 1
+                return 0
+            elif seen < splits[1]:
+                seen += 1
+                return 1
+            else:
+                seen += 1
+                return 2
+
+        def t():
+            return torch.randn([])
+
+        x = t()
+        a0 = t()
+        a1 = t()
+        b0 = t()
+        b1 = t()
+        c0 = t()
+        c1 = t()
+
+        example_inputs = (x, a0, a1, b0, b1, c0, c1)
+        gm, inps, _ = self.capture(Mod())(*example_inputs)
+        split = torch.fx.passes.split_module.split_module(gm, gm, split)
+
+        # Each of the split graphs only has one output.
+        ca0 = torch._inductor.standalone_compile(split.submod_0, (a0, x, a1))
+        ca1 = torch._inductor.standalone_compile(split.submod_1, (b0, x, b1))
+        ca2 = torch._inductor.standalone_compile(split.submod_2, (c0, x, c1))
+
+        y = ca0(a0, x, a1)
+        y = ca1(b0, y, b1)
+        y = ca2(c0, y, c1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        # TODO: split_module causes ca1 and ca2 to have different type annotations
+        # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        expected = Mod()(*example_inputs)
+        self.assertEqual(y, expected)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1984,6 +2060,73 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         result = torch.compile(f, backend=backend)(static_x)
         self.assertEqual(result, static_x * 3)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_handling(self):
+        """
+        Test that properly-registered custom hooks allow caching.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return "uuid"
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
+        compiled_fn = torch.compile(fn)
+
+        # The cache should be bypassed if a custom hook doesn't use CustomGraphPass.
+        with config.patch({"post_grad_custom_pre_pass": lambda x: x}):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # With proper usage, we expect normal caching.
+        custom_pass = TestCustomGraphPass()
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_pass,
+                "post_grad_custom_post_pass": custom_pass,
+                "joint_custom_pre_pass": custom_pass,
+                "joint_custom_post_pass": custom_pass,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+
+class TestCustomPartitionerFn(CustomPartitionerFn):
+    def __init__(self):
+        self._uuid = None
+
+    def __call__(
+        self, gm, joint_inputs, **kwargs
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return gm, gm  # Dummy implementation
+
+    def uuid(self) -> Optional[Union[bytes, str]]:
+        return self._uuid
 
 
 class TestFxGraphCacheHashing(TestCase):
@@ -2347,6 +2490,79 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details3),
             )
 
+    def test_hash_custom_backend_config(self):
+        """
+        Test cache correctness when a custom inductor codegen config
+        is installed
+        """
+        with patch_inductor_backend(
+            "cpu", custom_backend_config=custom_inductor_config
+        ):
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+
+            custom_inductor_config.enable_optimisation = True
+            details3 = FxGraphHashDetails(None, [], {}, [])
+            self.assertNotEqual(pickler.dumps(details2), pickler.dumps(details3))
+
+            torch._dynamo.reset()
+            counters.clear()
+
+            custom_inductor_config.enable_optimisation = False
+            x = torch.zeros(32)
+            y = torch.zeros(32)
+            compiled_fn = torch.compile(torch.add)
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            torch._dynamo.reset()
+            counters.clear()
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            torch._dynamo.reset()
+            counters.clear()
+
+            # Changing the custom config should trigger a recompilation
+            custom_inductor_config.enable_optimisation = True
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    def test_hash_custom_partitioner_fn(self):
+        """
+        Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
+        """
+        custom_partitioner_fn = TestCustomPartitionerFn()
+        with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
+            custom_partitioner_fn._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_partitioner_fn._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            self.assertEqual(details1._custom_partitioner_fn, "1")
+            self.assertEqual(details2._custom_partitioner_fn, "1")
+            self.assertEqual(details3._custom_partitioner_fn, "2")
+
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+
+            self.assertEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
+
     def test_bypass_unsupported(self):
         """
         Test _reduce_unsupported
@@ -2403,7 +2619,7 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
             ["abc.cu", "def.cu"], "output", "so"
@@ -2448,7 +2664,7 @@ class TestAutotuneCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @unittest.skipIf(
         TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
@@ -2499,7 +2715,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2540,7 +2756,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2601,7 +2817,7 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2630,8 +2846,8 @@ class TestAutotuneCache(TestCase):
         def fn(x, y):
             return (x + y).relu()
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
 
         with config.patch(
             {
@@ -2665,7 +2881,7 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -2704,7 +2920,7 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -2779,7 +2995,7 @@ class TestUtils(TestCase):
 
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
-    @requires_cuda
+    @requires_cuda_and_triton
     @config.patch(
         {
             "coordinate_descent_tuning": True,
