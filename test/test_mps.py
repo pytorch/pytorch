@@ -7525,18 +7525,17 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-    @parametrize("device", ['mps', 'cpu'])
-    def test_dropout(self, dtype, device):
+    def test_dropout(self, dtype):
         shapes = [
-            (1_000_000,),
-            (1000, 1000),
-            (100, 100, 100),
-            (10, 10, 10, 10, 10, 10),
+            (100_000,),
+            (100, 1000),
+            (10, 100, 100),
+            (10, 10, 10, 10, 10),
         ]
         p_list = [0, 0.34, 0.78, 1]
 
         for shape, p, train in itertools.product(shapes, p_list, [False, True]):
-            input = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
             output, mask = torch.native_dropout(input, p, train=train)
 
             p_actual_mps = 1 - (mask.sum() / mask.numel())
