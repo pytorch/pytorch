@@ -604,6 +604,7 @@ class ContinueExecutionCache:
                 if i1 is target
             )
             assert target.opcode == new_target.opcode
+            assert new_target.offset is not None
             new_offset = new_target.offset
 
         transform_code_object(code, find_new_offset)
