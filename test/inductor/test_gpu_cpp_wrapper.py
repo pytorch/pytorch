@@ -63,6 +63,12 @@ class TestGpuWrapper(InductorTestCase):
         comp()
 
     def test_non_tensor_args_wrapped_on_cpu(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        if GPU_TYPE != "cuda":
+            self.skipTest("Test only runs on CUDA")
+
         def test_fn(x, s):
             return (x + s).sum()
 
