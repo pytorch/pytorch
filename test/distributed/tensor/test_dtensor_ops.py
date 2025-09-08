@@ -536,7 +536,7 @@ class TestDTensorOps(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
     def test_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, dtype, op)
+        self.run_opinfo_test(dtype, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
         flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
