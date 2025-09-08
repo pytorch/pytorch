@@ -358,3 +358,10 @@ def get_default_numa_options():
 
 def log_triton_builds(fail: Optional[str]):
     pass
+
+
+def find_compile_subproc_binary() -> Optional[str]:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None
