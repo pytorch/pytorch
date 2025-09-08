@@ -629,9 +629,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
+        """
+        Test dispatch-and-combine over World group
+        """
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        # Test on World
         self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
 
     @skipIfRocm
@@ -639,6 +641,9 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     # failure
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
+        """
+        Test dispatch-and-combine over concurrent subgroups
+        """
         torch.manual_seed(42 + self.rank)
         self._init_device()
         symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
