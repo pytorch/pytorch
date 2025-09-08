@@ -78,6 +78,16 @@ int device_count_impl(bool fail_if_no_driver) {
           "would like to use GPUs, turn off ASAN.");
       break;
 #endif // C10_ASAN_ENABLED
+#if _WIN32 && CUDA_VERSION >= 13000
+    // Weird workaround for CUDA-13.0 error handling change
+    // See https://github.com/pytorch/pytorch/issues/162333#issuecomment-3267929585
+    case cudaErrorNotSupported:
+        if (!fail_if_no_driver) { 
+          TORCH_WARN("cudaGetDeviceCount() returned cudaErrorNotSupported, likely running on CPU machine");
+          count = 0;
+          break;
+        }
+#endif
     default:
       TORCH_CHECK(
           false,
