@@ -1427,23 +1427,13 @@ class AOTInductorModelCache:
             inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
-            # We can't support this in non-strict
-            if hasattr(model_clone, "name") and model.name == "levit_128":
-                ep = torch.export.export(
-                    model_clone,
-                    example_args,
-                    example_kwargs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=True,
-                )
-            else:
-                ep = torch.export.export(
-                    model_clone,
-                    example_args,
-                    example_kwargs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=True,
-                )
+            ep = torch.export.export(
+                model_clone,
+                example_args,
+                example_kwargs,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            )
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
@@ -2327,7 +2317,6 @@ class BenchmarkRunner:
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast(**self.autocast_arg):
-                        model_copy.name = name
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )

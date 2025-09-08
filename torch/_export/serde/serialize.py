@@ -42,6 +42,7 @@ from .schema import (  # type: ignore[attr-defined]
     Argument,
     ArgumentKind,
     BufferMutationSpec,
+    ComplexValue,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -92,14 +93,6 @@ from .schema import (  # type: ignore[attr-defined]
     UserOutputSpec,
 )
 from .union import _Union
-
-
-if has_triton():
-    from triton.runtime.autotuner import Autotuner
-else:
-
-    class Autotuner:  # type: ignore[no-redef]
-        pass
 
 
 __all__ = [
@@ -684,6 +677,7 @@ class GraphModuleSerializer(metaclass=Final):
                 is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
             ):
                 assert has_triton(), "triton required to serialize triton kernels"
+                from triton.runtime.autotuner import Autotuner
 
                 meta_val = node.meta["val"]
                 assert isinstance(meta_val, dict)
@@ -988,6 +982,15 @@ class GraphModuleSerializer(metaclass=Final):
                     return Argument.create(
                         as_graph=GraphArgument(name=arg.target, graph=graph)
                     )
+                elif type(attr).__name__ == "LoweredBackendModule":
+                    # Special handling for executorch_call_delegate HOP
+                    # It's first argument is a LoweredBackendModule, for which we
+                    # serialize name and backend id of the lowered module
+                    module_name = getattr(attr, "module_name", None)
+                    backend_id = getattr(attr, "backend_id", None)
+                    assert module_name is not None, "module_name should not be None"
+                    assert backend_id is not None, "backend_id should not be None"
+                    return Argument.create(as_string=f"{module_name}-{backend_id}")
                 else:
                     raise SerializeError(
                         f"Unsupported getattr attribute {arg.target} with type: {type(attr)}"
@@ -1055,6 +1058,10 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(as_int=arg)
         elif type(arg) is float:
             return Argument.create(as_float=arg)
+        elif type(arg) is complex:
+            return Argument.create(
+                as_complex=ComplexValue(real=arg.real, imag=arg.imag)
+            )
         elif arg is None:
             return Argument.create(as_none=True)
         elif isinstance(arg, (list, tuple)):
@@ -2588,6 +2595,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return inp.as_bool
         elif typ_ == "as_string":
             return inp.as_string
+        elif typ_ == "as_complex":
+            return complex(inp.as_complex.real, inp.as_complex.imag)
         elif typ_ == "as_sym_int":
             return self.deserialize_sym_argument(inp.as_sym_int)
         elif typ_ == "as_sym_float":
@@ -3186,6 +3195,8 @@ def _canonicalize_graph(
         elif a.type == "as_string":
             return None
         elif a.type == "as_strings":
+            return None
+        elif a.type == "as_complex":
             return None
         elif a.type == "as_sym_int":
             return a.as_sym_int
