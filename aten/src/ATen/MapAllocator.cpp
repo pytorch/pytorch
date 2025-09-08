@@ -293,7 +293,7 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
             TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", c10::utils::str_error(errno), " (", errno, ")");
           }
 
-#if !defined(__APPLE__) && !defined(__ANDROID__)
+#ifdef HAVE_POSIX_FALLOCATE
           if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
             for (;;) {
               if (posix_fallocate(fd, 0, static_cast<off_t>(size)) == 0) {
