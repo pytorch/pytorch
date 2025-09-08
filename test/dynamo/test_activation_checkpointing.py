@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -19,6 +20,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -28,9 +30,54 @@ from torch.utils.checkpoint import (
 )
 
 
+if HAS_CUDA_AND_TRITON:
+    import triton
+    from triton import language as tl
+
+    @triton.jit
+    def add_one_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        output = x + 1
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
+
+
+class EagerRecordGraphAndInputs:
+    def __init__(self) -> None:
+        self.graphs = []
+        self.example_inputs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        self.example_inputs.append(example_inputs)
+        return gm
+
+
+def strip_comment(code: str) -> str:
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code: str) -> str:
+    return "\n".join([line.rstrip() for line in code.split("\n")])
+
+
+def normalize_gm(gm_str: str) -> str:
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
 
 
 def checkpoint_wrapper(fn):
@@ -246,7 +293,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=fullgraph)(*runtime_args)
+                    return torch.compile(gm, fullgraph=False)(*runtime_args)
 
                 return runtime_wrapper
 
@@ -751,6 +798,73 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         def gn(x, y):
             return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=selective_checkpointing_context_fn,
+            )
+
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 6 here
+            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+            # if we didn't enable selective checkpointing.
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_selective_checkpoint_triton_kernel(self, device):
+        # Copy of the above test, but make sure that having a triton kernel in the
+        # region does not error.
+        def add_one(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_one_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+            return out
+
+        class AddOne(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return add_one(x)
+
+            @staticmethod
+            def backward(ctx, x):
+                return x
+
+        def selective_checkpointing_context_fn():
+            no_recompute_list = [
+                torch.ops.aten.mm.default,
+            ]
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(no_recompute_list=no_recompute_list)
+            )
+
+        def gn(x, y):
+            return (
+                torch.sigmoid(torch.matmul(torch.matmul(AddOne.apply(x.sin()), y), y))
+                * y
+            )
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
@@ -1350,6 +1464,99 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
+    def test_branch_on_is_checkpoint_enabled(self):
+        from torch.utils.checkpoint import is_checkpoint_enabled
+
+        def test_fn(x):
+            if is_checkpoint_enabled():
+                return x.sin().sin()
+            else:
+                return x.cos(), x.cos()
+
+        backend = EagerRecordGraphAndInputs()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            a, b = torch.utils.checkpoint.checkpoint(test_fn, x, use_reentrant=False)
+            c = a + b
+            return c.exp()
+
+        a = torch.rand((2, 2), requires_grad=True)
+        out = fn(a)
+        out.sum().backward()
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.example_inputs), 1)
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 2]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False, determinism_check = 'default', debug = False, early_stop = True);  wrap_body_0 = l_x_ = None
+        getitem: "f32[2, 2]" = tag_activation_checkpoint[0];  tag_activation_checkpoint = None
+
+        a: "f32[2]" = getitem[0]
+        b: "f32[2]" = getitem[1];  getitem = None
+
+        c: "f32[2]" = a + b;  a = b = None
+
+        exp: "f32[2]" = c.exp();  c = None
+        return (exp,)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[2, 2]"):
+            sin: "f32[2, 2]" = l_x_.sin();  l_x_ = None
+            sin_1: "f32[2, 2]" = sin.sin();  sin = None
+            return (sin_1,)
+""",  # noqa: B950
+        )
+
+        backend = EagerRecordGraphAndInputs()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_no_ac(x):
+            a, b = test_fn(x)
+            c = a + b
+            return c.exp()
+
+        # Next: actually inspect the graph to see if there are sin
+        a = torch.rand((2, 2), requires_grad=True)
+        out = fn_no_ac(a)
+        out.sum().backward()
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 4)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.example_inputs), 1)
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 2]"):
+        l_x_ = L_x_
+
+        a: "f32[2, 2]" = l_x_.cos()
+        b: "f32[2, 2]" = l_x_.cos();  l_x_ = None
+
+        c: "f32[2, 2]" = a + b;  a = b = None
+
+        exp: "f32[2, 2]" = c.exp();  c = None
+        return (exp,)
+""",
+        )
+
     @requires_cuda_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
@@ -1428,6 +1635,76 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 op=op2,
             )
         )
+
+    @requires_cuda_and_triton
+    def test_eager_backend(self, device):
+        # Test that AC HOP when run with eager backend has parity with eager AC
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            act_mem = (cur_mem - start_mem) / (1024 * 1024)
+            out.backward()
+            return act_mem
+
+        def get_bw_flops(f):
+            # Normalized so that a 512 square matmul returns 1
+            f().backward()
+            out = f()
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
+
+        x = torch.randn(512, 512, requires_grad=True, device=device)
+        y = torch.randn(512, 512, requires_grad=True, device=device)
+
+        def gn(x, y):
+            return torch.mm(x.cos(), y).sin().sum()
+
+        def fn_ac(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn_sac(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn,
+            )
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=context_fn
+            )
+
+        # Full AC
+        act_mem_ac_nocompile = get_act_mem(lambda: fn_ac(x, y))
+        bw_flops_ac_nocompile = get_bw_flops(lambda: fn_ac(x, y))
+
+        compiled_fn_ac = torch.compile(fn_ac, backend="eager", fullgraph=True)
+        act_mem_ac_compile_eager = get_act_mem(lambda: compiled_fn_ac(x, y))
+        bw_flops_ac_compile_eager = get_bw_flops(lambda: compiled_fn_ac(x, y))
+
+        self.assertEqual(act_mem_ac_nocompile, act_mem_ac_compile_eager)
+        self.assertEqual(bw_flops_ac_nocompile, bw_flops_ac_compile_eager)
+
+        # SAC
+        act_mem_sac_nocompile = get_act_mem(lambda: fn_sac(x, y))
+        bw_flops_sac_nocompile = get_bw_flops(lambda: fn_sac(x, y))
+
+        compiled_fn_sac = torch.compile(fn_sac, backend="eager", fullgraph=True)
+        act_mem_sac_compile_eager = get_act_mem(lambda: compiled_fn_sac(x, y))
+        bw_flops_sac_compile_eager = get_bw_flops(lambda: compiled_fn_sac(x, y))
+
+        # Verify parity between compiled and non-compiled SAC
+        self.assertEqual(act_mem_sac_nocompile, act_mem_sac_compile_eager)
+        self.assertEqual(bw_flops_sac_nocompile, bw_flops_sac_compile_eager)
 
     @requires_distributed()
     @requires_cuda_and_triton
