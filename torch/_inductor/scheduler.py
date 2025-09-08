@@ -969,7 +969,11 @@ def _prune_redundant_deps(
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
             op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
+            is_redundant = name_to_dep_count[
+                name_to_fused_node[op_name].get_name()
+            ] > 0 and node.scheduler.fusable_weak_dep(
+                dep, name_to_fused_node[op_name], node
+            )
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
             # B gets fused with C, then any time BC is fused, the weakdep will reappear
@@ -3339,6 +3343,7 @@ class Scheduler:
             - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
+        self.prune_redundant_deps(nodes)
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -3481,7 +3486,6 @@ class Scheduler:
             num_nodes_orig,
             len(self.nodes),
         )
-        self.prune_redundant_deps(self.nodes)
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
@@ -4084,26 +4088,6 @@ class Scheduler:
                 why("intermediate nodes between node1 & node2")
                 return False
 
-        # handle write after read dependency
-        for wd in node2.read_writes.writes:
-            if not isinstance(wd, MemoryDep):
-                continue
-            wds = [wd]
-            for o in node2.get_outputs():
-                if o.node.name != wd.name:
-                    continue
-                for m in o.get_mutations():
-                    from dataclasses import replace
-                    wds.append(replace(wd, name=m))
-            for wd_m in wds:
-                for rd in node1.read_writes.reads:
-                    if not isinstance(rd, MemoryDep):
-                        continue
-                    if not self.fusable_read_and_write(rd, wd_m):
-                        why("write after read cannot be satisfied")
-                        return False
-        # for out in node2.outputs:
-        #     if out.get_mutations() in node1.read_w
         return True
 
     def fusable_weak_dep(
