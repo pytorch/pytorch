@@ -1749,22 +1749,17 @@ at time_step %s when running action %s",
 class _PipelineContext:
     def __init__(
         self,
-        stages: list[_PipelineStageBase],
-        mb_indices: list[int],
+        schedule_ref: _PipelineSchedule,
         arg_mbs: Optional[list[tuple]] = None,
         kwarg_mbs: Optional[list[dict]] = None,
         target_mbs: Optional[list] = None,
         losses: Optional[list] = None,
-        **schedule_kwargs,
     ):
-        self.stages = stages
-        self.mb_indices = mb_indices
+        self.schedule_ref = schedule_ref
         self.arg_mbs = arg_mbs
         self.kwarg_mbs = kwarg_mbs
         self.target_mbs = target_mbs
         self.losses = losses
-        # TODO: these kwargs should be attributes of the Schedule
-        self.schedule_kwargs = schedule_kwargs
 
 
 class _CustomFunctionProtocol(Protocol):
@@ -1783,6 +1778,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        self.backward_counter: Counter[int] = Counter()
+
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
 
     def register_custom_function(
         self,
@@ -1931,10 +1932,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
         )
 
-        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-        fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-
         # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
 
@@ -1991,20 +1988,22 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         assert (
                             stage_idx,
                             mb_index,
-                        ) not in fwd_recv_ops, (
+                        ) not in self.fwd_recv_ops, (
                             "Recv twice for {stage_idx=} {mb_index=} without executing forward"
                         )
-                        fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        self.fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_fwd_recv_ops(mb_index)
                         )
                     elif comp_type == RECV_B:
                         assert (
                             stage_idx,
                             mb_index,
-                        ) not in bwd_recv_ops, (
+                        ) not in self.bwd_recv_ops, (
                             "Recv twice for {stage_idx=} {mb_index=} without executing backward"
                         )
-                        bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        if self.rank == 3:
+                            pass
+                        self.bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_bwd_recv_ops(mb_index)
                         )
                     elif comp_type == UNSHARD:
@@ -2035,10 +2034,12 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in fwd_recv_ops, (
+                            ) in self.fwd_recv_ops, (
                                 f"Computing {action=} before receiving input"
                             )
-                            _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.fwd_recv_ops.pop((stage_idx, mb_index))
+                            )
 
                         output = stage.forward_one_chunk(
                             mb_index,
@@ -2066,14 +2067,16 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in bwd_recv_ops, (
+                            ) in self.bwd_recv_ops, (
                                 f"Attempted to run compute {action=} before receiving input"
                             )
-                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.bwd_recv_ops.pop((stage_idx, mb_index))
+                            )
                         loss = self._maybe_get_loss(stage, mb_index)
-                        backward_counter[stage_idx] += 1
+                        self.backward_counter[stage_idx] += 1
                         last_backward = (
-                            backward_counter[stage_idx] == self._n_microbatches
+                            self.backward_counter[stage_idx] == self._n_microbatches
                         )
                         grad_scale_factor = (
                             self._n_microbatches if self.scale_grads else 1
@@ -2100,10 +2103,12 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                             assert (
                                 stage_idx,
                                 mb_index,
-                            ) in bwd_recv_ops, (
+                            ) in self.bwd_recv_ops, (
                                 f"Attempted to run compute {action=} before receiving input"
                             )
-                            _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
+                            _wait_batch_p2p(
+                                self.bwd_recv_ops.pop((stage_idx, mb_index))
+                            )
                         loss = self._maybe_get_loss(stage, mb_index)
                         stage.backward_one_chunk(
                             mb_index,
@@ -2120,10 +2125,10 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     elif comp_type == BACKWARD_WEIGHT:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
-                        backward_counter[stage_idx] += 1
+                        self.backward_counter[stage_idx] += 1
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_idx]
+                            last_backward=self.backward_counter[stage_idx]
                             == self._n_microbatches,
                         )
                     else:
@@ -2144,8 +2149,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 )
                 raise e
 
-        # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             if action.computation_type in self._comp_type_to_function_map:
                 stages = []
@@ -2160,13 +2163,11 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     assert action.microbatch_index is not None
                     mb_indices.append(action.microbatch_index)
                 ctx = _PipelineContext(
-                    stages,
-                    mb_indices,
+                    self,
                     arg_mbs,
                     kwarg_mbs,
                     target_mbs,
                     losses,
-                    fwd_recv_ops=fwd_recv_ops,
                 )
                 self._comp_type_to_function_map[action.computation_type](action, ctx)
             elif action.computation_type == OVERLAP_F_B:
