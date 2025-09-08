@@ -7805,6 +7805,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s77, 3]";
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -7953,6 +7955,8 @@ class GraphModule(torch.nn.Module):
         t: "f32[2, 3]";
 
         t, = fx_pytree.tree_flatten_spec(([t], {}), self._in_spec)
+        _guards_fn = self._guards_fn(t);  _guards_fn = None
+
         sum_1: "f32[]" = torch.ops.aten.sum.default(t)
         _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(sum_1, dtype = torch.float32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
         to: "i64[]" = torch.ops.aten.to.dtype(sum_1, torch.int64);  sum_1 = None
@@ -8101,6 +8105,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s77, 3]";
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s77, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8520,6 +8526,8 @@ class GraphModule(torch.nn.Module):
         a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
 
         a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+        _guards_fn = self._guards_fn(a, b1, b2, c);  _guards_fn = None
+
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
         cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, (c, b1, b2));  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
@@ -8602,6 +8610,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s68, 3]"; y: "f32[s17]"; z: "f32[s68, 3]";
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
+
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 
