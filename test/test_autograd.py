@@ -8032,7 +8032,6 @@ for shape in [(1,), ()]:
 
             @staticmethod
             def backward(ctx, grad_output):
-                inp, = ctx.saved_tensors
                 return grad_output.double()
 
         x = torch.randn(3, 3, dtype=torch.float32, requires_grad=True)
