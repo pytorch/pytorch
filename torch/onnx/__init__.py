@@ -6,80 +6,41 @@ __all__ = [
     # Modules
     "errors",
     "ops",
-    "symbolic_helper",
-    "utils",
-    # All opsets
-    "symbolic_opset7",
-    "symbolic_opset8",
-    "symbolic_opset9",
-    "symbolic_opset10",
-    "symbolic_opset11",
-    "symbolic_opset12",
-    "symbolic_opset13",
-    "symbolic_opset14",
-    "symbolic_opset15",
-    "symbolic_opset16",
-    "symbolic_opset17",
-    "symbolic_opset18",
-    "symbolic_opset19",
-    "symbolic_opset20",
-    # Enums
-    "OperatorExportTypes",
-    "TrainingMode",
-    "TensorProtoDataType",
-    "JitScalarType",
     # Public functions
     "export",
     "is_in_onnx_export",
-    "select_model_mode_for_export",
-    "register_custom_op_symbolic",
-    "unregister_custom_op_symbolic",
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
-    "enable_fake_mode",
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
-from typing_extensions import deprecated
 
 import torch
 from torch._C import _onnx as _C_onnx
-from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
+from torch._C._onnx import (  # Deprecated members that are excluded from __all__
+    OperatorExportTypes as OperatorExportTypes,
+    TensorProtoDataType as TensorProtoDataType,
+    TrainingMode as TrainingMode,
+)
 
-from ._internal._exporter_legacy import enable_fake_mode
+from . import errors, ops
 from ._internal.exporter._onnx_program import ONNXProgram
-from ._type_utils import JitScalarType
-from .errors import OnnxExporterError
-from .utils import (
-    _run_symbolic_function,
-    _run_symbolic_method,
+from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
+    symbolic_helper,
+    symbolic_opset10,
+    symbolic_opset9,
+    utils,
+)
+from ._internal.torchscript_exporter._type_utils import (
+    JitScalarType,  # Deprecated members that are excluded from __all__
+)
+from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     register_custom_op_symbolic,
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
 )
-
-
-from . import (  # usort: skip. Keep the order instead of sorting lexicographically
-    errors,
-    ops,
-    symbolic_helper,
-    symbolic_opset7,
-    symbolic_opset8,
-    symbolic_opset9,
-    symbolic_opset10,
-    symbolic_opset11,
-    symbolic_opset12,
-    symbolic_opset13,
-    symbolic_opset14,
-    symbolic_opset15,
-    symbolic_opset16,
-    symbolic_opset17,
-    symbolic_opset18,
-    symbolic_opset19,
-    symbolic_opset20,
-    utils,
-)
+from .errors import OnnxExporterError
 
 
 if TYPE_CHECKING:
@@ -87,11 +48,10 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
-JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
-enable_fake_mode.__module__ = "torch.onnx"
 
+# TODO(justinchuby): Remove these two properties
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
@@ -114,7 +74,7 @@ def export(
     | Mapping[str, Sequence[int]]
     | None = None,
     keep_initializers_as_inputs: bool = False,
-    dynamo: bool = False,
+    dynamo: bool = True,
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
@@ -126,7 +86,7 @@ def export(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
+    fallback: bool = True,
     # Deprecated options
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
@@ -169,7 +129,10 @@ def export(
         output_names: names to assign to the output nodes of the graph, in order.
         opset_version: The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7.
+            to target. You should set ``opset_version`` according to the supported opset versions
+            of the runtime backend or compiler you want to run the exported model with.
+            Leave as default (``None``) to use the recommended version, or refer to
+            the ONNX operators documentation for more information.
         dynamic_axes:
 
             By default the exported model will have the shapes of all input and output tensors
@@ -385,7 +348,7 @@ def export(
     else:
         import warnings
 
-        from torch.onnx.utils import export
+        from ._internal.torchscript_exporter.utils import export
 
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
@@ -429,7 +392,7 @@ def export(
 
 def is_in_onnx_export() -> bool:
     """Returns whether it is in the middle of ONNX export."""
-    from torch.onnx._globals import GLOBALS
     from torch.onnx._internal.exporter import _flags
+    from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
     return GLOBALS.in_onnx_export or _flags._is_onnx_exporting
