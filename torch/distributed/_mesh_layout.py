@@ -118,6 +118,14 @@ class Layout(LayoutBase):  # type: ignore[no-untyped-def]
         else:
             return 1
 
+    # operator []    (get-i like tuples)
+    def __getitem__(self, i):  # type: ignore[no-untyped-def]
+        if is_tuple(self.shape):
+            return Layout(self.shape[i], self.stride[i])
+        else:
+            assert i == 0
+            return Layout(self.shape, self.stride)
+
     # size(layout)   Size of the domain
     def size(self):  # type: ignore[no-untyped-def]
         return product(self.shape)
