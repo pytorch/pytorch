@@ -1024,6 +1024,11 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
+    """
+    A SchedulerNode is a node for scheduling that encapsulates either
+    a ComputedBuffer or a TemplateBuffer.
+    """
+
     _sizes: tuple[Sequence[sympy.Expr], ...]
     _body: LoopBody
 
