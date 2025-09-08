@@ -299,7 +299,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_grad_acc_with_reduce_dtype(self):
         """
         Tests that gradient accumulation without reduce-scatter when using
