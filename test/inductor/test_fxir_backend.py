@@ -20,6 +20,7 @@ from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
@@ -402,6 +403,57 @@ class FxirTestCase(InductorTestCase):
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
 
+    @parametrize(
+        "shape",
+        [
+            (20,),
+            (50, 30),
+            (50, 30, 40),
+        ],
+    )
+    @torch._inductor.config.patch(
+        {
+            "pad_dynamic_shapes": True,
+            "comprehensive_padding": True,
+            "padding_alignment_bytes": 32,
+            "pad_outputs": True,
+        }
+    )
+    def test_dynamic_shapes_with_padding(self, shape):
+        """
+        Test a graph with dynamic shapes with padding.
+        """
+
+        def get_input(shape):
+            pad_size = list(shape)
+            pad_size[-1] = ((shape[-1] + 7) // 8) * 8
+            pad = torch.randn(pad_size, dtype=torch.float32, device=self.device)
+            view = torch.as_strided(pad, shape, pad.stride())
+            return view
+
+        args = [get_input(shape) for _ in range(2)]
+        (gm,) = self._compile_and_check(
+            torch.add, args, compile_kwargs={"dynamic": True}
+        )
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        example_tensor = empty_strided.meta["val"]
+        symbolic_dims = example_tensor.shape
+        symbolic_strides = example_tensor.stride()
+
+        align_elems = 32 // args[0].dtype.itemsize
+        expected_strides = [1 for _ in range(len(shape))]
+        for i in range(len(shape) - 1, 0, -1):
+            expected_strides[i - 1] = align_elems * (
+                ((expected_strides[i] * symbolic_dims[i]) + align_elems - 1)
+                // align_elems
+            )
+        for i, j in zip(symbolic_strides, expected_strides):
+            self.assertEqual(i, j)
+
     def test_dynamic_shapes_precomputed_size(self):
         """
         Test dynamic shapes where a kernel's size arg is precomputed.
@@ -418,9 +470,9 @@ class FxirTestCase(InductorTestCase):
         )
         self.assertIn("ks0", triton_node.kwargs["kwargs"])
 
-    def test_dynamic_launch_grid_calc(self):
+    def test_dynamic_launch_grid_calc_python(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper
+        Test the dyanmic launch grid calculation for Triton kernel wrapper using python mode
         """
         func = torch.add
         args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
@@ -434,11 +486,46 @@ class FxirTestCase(InductorTestCase):
         self.assertIn("xnumel", triton_node.kwargs["kwargs"])
         self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
         grid = triton_node.kwargs["grid"][0]
-        self.assertEqual(
-            grid[0].target, operator.floordiv
-        )  # ((xnumel + 127) // xblock))
+        xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
+        xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
+        self.assertEqual(grid[0].meta["val"], -(-xnumel // xblock))
         self.assertEqual(grid[1], 1)
         self.assertEqual(grid[2], 1)
+
+    def test_dynamic_launch_grid_calc_python_slow(self):
+        """
+        Test the dyanmic launch grid calculation for Triton kernel wrapper using python_slow mode
+        """
+        from torch._inductor.runtime.triton_heuristics import GridExpr
+
+        # Mock GridExpr.from_meta to use "python_slow" mode explicitly
+        original_from_meta = GridExpr.from_meta
+
+        def mocked_from_meta(inductor_meta, cfg, mode="python"):
+            return original_from_meta(inductor_meta, cfg, mode="python_slow")
+
+        with unittest.mock.patch.object(GridExpr, "from_meta", mocked_from_meta):
+            func = torch.add
+            args = [
+                torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]
+            ]
+            (gm,) = self._compile_and_check(
+                func, args, compile_kwargs={"dynamic": True}
+            )
+
+            # Check for the precomputed size arg.
+            (triton_node,) = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+            self.assertIn("grid", triton_node.kwargs)
+            self.assertIn("xnumel", triton_node.kwargs["kwargs"])
+            self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
+            grid = triton_node.kwargs["grid"][0]
+            xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
+            xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
+            self.assertEqual(grid[0].meta["val"], ((xnumel + xblock - 1) // xblock))
+            self.assertEqual(grid[1], 1)
+            self.assertEqual(grid[2], 1)
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
@@ -599,6 +686,8 @@ class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def check(self, model, inp, dynamic_shapes=None, strict=False):
+        if self.device == "xpu":
+            raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
             ep = torch.export.export(
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
@@ -694,6 +783,43 @@ class AOTFxirTestCase(InductorTestCase):
             dynamic_shapes=dynamic_shapes,
             strict=True,
         )
+
+    def test_custom_backend(self):
+        """
+        Test registering a custom FX backend.
+        """
+        called = False
+
+        class CustomWrapperCodegen(WrapperFxCodegen):
+            def compile_graph(self, gm):
+                """
+                Simply records whether this override was called.
+                """
+                nonlocal called
+                called = True
+                return super().compile_graph(gm)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        # Register a custom FX backend.
+        custom_backend = common.DeviceCodegen(
+            TritonScheduling,
+            PythonWrapperCodegen,
+            fx_wrapper_codegen=CustomWrapperCodegen,
+        )
+        with unittest.mock.patch.dict(
+            common.device_codegens, {self.device: custom_backend}
+        ):
+            # The backend should not have been called yet.
+            self.assertFalse(called)
+
+            inp = (torch.randn(8, device=self.device),)
+            self.check(M().to(self.device), inp)
+
+        # Now the backend should have been called.
+        self.assertTrue(called)
 
 
 if __name__ == "__main__":
