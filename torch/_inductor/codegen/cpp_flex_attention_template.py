@@ -806,7 +806,11 @@ FLEX_DECODING_TEMPLATE = r"""
       for (int64_t n_idx : c10::irange(n_idx_start, n_idx_end)) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
-
+        if (!bs_head_independent_mod
+            && (n < partition_id * PARTITION_SIZE
+            || n >= std::min(partition_id * PARTITION_SIZE + PARTITION_SIZE, kvSize))) {
+          continue;
+        }
         auto cur_n = n/kvSplitSize;
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
 
