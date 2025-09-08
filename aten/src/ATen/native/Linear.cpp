@@ -22,7 +22,9 @@
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/dot.h>
+#include <ATen/ops/einsum.h>
 #include <ATen/ops/einsum_native.h>
+#include <ATen/ops/linear.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mkldnn_linear.h>
@@ -891,6 +893,39 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+linear_backward(const Tensor& self,            // [..., in]
+                const Tensor& grad_output,     // [..., out]
+                const Tensor& weight,          // [out, in]
+                std::array<bool,3> output_mask) {
+  Tensor grad_input, grad_weight, grad_bias;
+
+  // dL/dx = dL/dy @ W
+  if (output_mask[0]) {
+    grad_input = at::matmul(grad_output, weight);            // [..., out] @ [out, in] -> [..., in]
+  }
+
+  // dL/dW = sum_batch ( (dL/dy)ᵀ @ x )
+  // Use einsum to contract over all leading dims without reshaping:
+  if (output_mask[1]) {
+    grad_weight = at::einsum("...o,...i->oi", {grad_output, self}); // [out, in]
+  }
+
+  // dL/db = sum over all dims except last
+  if (output_mask[2]) {
+    if (grad_output.dim() == 1) {
+      grad_bias = grad_output;                                   // [out]
+    } else {
+      std::vector<int64_t> sum_dims;
+      sum_dims.reserve(grad_output.dim() - 1);
+      for (int64_t i = 0; i < grad_output.dim() - 1; ++i) sum_dims.push_back(i);
+      grad_bias = grad_output.sum(sum_dims);                     // [out]
+    }
+  }
+
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 }  // namespace at::native
