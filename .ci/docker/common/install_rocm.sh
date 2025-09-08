@@ -3,7 +3,7 @@
 set -ex
 
 # for pip_install function
-source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh" 
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
