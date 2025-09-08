@@ -647,7 +647,6 @@ class RedistributeTest(DTensorTestBase):
                 grad_input = torch.autograd.grad(
                     outputs=output_dist, inputs=dtensor, create_graph=True
                 )[0].full_tensor()
-            # print(comm_mode.get_total_counts(), comm_mode.get_comm_counts())
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
             )
