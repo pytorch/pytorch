@@ -286,7 +286,7 @@ at::Tensor all_to_all_vdev(
   void* output_ptr = out.mutable_data_ptr();
   int64_t* splits_ptr = (int64_t*)(in_out_splits.mutable_data_ptr());
 
-  TORCH_CHECK(input.device() == out.device());
+  TORCH_CHECK_EQ(input.device(), out.device());
   auto device = input.device();
   c10::cuda::CUDAGuard guard(device);
   auto& team_manager = TeamManager::get(device);
