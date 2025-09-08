@@ -8,14 +8,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-import unittest
 from unittest.mock import MagicMock, patch
 
 from torch.distributed.launcher.api import launch_agent, LaunchConfig
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class LauncherApiTest(unittest.TestCase):
+class LauncherApiTest(TestCase):
     def setUp(self):
         # Save original environment variable if it exists
         self.original_signals_env = os.environ.get(

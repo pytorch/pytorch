@@ -9,7 +9,6 @@
 
 import os
 import signal
-import unittest
 from unittest.mock import MagicMock, patch
 
 from torch.distributed.elastic.multiprocessing.api import (
@@ -17,10 +16,10 @@ from torch.distributed.elastic.multiprocessing.api import (
     PContext,
     SignalException,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class SignalHandlingTest(unittest.TestCase):
+class SignalHandlingTest(TestCase):
     def setUp(self):
         # Save original environment variable if it exists
         self.original_signals_env = os.environ.get(
