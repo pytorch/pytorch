@@ -841,9 +841,11 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        if func is torch.ops.higher_order.triton_kernel_wrapper_mutation or func is torch.ops.higher_order.triton_kernel_wrapper_functional:
+            from torch._higher_order_ops.triton_kernel_wrap import get_kernel
             # Special case - look in the triton flop registry for the kernel
-            return self.counter._count_flops(kwargs["kernel"], None, args, kwargs)
+            kernel_name = get_kernel(kwargs["kernel_idx"])
+            return self.counter._count_flops(kernel_name, None, args, kwargs)
         elif func is torch.ops.higher_order.cond:
             # The flop counter for cond counts the upper bound of flops.
             # For example, if a matmul is executed 2 times in true branch

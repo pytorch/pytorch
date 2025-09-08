@@ -513,11 +513,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         if dispatch_key != DispatchKey.PreDispatch:
             self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
-        if "kernel" in kwargs:
-            # This is to support the case where we have a triton kernel wrap
-            # registered for a dispatch key with higher precedence - we would
-            # not want to forward this kwarg which is not needed any further
-            del kwargs["kernel"]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
         assert not isinstance(kernel, DispatchKey)
