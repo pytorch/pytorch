@@ -416,7 +416,6 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1571
     def test_set_reduce_scatter_divide_factor(self):
         self.run_subtests(
             {"divide_factor": [self.world_size * 2, self.world_size]},
