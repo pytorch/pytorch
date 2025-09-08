@@ -2798,9 +2798,6 @@ def cooperative_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    triton_meta = {} if triton_meta is None else triton_meta
-    triton_meta["launch_cooperative_grid"] = True
-
     # Cooperative reductions currently only support a single reduction dimension.
     assert len(size_hints) == 2, (
         "Cooperative reductions don't support tiling reduction dims"
