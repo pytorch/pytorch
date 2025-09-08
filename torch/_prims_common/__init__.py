@@ -592,11 +592,14 @@ def compute_elementwise_output_logical_to_physical_perm(
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
-
             if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
                 stride_b == 0
             ):
                 continue
+
+            if guard_or_false(stride_a == stride_b):
+                if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+                    return 1
 
             # when stride_a = 1, we want stride_a < stride_b to be TRUE
             # when stride_b = 1, we want stride_a < stride_b to be FALSE
