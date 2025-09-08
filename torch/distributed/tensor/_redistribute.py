@@ -335,7 +335,13 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        output_dtensor = RedistributeBackward.apply(grad_output, previous_spec, ctx.async_op, ctx.backward_dtype, ctx.original_dtype)
+        output_dtensor = RedistributeBackward.apply(
+            grad_output,
+            previous_spec,
+            ctx.async_op,
+            ctx.backward_dtype,
+            ctx.original_dtype,
+        )
         return (
             output_dtensor,
             None,
@@ -355,7 +361,7 @@ class RedistributeBackward(torch.autograd.Function):
         previous_spec,
         async_op: bool = False,
         backward_dtype: Optional[torch.dtype] = None,
-        original_dtype: Optional[torch.dtype] = None
+        original_dtype: Optional[torch.dtype] = None,
     ):
         ctx.original_dtype = original_dtype
         ctx.async_op = async_op

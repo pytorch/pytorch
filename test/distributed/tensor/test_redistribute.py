@@ -640,9 +640,13 @@ class RedistributeTest(DTensorTestBase):
             output_dist = reshard_dtensor_act.mean()
             output_ref = expected_tensor_act.mean()
             self.assertEqual(output_ref, output_dist)
-            grad_input_ref = torch.autograd.grad(outputs=output_ref, inputs=expected_tensor, create_graph=True)[0]
+            grad_input_ref = torch.autograd.grad(
+                outputs=output_ref, inputs=expected_tensor, create_graph=True
+            )[0]
             with comm_mode:
-                grad_input = torch.autograd.grad(outputs=output_dist, inputs=dtensor, create_graph=True)[0].full_tensor()
+                grad_input = torch.autograd.grad(
+                    outputs=output_dist, inputs=dtensor, create_graph=True
+                )[0].full_tensor()
             # print(comm_mode.get_total_counts(), comm_mode.get_comm_counts())
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
