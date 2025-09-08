@@ -2395,7 +2395,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_multi_template=False,
         best_config_future=None,
     ):
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2427,8 +2427,8 @@ class AlgorithmSelectorCache(PersistentCache):
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
-            if not isinstance(choices[0], CUDATemplateCaller):
-                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
+            if not isinstance(choices[0], CUTLASSTemplateCaller):
+                # CUTLASSTemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
         inputs_key = create_inputs_key(input_nodes)
@@ -2803,12 +2803,12 @@ class AlgorithmSelectorCache(PersistentCache):
                         "select_algorithm_num_precompilation_exceptions"
                     ] += 1
                     exceptions.append((futures[future], e))
-                    from torch._inductor.codegen.cutlass.cuda_kernel import (
-                        CUDATemplateCaller,
+                    from torch._inductor.codegen.cutlass.kernel import (
+                        CUTLASSTemplateCaller,
                     )
 
                     if isinstance(e, CUDACompileError) and isinstance(
-                        futures[future], CUDATemplateCaller
+                        futures[future], CUTLASSTemplateCaller
                     ):
                         log.debug(
                             "Exception %s for benchmark choice %s",
@@ -2936,11 +2936,9 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError as e:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
-                if not isinstance(choice, CUDATemplateCaller):
+                if not isinstance(choice, CUTLASSTemplateCaller):
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
                         e,
@@ -2950,9 +2948,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented: %s", e)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -2961,7 +2957,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     if "illegal memory access" in msg:
                         msg += "\n\nEither error in template or triton bug.\n"
 
-                if isinstance(choice, CUDATemplateCaller):
+                if isinstance(choice, CUTLASSTemplateCaller):
                     log.debug(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
@@ -3095,7 +3091,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         candidates = []
         if (
@@ -3106,7 +3102,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [
                     c
                     for c in choices
-                    if isinstance(c, CUDATemplateCaller)
+                    if isinstance(c, CUTLASSTemplateCaller)
                     # hardcoded to only look at swizzle=2
                     if c.info_dict().get("swizzle") == "2"
                 ]
@@ -3129,7 +3125,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
@@ -3143,7 +3139,7 @@ class AlgorithmSelectorCache(PersistentCache):
             pruned_choices = [
                 choice
                 for choice in choices
-                if not isinstance(choice, CUDATemplateCaller)
+                if not isinstance(choice, CUTLASSTemplateCaller)
                 or choice.kernel_hash_key() in winner_kernel_hashes
             ]
             return pruned_choices
@@ -3189,7 +3185,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 winner_hashes.add(candidate.hash_key())
-                if isinstance(candidate, CUDATemplateCaller):
+                if isinstance(candidate, CUTLASSTemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
         pruned_choices = [
