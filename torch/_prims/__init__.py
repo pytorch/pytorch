@@ -1384,15 +1384,22 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
-# If the validity of the collapse cannot be determined (because of unbacked data) then `must_be_valid` determines the behavior:
-#     None: return None, None.
-#     str: Do a torch._check() to ensure the collapse is valid and if it isn't then fail with the provided string.
+# If the collapse is invalid or cannot be determined (because of unbacked data)
+# then `must_be_valid` determines the behavior:
+#   None: return None, None.
+#   str: Do a torch._check() to ensure the collapse is valid and if it isn't
+#   then fail with the provided string.
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int, must_be_valid: Optional[str]
 ) -> tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and, sym_or
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_and,
+        sym_or,
+    )
 
     _validate_collapse_args(a, start, end)
 
@@ -1407,9 +1414,6 @@ def _collapse_view_helper(
     if a.ndim == 0 or (end == start):
         return shape, strides
 
-    length = shape[end]
-    stride = strides[end]
-
     valid_op = True
     if guard_or_false(a.numel() != 0):
         for idx in range(end - 1, start - 1, -1):
@@ -1422,7 +1426,7 @@ def _collapse_view_helper(
                 ),
             )  # type: ignore[assignment]
 
-            # early exit if we already know it's invalid.
+            # early exit if we already know its invalid.
             if guard_or_false(valid_op is False):
                 if must_be_valid:
                     torch._check(valid_op, lambda: must_be_valid)
@@ -1438,21 +1442,17 @@ def _collapse_view_helper(
         if not guard_or_false(valid_op):
             return None, None
 
-    # compute stride which is the min dimension in the collapsed range.
-    for idx in range(end - 1, start - 1, -1):
-        stride = min(stride, strides[idx])
+    stride = min(strides[start : end + 1])
 
     # compute length
-    for idx in range(end - 1, start - 1, -1):
-        # those are just show circuits, mm except
-        if guard_or_false(shape[idx] == 0) or guard_or_false(shape[idx + 1] == 0):
-            length = 0
-            break
-
-        if guard_or_false(shape[idx] == 1):
-            continue
-
-        length = length * shape[idx]
+    length = shape[end]
+    if guard_or_true(length != 1):
+        for idx in range(end - 1, start - 1, -1):
+            # those are just show circuits, mm except
+            if guard_or_false(shape[idx] == 0):
+                length = 0
+                break
+            length = length * shape[idx]
 
     new_shape = shape[:start] + (length,) + shape[end + 1 :]
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
