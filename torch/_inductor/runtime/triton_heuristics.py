@@ -686,7 +686,7 @@ class CachingAutotuner(KernelInterface):
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
 
-    def _get_compile_meta(self, cfg: Config) -> dict[str, Any]:
+    def _create_compile_meta(self, cfg: Config) -> dict[str, Any]:
         """
         Create compilation metadata for a given autotuner config. This involves
         processing the Config kwargs so that the kwargs that are not part
@@ -726,7 +726,7 @@ class CachingAutotuner(KernelInterface):
 
         return compile_meta
 
-    def _get_compile_options(
+    def _create_compile_options(
         self, cfg: Config, compile_meta: dict[str, Any]
     ) -> dict[str, Any]:
         """
@@ -769,7 +769,7 @@ class CachingAutotuner(KernelInterface):
 
     def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
         """Ahead of time compile a given autotuner config."""
-        compile_meta = self._get_compile_meta(cfg)
+        compile_meta = self._create_compile_meta(cfg)
 
         if self.device_props.type == "cpu":
             triton_helpers.set_driver_to_cpu()
@@ -803,7 +803,7 @@ class CachingAutotuner(KernelInterface):
             cc_warp_size(compile_meta["cc"]),
         )
 
-        options = self._get_compile_options(cfg, compile_meta)
+        options = self._create_compile_options(cfg, compile_meta)
 
         compile_kwargs = {
             "target": target,
