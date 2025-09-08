@@ -1943,6 +1943,8 @@ def check_pip_packages() -> None:
     except PackageNotFoundError:
         print_to_stderr(
             f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+            f" or `pip install -r <(grep -v 'cuda-bindings' .ci/docker/requirements-ci.txt)`"
+            f" if you don't test on CUDA."
         )
         sys.exit(1)
 
