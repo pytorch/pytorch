@@ -24,6 +24,29 @@ constexpr int MAX_N_TEAMS = 128;
 // A pool of teams for each group. These are duplicate teams.
 using TeamPool = std::vector<nvshmem_team_t>;
 
+// Custom deletion function for freeing CUDA memory of the team pool
+static void dev_team_deleter(nvshmem_team_t* team_pool_dev) {
+  // We do it in a best effort manner because the team pool is managed by a
+  // static TeamManager and the destruction order of static objects is
+  // undetermined. If the destructor is called after the CUDA context is
+  // destroyed, cudaFree would fail.
+  try {
+    // cudaFree generally implies a device synchronization, meaning it will
+    // block until all preceding CUDA operations on the device have completed
+    // before freeing the memory. Thus we don't need to worry about freeing
+    // the memory before CUDA kernels complete.
+    c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
+  } catch (...) {
+    // Ignore the error
+    std::cerr << "Failed to free the team pool in device memory, skipping\n";
+  }
+}
+
+// A unique pointer to a team pool in device memory, so that the custom deleter
+// is called when the pointer is destroyed
+using TeamPoolDevPtr =
+    std::unique_ptr<nvshmem_team_t, decltype(&dev_team_deleter)>;
+
 // Manage all the team business. Singleton.
 class TeamManager {
  public:
@@ -70,9 +93,11 @@ class TeamManager {
       // If not, allocate a new pool in device memory
       team_pool_dev = reinterpret_cast<nvshmem_team_t*>(
           c10::cuda::CUDACachingAllocator::raw_alloc(pool_bytes));
-      team_pool_devptrs_[group_name] = team_pool_dev;
+      team_pool_devptrs_.emplace(
+          group_name, TeamPoolDevPtr(team_pool_dev, dev_team_deleter));
     } else {
-      team_pool_dev = it->second;
+      // If yes, use the existing pool
+      team_pool_dev = it->second.get();
     }
     // Update the pool in device memory if host side pool is updated
     if (pool_updated) {
@@ -86,26 +111,6 @@ class TeamManager {
           stream));
     }
     return std::make_pair(std::cref(team_pool), team_pool_dev);
-  }
-
-  ~TeamManager() noexcept {
-    // Free the team pools in device memory
-    // Note that we do it in a best effort manner because the team pool is
-    // managed by a static TeamManager and the destruction order of static
-    // objects is undetermined. If the destructor is called after the CUDA
-    // context is destroyed, cudaFree would fail.
-    try {
-      // cudaFree generally implies a device synchronization, meaning it will
-      // block until all preceding CUDA operations on the device have completed
-      // before freeing the memory. Thus we don't need to worry about freeing
-      // the memory before CUDA kernels complete.
-      for (auto& [_, team_pool_dev] : team_pool_devptrs_) {
-        c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
-      }
-    } catch (...) {
-      // Ignore the error
-      std::cerr << "Failed to free the team pool in device memory, skipping\n";
-    }
   }
 
  private:
@@ -164,7 +169,7 @@ class TeamManager {
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
-  std::unordered_map<std::string, nvshmem_team_t*> team_pool_devptrs_;
+  std::unordered_map<std::string, TeamPoolDevPtr> team_pool_devptrs_;
 };
 
 } // namespace c10d::nvshmem_extension
