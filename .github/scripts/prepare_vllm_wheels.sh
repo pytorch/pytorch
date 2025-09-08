@@ -2,7 +2,8 @@
 
 set -eux
 
-nightly=$(unzip -p torch-* '**/METADATA' | grep '^Version: ' | cut -d' ' -f2 | cut -d'.' -f4)
+torch_version=$(unzip -p torch-* '**/METADATA' | grep '^Version: ')
+nightly=$(echo ${torch_version} | cut -d' ' -f2 | cut -d'.' -f4)
 
 # Copied from .ci/manywheel/build_common.sh
 make_wheel_record() {
@@ -35,6 +36,10 @@ change_wheel_version() {
 
   # Update the version in METADATA and its SHA256 hash
   sed -i "s/Version: ${f_version}/Version: ${t_version}/g" METADATA
+  # then add PyTorch nightly dependency of vLLM
+  if [[ "${package}" == vllm ]]; then
+    sed -i "/License-File/a\Requires-Dist: torch==${torch_version}" METADATA
+  fi
   sed -i '/METADATA,sha256/d' RECORD
   popd
 
