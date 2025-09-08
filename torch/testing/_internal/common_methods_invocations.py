@@ -6004,6 +6004,7 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_input((2, 3, 4)), repeats=2)
     yield SampleInput(make_input((2, 3, 4)), repeats=2, dim=1)
     yield SampleInput(make_input((2, 3, 4)), repeats=torch.arange(3, device=device), dim=1)
+    yield SampleInput(make_input((4, 1)), repeats=torch.arange(4, device=device), dim=0, output_size=6)
 
 
 def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
@@ -12361,6 +12362,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               # Higher differences starting with Zen3 or Alder Lake
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=4e-06)}),
+                   'TestDecomp', 'test_quick', device_type='cpu'),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
@@ -21077,6 +21082,7 @@ op_db: list[OpInfo] = [
             # NOTE: Only run on MPS
             DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
             DecorateInfo(unittest.skip('Skipped!'), device_type='cuda'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='xpu'),
             DecorateInfo(unittest.skip('Skipped!'), device_type='meta'),
         ),),
     OpInfo(
