@@ -55,8 +55,8 @@ jobs:
           { config: "vllm_lora_test", shard: 1, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 2, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 3, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: "linux.aws.h100.4"},
-          { config: "vllm_distributed_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.aws.h100.4"}
+          { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: "linux.g6.12xlarge.nvidia.gpu"},
+          { config: "vllm_distributed_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.12xlarge.nvidia.gpu"}
         ]}
     secrets: inherit
 
