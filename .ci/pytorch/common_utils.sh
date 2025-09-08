@@ -255,9 +255,10 @@ function install_torchrec_and_fbgemm() {
 
     # Build the wheel if it doesn't exist
     if [ "${found_whl}" == "0" ]; then
-      git clone --recursive https://github.com/pytorch/fbgemm
+      git clone https://github.com/pytorch/fbgemm
+      git checkout "${fbgemm_commit}"
+      git submodule update --init --recursive
       pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}" --recurse-submodules
       python setup.py bdist_wheel \
         --build-variant=rocm \
         -DHIP_ROOT_DIR="${ROCM_PATH}" \
