@@ -180,7 +180,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -318,7 +318,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
