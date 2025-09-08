@@ -5,6 +5,8 @@ set -ex
 # for pip_install function
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+ROCM_COMPOSABLE_KERNEL_VERSION="$(cat $(dirname $0)/../ci_commit_pins/rocm-composable-kernel.txt)"
+
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
@@ -117,7 +119,7 @@ EOF
     fi
 
     # todo: read from pin file
-    pip_install "git+https://github.com/rocm/composable_kernel@7fe50dc3da2069d6645d9deb8c017a876472a977"
+    pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -183,7 +185,7 @@ install_centos() {
   done
 
   # todo: read from pin file
-  pip_install "git+https://github.com/rocm/composable_kernel@7fe50dc3da2069d6645d9deb8c017a876472a977"
+  pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
   # Cleanup
   yum clean all
