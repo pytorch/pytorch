@@ -1364,7 +1364,8 @@ def aot_stage2_autograd(
             if maybe_subclass_meta is None
             else maybe_subclass_meta.fw_metadata
         )
-        with track_graph_compiling(aot_config, "joint"):
+        context = torch._C._DisableAutocast if disable_amp else nullcontext
+        with context(), track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
             # See Note: [Recomputing subclass mutation handling]
             mutated_inp_runtime_indices = (
