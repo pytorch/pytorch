@@ -1981,7 +1981,6 @@ def are_strides_like_channels_last_or_false(
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_true,
-        guard_size_oblivious,
         statically_known_true,
     )
 
@@ -1996,7 +1995,6 @@ def are_strides_like_channels_last_or_false(
     else:
         return False
 
-    # if a stride is 0, then only if the size is 0 its ok
     if guard_or_true(strides[1] == 0):
         return False
 
@@ -2010,8 +2008,9 @@ def are_strides_like_channels_last_or_false(
             return False
         min = strides[d]
         if not statically_known_true(min == 0):
-            # Assume stride is not 1, the consequence is min could be larger than needed min,
-            # which would result in returning False, so it's ok.
+            # Assume stride is not 1, the consequence is min could be larger than needed,
+            # which would result in returning False for this function but not vice versa,
+            # so it's ok.
             if guard_or_true(strides[d] > 1):
                 min *= shape[d]
     return True
