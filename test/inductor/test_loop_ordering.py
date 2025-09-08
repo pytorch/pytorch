@@ -613,7 +613,7 @@ class LoopOrderingTest(TestCase):
         """
         Test a pattern as follows. We have a 3d contiguous tensor [m, n, k] as input.
         1. do reduction on the k dimension and get a [m, n] tensor
-        2. do a pointwise operation on this [m, n] tensor
+        2. do a pointwise operation on this [m, n] tensor (and realize the computation)
         3. do a outer reduction on the output of step 2 on the m dimension.
 
         Each of these step generate a kernel before fusion.
