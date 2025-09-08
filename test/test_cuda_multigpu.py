@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
+    skipIfRocm,
     TEST_CUDA,
     TestCase,
 )
@@ -776,6 +777,8 @@ class TestCudaMultiGPU(TestCase):
             p2c.get()
             c2p.put(sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES))
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [
@@ -816,6 +819,7 @@ class TestCudaMultiGPU(TestCase):
             self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_events_wait(self):
         d0 = torch.device("cuda:0")
@@ -884,6 +888,7 @@ class TestCudaMultiGPU(TestCase):
             self.assertTrue(e1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_events_multi_gpu_elapsed_time(self):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")

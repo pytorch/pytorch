@@ -1440,9 +1440,6 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
-    enable_pdl = False
-
 
 class aot_inductor:
     """
@@ -1785,6 +1782,9 @@ class rocm:
 
     # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
     split_k_threshold: int = 16
+
+    # The threshold at which we trigger a contiguous subgraph transformation
+    contiguous_threshold: int = 16
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
