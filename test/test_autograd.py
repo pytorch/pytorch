@@ -8024,6 +8024,25 @@ for shape in [(1,), ()]:
         self.assertTrue(Node not in type(out.grad_fn).mro())
         out.sum().backward()
 
+    def test_allow_grad_dtype_mismatch(self):
+        class MismatchedGradientFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inp, = ctx.saved_tensors
+                return grad_output.double()
+
+        x = torch.randn(3, 3, dtype=torch.float32, requires_grad=True)
+        # Important: need keep acc_grad reference around!
+        acc_grad = x.view_as(x).grad_fn.next_functions[0][0]
+        acc_grad._input_metadata[0].allow_grad_dtype_mismatch = True
+        y = MismatchedGradientFunction.apply(x)
+        y.sum().backward()
+        self.assertTrue(x.grad.dtype != x.dtype)
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

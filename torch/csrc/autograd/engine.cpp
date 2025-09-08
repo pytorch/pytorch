@@ -951,13 +951,9 @@ static void validate_outputs_impl(
         (input_is_complex == grad_is_complex));
     if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
         grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+      if (!metadata.allow_grad_dtype_mismatch()) {
+        grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for

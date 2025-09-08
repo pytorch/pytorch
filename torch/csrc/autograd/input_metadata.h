@@ -65,6 +65,14 @@ struct TORCH_API InputMetadata {
     return is_tensor_subclass_;
   }
 
+  bool allow_grad_dtype_mismatch() const {
+    return allow_grad_dtype_mismatch_;
+  }
+
+  void set_allow_grad_dtype_mismatch(bool allow_mismatch) {
+    allow_grad_dtype_mismatch_ = allow_mismatch;
+  }
+
   at::Tensor zeros_like() const;
 
   bool is_same_shape(const at::Tensor& grad) const;
@@ -109,5 +117,6 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
+  bool allow_grad_dtype_mismatch_ = false;
 };
 } // namespace torch::autograd
