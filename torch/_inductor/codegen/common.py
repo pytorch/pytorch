@@ -308,6 +308,7 @@ class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
     cpp_wrapper_codegen: Optional[WrapperConstructor] = None
+    fx_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
@@ -402,11 +403,15 @@ def register_backend_for_device(
     device_scheduling: SchedulingConstructor,
     device_wrapper_codegen: WrapperConstructor,
     device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_fx_wrapper_codegen: Optional[WrapperConstructor] = None,
     device_custom_pass: Optional[CustomGraphModulePass] = None,
     device_custom_config: Optional[ConfigModule] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
-        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
+        device_scheduling,
+        device_wrapper_codegen,
+        device_cpp_wrapper_codegen,
+        device_fx_wrapper_codegen,
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
@@ -468,9 +473,7 @@ def get_wrapper_codegen_for_device(
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         if fx_wrapper:
-            from .wrapper_fxir import WrapperFxCodegen
-
-            return WrapperFxCodegen
+            return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
             return wrapper_codegen_obj.cpp_wrapper_codegen
         else:
@@ -507,6 +510,7 @@ def init_backend_registration() -> None:
     from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
+    from .wrapper_fxir import WrapperFxCodegen
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -521,6 +525,7 @@ def init_backend_registration() -> None:
             CppWrapperCpuArrayRef
             if config.aot_inductor.allow_stack_allocation
             else CppWrapperCpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -534,6 +539,7 @@ def init_backend_registration() -> None:
             lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("xpu") is None:
@@ -542,6 +548,7 @@ def init_backend_registration() -> None:
             TritonScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("mps") is None:
@@ -550,6 +557,7 @@ def init_backend_registration() -> None:
             MetalScheduling,
             PythonWrapperCodegen,
             CppWrapperMps,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("mtia") is None:
@@ -558,6 +566,7 @@ def init_backend_registration() -> None:
             TritonScheduling,
             PythonWrapperMtia,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -571,12 +580,14 @@ def init_backend_registration() -> None:
             device_scheduling = _get_custom_mod_func("Scheduling")
             wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
             cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
+            fx_wrapper_codegen = _get_custom_mod_func("WrapperFxCodegen")
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
                     device_scheduling,
                     wrapper_codegen,
                     cpp_wrapper_codegen,
+                    fx_wrapper_codegen,
                 )
         except RuntimeError:
             pass
@@ -808,6 +819,14 @@ class PythonPrinter(_PythonPrinter):
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
+
+    def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
 
 
 class OpDecompositions:
@@ -2390,6 +2409,29 @@ class KernelTemplate:
 
     def __init__(self, name: str) -> None:
         self.name = name
+
+    @property
+    def uid(self) -> str:
+        """
+        entry point to override for templates to ensure a uid e.g. through a prefix
+
+        the purpose of this is that every KernelTemplate/ExternKernelChoice is unique
+        in the system, but reproducible e.g. restarting pytorch should yield the same id
+        """
+        # TODO(coconutruben): add some central registration to assert on global uniqueness
+        return self.name
+
+    def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
+        """
+        Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
+
+        kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
+        """
+        temp_choices: list[Any] = []
+        result = self.maybe_append_choice(temp_choices, **kwargs)
+        if result is None and len(temp_choices) == 1:
+            return temp_choices[0]
+        return None
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
