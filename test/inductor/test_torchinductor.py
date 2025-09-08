@@ -13934,6 +13934,116 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inp = torch.randn(100, 100, device=self.device)
         self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
+    @requires_cuda_and_triton
+    def test_cpu_scalar_with_gpu_tensor(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cpu_scalar_with_gpu_tensor_cpp(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+
+    @requires_cuda_and_triton
+    def test_cpu_scalar_with_gpu_tensor_dynamic(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
+        self.assertEqual(eager, compiled)
+
+    def test_cpu_scalar_with_cpu_tensor(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device="cpu")
+        b = torch.rand(4, device="cpu")
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda_and_triton
+    def test_gpu_scalar_with_gpu_tensor(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device=GPU_TYPE)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda_and_triton
+    def test_cpu_tensor_with_gpu_tensor(self):
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(20, device="cpu")
+
+        with self.assertRaises(RuntimeError):
+            compiled = torch.compile(fn, backend="inductor")(a, b)
+
+    def test_cpu_tensor_with_cpu_tensor(self):
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand(20, device="cpu")
+        b = torch.rand(20, device="cpu")
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+
+    def test_cpu_scalar_with_cpu_scalar(self):
+        def fn(a, b):
+            return a[0] + b[0]
+
+        a = torch.rand(20, device="cpu")
+        b = torch.rand(20, device="cpu")
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+
+    @requires_cuda_and_triton
+    def test_gpu_scalar_with_cpu_tensor(self):
+        def fn(a, b):
+            return a[0] + b
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(20, device="cpu")
+
+        with self.assertRaises(RuntimeError):
+            compiled = torch.compile(fn, backend="inductor")(a, b)
+
     # end of class CommonTemplate - add new tests here
 
 
