@@ -69,21 +69,53 @@ def replace_tag(filename) -> None:
         f.writelines(lines)
 
 
-def patch_library_rpath(folder: str, lib_name: str) -> None:
-    """Apply patchelf to set RPATH to $ORIGIN for a library in torch/lib"""
+def patch_library_rpath(folder: str, lib_name: str, use_nvidia_pypi_libs: bool = False, desired_cuda: str = "") -> None:
+    """Apply patchelf to set RPATH for a library in torch/lib"""
     lib_path = f"{folder}/tmp/torch/lib/{lib_name}"
+    
+    if use_nvidia_pypi_libs:
+        # For PyPI NVIDIA libraries, construct CUDA RPATH
+        cuda_rpaths = [
+            '$ORIGIN/../../nvidia/cudnn/lib',
+            '$ORIGIN/../../nvidia/nvshmem/lib',
+            '$ORIGIN/../../nvidia/nccl/lib',
+            '$ORIGIN/../../nvidia/cusparselt/lib'
+        ]
+        
+        if "130" in desired_cuda:
+            cuda_rpaths.append('$ORIGIN/../../nvidia/cu13/lib')
+        else:
+            cuda_rpaths.extend([
+                '$ORIGIN/../../nvidia/cublas/lib',
+                '$ORIGIN/../../nvidia/cuda_cupti/lib',
+                '$ORIGIN/../../nvidia/cuda_nvrtc/lib',
+                '$ORIGIN/../../nvidia/cuda_runtime/lib',
+                '$ORIGIN/../../nvidia/cufft/lib',
+                '$ORIGIN/../../nvidia/curand/lib',
+                '$ORIGIN/../../nvidia/cusolver/lib',
+                '$ORIGIN/../../nvidia/cusparse/lib',
+                '$ORIGIN/../../nvidia/nvtx/lib',
+                '$ORIGIN/../../nvidia/cufile/lib'
+            ])
+        
+        # Add $ORIGIN for local torch libs
+        rpath = ':'.join(cuda_rpaths) + ':$ORIGIN'
+    else:
+        # For bundled libraries, just use $ORIGIN
+        rpath = '$ORIGIN'
+    
     if os.path.exists(lib_path):
         os.system(
             f"cd {folder}/tmp/torch/lib/; "
-            f"patchelf --set-rpath '$ORIGIN' --force-rpath {lib_name}"
+            f"patchelf --set-rpath '{rpath}' --force-rpath {lib_name}"
         )
 
-def copy_and_patch_library(src_path: str, folder: str) -> None:
+def copy_and_patch_library(src_path: str, folder: str, use_nvidia_pypi_libs: bool = False, desired_cuda: str = "") -> None:
     """Copy a library to torch/lib and patch its RPATH"""
     if os.path.exists(src_path):
         lib_name = os.path.basename(src_path)
         shutil.copy2(src_path, f"{folder}/tmp/torch/lib/{lib_name}")
-        patch_library_rpath(folder, lib_name)
+        patch_library_rpath(folder, lib_name, use_nvidia_pypi_libs, desired_cuda)
 
 def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     """
@@ -114,7 +146,17 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
 
         # Copy minimal libraries to unzipped_folder/torch/lib
         for lib_path in minimal_libs_to_copy:
-            copy_and_patch_library(lib_path, folder)
+            copy_and_patch_library(lib_path, folder, use_nvidia_pypi_libs, desired_cuda)
+        
+        # Patch torch libraries used for searching libraries
+        torch_libs_to_patch = [
+            "libtorch.so",
+            "libtorch_cuda.so",
+            "libtorch_python.so",
+            "libtorch_global_deps.so",
+        ]
+        for lib_name in torch_libs_to_patch:
+            patch_library_rpath(folder, lib_name, use_nvidia_pypi_libs, desired_cuda)
     else:
         print("Bundling CUDA libraries with wheel")
         # Original logic for bundling system CUDA libraries
@@ -181,19 +223,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
 
         # Copy libraries to unzipped_folder/torch/lib
         for lib_path in libs_to_copy:
-            copy_and_patch_library(lib_path, folder)
-
-    # Fix RPATH for all existing torch libraries (not just copied CUDA libs)
-    torch_libs_to_patch = [
-        "libtorch.so",
-        "libtorch_cuda.so",
-        "libtorch_python.so",
-        "libc10.so",
-        "libc10_cuda.so"
-    ]
-    
-    for lib_name in torch_libs_to_patch:
-        patch_library_rpath(folder, lib_name)
+            copy_and_patch_library(lib_path, folder, use_nvidia_pypi_libs, desired_cuda)
 
     # Make sure the wheel is tagged with manylinux_2_28
     for f in os.scandir(f"{folder}/tmp/"):

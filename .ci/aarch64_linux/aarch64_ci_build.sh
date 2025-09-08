@@ -45,36 +45,6 @@ else
         # Replace 'platform_machine == "x86_64"' with 'platform_machine == "aarch64"'
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS//platform_machine == \'x86_64\'/platform_machine == \'aarch64\'}"
         echo "Updated PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64: $PYTORCH_EXTRA_INSTALL_REQUIREMENTS"
-        CUDA_RPATHS=(
-            '$ORIGIN/../../nvidia/cudnn/lib'
-            '$ORIGIN/../../nvidia/nvshmem/lib'
-            '$ORIGIN/../../nvidia/nccl/lib'
-            '$ORIGIN/../../nvidia/cusparselt/lib'
-        )
-        if [[ $GPU_ARCH_VERSION == 13* ]]; then
-            CUDA_RPATHS+=('$ORIGIN/../../nvidia/cu13/lib')
-        else
-            CUDA_RPATHS+=(
-                '$ORIGIN/../../nvidia/cublas/lib'
-                '$ORIGIN/../../nvidia/cuda_cupti/lib'
-                '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
-                '$ORIGIN/../../nvidia/cuda_runtime/lib'
-                '$ORIGIN/../../nvidia/cufft/lib'
-                '$ORIGIN/../../nvidia/curand/lib'
-                '$ORIGIN/../../nvidia/cusolver/lib'
-                '$ORIGIN/../../nvidia/cusparse/lib'
-                '$ORIGIN/../../nvidia/nvtx/lib'
-                '$ORIGIN/../../nvidia/cufile/lib'
-            )
-        fi
-        CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
-        export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
-        export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
-        export FORCE_RPATH="--force-rpath"
-        export USE_STATIC_NCCL=0
-        export ATEN_STATIC_CUDA=0
-        export USE_CUDA_STATIC_LINK=0
-        export USE_CUPTI_SO=1
         export USE_NVIDIA_PYPI_LIBS=1
     fi
 
