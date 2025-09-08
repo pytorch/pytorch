@@ -13734,6 +13734,22 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    def test_expand_copy_export_handles_implicit_true(self):
+        class ExpandModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, implicit):
+                return torch.expand_copy(x, [3, 3], implicit=implicit)
+
+        model = ExpandModel()
+        x = torch.ones([3])
+
+        model(x, False)
+        model(x, True)
+        export(model, (x, False))
+        export(model, (x, True))
+
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -16657,6 +16673,27 @@ def forward(self, x, y):
 
         ep = export(M(), inp)
         FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
+            str(ep.graph)
+        )
+
+    def test_item(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+                self.b = 5.0
+
+            def forward(self, y):
+                at = torch.tensor(self.a)
+                # This becomes 5
+                a = at.item()
+                bt = torch.tensor(self.b)
+                # This becomes 5.0
+                b = bt.item()
+                return a * b * y
+
+        ep = export(M(), (torch.ones(3),))
+        FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
 
