@@ -109,6 +109,19 @@ static std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
+
+static std::tuple<Tensor, std::optional<int64_t>> linear_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& weight, std::optional<int64_t> weight_bdim,
+    const std::optional<Tensor>& bias, std::optional<int64_t> bias_bdim
+    ) {
+  // TODO: add error checking
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto weight_ = moveBatchDimToFront(weight, weight_bdim);
+  auto bias_ = bias.has_value() ? std::make_optional<Tensor>(moveBatchDimToFront(*bias, bias_bdim)) : std::nullopt;
+  return std::make_tuple( at::linear(self_, weight_, bias_), 0 );
+}
+
 // AFAICT, nothing here can be batched. So we decompose :)
 Tensor addmv_decomp(
   const Tensor& input, const Tensor& mat, const Tensor& vec, const Scalar& beta, const Scalar& alpha) {
@@ -747,6 +760,7 @@ LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd)
 // NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+  VMAP_SUPPORT(linear, linear_batch_rule);
   VMAP_SUPPORT(bmm, bmm_batch_rule);
   m.impl("addmv", addmv_decomp);
   m.impl("addmm", addmm_decomp);
