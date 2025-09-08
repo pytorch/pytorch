@@ -13,7 +13,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
 
 from torch.numa.binding import (
-    maybe_temporarily_apply_numa_binding_to_current_process,
+    maybe_temporarily_apply_numa_binding_to_current_thread,
     NumaOptions,
 )
 
@@ -29,7 +29,6 @@ __all__ = [
     "ProcessException",
     "ProcessExitedException",
     "ProcessRaisedException",
-    "should_use_parallel_start",
     "spawn",
     "SpawnContext",
     "start_processes",
@@ -227,17 +226,6 @@ class SpawnContext(ProcessContext):
         super().__init__(processes, error_files)
 
 
-def should_use_parallel_start(start_method: str) -> bool:
-    """
-    Returns:
-        Whether we will start subprocesses in parallel.
-    """
-    return (
-        start_method == "forkserver"
-        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
-    )
-
-
 # Note: [start_processes]
 # mp.start_processes handles both start_method='spawn' and 'fork'. It's supposed to be a
 # more generalized API than mp.spawn. Currently we only document mp.spawn as it's the
@@ -259,15 +247,15 @@ def start_processes(
     # this func will start processes in parallel if start_method is 'forkserver'.
     # Please opt in to this perf optimization by setting env var (TORCH_MP_PARALLEL_START) to 1.
     # todo: investigate why spawn does not work with threadpool and raises SIGINT
-    if should_use_parallel_start(start_method):
+    if (
+        start_method == "forkserver"
+        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
+    ):
         log.info("Starting processes in parallel.")
         start_parallel = True
     else:
         # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
         start_parallel = False
-
-    if numa_options is not None and start_parallel:
-        raise ValueError("NUMA binding is not compatible with parallel start")
 
     mp = multiprocessing.get_context(start_method)
     error_files = [None] * nprocs
@@ -292,8 +280,8 @@ def start_processes(
             daemon=daemon,
         )
 
-        # HACK [NUMA inheritance]: Subprocesses inherit the parent process's CPU
-        # affinity. So, we temporarily apply the bindings to the current process,
+        # HACK [NUMA inheritance]: Subprocesses inherit the parent thread's CPU
+        # affinity. So, we temporarily apply the bindings to the current thread,
         # and then immediately undo them.
         # This is necessary because the alternatives would be to
         # either
@@ -305,7 +293,7 @@ def start_processes(
         # can result in worse memory locality, because torch and CUDA
         # initialization would occur before applying the bindings, thus
         # allowing some memory to be allocated on the wrong NUMA nodes.
-        with maybe_temporarily_apply_numa_binding_to_current_process(
+        with maybe_temporarily_apply_numa_binding_to_current_thread(
             gpu_index=i, numa_options=numa_options
         ):
             process.start()

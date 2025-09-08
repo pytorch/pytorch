@@ -527,7 +527,6 @@ def tensorboard_trace_handler(
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
-    import os
     import socket
     import time
 

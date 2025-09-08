@@ -1530,7 +1530,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv_pattern(dtype):
+def _is_valid_dequant_conv_pattern(dtype, with_dtype_convert):
     def _inner(match):
         # Here we do some further check to ensure:
         # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
@@ -1552,7 +1552,7 @@ def _is_valid_dequant_conv_pattern(dtype):
 
         assert dtype in [torch.float32, torch.bfloat16]
 
-        if dtype == torch.float32:
+        if not with_dtype_convert:
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
@@ -1567,10 +1567,12 @@ def _is_valid_dequant_conv_pattern(dtype):
     return _inner
 
 
-def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float32):
+def _register_qconv_weight_prepack_pass(
+    pattern, pass_number, dtype=torch.float32, with_dtype_convert=False
+):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_conv_pattern(dtype),
+        extra_check=_is_valid_dequant_conv_pattern(dtype, with_dtype_convert),
         pass_number=pass_number,
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
@@ -1590,7 +1592,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         assert dtype in [torch.float32, torch.bfloat16]
         conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
-        if dtype == torch.float32:
+        if not with_dtype_convert:
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
@@ -1695,7 +1697,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             # Erase the original conv node
             graph.erase_node(conv_node)
             # Erase the dequant pattern
-            if dtype == torch.bfloat16:
+            if with_dtype_convert:
                 graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined, arg-type]
             graph.erase_node(dequant_node)  # type: ignore[arg-type]
             # Erase the dequant per channel pattern
@@ -1711,7 +1713,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
 
 
 def _generate_dequant_convolution_node_pattern(
-    _dequant_per_channel_pattern, dtype=torch.float32
+    _dequant_per_channel_pattern, dtype=torch.float32, with_dtype_convert=False
 ):
     assert dtype in [torch.float32, torch.bfloat16]
     dequant_convolution_node_pattern = CallFunction(
@@ -1719,7 +1721,7 @@ def _generate_dequant_convolution_node_pattern(
         _may_generate_pattern_with_dtype_convert(
             get_dequantize_per_tensor_activation_pattern(),
             KeywordArg("autocast_act_dtype"),
-            dtype == torch.bfloat16,
+            with_dtype_convert,
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1733,7 +1735,9 @@ def _generate_dequant_convolution_node_pattern(
     return dequant_convolution_node_pattern
 
 
-def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
+def _generate_qconv_weight_prepack_patterns(
+    dtype=torch.float32, with_dtype_convert=False
+):
     assert dtype in [torch.float32, torch.bfloat16]
     return (
         _generate_dequant_convolution_node_pattern(
@@ -1741,6 +1745,7 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_weight_pattern,
             dtype,
+            with_dtype_convert,
         ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
@@ -1751,6 +1756,7 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
             if dtype == torch.float32
             else dequantize_per_channel_to_bf16_clone_weight_pattern,
             dtype,
+            with_dtype_convert,
         ),
     )
 
@@ -1778,7 +1784,11 @@ def _get_linear_node(match, input_dim_exceeds_two, input_contiguous):
 
 
 def _get_linear_dq_node(
-    linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+    linear_node,
+    input_index,
+    input_dim_exceeds_two,
+    input_contiguous,
+    with_dtype_convert,
 ):
     act_reshape_node = None
     activation_to_bf16_node = None
@@ -1787,7 +1797,7 @@ def _get_linear_dq_node(
         if input_contiguous:
             act_reshape_node = linear_node.args[input_index]
             assert act_reshape_node.target is aten.reshape.default
-            if dtype == torch.float32:
+            if not with_dtype_convert:
                 # pattern: linear -> reshape -> dequant
                 dequant_node = act_reshape_node.args[0]
             else:
@@ -1798,13 +1808,13 @@ def _get_linear_dq_node(
             # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
             act_expand_node = linear_node.args[input_index]
             assert act_expand_node.target is aten.expand.default
-            if dtype == torch.float32:
+            if not with_dtype_convert:
                 dequant_node = act_expand_node.args[0]
             else:
                 activation_to_bf16_node = act_expand_node.args[0]
                 dequant_node = activation_to_bf16_node.args[0]
     else:
-        if dtype == torch.float32:
+        if not with_dtype_convert:
             # pattern: linear -> dequant
             dequant_node = linear_node.args[input_index]
         else:
@@ -1814,7 +1824,9 @@ def _get_linear_dq_node(
     return dequant_node, act_reshape_node, activation_to_bf16_node, act_expand_node
 
 
-def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contiguous):
+def _is_valid_dequant_linear_pattern(
+    dtype, input_dim_exceeds_two, input_contiguous, with_dtype_convert
+):
     def _inner(match):
         # Check dequant pattern has only 1 user.
         (
@@ -1830,7 +1842,11 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
             _,
             _,
         ) = _get_linear_dq_node(
-            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+            linear_node,
+            input_index,
+            input_dim_exceeds_two,
+            input_contiguous,
+            with_dtype_convert,
         )
 
         assert dequant_node.target in [
@@ -1892,11 +1908,12 @@ def _register_qlinear_weight_prepack_pass(
     dtype=torch.float32,
     input_dim_exceeds_two=False,
     input_contiguous=True,
+    with_dtype_convert=False,
 ):
     @register_freezing_graph_pattern(
         pattern,
         extra_check=_is_valid_dequant_linear_pattern(
-            dtype, input_dim_exceeds_two, input_contiguous
+            dtype, input_dim_exceeds_two, input_contiguous, with_dtype_convert
         ),
         pass_number=pass_number,
     )
@@ -1928,7 +1945,11 @@ def _register_qlinear_weight_prepack_pass(
             activation_to_bf16_node,
             act_expand_node,
         ) = _get_linear_dq_node(
-            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+            linear_node,
+            input_index,
+            input_dim_exceeds_two,
+            input_contiguous,
+            with_dtype_convert,
         )
 
         if input_dim_exceeds_two and not input_contiguous:
@@ -2035,7 +2056,7 @@ def _register_qlinear_weight_prepack_pass(
                 else:
                     graph.erase_node(act_expand_node)
                     graph.erase_node(wgt_expand_node)  # type: ignore[possibly-undefined]
-            if dtype == torch.bfloat16:
+            if with_dtype_convert:
                 graph.erase_node(activation_to_bf16_node)
             # Erase the dequant pattern
             graph.erase_node(dequant_node)
@@ -2056,6 +2077,7 @@ def _generate_dequant_linear_node_pattern(
     dtype=torch.float32,
     input_dim_exceeds_two=False,
     is_tensor_overload=False,
+    with_dtype_convert=False,
 ):
     assert dtype in [torch.float32, torch.bfloat16]
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
@@ -2067,7 +2089,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
                     KeywordArg("autocast_act_dtype"),
-                    dtype == torch.bfloat16,
+                    with_dtype_convert,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -2084,7 +2106,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
                     KeywordArg("autocast_act_dtype"),
-                    dtype == torch.bfloat16,
+                    with_dtype_convert,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -2102,6 +2124,7 @@ def _generate_dequant_bmm_node_pattern(
     dtype=torch.float32,
     with_bias=False,
     is_tensor_overload=False,
+    with_dtype_convert=False,
 ):
     # When activation of linear dim exceed 2 and not contiguous
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
@@ -2114,7 +2137,7 @@ def _generate_dequant_bmm_node_pattern(
             _may_generate_pattern_with_dtype_convert(
                 get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
                 KeywordArg("autocast_act_dtype"),
-                dtype == torch.bfloat16,
+                with_dtype_convert,
             ),
             KeywordArg("act_expand_size"),
         ),
@@ -2144,6 +2167,7 @@ def _generate_qlinear_weight_prepack_patterns(
     input_contiguous=True,
     with_bias=False,
     is_tensor_overload=False,
+    with_dtype_convert=False,
 ):
     if input_dim_exceeds_two and not input_contiguous:
         return _generate_dequant_bmm_node_pattern(
@@ -2151,6 +2175,7 @@ def _generate_qlinear_weight_prepack_patterns(
             dtype,
             with_bias,
             is_tensor_overload,
+            with_dtype_convert,
         )
     else:
         return _generate_dequant_linear_node_pattern(
@@ -2158,6 +2183,7 @@ def _generate_qlinear_weight_prepack_patterns(
             dtype,
             input_dim_exceeds_two,
             is_tensor_overload,
+            with_dtype_convert,
         )
 
 
@@ -2273,12 +2299,21 @@ def _register_dequant_promotion():
 
 
 def _register_qconv_weight_prepack():
-    for dtype in [torch.float32, torch.bfloat16]:
-        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(dtype)
+    for dtype, with_dtype_convert in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    ):
+        if dtype == torch.float32 and with_dtype_convert:
+            continue
+        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(
+            dtype, with_dtype_convert
+        )
         for weight_prepack_pattern in weight_prepack_patterns:
             # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
             _register_qconv_weight_prepack_pass(
-                weight_prepack_pattern, pass_number=1, dtype=dtype
+                weight_prepack_pattern,
+                pass_number=1,
+                dtype=dtype,
+                with_dtype_convert=with_dtype_convert,
             )
 
 
@@ -2318,15 +2353,23 @@ def _register_qlinear_weight_prepack():
     #   |            OPT(add)               |
 
     linear_weight_prepack_cases = itertools.product(
-        [torch.float32, torch.bfloat16], [True, False], [True, False]
+        [torch.float32, torch.bfloat16], [True, False], [True, False], [True, False]
     )
 
     # Step 1: register patterns from mm and addmm
-    for dtype, input_dim_exceeds_two, is_tensor_overload in linear_weight_prepack_cases:
+    for (
+        dtype,
+        input_dim_exceeds_two,
+        is_tensor_overload,
+        with_dtype_convert,
+    ) in linear_weight_prepack_cases:
+        if dtype == torch.float32 and with_dtype_convert:
+            continue
         weight_prepack_patterns = _generate_qlinear_weight_prepack_patterns(
             dtype,
             input_dim_exceeds_two,
             is_tensor_overload=is_tensor_overload,
+            with_dtype_convert=with_dtype_convert,
         )
         for weight_prepack_pattern in weight_prepack_patterns:
             # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
@@ -2335,6 +2378,7 @@ def _register_qlinear_weight_prepack():
                 pass_number=1,
                 dtype=dtype,
                 input_dim_exceeds_two=input_dim_exceeds_two,
+                with_dtype_convert=with_dtype_convert,
             )
 
     # Step 2: register patterns from bmm
@@ -2342,15 +2386,23 @@ def _register_qlinear_weight_prepack():
     # refer to:
     # https://github.com/pytorch/pytorch/blob/80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
     # in this case, we can convert it back to qlinear
-    for dtype, with_bias, is_tensor_overload in itertools.product(
-        [torch.float32, torch.bfloat16], [True, False], [True, False]
+    for (
+        dtype,
+        with_bias,
+        is_tensor_overload,
+        with_dtype_convert,
+    ) in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False], [True, False], [True, False]
     ):
+        if dtype == torch.float32 and with_dtype_convert:
+            continue
         bmm_pattern = _generate_qlinear_weight_prepack_patterns(
             dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
             with_bias=with_bias,
             is_tensor_overload=is_tensor_overload,
+            with_dtype_convert=with_dtype_convert,
         )
         _register_qlinear_weight_prepack_pass(
             bmm_pattern,
@@ -2360,6 +2412,7 @@ def _register_qlinear_weight_prepack():
             dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
+            with_dtype_convert=with_dtype_convert,
         )
 
 

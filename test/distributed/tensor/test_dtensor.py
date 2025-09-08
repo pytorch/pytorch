@@ -849,6 +849,30 @@ class DTensorMeshTest(DTensorTestBase):
             self.assertEqual(local_shard, torch.ones(4, 3) + torch.ones(3))
 
     @with_comms
+    def test_vmap_embedding(self):
+        mesh = self.build_device_mesh()
+        batch_size, seq_len = 2, 6
+        output_dim = 32
+
+        indices = torch.zeros(*(batch_size, seq_len), dtype=torch.int64)
+        indices[0, 1] = 1
+        indices[1, 3] = 1
+        indices[1, 5] = 1
+        indices = DTensor.from_local(indices, mesh, [Shard(0)])
+
+        emb = torch.randn(
+            *(batch_size, 8, output_dim),
+            dtype=torch.float32,
+        )
+        emb = DTensor.from_local(emb, mesh, [Shard(0)])
+        result = torch.vmap(F.embedding)(indices, emb)
+        expected = [F.embedding(indices[i], emb[i]) for i in range(batch_size)]
+        expected = torch.stack(expected)
+        local_result = result.to_local()
+        local_expected = expected.to_local()
+        self.assertEqual(local_result, local_expected)
+
+    @with_comms
     def test_auto_implicit_replication(self):
         mesh = self.build_device_mesh()
 

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -22,13 +23,11 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import (
-    _is_static_problem,
-    addmm_epilogue,
-    is_batch_stride_largest_or_zero,
-    mm_args,
-)
+from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
 
+
+if TYPE_CHECKING:
+    from ..ir import ChoiceCaller
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -190,30 +189,32 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         layout,
     )
 
+    aten_handler: ExternKernelChoice = aten_bmm
+    aten_extra_kwargs = {}
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
-        aten_func = aten_bmm_dtype.bind(
-            kernel_inputs.nodes(), layout, out_dtype=out_dtype
+        aten_handler = aten_bmm_dtype
+        aten_extra_kwargs = {"out_dtype": out_dtype}
+
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [aten_handler],
+                name,
+                {aten_handler.uid: aten_extra_kwargs},
+            )
         )
-    else:
-        aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
 
-    # options to tune from
-    choices = [aten_func] if use_aten_gemm_kernels() else []
-
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **kwargs,
-            )
+        choices.extend(
+            V.choices.get_mm_configs(kernel_inputs, layout, [bmm_template], name)
+        )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -245,11 +246,16 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
 @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    """
+    Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
     # Create MMKernelInputs for BadDBMM at the top
-    kernel_inputs = MMKernelInputs([inp, mat1, mat2])
+    kernel_inputs = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]
@@ -267,24 +273,20 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
     name = "baddbmm"
     # options to tune from
-    choices = (
-        [aten_baddbmm.bind(kernel_inputs.nodes(), layout, alpha=alpha, beta=beta)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        choices.extend(
+            V.choices.get_mm_configs(kernel_inputs, layout, [aten_baddbmm], name)
+        )
 
-    if use_triton_template(layout):
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **kwargs,
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
+    if use_triton_template(layout, check_max_autotune=False):
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [bmm_template],
+                name,
             )
+        )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

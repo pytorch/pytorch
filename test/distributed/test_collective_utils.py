@@ -7,16 +7,20 @@ import torch.distributed as c10d
 from torch.distributed.collective_utils import (
     _check_rng_sync,
     _check_rng_sync_internal,
+    _summarize_ranks,
     all_gather,
     broadcast,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -163,7 +167,47 @@ class TestCollectiveUtils(MultiProcessTestCase):
         log_str = _check_rng_sync(generator, group)
         FileCheck().check("Generator desync detected").check("Ranks").check("0").check(
             "1"
-        ).check("2-3").run(log_str)
+        ).check("2:4").run(log_str)
+
+
+class TestUtils(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        if not c10d.is_initialized():
+            self.rank = 0
+            self.world_size = 4096
+
+            store = FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
+
+    def tearDown(self):
+        c10d.destroy_process_group()
+
+    def test_summarize_ranks(self):
+        mesh_dim_names = ("pp", "dp", "tp")
+        mesh = init_device_mesh("cpu", (8, 64, 8), mesh_dim_names=mesh_dim_names)
+        ranks_lists = {name: mesh[name].mesh.tolist() for name in mesh_dim_names}
+        summaries = {
+            name: _summarize_ranks(ranks_lists[name]) for name in mesh_dim_names
+        }
+        self.assertEqual(summaries["pp"], "0:4096:512")
+        self.assertEqual(summaries["dp"], "0:512:8")
+        self.assertEqual(summaries["tp"], "0:8")
+
+        self.assertEqual(
+            _summarize_ranks([1, 2, 3, 6, 7, 8, 10, 12, 14, 16]),
+            "1:4,6:9,10:18:2",
+        )
+        self.assertEqual(
+            _summarize_ranks([1]),
+            "1",
+        )
 
 
 instantiate_parametrized_tests(TestCollectiveUtils)

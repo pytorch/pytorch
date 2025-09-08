@@ -2,12 +2,15 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
+import gc
 import inspect
 import logging
+import os
 import re
 import sys
 import time
 import warnings
+import weakref
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
 from typing_extensions import TypeAlias
@@ -69,6 +72,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -106,6 +110,8 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 
 log = logging.getLogger(__name__)
+
+NONSTRICT_EXPORT_SANITIZE_TRACE = "NONSTRICT_EXPORT_SANITIZE_TRACE"
 
 
 # Type alias for dynamic shapes specification
@@ -750,7 +756,7 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -810,10 +816,7 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
-                    # currently the following 2 flags are tied together for export purposes,
-                    # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
                 )(
@@ -1402,7 +1405,7 @@ def _strict_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
+    prefer_deferred_runtime_asserts_over_guards: bool,
     _to_aten_func: Callable,
 ) -> ExportArtifact:
     """
@@ -1416,7 +1419,7 @@ def _strict_export(
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _log_export_usage=False,
     )
 
@@ -1859,7 +1862,7 @@ def _non_strict_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
+    prefer_deferred_runtime_asserts_over_guards: bool,
     _to_aten_func: Callable,
 ) -> ExportArtifact:
     """
@@ -1956,7 +1959,7 @@ def _non_strict_export(
         args,
         kwargs,
         dynamic_shapes,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
     )
 
     fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
@@ -2037,6 +2040,7 @@ def _export_for_training(
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2054,6 +2058,16 @@ def _export_for_training(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
+    alive_fake_input_ids_before_export: list[int] = []
+
+    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
+        gc.collect()
+        alive_fake_input_ids_before_export = [
+            id(i)
+            for i in gc.get_objects()
+            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
+        ]
+
     export_artifact = export_func(
         mod=mod,
         args=args,
@@ -2061,7 +2075,7 @@ def _export_for_training(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
@@ -2109,6 +2123,53 @@ def _export_for_training(
     )
 
     verify_additional_inputs(exported_program)
+
+    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
+        # See NOTE [export non-strict fake tensor leak detection]
+        from torch.fx.experimental.proxy_tensor import (
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
+        )
+
+        fakes_after: list[torch._subclasses.fake_tensor.FakeTensor] = [
+            i
+            for i in gc.get_objects()
+            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
+        ]
+
+        active_fakes: weakref.WeakSet = weakref.WeakSet()
+        for fake_tensor in fakes_after:
+            if id(fake_tensor) not in alive_fake_input_ids_before_export:
+                active_fakes.add(fake_tensor)
+
+        del fakes_after
+        del alive_fake_input_ids_before_export
+
+        legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
+        leak_sources: list[str] = []
+        if len(legit_leak) > 0:
+            for fake_val in legit_leak:
+                if id(fake_val) in _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT:
+                    stack_trace = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[
+                        id(fake_val)
+                    ].meta.get("stack_trace", "<unknown stack trace>")
+
+                    # Get shape and dtype info
+                    shape_info = f"shape={fake_val.shape}, dtype={fake_val.dtype}"
+                    leak_info = f"FakeTensor({shape_info}): {stack_trace}"
+                    leak_sources.append(leak_info)
+
+            # Format the warning message more nicely
+            leak_details = "\n  ".join(leak_sources)
+            warnings.warn(
+                f"Detected {len(legit_leak)} fake tensors that are still alive after export.\n"
+                f"This is likely result of torch.export.export not being able to track side effects "
+                f"that is happening outside of model scope.\n\n"
+                f"Leaked tensors:\n  {leak_details}\n\n"
+                f"Alternatively, please file a bug report to PyTorch team for further debugging help."
+            )
+
+            del legit_leak
+
     return exported_program
 
 
@@ -2123,7 +2184,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -2154,7 +2215,7 @@ def _export(
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
 
-        allow_complex_guards_as_runtime_asserts:
+        prefer_deferred_runtime_asserts_over_guards:
          With the current dynamic shapes language for dims and derived dims, we can run into constraints
          that are not expressible with the language. For example, flattening a matrix and adding to a vector,
          both fully dynamic (i.e. x.reshape([-1]) + y) emits a guard s0 * s1 = s2, which is not expressible.
@@ -2198,6 +2259,7 @@ def _export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep
@@ -2222,7 +2284,7 @@ def _export(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=original_in_spec,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _to_aten_func=functools.partial(
             _export_to_aten_ir,
             pre_dispatch=pre_dispatch,

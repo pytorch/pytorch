@@ -220,6 +220,8 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
+    pkgs_to_add = []
+
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
     kept_lines = [line for line in lines if not pattern.match(line)]
@@ -236,7 +238,11 @@ def preprocess_test_in(
     ]
 
     # Write back: header_lines + blank + kept_lines
-    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    out_lines = header_lines + [""] + kept_lines
+    if pkgs_to_add:
+        out_lines += [""] + pkgs_to_add
+
+    out = "\n".join(out_lines) + "\n"
     target_path.write_text(out)
     logger.info("[INFO] Updated %s", target_file)
 

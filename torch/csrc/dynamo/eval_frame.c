@@ -479,15 +479,15 @@ PyObject* dynamo_eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     const char* trace_annotation,
-    int throw_flag) {}
+    int throw_flag) { return NULL; }
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(
-    THP_EVAL_API_FRAME_OBJECT* frame) {}
+    THP_EVAL_API_FRAME_OBJECT* frame) { return NULL; }
 PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag) {}
+    int throw_flag) { return NULL; }
 
-static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {{NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)

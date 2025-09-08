@@ -587,6 +587,47 @@ class TestPythonRegistration(TestCase):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
                 my_lib1 = Library("prim", kind)  # noqa: TOR901
 
+    def test_dispatcher_error_filenames(self) -> None:
+        # Test that dispatcher errors report correct Python filenames and line numbers
+        # when defining duplicate libraries (which triggers the filename tracking)
+        import linecache
+        import re
+
+        # Create first library
+        # NOTE: Using Library directly instead of _scoped_library because this test
+        # specifically verifies filename tracking in error messages, and _scoped_library
+        # would report library.py locations instead of the actual test file locations
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: TOR901
+        try:
+            lib1.define("duplicate_op(Tensor x) -> Tensor")
+
+            # Try to create another library with same namespace - this should trigger error
+            with self.assertRaises(RuntimeError) as cm:
+                lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER  # noqa: TOR901
+        finally:
+            lib1._destroy()
+
+        error_msg = str(cm.exception)
+
+        # The error should NOT contain /dev/null (the old placeholder)
+        self.assertNotIn("/dev/null", error_msg)
+        # The error should contain the test file name for both registrations
+        self.assertIn("test_python_dispatch.py", error_msg)
+        # Extract line numbers from the error message and verify they point to the right lines
+        line_matches = re.findall(r"test_python_dispatch\.py:(\d+)", error_msg)
+        self.assertEqual(
+            len(line_matches), 2, "Should have exactly 2 line number references"
+        )
+
+        # Get the actual source lines and verify they contain our markers
+        first_line_num, second_line_num = sorted([int(x) for x in line_matches])
+        first_line = linecache.getline(__file__, first_line_num).strip()
+        second_line = linecache.getline(__file__, second_line_num).strip()
+
+        # Verify the lines contain our expected markers
+        self.assertIn("FIRST_LIB_MARKER", first_line)
+        self.assertIn("SECOND_LIB_MARKER", second_line)
+
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()
         fake_tensor_mode = FakeTensorMode(shape_env=shape_env)

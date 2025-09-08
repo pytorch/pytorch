@@ -168,9 +168,9 @@ def max_with_index(value, index, dim):
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
-        return libdevice.exp2(x * _LOG_2_E)
-    else:
         return math.exp(x)
+    else:
+        return libdevice.exp(x)
 
 
 @triton.jit
@@ -314,8 +314,8 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = (
-            mid * BOUNDARIES_STRIDE + boundary_indices
-        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+            (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None

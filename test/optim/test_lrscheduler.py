@@ -784,6 +784,19 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr_no_warnings(self):
+        scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt, schedulers=[scheduler1, scheduler2], milestones=[5]
+        )
+
+        for _ in range(10):
+            self.opt.step()
+            with warnings.catch_warnings(record=True) as ws:
+                scheduler.step()
+                self.assertTrue(len(ws) == 0, "No warning should be raised")
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]

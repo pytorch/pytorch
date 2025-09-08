@@ -1,11 +1,15 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
 import importlib
+import json
 import os
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
+from torch.distributed.checkpoint.quantized_hf_storage import (
+    QuantizedHuggingFaceStorageReader,
+)
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
@@ -155,6 +159,118 @@ class TestSingleRankSaveLoad(TestCase):
         for key in state_dict_to_save.keys():
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_to_load[key])
+            )
+
+    @with_temp_dir
+    def test_quantized_checkpoint_loading(self) -> None:
+        """Test end-to-end saving a quantizaed checkpoint and loading it."""
+        try:
+            from safetensors.torch import save_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        # Create original (unquantized) tensors to validate against
+        original_tensors = {
+            "linear1.weight": torch.randn(256, 128, dtype=torch.float32) * 2.0,
+            "linear2.weight": torch.randn(128, 64, dtype=torch.float32) * 1.5,
+            "embedding.weight": torch.randn(512, 256, dtype=torch.float32) * 3.0,
+        }
+
+        # Create quantized tensors and scale tensors
+        quantized_checkpoint = {}
+        block_size = 128
+
+        for tensor_name, original_tensor in original_tensors.items():
+            # Simulate quantization: scale down the tensor for quantization
+            # This is a simplified quantization - in real scenarios it would be more complex
+            rows, cols = original_tensor.shape
+
+            # Create scale tensor for block-wise dequantization
+            block_rows = (rows + block_size - 1) // block_size
+            block_cols = (cols + block_size - 1) // block_size
+
+            # Create scale inverse tensor (used for dequantization)
+            scale_inv = torch.ones(block_rows, block_cols, dtype=torch.float32) * 2.0
+
+            # Create quantized version (divide by scale for quantization)
+            quantized_tensor = original_tensor / 2.0  # Simplified quantization
+
+            # Store quantized tensor and its scale
+            quantized_checkpoint[tensor_name] = quantized_tensor
+            quantized_checkpoint[f"{tensor_name}_scale_inv"] = scale_inv
+
+        # Save quantized checkpoint to safetensors file
+        safetensors_file = os.path.join(CHECKPOINT_DIR, "model.safetensors")
+        save_file(quantized_checkpoint, safetensors_file)
+
+        # Create model.safetensors.index.json with weight mapping
+        weight_map = {}
+        for key in quantized_checkpoint.keys():
+            weight_map[key] = "model.safetensors"
+
+        index_data = {
+            "metadata": {
+                "total_size": sum(
+                    t.numel() * t.element_size() for t in quantized_checkpoint.values()
+                )
+            },
+            "weight_map": weight_map,
+        }
+
+        index_file = os.path.join(CHECKPOINT_DIR, "model.safetensors.index.json")
+        with open(index_file, "w") as f:
+            json.dump(index_data, f, indent=2)
+
+        # Prepare state dict to load into
+        state_dict_to_load = {}
+        for tensor_name, original_tensor in original_tensors.items():
+            state_dict_to_load[tensor_name] = torch.zeros_like(original_tensor)
+
+        # Load using QuantizedHuggingFaceStorageReader
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=QuantizedHuggingFaceStorageReader(
+                path=CHECKPOINT_DIR,
+                target_dtype=torch.float32,
+                block_size=block_size,
+                thread_count=2,
+            ),
+        )
+
+        # Validate that loaded tensors match original tensors
+        self.assertEqual(
+            sorted(original_tensors.keys()), sorted(state_dict_to_load.keys())
+        )
+
+        for tensor_name in original_tensors.keys():
+            original = original_tensors[tensor_name]
+            loaded = state_dict_to_load[tensor_name]
+
+            # Verify shapes match
+            self.assertEqual(
+                original.shape,
+                loaded.shape,
+                f"Shape mismatch for {tensor_name}: {original.shape} vs {loaded.shape}",
+            )
+
+            # Verify dtypes match
+            self.assertEqual(
+                original.dtype,
+                loaded.dtype,
+                f"Dtype mismatch for {tensor_name}: {original.dtype} vs {loaded.dtype}",
+            )
+
+            # Verify dequantized values match original values
+            # We expect exact match since we used simple 2x scaling
+            torch.testing.assert_close(
+                loaded,
+                original,
+                rtol=1e-5,
+                atol=1e-5,
+                msg=f"Value mismatch for tensor {tensor_name}",
             )
 
 

@@ -27,7 +27,10 @@ from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._higher_order_ops.while_loop import while_loop
+from torch._higher_order_ops.while_loop import (
+    while_loop,
+    while_loop_stack_output_op as while_loop_stack_output,
+)
 from torch._higher_order_ops.wrap import (
     dynamo_bypassing_wrapper,
     tag_activation_checkpoint,
@@ -69,4 +72,5 @@ __all__ = [
     "strict_mode",
     "aoti_call_delegate",
     "map",
+    "while_loop_stack_output",
 ]

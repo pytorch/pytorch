@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/CachingDeviceAllocator.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -50,8 +49,9 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
+
+extern const size_t kLargeBuffer;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
@@ -163,6 +163,7 @@ struct AllocatorConfigInfo {
   bool expandable_segments;
   bool release_lock_on_malloc;
   bool pinned_use_host_register;
+  bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
 };

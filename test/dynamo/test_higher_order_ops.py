@@ -2608,25 +2608,17 @@ class GraphModule(torch.nn.Module):
             f, default_args_generator((x,)), arg_count, expected_opcount=3
         )
 
-    def test_fallback_on_python_primitives_output(self):
+    def test_support_float_in_output(self):
         counters.clear()
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return wrap(lambda x: [1, torch.sin(x), 2.0], x)
 
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
-        self.assertEqual(cnt.frame_count, 0)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {
-                ".*HigherOrderOperator body's output must consist of tensors or ints only but got": 1
-            },
-        )
 
     def test_nested_tuple_output(self):
         def f(x):

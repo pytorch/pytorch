@@ -13,6 +13,11 @@ from cli.lib.common.envs_helper import (
     env_str_field,
     with_params_help,
 )
+from cli.lib.common.gh_summary import (
+    gh_summary_path,
+    summarize_content_from_file,
+    summarize_wheels,
+)
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
@@ -21,7 +26,7 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
-from cli.lib.core.vllm.lib import clone_vllm
+from cli.lib.core.vllm.lib import clone_vllm, summarize_build_info
 
 
 logger = logging.getLogger(__name__)
@@ -153,18 +158,43 @@ class VllmBuildRunner(BaseRunner):
         """
         inputs = VllmBuildParameters()
         logger.info("Running vllm build with inputs: %s", inputs)
-        clone_vllm()
+        vllm_commit = clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
-
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
 
-        ensure_dir_exists(inputs.output_dir)
+        # make sure the output dir to store the build artifacts exist
+        ensure_dir_exists(Path(inputs.output_dir))
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
-        run_command(cmd, cwd="vllm", env=os.environ.copy())
+
+        try:
+            run_command(cmd, cwd="vllm", env=os.environ.copy())
+        finally:
+            self.genearte_vllm_build_summary(vllm_commit, inputs)
+
+    def genearte_vllm_build_summary(
+        self, vllm_commit: str, inputs: VllmBuildParameters
+    ):
+        if not gh_summary_path():
+            return logger.info("Skipping, not detect GH Summary env var....")
+        logger.info("Generate GH Summary ...")
+        # summarize vllm build info
+        summarize_build_info(vllm_commit)
+
+        # summarize vllm build artifacts
+        vllm_artifact_dir = inputs.output_dir / "wheels"
+        summarize_content_from_file(
+            vllm_artifact_dir,
+            "build_summary.txt",
+            title="Vllm build env pip package summary",
+        )
+        summarize_wheels(
+            inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts"
+        )
+        summarize_wheels(vllm_artifact_dir, max_depth=3, title="Vllm Wheels Artifacts")
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:

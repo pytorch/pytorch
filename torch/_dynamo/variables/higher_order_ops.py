@@ -27,7 +27,8 @@ import logging
 import types
 import warnings
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -68,6 +69,33 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+
+
+@dataclass
+class OutputSpec:
+    """
+    Contains the treespec of the output of the speculated subgraph, and the
+    information to mask out the constant values from the output during
+    flattening and inserting them back during unflattening. Cleaning up
+    constants from the graph makes the graph simpler for AOTDispatcher and
+    Inductor.
+    """
+
+    treespec: pytree.TreeSpec
+    # list of True/False to identify the locations of const values in the
+    # subgraph output. True means that value at that index is a constant.
+    masks_to_filter_const_values: Optional[list[bool]] = None
+    # The actual constant values that were present in the subgraph output. Note
+    # that this is the same length as the mask, we just look at the indices
+    # where mask is True.
+    const_values: Optional[list[Any]] = None
+
+    def __post_init__(self):
+        if (
+            self.masks_to_filter_const_values is not None
+            or self.const_values is not None
+        ):
+            assert len(self.masks_to_filter_const_values) == len(self.const_values)
 
 
 def raise_hard_error_if_graph_break(reason):
@@ -216,7 +244,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
 
 
 def _call_function_and_unflatten_output(
-    tx, fn, args, kwargs, flat_example_value, ret_treespec
+    tx, fn, args, kwargs, flat_example_value, ret_spec
 ):
     from .builder import wrap_fx_proxy
 
@@ -232,12 +260,21 @@ def _call_function_and_unflatten_output(
         example_value=flat_example_value,
     )
 
+    if ret_spec.masks_to_filter_const_values:
+        from torch._dynamo.external_utils import insert_const_values_with_mask
+
+        # During flattening, we removed the constant values. To ensure Dynamo
+        # can trace correctly, insert back the constant values in the output.
+        flat_variable = _make_inlined(tx, insert_const_values_with_mask)(
+            flat_variable, ret_spec.masks_to_filter_const_values, ret_spec.const_values
+        )
+
     # Transform variable back into a list (previously made into a tuple by
     # speculate_subgraph function) so as to respect the pytree API typing.
     flat_list_variable = BuiltinVariable(list).call_function(tx, [flat_variable], {})
     return (
-        _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_treespec)
-        if ret_treespec
+        _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_spec.treespec)
+        if ret_spec.treespec
         else flat_variable
     )
 
@@ -273,6 +310,246 @@ def _check_supported_callable_arg(
         unimplemented(
             f"{arg_name} should be a Callable but is of type {str(func_var)}."
         )
+
+
+def _call_while_loop(
+    self: VariableTracker,
+    tx: "InstructionTranslator",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+    stack_output: bool,
+) -> VariableTracker:
+    from torch._higher_order_ops.while_loop import _create_unbacked_symint
+
+    from . import TensorVariable
+
+    args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+    cond_fn, body_fn, operands, additional_inputs = args
+
+    # Input checks
+    for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
+        if v := kwargs.pop(k, None):
+            assert i == len(args), (
+                "did not provide the right number of non-keyword args"
+            )
+            args.append(v)
+
+    if kwargs:
+        unimplemented(f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}")
+
+    if len(args) != 4:
+        unimplemented(
+            f"Expected 4 arguments but got {len(args)}.\n"
+            f"Usage: while_loop(cond_fn, body_fn, operands)",
+        )
+
+    # cond_fn and body_fn input check
+    _check_supported_callable_arg(tx, cond_fn, "cond_fn")
+    _check_supported_callable_arg(tx, body_fn, "body_fn")
+
+    # operands input check
+    operands_seq = operands.unpack_var_sequence(tx)
+
+    # additional_inputs input check
+    if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+        unimplemented(
+            f"Expected additional_inputs to be a list/tuple but got "
+            f"{additional_inputs.python_type()}. It seems to be an "
+            f"internal error, please report an issue to PyTorch."
+        )
+    additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
+
+    with discard_graph_changes(tx):
+        # Note: this must be run under discard graph changes.
+        def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
+            # See NOTE [unspecialize int carry with unbacked symints]
+            if (
+                isinstance(carry, ConstantVariable) and carry.python_type() is int
+            ) or isinstance(carry, SymNodeVariable):
+                example_value = _create_unbacked_symint(
+                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                )
+                proxy = tx.output.current_tracer.create_graph_input(
+                    "unbacked_symint", type(example_value), example_value
+                )
+                return SymNodeVariable.create(tx, proxy, example_value)
+            else:
+                # See NOTE [unspecialize constant tensor carry]
+                assert isinstance(carry, TensorVariable)
+                cloned_carry = carry.clone()
+                cloned_carry.proxy.node.meta["example_value"].constant = None
+                return cloned_carry
+
+        # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
+        cond_operands_seq = [
+            unspecialize_carried_inputs(
+                tx,
+                (
+                    carry.call_method(tx, "clone", args=(), kwargs={})
+                    if isinstance(carry, TensorVariable)
+                    else carry
+                ),
+            )
+            for carry in operands_seq
+        ]
+        body_operands_seq = [
+            unspecialize_carried_inputs(
+                tx,
+                (
+                    carry.call_method(tx, "clone", args=(), kwargs={})
+                    if isinstance(carry, TensorVariable)
+                    else carry
+                ),
+            )
+            for carry in operands_seq
+        ]
+
+    # create cond subgrpahs
+    (
+        (cond_r, _cond_treespec),
+        cond_graph,
+        cond_lifted_freevars,
+    ) = speculate_subgraph(
+        tx,
+        cond_fn,
+        cond_operands_seq + additional_inputs_seq,
+        {},
+        "while_loop",
+        source_target=self.value,
+        # NOTE [why we cannot use "automatic" for while_loop]:
+        # The reason is that we want to enforce
+        # the ordering of inputs and outputs to be consistent and the the ordering
+        # of cond_fn and body_fn to the consistent.
+        # e.g. suppose we use "automatic" and we have:
+        #
+        # def body_fn(ph1, ph2):
+        #   new_a, new_b = ph2.cos(), ph1.sin()
+        #   return new_a, new_b
+        #
+        # a, b = torch.randn(3), torch.randn(3)
+        # new_a, new_b = body_fn(a, b)
+        #
+        # Using automatic, the ordering of arguments will be the order that they're
+        # used. In this example, the capture graph looks like:
+        #
+        # def captured_body(ph1, ph2):
+        #   new_a, new_b = ph1.cos(), ph2.add_(1)
+        #   return new_a, new_b
+        #
+        # This is fine when we change the calling convention of captured_body to be
+        # new_a, new_b = captured_body(b, a).
+        # But for while_loop, the next iteration's input is previous iteration output
+        # we'll end up feeding captured_body(new_a, new_b) instead.
+        # So it's best we always enforce the ordering of carried_inputs the same as outputs
+        # with "flatten_manual".
+        set_subgraph_inputs="flatten_manual",
+        supports_input_mutation=self.supports_input_mutation,
+        supports_aliasing=self.supports_aliasing,
+        remove_consts_from_outputs=False,
+    )
+    cond_nn_modules = dict(tx.output.nn_modules)
+    validate_subgraph_output_types(cond_r)
+    if isinstance(cond_r, TensorVariable):
+        cond_r_meta = _extract_tensor_metadata(
+            cond_r.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
+            []
+        ):
+            unimplemented(
+                f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
+            )
+    elif isinstance(cond_r, ConstantVariable):
+        # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
+        pred = cond_r.as_python_constant()
+        if pred:
+            unimplemented(
+                f"Infinite loop detected because while_loop's cond_fn always returns the same value {pred}"
+            )
+        else:
+            return operands
+
+    # create body subgraph
+    (
+        (body_r, body_treespec),
+        body_graph,
+        body_lifted_freevars,
+    ) = speculate_subgraph(
+        tx,
+        body_fn,
+        body_operands_seq + additional_inputs_seq,
+        {},
+        "while_loop",
+        source_target=self.value,
+        set_subgraph_inputs="flatten_manual",
+        should_flatten_outputs=True,
+        supports_input_mutation=False,
+        supports_aliasing=False,
+        remove_consts_from_outputs=False,
+    )
+    validate_subgraph_output_types(body_r)
+
+    # We set include contiguity=False because we have vmap x HOP tests, where if
+    # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+    # "querying is_contiguous inside of vmap for memory_format other than
+    # torch.contiguous_format is not yet implemented". This is okay because stride
+    # is still checked.
+    check_meta_consistency_vt(
+        body_r.unpack_var_sequence(tx),
+        operands_seq,
+        "body_fn_output",
+        "carried_inputs",
+        include_contiguity=False,
+    )
+
+    (
+        cond_graph,
+        body_graph,
+        cond_shared,
+        _body_shared,
+        cond_unique,
+        body_unique,
+    ) = _merge_graph_inputs(
+        cond_graph,
+        cond_lifted_freevars,
+        "cond_fn",
+        body_graph,
+        body_lifted_freevars,
+        "body_fn",
+    )
+
+    # Note: cond_shared and body_shared refer to the same proxy in parent graph
+    # so using either of them is OK. Use cond_shared as it doesn't matter.
+    additional_lifted_inputs = cond_shared + cond_unique + body_unique
+
+    body_nn_modules = dict(tx.output.nn_modules)
+
+    cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
+    body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
+    cond_name = tx.output.install_subgraph("cond_fn", cond_gm)
+    body_name = tx.output.install_subgraph("body_fn", body_gm)
+
+    cond_node = make_attr(tx, cond_name)
+    body_node = make_attr(tx, body_name)
+
+    operands_proxy = tuple(operand.as_proxy() for operand in operands_seq)
+    additional_inputs_proxy = tuple(
+        [inp.as_proxy() for inp in additional_inputs_seq] + additional_lifted_inputs
+    )
+    p_args = (
+        cond_node,
+        body_node,
+        operands_proxy,
+        additional_inputs_proxy,
+    )
+    return _call_function_and_unflatten_output(
+        tx,
+        self.value,
+        p_args,
+        {},
+        None,
+        body_treespec,
+    )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
@@ -636,6 +913,9 @@ def speculate_subgraph(
     set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
+    # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
+    # const outputs from the subgraph output.
+    remove_consts_from_outputs=True,
     under_activation_checkpoint=False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation=True,
@@ -726,14 +1006,37 @@ def speculate_subgraph(
                 tx.output.side_effects = prev_side_effects
 
             treespec = None
+            masks_to_filter_const_values = None
+            const_values = None
             if should_flatten_outputs:
+                from torch._dynamo.external_utils import filter_out_const_values
+
                 # Flatten the speculated subgraph output.
                 output, treespec = _make_inlined(tx, pytree.tree_flatten)(
                     output
                 ).unpack_var_sequence(tx)
+
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
                 output = BuiltinVariable(tuple).call_function(tx, [output], {})
+
+                if remove_consts_from_outputs:
+                    # Filter out the constants and save them into a spec. Filtering
+                    # out constants makes the graph simpler for the backends. We
+                    # need to ensure that after unflattening the constants are
+                    # inserted back at the right positions for the Dynamo tracing to
+                    # continue. This is done by filter_const_spec
+                    output_proxies = output.as_proxy()
+                    masks_to_filter_const_values = pytree.tree_map(
+                        lambda x: not isinstance(x, torch.fx.Proxy), output_proxies
+                    )
+                    const_values = pytree.tree_map(
+                        lambda x: None if isinstance(x, torch.fx.Proxy) else x,
+                        output_proxies,
+                    )
+                    output = _make_inlined(tx, filter_out_const_values)(
+                        output, masks_to_filter_const_values
+                    )
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -742,7 +1045,16 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
+                return (
+                    (
+                        output,
+                        OutputSpec(
+                            treespec, masks_to_filter_const_values, const_values
+                        ),
+                    ),
+                    tx.output.graph,
+                    subtracer.lifted_freevars,
+                )
             else:
                 validate_subgraph_output_types(output)
 
@@ -858,7 +1170,12 @@ def speculate_subgraph(
                         )
 
                 return (
-                    (output, treespec),
+                    (
+                        output,
+                        OutputSpec(
+                            treespec, masks_to_filter_const_values, const_values
+                        ),
+                    ),
                     graph,
                     lifted_freevars,
                 )
@@ -1045,7 +1362,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ix = 1 if branch else 2
             # TODO: Support kwargs
             (
-                (ret_val, ret_treespec),
+                (ret_val, ret_spec),
                 ret_graph,
                 ret_lifted_freevars,
             ) = speculate_subgraph(
@@ -1056,6 +1373,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "cond",
                 source_target=self.value,
                 should_flatten_outputs=True,
+                # TODO - removing consts from control flow ops need more work
+                remove_consts_from_outputs=False,
                 supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=self.supports_aliasing,
             )
@@ -1071,25 +1390,23 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         "Expected branches to return a possibly nested pytree of tensors "
                         f"or constant ints but it consists of others {ret.python_type()}.",
                     )
-            return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
+            return ret_val, ret_spec, ret_graph, ret_lifted_freevars
 
-        (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
-            True
-        )
+        (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
         true_nn_modules = dict(tx.output.nn_modules)
 
         (
             false_r,
-            false_treespec,
+            false_spec,
             false_graph,
             false_lifted_freevars,
         ) = speculate_branch(False)
         false_nn_modules = dict(tx.output.nn_modules)
 
-        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
-            true_treespec, false_treespec
+        same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            true_spec.treespec, false_spec.treespec
         )
-        if not same_treespec.as_python_constant():
+        if not same_spec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
         (
@@ -1134,7 +1451,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             None,
-            true_treespec,
+            true_spec,
         )
 
 
@@ -1203,241 +1520,23 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.while_loop import _create_unbacked_symint
+        return _call_while_loop(self, tx, args, kwargs, stack_output=False)
 
-        from . import TensorVariable
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
-        cond_fn, body_fn, operands, additional_inputs = args
+class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
 
-        # Input checks
-        for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
-            if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
-                args.append(v)
-
-        if kwargs:
-            unimplemented(
-                f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
-            )
-
-        if len(args) != 4:
-            unimplemented(
-                f"Expected 4 arguments but got {len(args)}.\n"
-                f"Usage: while_loop(cond_fn, body_fn, operands)",
-            )
-
-        # cond_fn and body_fn input check
-        _check_supported_callable_arg(tx, cond_fn, "cond_fn")
-        _check_supported_callable_arg(tx, body_fn, "body_fn")
-
-        # operands input check
-        operands_seq = operands.unpack_var_sequence(tx)
-
-        # additional_inputs input check
-        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
-            unimplemented(
-                f"Expected additional_inputs to be a list/tuple but got "
-                f"{additional_inputs.python_type()}. It seems to be an "
-                f"internal error, please report an issue to PyTorch."
-            )
-        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
-
-        with discard_graph_changes(tx):
-            # Note: this must be run under discard graph changes.
-            def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
-                # See NOTE [unspecialize int carry with unbacked symints]
-                if (
-                    isinstance(carry, ConstantVariable) and carry.python_type() is int
-                ) or isinstance(carry, SymNodeVariable):
-                    example_value = _create_unbacked_symint(
-                        tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
-                    )
-                    proxy = tx.output.current_tracer.create_graph_input(
-                        "unbacked_symint", type(example_value), example_value
-                    )
-                    return SymNodeVariable.create(tx, proxy, example_value)
-                else:
-                    # See NOTE [unspecialize constant tensor carry]
-                    assert isinstance(carry, TensorVariable)
-                    cloned_carry = carry.clone()
-                    cloned_carry.proxy.node.meta["example_value"].constant = None
-                    return cloned_carry
-
-            # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
-            cond_operands_seq = [
-                unspecialize_carried_inputs(
-                    tx,
-                    (
-                        carry.call_method(tx, "clone", args=(), kwargs={})
-                        if isinstance(carry, TensorVariable)
-                        else carry
-                    ),
-                )
-                for carry in operands_seq
-            ]
-            body_operands_seq = [
-                unspecialize_carried_inputs(
-                    tx,
-                    (
-                        carry.call_method(tx, "clone", args=(), kwargs={})
-                        if isinstance(carry, TensorVariable)
-                        else carry
-                    ),
-                )
-                for carry in operands_seq
-            ]
-
-        # create cond subgrpahs
-        (
-            (cond_r, _cond_treespec),
-            cond_graph,
-            cond_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            cond_fn,
-            cond_operands_seq + additional_inputs_seq,
-            {},
-            "while_loop",
-            source_target=self.value,
-            # NOTE [why we cannot use "automatic" for while_loop]:
-            # The reason is that we want to enforce
-            # the ordering of inputs and outputs to be consistent and the the ordering
-            # of cond_fn and body_fn to the consistent.
-            # e.g. suppose we use "automatic" and we have:
-            #
-            # def body_fn(ph1, ph2):
-            #   new_a, new_b = ph2.cos(), ph1.sin()
-            #   return new_a, new_b
-            #
-            # a, b = torch.randn(3), torch.randn(3)
-            # new_a, new_b = body_fn(a, b)
-            #
-            # Using automatic, the ordering of arguments will be the order that they're
-            # used. In this example, the capture graph looks like:
-            #
-            # def captured_body(ph1, ph2):
-            #   new_a, new_b = ph1.cos(), ph2.add_(1)
-            #   return new_a, new_b
-            #
-            # This is fine when we change the calling convention of captured_body to be
-            # new_a, new_b = captured_body(b, a).
-            # But for while_loop, the next iteration's input is previous iteration output
-            # we'll end up feeding captured_body(new_a, new_b) instead.
-            # So it's best we always enforce the ordering of carried_inputs the same as outputs
-            # with "flatten_manual".
-            set_subgraph_inputs="flatten_manual",
-            supports_input_mutation=self.supports_input_mutation,
-            supports_aliasing=self.supports_aliasing,
-        )
-        cond_nn_modules = dict(tx.output.nn_modules)
-        validate_subgraph_output_types(cond_r)
-        if isinstance(cond_r, TensorVariable):
-            cond_r_meta = _extract_tensor_metadata(
-                cond_r.proxy.node.meta["example_value"], include_contiguity=False
-            )
-            if (
-                not cond_r_meta.dtype == torch.bool
-                or not cond_r_meta.shape == torch.Size([])
-            ):
-                unimplemented(
-                    f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
-                )
-        elif isinstance(cond_r, ConstantVariable):
-            # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
-            pred = cond_r.as_python_constant()
-            if pred:
-                unimplemented(
-                    f"Infinite loop detected because while_loop's cond_fn always returns the same value {pred}"
-                )
-            else:
-                return operands
-
-        # create body subgraph
-        (
-            (body_r, body_treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            body_fn,
-            body_operands_seq + additional_inputs_seq,
-            {},
-            "while_loop",
-            source_target=self.value,
-            set_subgraph_inputs="flatten_manual",
-            should_flatten_outputs=True,
-            supports_input_mutation=False,
-            supports_aliasing=False,
-        )
-        validate_subgraph_output_types(body_r)
-
-        # We set include contiguity=False because we have vmap x HOP tests, where if
-        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
-        # "querying is_contiguous inside of vmap for memory_format other than
-        # torch.contiguous_format is not yet implemented". This is okay because stride
-        # is still checked.
-        check_meta_consistency_vt(
-            body_r.unpack_var_sequence(tx),
-            operands_seq,
-            "body_fn_output",
-            "carried_inputs",
-            include_contiguity=False,
-        )
-
-        (
-            cond_graph,
-            body_graph,
-            cond_shared,
-            _body_shared,
-            cond_unique,
-            body_unique,
-        ) = _merge_graph_inputs(
-            cond_graph,
-            cond_lifted_freevars,
-            "cond_fn",
-            body_graph,
-            body_lifted_freevars,
-            "body_fn",
-        )
-
-        # Note: cond_shared and body_shared refer to the same proxy in parent graph
-        # so using either of them is OK. Use cond_shared as it doesn't matter.
-        additional_lifted_inputs = cond_shared + cond_unique + body_unique
-
-        body_nn_modules = dict(tx.output.nn_modules)
-
-        cond_name = tx.output.install_subgraph(
-            "cond_fn",
-            torch.fx.GraphModule(cond_nn_modules, cond_graph),
-        )
-        body_name = tx.output.install_subgraph(
-            "body_fn",
-            torch.fx.GraphModule(body_nn_modules, body_graph),
-        )
-
-        cond_node = make_attr(tx, cond_name)
-        body_node = make_attr(tx, body_name)
-
-        p_args = (
-            cond_node,
-            body_node,
-            tuple([operand.as_proxy() for operand in operands_seq]),
-            tuple(
-                [inp.as_proxy() for inp in additional_inputs_seq]
-                + additional_lifted_inputs
-            ),
-        )
-        return _call_function_and_unflatten_output(
-            tx,
-            torch.ops.higher_order.while_loop,
-            p_args,
-            {},
-            None,
-            body_treespec,
-        )
+    @raise_hard_error_if_graph_break(
+        reason="while_loop_stack_output doesn't work unless it is captured completely with torch.compile."
+    )
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return _call_while_loop(self, tx, args, kwargs, stack_output=True)
 
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1526,7 +1625,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         sub_args = sub_args + sub_args_additional_inputs
         (
-            (combine_result, _combine_treespec),
+            (combine_result, _combine_spec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1641,7 +1740,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             None,
-            xs_treespec,
+            OutputSpec(xs_treespec),
         )
 
 
@@ -1749,7 +1848,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
-            (combine_result, _combine_treespec),
+            (combine_result, _combine_spec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1783,7 +1882,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}"
                 )
             carry_tree, out_vars = combine_result_vars
-            carry_vars, carry_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            carry_vars, _ = _make_inlined(tx, pytree.tree_flatten)(
                 carry_tree
             ).unpack_var_sequence(tx)
             carry_vars = carry_vars.unpack_var_sequence(tx)
@@ -1792,7 +1891,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ).unpack_var_sequence(tx)
 
             # additional output checking
-            _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
+            _combine_spec = OutputSpec(
+                _make_inlined(tx, pytree.tree_structure)(combine_result)
+            )
 
             check_meta_consistency_vt(
                 init_vars,
@@ -1833,7 +1934,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_treespec
+            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_spec
         )
 
 
@@ -1912,6 +2013,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
+            # TODO - removing consts from control flow ops need more work
+            remove_consts_from_outputs=False,
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -2413,7 +2516,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         (
-            (ret_val, ret_treespec),
+            (ret_val, ret_spec),
             ret_graph,
             ret_lifted_freevars,
         ) = speculate_subgraph(
@@ -2451,7 +2554,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             flat_example_value,
-            ret_treespec,
+            ret_spec,
         )
 
 
@@ -2464,8 +2567,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from torch.utils.checkpoint import noop_context_fn
-
-        from .builder import wrap_fx_proxy
 
         context_fn = None
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
@@ -2490,7 +2591,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             _,
             example_value,
             _body_r,
-            treespec,
+            out_spec,
             checkpointed_gmod,
             _,
         ) = self.create_wrapped_node(
@@ -2506,26 +2607,14 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
-        # Store the invocation as a call
-        variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs=checkpoint_kwargs,
-            ),
-            example_value=example_value,
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            checkpoint_kwargs,
+            example_value,
+            out_spec,
         )
-
-        if treespec is None:
-            return variable
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        variable = BuiltinVariable(list).call_function(tx, [variable], {})
-
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
@@ -2538,8 +2627,6 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import wrap_fx_proxy
-
         func_var = args[0]
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
@@ -2557,7 +2644,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
             _,
             example_value,
             _body_r,
-            treespec,
+            out_spec,
             gmod,
             _,
         ) = self.create_wrapped_node(
@@ -2573,26 +2660,14 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
         gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
         gmod.meta[gmod_meta_key] = func
 
-        # Store the invocation as a call
-        variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=(gmod_meta_key,) + tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            (gmod_meta_key,) + tuple(p_args),
+            {},
+            example_value,
+            out_spec,
         )
-
-        if treespec is None:
-            return variable
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        variable = BuiltinVariable(list).call_function(tx, [variable], {})
-
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -2772,7 +2847,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (_body_output, _body_treespec),
+                (_body_output, _body_spec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
@@ -3426,6 +3501,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
+    "while_loop_stack_output": WhileLoopStackOutputHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,

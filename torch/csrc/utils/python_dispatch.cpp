@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DTensorState.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -26,12 +27,18 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <utility>
 
 namespace py = pybind11;
 
 namespace torch::impl::dispatch {
+
+// Global storage for leaked Python filenames to ensure they remain valid
+// for the lifetime of Library objects
+static std::vector<std::string> leaked_python_filenames_;
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -497,13 +504,18 @@ void initDispatchBindings(PyObject* module) {
          const char* file,
          uint32_t linenum) {
         HANDLE_TH_ERRORS
+        // Store the file string in global storage to ensure it remains valid
+        // for the lifetime of the Library object
+        leaked_python_filenames_.emplace_back(file);
+        const char* leaked_file = leaked_python_filenames_.back().c_str();
+
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
             std::string(dispatch).empty()
                 ? std::nullopt
                 : std::make_optional(c10::parseDispatchKey(dispatch)),
-            "/dev/null", // temporary workaround
+            leaked_file,
             linenum);
         END_HANDLE_TH_ERRORS_PYBIND
       },
@@ -513,6 +525,12 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch"),
       py::arg("file") = "/dev/null",
       py::arg("linenum") = 0);
+
+  m.def(
+      "_dispatch_clear_leaked_python_filenames",
+      []() { leaked_python_filenames_.clear(); },
+      "Clear the global storage of leaked Python filenames. "
+      "WARNING: Only call this if you're sure no Library objects are still using the filenames.");
 
   m.def(
       "_dispatch_find_schema_or_throw",
@@ -1027,6 +1045,13 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
   m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
+
+  m.def(
+      "_get_dtensor_allow_implicit_replication",
+      &at::get_dtensor_allow_implicit_replication);
+  m.def(
+      "_set_dtensor_allow_implicit_replication",
+      &at::set_dtensor_allow_implicit_replication);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")

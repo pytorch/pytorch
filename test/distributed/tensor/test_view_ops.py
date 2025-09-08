@@ -228,19 +228,23 @@ class TestViewOps(DTensorTestBase):
         shard.view(-1)
 
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(-1)
 
         # 8 is the uneven case since mesh dim is 6
         tensor = torch.randn((8, 256))
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten unevenly sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(-1)
+
+        # assuming world size is 4+, tensor is shardable on dim 1 with size 256
+        # but not viewable when the resulting dim 1 has size 2
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(8, 2, -1)
 
     @with_comms
     def test_view_ops(self):
@@ -637,9 +641,7 @@ class TestViewOps(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten unevenly sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             dtensor_x.view(-1, 8)
 
     @with_comms

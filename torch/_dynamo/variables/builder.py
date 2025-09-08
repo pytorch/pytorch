@@ -168,10 +168,10 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -630,7 +630,7 @@ class VariableBuilder:
 
         from ..decorators import (
             DynamoConfigPatchProxy,
-            SetFullgraphDecoratorContextManager,
+            ErrorOnGraphBreakDecoratorContextManager,
         )
 
         if has_triton():
@@ -988,8 +988,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
-        elif isinstance(value, SetFullgraphDecoratorContextManager):
-            return SetFullgraphVariable(value.fullgraph)
+        elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
+            return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1521,7 +1521,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return MutableMappingVariable(value, source=self.source)
+            result = MutableMappingVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
@@ -2911,7 +2912,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
+        tx.output.current_tracer.track_produced_symints(example_value, proxy)
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
@@ -2990,12 +2991,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, (int, float, bool)) and (
         proxy.node.target is call_torchbind
-    ):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is flat_apply
+        or proxy.node.target is flat_apply
+        or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3076,7 +3073,8 @@ def construct_tensor_variable(
     # So that subgraphs can access the unbacked symbol's proxy in parent graph
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
-    tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
+    if proxy.node.op != "placeholder":
+        tx.output.current_tracer.track_produced_symints(example_value, proxy)
     options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
     return target_cls(proxy, **options)
 
