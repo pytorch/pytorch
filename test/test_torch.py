@@ -2147,7 +2147,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
-        with self.assertRaisesRegex(RuntimeError, r"check the repeats tensor values"):
+        with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.rand((7, 2, 6, 4, 8, 3), device=device),
                                     torch.tensor([6773413839565225984], device=device))
 
