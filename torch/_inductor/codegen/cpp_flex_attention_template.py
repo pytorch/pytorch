@@ -689,11 +689,10 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
 FLEX_DECODING_TEMPLATE = r"""
   int64_t PARTITION_SIZE = {{partition_size}};
-
-  // TODO: Support score / mask mod dependent on batch_size / num_head
-  int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
   int64_t num_kvblocks_per_partition = PARTITION_SIZE / kvBlockSize;
-  int64_t num_partitions = (num_kvblocks_per_seq + num_kvblocks_per_partition - 1) / num_kvblocks_per_partition;
+  int64_t actual_kvSize = kvSize / batchSize;
+  int64_t num_partitions =
+      (actual_kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
 
   // Allocate temp buf (accumulate type)
   int64_t _accum_buff_size =
