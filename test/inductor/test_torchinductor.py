@@ -2991,6 +2991,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_torch_device_split(self):
+        def fn(x):
+            return x.split(2)
+
+        x = torch.rand(10)
+
+        with x.device:
+            out = torch.compile(fn)(x)
+            ref = fn(x)
+            for a, b in zip(out, ref):
+                self.assertTrue(torch.allclose(a, b))
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -14454,6 +14466,55 @@ if RUN_GPU:
             self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
+
+        @config.patch(expand_dimension_for_pointwise_nodes=True)
+        def test_rope_fusion(self):
+            batch_size, seq_length, hidden_dim = 8, 16, 128
+            num_q_heads, num_kv_heads = 32, 8
+
+            def prepare_input(batch_size, seq_length):
+                q = torch.randn(
+                    (batch_size, num_q_heads, seq_length, hidden_dim), device=GPU_TYPE
+                )
+                k = torch.randn(
+                    (batch_size, num_kv_heads, seq_length, hidden_dim),
+                    device=GPU_TYPE,
+                )
+                pos_ids = torch.arange(
+                    seq_length, device=GPU_TYPE, dtype=torch.long
+                ).unsqueeze(0)
+
+                # dummy cos and sin
+                cos, sin = (
+                    torch.randn((1, seq_length, hidden_dim), device=GPU_TYPE),
+                    torch.randn((1, seq_length, hidden_dim), device=GPU_TYPE),
+                )
+                return q, k, cos, sin, pos_ids
+
+            def rotate_half(x):
+                """Rotates half the hidden dims of the input."""
+                x1 = x[..., : x.shape[-1] // 2]
+                x2 = x[..., x.shape[-1] // 2 :]
+                return torch.cat((-x2, x1), dim=-1)
+
+            def apply_rotary_pos_emb(
+                q, k, cos, sin, position_ids=None, unsqueeze_dim=1
+            ):
+                cos = cos.unsqueeze(unsqueeze_dim)
+                sin = sin.unsqueeze(unsqueeze_dim)
+                q_embed = (q * cos) + (rotate_half(q) * sin)
+                k_embed = (k * cos) + (rotate_half(k) * sin)
+                return q_embed, k_embed
+
+            q, k, cos, sin, pos_ids = prepare_input(batch_size, seq_length)
+            compiled_fn = torch.compile(apply_rotary_pos_emb)
+            compiled_out = compiled_fn(q, k, cos, sin, pos_ids)
+            eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
+            self.assertEqual(compiled_out, eager_out)
+
+            # make sure that rope is fused into 1 kernel
+            code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
+            self.assertEqual(code.count(".run("), 1)
 
         def test_numpy_autograd(self):
             def my_torch(x):

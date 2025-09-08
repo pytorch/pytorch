@@ -121,11 +121,17 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
-        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
-        # as implicitly replicated or we throw error to user.
-        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
-        # it as False by default.
-        self._allow_implicit_replication = False
+    # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+    # as implicitly replicated or we throw error to user.
+    # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+    # it as False by default.
+    @property
+    def _allow_implicit_replication(self) -> bool:
+        return torch._C._get_dtensor_allow_implicit_replication()
+
+    @_allow_implicit_replication.setter
+    def _allow_implicit_replication(self, value: bool) -> None:
+        return torch._C._set_dtensor_allow_implicit_replication(value)
 
     def dispatch(
         self,

@@ -39,6 +39,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
 from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -3471,20 +3478,21 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "DICT_VERSION",
+        "NN_MODULE",
+        "ID_MATCH",
+        "FUNCTION_MATCH",
+        "CLOSURE_MATCH",
+        "WEAKREF_ALIVE",
+    )
+
     def serialize_guards(
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
-        UNSUPPORTED_GUARD_TYPES = (
-            "DICT_VERSION",
-            "NN_MODULE",
-            "ID_MATCH",
-            "FUNCTION_MATCH",
-            "CLOSURE_MATCH",
-            "WEAKREF_ALIVE",
-        )
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
@@ -3496,12 +3504,19 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard.name)
                     raise_local_type_error(obj)
-            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+            elif (
+                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
                 )
             elif failed := next(
-                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+                (
+                    i
+                    for i in derived_guard_types
+                    if i in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                ),
+                None,
             ):
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(

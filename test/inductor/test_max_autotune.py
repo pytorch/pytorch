@@ -31,8 +31,11 @@ from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
+    add_preprocessing_fn,
     AlgorithmSelectorCache,
     clear_feedback_savers,
+    clear_preprocessing_fns,
+    ExternKernelCaller,
     TritonTemplate,
     TritonTemplateCaller,
 )
@@ -231,6 +234,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="TMA path on Intel GPU not require this check")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
         def mm(a, b):
@@ -359,6 +363,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="TMA path on Intel GPU not require this check")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_persistent_tma_illegal_alignment(self, dynamic):
         def addmm(x, a, b):
@@ -1305,7 +1310,9 @@ class TestMaxAutotune(TestCase):
 
         # Force only contiguous choice to test the transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 
@@ -1347,7 +1354,9 @@ class TestMaxAutotune(TestCase):
 
         # Force contiguous choice to test the transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 
@@ -1408,7 +1417,7 @@ class TestMaxAutotune(TestCase):
             # Test with non-contiguous second matrix - should use contiguous transform
             with (
                 mock.patch(
-                    "torch._inductor.kernel.mm.use_contiguous"
+                    "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
                 ) as contiguous_mock,
             ):
                 contiguous_mock.return_value = True
@@ -1453,7 +1462,9 @@ class TestMaxAutotune(TestCase):
 
         # Force contiguous transform
         with (
-            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+            mock.patch(
+                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+            ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
 
@@ -1891,6 +1902,76 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(
             counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
         )
+
+    @parametrize("op", ("mm", "addmm", "bmm", "baddbmm", "mm_plus_mm"))
+    @parametrize("max_autotune", (False, True))
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+    )
+    def test_autotune_gemm_choice_validation(self, op, max_autotune):
+        def generate_inputs_and_func(op_name):
+            # Base config with just x and w
+            base_inputs = [
+                torch.randn(128, 256, device=GPU_TYPE),
+                torch.randn(256, 128, device=GPU_TYPE),
+            ]
+            func = torch.mm
+            if op_name == "mm":
+                # default
+                pass
+            elif op_name == "addmm":
+                # Add bias for addmm
+                base_inputs = [torch.randn(128, device=GPU_TYPE)] + base_inputs
+                func = torch.addmm
+            elif op_name in ["bmm", "baddbmm"]:
+                # Override for batch dimensions
+                base_inputs[0] = torch.randn(4, 128, 256, device=GPU_TYPE)
+                base_inputs[1] = torch.randn(4, 256, 128, device=GPU_TYPE)
+                func = torch.bmm
+                if op_name == "baddbmm":
+                    # Add batch bias
+                    base_inputs = [
+                        torch.torch.randn(4, 128, 128, device=GPU_TYPE)
+                    ] + base_inputs
+                    func = torch.baddbmm
+            elif op_name == "mm_plus_mm":
+                # Add second matrix pair
+                base_inputs += [
+                    torch.randn(128, 256, device=GPU_TYPE),
+                    torch.randn(256, 128, device=GPU_TYPE),
+                ]
+
+                def mmpmm(x, w, x2, w2):
+                    return torch.mm(x, w) + torch.mm(x2, w2)
+
+                func = mmpmm
+            else:
+                raise ValueError(f"Unsupported op: {op_name}")
+            return base_inputs, func
+
+        choice_types_seen = set()
+
+        def choice_validator(choices):
+            for choice in choices:
+                choice_types_seen.add(type(choice))
+            return choices
+
+        inputs, fn = generate_inputs_and_func(op)
+
+        add_preprocessing_fn(choice_validator)
+        try:
+            with config.patch({"max_autotune": max_autotune}):
+                compiled_fn = torch.compile(fn, dynamic=False)
+                compiled_fn(*inputs)
+
+                if max_autotune:
+                    self.assertIn(ExternKernelCaller, choice_types_seen)
+                    self.assertIn(TritonTemplateCaller, choice_types_seen)
+                else:
+                    self.assertIn(ExternKernelCaller, choice_types_seen)
+                    self.assertNotIn(TritonTemplateCaller, choice_types_seen)
+        finally:
+            clear_preprocessing_fns()
 
 
 class TestMaxAutotunePrecompile(TestCase):

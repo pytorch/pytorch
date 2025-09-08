@@ -170,7 +170,7 @@ class CPythonTestCase(TestCase):
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(backend, nopython=nopython)(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
         setattr(self, self._testMethodName, method)
         return fn
 

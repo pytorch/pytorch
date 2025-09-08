@@ -1412,7 +1412,7 @@
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
   dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: cat_sparse
+    SparseCPU, SparseCUDA: cat_sparse
     QuantizedCPU: cat_quantized_cpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: cat_nested
   tags: core
@@ -7158,6 +7158,7 @@
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
   variants: function
   dispatch:
+    CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
 
 # NOTE [ Sparse: autograd and API ]

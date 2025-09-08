@@ -110,6 +110,12 @@ automatic_dynamic_shapes = True
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,

@@ -131,9 +131,27 @@
 
     offs_n = tl.arange(0, BLOCK_N) + off_n
 
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
+
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K, V, None, None, Q_LEN, KV_LEN,
+        q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
         #offsets
@@ -168,7 +186,7 @@
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K, V, None, None, Q_LEN, KV_LEN,
+            q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
             #offsets

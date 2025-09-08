@@ -79,9 +79,16 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
     rank_to_global_rank_ = group_info.rank_to_global_rank;
+
+    world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_ptr(
-          base_ptr_, rank_to_global_rank_[r]));
+      auto peer_ptr = nvshmem_ptr(
+          base_ptr_, rank_to_global_rank_[r]);
+      buffers_.push_back(peer_ptr);
+      // If a peer is over network, `nvshmem_ptr` returns null
+      if (peer_ptr == nullptr) {
+        world_within_cuda_p2p_ = false;
+      }
     }
 
     // TODO: use the same allocation for signal pad
@@ -128,6 +135,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   void** signal_pads_dev_;
   std::vector<int> rank_to_global_rank_;
   int* rank_to_global_rank_dev_;
+  // Whether the world is within CUDA P2P only, not network
+  bool world_within_cuda_p2p_;
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -230,6 +239,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int* get_rank_to_global_rank_dev() override {
     return pai_->rank_to_global_rank_dev_;
   };
+
+  bool world_within_direct_access() {
+    return pai_->world_within_cuda_p2p_;
+  }
 
  private:
   std::shared_ptr<NVSHMEMAllocation> allocation_;

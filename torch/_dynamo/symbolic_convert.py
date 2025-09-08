@@ -3756,8 +3756,8 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
-        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # NOTE: one_graph is used for export/fullgraph=True to always force errors on graph breaks.
+        # To toggle erroring/resuming on graph breaks during fullgraph=False compile, self.error_on_graph_break
         # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
         # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
         # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on

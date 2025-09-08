@@ -346,11 +346,12 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
         value_bytes = b""
     elif value.data_ptr():
         cpu_tensor = value.cpu().contiguous()
-        # we store the raw bytes of tensor. Tensor metadata is stored separately
+        value_untyped_storage = cpu_tensor.untyped_storage()
+        # we store the raw bytes the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
             ctypes.cast(
-                cpu_tensor.data_ptr(),
-                ctypes.POINTER(ctypes.c_ubyte * value.element_size() * value.numel()),
+                value_untyped_storage.data_ptr(),
+                ctypes.POINTER(ctypes.c_ubyte * value_untyped_storage.size()),
             ).contents
         )
     else:

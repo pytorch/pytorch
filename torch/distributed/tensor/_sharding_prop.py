@@ -196,27 +196,27 @@ class ShardingPropagator:
             return None
 
     @lru_cache  # noqa: B019
-    def _propagate_tensor_meta_cached(
-        self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
-        """
-        Cached version of _propagate_tensor_meta_non_cached
-        Use _propagate_tensor_meta instead to make compile-safe.
-        """
-        return self._propagate_tensor_meta_non_cached(op_schema)
-
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         """
+        Cached version of _propagate_tensor_meta_non_cached
+        This is a private API. Use propagate_tensor_meta instead.
+        """
+        return self._propagate_tensor_meta_non_cached(op_schema)
+
+    def propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. Uses the cached version if not
-        actively tracing. Use this method if you need caching.
+        or a list/tuple of TensorMetas. This is a public API that should be
+        used if cache should be used.
         """
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
-            return self._propagate_tensor_meta_cached(op_schema)
+            return self._propagate_tensor_meta(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,

@@ -12,7 +12,9 @@ self-hosted-runner:
     - linux.9xlarge.ephemeral
     - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
+    - linux.12xlarge.memory
     - linux.24xlarge
+    - linux.24xlarge.memory
     - linux.24xlarge.ephemeral
     - linux.24xlarge.amd
     - linux.arm64.2xlarge

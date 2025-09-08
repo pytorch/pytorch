@@ -11,7 +11,42 @@ if TYPE_CHECKING:
 
 
 class TemplateConfigHeuristics:
+    """Base class for generating sets of configs for an associated template."""
+
+    def should_run(self, inputs: KernelInputs, layout: Layout) -> bool:
+        """
+        hookup to check whether the configs are right to run at all e.g. you can check
+        max-autotune specific to your heuristic here or other things
+        If this returns False, get_template_configs will yield no configs
+
+        Args:
+            inputs: KernelInputs
+            layout: Layout
+        """
+        return True
+
     def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Get template configs for the given inputs.
+
+        Prefer to override the _get_template_configs_impl method
+        to leverage things like should_run
+        """
+        if not self.should_run(kernel_inputs, layout):
+            return
+
+        yield from self._get_template_configs_impl(
+            kernel_inputs,
+            layout,
+            op_name,
+        )
+
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         layout: Layout,
@@ -21,8 +56,7 @@ class TemplateConfigHeuristics:
         Get template configs for the given inputs.
         This is the main entry point for template-specific logic.
         """
-        # NOTE: not an abstract class, because that clashed below for the mixin
-        # functionality. Can be adjusted, but not a high priority
+        # base implementation yields no entries
         yield from []
 
     def get_extra_kwargs(

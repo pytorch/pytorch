@@ -154,7 +154,7 @@ inline Tensor pad(
 
 // This function is an overload to compute the maximum value along each slice of
 // `self` along a single dimension `dim`.
-inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
+inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
@@ -167,7 +167,7 @@ inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
 // typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
 // header-only (2) SymInt is not yet header-only
 inline Tensor amax(
-    Tensor& self,
+    const Tensor& self,
     std::vector<int64_t> dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;

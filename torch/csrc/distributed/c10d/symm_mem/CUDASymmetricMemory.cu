@@ -320,6 +320,10 @@ c10::Device CUDASymmetricMemory::get_device() {
   return c10::Device(c10::DeviceType::CUDA, local_device_idx_);
 }
 
+bool CUDASymmetricMemory::world_within_direct_access() {
+  return true;
+}
+
 Block::Block(
     c10::intrusive_ptr<AllocationRef> alloc_ref,
     int device_idx,

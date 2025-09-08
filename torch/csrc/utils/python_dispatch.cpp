@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DTensorState.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -1044,6 +1045,13 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
   m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
+
+  m.def(
+      "_get_dtensor_allow_implicit_replication",
+      &at::get_dtensor_allow_implicit_replication);
+  m.def(
+      "_set_dtensor_allow_implicit_replication",
+      &at::set_dtensor_allow_implicit_replication);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")

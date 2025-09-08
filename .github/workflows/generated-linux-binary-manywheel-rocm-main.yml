@@ -10,7 +10,9 @@ on:
     branches:
       - main
     tags:
-      - 'ciflow/rocm-mi300/*'
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
+      - 'ciflow/rocm/*'
   workflow_dispatch:
 
 permissions:
@@ -67,7 +69,7 @@ jobs:
     needs:
       - manywheel-py3_9-rocm6_4-build
       - get-label-type
-    runs-on: linux.rocm.gpu.gfx942.1
+    runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch

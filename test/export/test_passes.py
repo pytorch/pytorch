@@ -1381,6 +1381,38 @@ def forward(self, arg0_1):
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cuda:0"))
 
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_device_example_inputs(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x, y, z):
+                return self.linear(x) + y + z
+
+        # Create model with example inputs on CPU
+        mod = Model()
+        example_args = (torch.rand(4, 4), torch.rand(4, 4))
+        example_kwargs = {"z": torch.tensor([1.0, 2.0, 3.0, 4.0])}
+
+        # Export with example inputs
+        ep = export(mod, example_args, example_kwargs)
+
+        # Verify initial state - all tensors should be on CPU
+        self.assertEqual(ep.example_inputs[0][0].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[0][1].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
+
+        # Move to CUDA
+        location = torch.device("cuda:0")
+        ep_cuda = move_to_device_pass(ep, location=location)
+
+        # Verify example_inputs moved to CUDA
+        self.assertEqual(ep_cuda.example_inputs[0][0].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[0][1].device, torch.device("cuda:0"))
+        self.assertEqual(ep_cuda.example_inputs[1]["z"].device, torch.device("cuda:0"))
+
     def test_constant_folding_pass(self):
         from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
         from torch.ao.quantization.pt2e._affine_quantization import (
