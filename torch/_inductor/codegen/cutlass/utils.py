@@ -305,19 +305,20 @@ def gen_ops(device_type: str) -> dict[Any, Any]:
 from ..cpp_utils import DTYPE_TO_CPP
 
 
-# DTYPE_TO_CUTLASS_TYPE = {
-#     **DTYPE_TO_CPP,
-#     torch.float16: "__half",
-#     torch.bfloat16: "__nv_bfloat16",
-#     torch.float8_e4m3fn: "__nv_fp8_e4m3",
-# }
-
-DTYPE_TO_CUTLASS_TYPE = {
-    **DTYPE_TO_CPP,
-    torch.float16: "half_t",
-    torch.bfloat16: "bfloat16_t",
-    torch.float8_e4m3fn: "float_e4m3_t",
-}
+if torch.xpu.is_available():
+    DTYPE_TO_CUTLASS_TYPE = {
+        **DTYPE_TO_CPP,
+        torch.float16: "uint16_t",
+        torch.bfloat16: "uint16_t",
+        torch.float8_e4m3fn: "uint8_t",
+    }
+else:
+    DTYPE_TO_CUTLASS_TYPE = {
+        **DTYPE_TO_CPP,
+        torch.float16: "__half",
+        torch.bfloat16: "__nv_bfloat16",
+        torch.float8_e4m3fn: "__nv_fp8_e4m3",
+    }
 
 
 @functools.lru_cache(32)
