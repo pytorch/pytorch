@@ -59,20 +59,6 @@ jobs:
         run: |
           set -eux
 
-          # Keep PyTorch nightly wheel here so that we can install it later during
-          # vLLM build process
-          mkdir -p "${RUNNER_TEMP}/artifacts/"
-
-          container_name=$(docker run \
-            --tty \
-            --detach \
-            -e PLATFORM \
-            -v "${GITHUB_WORKSPACE}:/pytorch" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w /artifacts/ \
-            "${MANYLINUX_IMAGE}"
-          )
-
           # Determine python executable for given version (copied from build-triton-wheel)
           case $PY_VERS in
           3.10)
@@ -102,6 +88,21 @@ jobs:
             ;;
           esac
 
+          # Keep PyTorch nightly wheel here so that we can install it later during
+          # vLLM build process
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -e PLATFORM \
+            -e PYTHON_EXECUTABLE \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${MANYLINUX_IMAGE}"
+          )
+
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip install \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
@@ -113,7 +114,6 @@ jobs:
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
           # Save this for later
-          echo "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" >> "$GITHUB_ENV"
           echo "container_name=${container_name}" >> "$GITHUB_ENV"
 
       - name: Build vLLM wheel
