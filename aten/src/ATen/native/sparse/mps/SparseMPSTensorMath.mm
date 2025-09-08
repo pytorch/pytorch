@@ -82,10 +82,11 @@ static SparseTensor& mul_out_dense_sparse_mps(
               "mul(dense, sparse): sizes must match exactly (no broadcasting): ",
               dense.sizes(), " vs ", sparse.sizes());
 
-  const int64_t nDim  = sparse.dim();
   const int64_t nDimI = sparse.sparse_dim();
-  TORCH_CHECK(nDimI >= 0 && nDimI <= nDim,
-              "Invalid sparse_dim=", nDimI, " for dense tensor of dim ", nDim);
+  const int64_t nDim = dense.dim();
+  TORCH_CHECK(
+    nDimI <= nDim,
+    "mul(dense, sparse): sparse_dim=", nDimI, " exceeds dense.dim()=", nDim);
 
   // Prepare shapes
   int64_t view_rows = 1, view_cols = 1;
@@ -219,9 +220,8 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
   auto A_keys = A_is_lhs ? lhs_keys : rhs_keys;
   auto B_keys = A_is_lhs ? rhs_keys : lhs_keys;
 
-  const int64_t mmax = std::min(lhs_nnz, rhs_nnz);
-  auto outA_idx = at::empty({mmax}, at::device(device).dtype(kLong));
-  auto outB_idx = at::empty({mmax}, at::device(device).dtype(kLong));
+  auto outA_idx = at::empty({lenA}, at::device(device).dtype(kLong));
+  auto outB_idx = at::empty({lenA}, at::device(device).dtype(kLong));
   auto counter = at::zeros({1}, at::device(device).dtype(kInt));
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
