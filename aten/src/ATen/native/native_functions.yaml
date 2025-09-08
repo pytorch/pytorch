@@ -3275,6 +3275,9 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: kl_div
+    MTIA: kl_div_mtia
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
