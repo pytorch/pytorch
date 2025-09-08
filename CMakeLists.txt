@@ -889,6 +889,12 @@ IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
   set(USE_FBGEMM_GENAI off)
 endif()
 
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a")
+  message(WARNING "Setting USE_FBGEMM_GENAI to ON for CUDA build on SM100")
+  set(USE_FBGEMM_GENAI ON)
+endif()
+
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(

@@ -2000,6 +2000,11 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex32)
         self.assertEqual(complexHalfTensor, expected)
 
+    def test_zeros_bounds_checking(self, device):
+        # Test negative large integer
+        with self.assertRaisesRegex(RuntimeError, r"zeros: Dimension size must be non-negative."):
+            torch.zeros(-6744789213055875072, device=device)
+
     # TODO: this test should be updated
     def test_zeros_out(self, device):
         shape = (3, 4)
