@@ -5264,7 +5264,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         ]
         rel_logits = torch.randn(2 * B, H, S, S, device=device)
         rel_logits[B:] = float("nan")
-        print("rel_logits", rel_logits)
 
         def score_mod(score, b, h, q, kv):
             return score + rel_logits[b, h, q, kv]
