@@ -1340,6 +1340,8 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
                 export_status.torch_export_strict = result.success
+            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
+                export_status.torch_export_draft_export = result.success
 
             if result.exception is not None:
                 failed_results.append(result)
