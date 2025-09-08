@@ -73,6 +73,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    is_in_any_mode_without_ignore_compile_internals,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -523,12 +524,6 @@ class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
 
 
-def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
-    if tx is None:
-        return _get_error_on_graph_break()
-    return tx.error_on_graph_break
-
-
 def get_compile_id(
     frame_state: dict[str, Union[int, FrameStateSizeEntry]],
 ) -> CompileId:
@@ -855,6 +850,7 @@ class DynamoOutput:
         hooks: Optional[Hooks] = None,
         save: bool = False,
         cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
     ) -> CheckFunctionManager:
         assert self.tracer_output.output_graph is not None
         return CheckFunctionManager(
@@ -864,6 +860,7 @@ class DynamoOutput:
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
+            strict_error=strict_error,
         )
 
 
@@ -909,7 +906,9 @@ class FrameInfo:
     closure: tuple[CellType]
 
 
-def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
+def fullgraph_capture(
+    frame: FrameInfo, *, _is_export_deprecated_do_not_use: bool = False
+) -> CaptureOutput:
     """
     A standalone function which takes a frame and returns dynamo captured graph
     plus other important compile information. This should serve as the common
@@ -943,16 +942,30 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         )
         return gm
 
-    dynamo_output = compile_frame(
-        frame.code,
-        frame.globals,
-        frame.locals,
-        frame.builtins,
-        frame.closure,
-        compiler_fn=fullgraph_compiler,
-        one_graph=True,
-        restart_reasons=set(),
-    )
+    try:
+        dynamo_output = compile_frame(
+            frame.code,
+            frame.globals,
+            frame.locals,
+            frame.builtins,
+            frame.closure,
+            compiler_fn=fullgraph_compiler,
+            export=_is_export_deprecated_do_not_use,
+            one_graph=True,
+            restart_reasons=set(),
+        )
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
+    except Unsupported as e:
+        augment_exc_message(e)
+        if config.verbose:
+            raise
+        # strip internal tracebacks from causes
+        cur_exn: BaseException = e
+        while cur_exn.__cause__ is not None:
+            cur_exn.__cause__.with_traceback(None)
+            cur_exn = cur_exn.__cause__
+        raise e.with_traceback(None) from e.__cause__  # User compiler error
+
     assert backend_input is not None
     return CaptureOutput(dynamo_output, backend_input)
 
@@ -1151,10 +1164,8 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph or _is_error_on_graph_break(e._torch_dynamo_tracer_output):
-                log.debug(
-                    "No graph captured with one_graph=True or error_on_graph_break=True"
-                )
+            if one_graph:
+                log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
@@ -1360,10 +1371,9 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _get_error_on_graph_break():
+            elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
-                    "Excessive recompilations can degrade "
+                    f"{limit_type} reached with fullgraph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
@@ -1432,7 +1442,12 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
-            log_frame_dynamic_whitelist(code)
+            if (
+                tracer_output
+                and (output_graph := tracer_output.output_graph)
+                and output_graph.has_outputs()
+            ):
+                log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1726,7 +1741,7 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    with decorators.set_fullgraph(fullgraph=False):
+    with decorators.error_on_graph_break(False):
         try:
             _compile(
                 record.code,
@@ -1770,6 +1785,10 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
+def should_skip_due_to_torch_dispatch_mode() -> bool:
+    return is_in_any_mode_without_ignore_compile_internals()
+
+
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -1797,7 +1816,7 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False)
+                should_skip_due_to_torch_dispatch_mode()
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):

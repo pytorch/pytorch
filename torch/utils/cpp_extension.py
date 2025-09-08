@@ -22,9 +22,8 @@ import torch
 import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
-from .hipify import hipify_python
-from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Optional, Union
+from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -1368,6 +1367,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     include_dirs = kwargs.get('include_dirs', [])
 
     if IS_HIP_EXTENSION:
+        from .hipify import hipify_python
         build_dir = os.getcwd()
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
@@ -1705,6 +1705,9 @@ def load(name,
         is_standalone,
         keep_intermediates=keep_intermediates)
 
+@deprecated("PyBind11 ABI handling is internal to PyBind11; this will be removed after PyTorch 2.9.0")
+def _get_pybind11_abi_build_flags() -> list[str]:
+    return []
 
 def check_compiler_is_gcc(compiler):
     if not IS_LINUX:
@@ -2105,6 +2108,8 @@ def _jit_compile(name,
     if baton.try_acquire():
         try:
             if version != old_version:
+                from .hipify import hipify_python
+                from .hipify.hipify_python import GeneratedFileCleaner
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(

@@ -566,6 +566,10 @@ class HalideOverrides(OpOverrides):
     def frexp(x):
         raise NotImplementedError("frexp")
 
+    @staticmethod
+    def device_assert_async(cond, msg):
+        raise NotImplementedError("device_assert_async")
+
 
 HalideOverrides._initialize_pointwise_overrides("halide")
 
