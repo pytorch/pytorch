@@ -3,6 +3,7 @@
 import contextlib
 import os
 import unittest
+from unittest import skipUnless
 
 import numpy as np
 import sympy
@@ -18,13 +19,14 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import run_and_get_code, sympy_index_symbol
+from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -413,6 +415,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
@@ -435,6 +438,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_pattern_2(self):
         """
@@ -558,6 +562,35 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
+    def test_interaction_with_triton_template(self):
+        """
+        Make sure the dependency prefix for TritonTempalate and its
+        prologue match.
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.randn([1, 1], device=GPU_TYPE)
+        y = torch.randn([64, 128], device=GPU_TYPE)
+
+        out, code = run_and_get_code(f, x, y)
+
+        # well when benchmark_kernel flag is on, we have one more .run
+        # call in the benchmarking code.
+        FileCheck().check("def call(").check_count(
+            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
+        ).run(code[0])
 
 
 @inductor_config.patch(
