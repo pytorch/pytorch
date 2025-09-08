@@ -8,11 +8,11 @@ import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
-import psutil
 
 import benchmark_utils
 
 import numpy as np
+import psutil
 
 import torch
 
@@ -372,7 +372,7 @@ class BenchmarkRunner:
         curr_test_total_time = 0
         time_trace = []
         peak_memory = 0
-        # TODO: Add conditional to measure peak memory usage for cpu (skiping cpu for now)
+        # TODO: Add conditional to measure peak memory usage for cpu (skipping cpu for now)
         sample_input = next(iter(test_case.op_bench.inputs.values()))
         device = sample_input.device
         device_module = torch.get_device_module(device.type)
@@ -382,13 +382,13 @@ class BenchmarkRunner:
             run_time_sec = launch_test(test_case, iters, print_per_iter)
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize(device)
-            # Memory measurement process 
+            # Memory measurement process
             if hasattr(device_module, "max_memory_allocated"):
                 peak_memory = device_module.max_memory_allocated(device)
             elif device == torch.device("cpu"):
                 # Method 1
-                # total = psutil.virtual_memory().total 
-                # percentage = psutil.Process(os.getpid()).memory_percent() 
+                # total = psutil.virtual_memory().total
+                # percentage = psutil.Process(os.getpid()).memory_percent()
                 # peak_memory = percentage * total
                 # Method 2
                 process = psutil.Process()
