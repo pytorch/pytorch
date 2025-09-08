@@ -4043,9 +4043,6 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
-
-        Additionally, we must make sure that if node1 reads a buffer and
-        node2 writes it, that they have identical memory access patterns
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
