@@ -53,9 +53,11 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 
 def get_float32_precision():
     if (
-        torch.backends.cuda.matmul.fp32_precision == "ieee"
-        if torch.backends.cuda.matmul.fp32_precision != "none"
-        else torch.get_float32_matmul_precision() == "highest"
+        (
+            torch.backends.cuda.matmul.fp32_precision == "ieee"
+            if torch.backends.cuda.matmul.fp32_precision != "none"
+            else torch.get_float32_matmul_precision() == "highest"
+        )
         or torch.version.hip
         or torch.mtia.is_available()
     ):
@@ -251,6 +253,12 @@ def flex_attention(
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
+    max_scores = empty_strided(
+        logsumexp_shape,  # Same shape as logsumexp
+        None,
+        dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
@@ -272,7 +280,9 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_fwd_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -342,6 +352,7 @@ def flex_attention(
                 key,
                 value,
                 logsumexp,
+                max_scores,
                 kv_num_blocks,
                 kv_indices,
                 full_kv_num_blocks,
@@ -354,6 +365,7 @@ def flex_attention(
             ],
             mutated_inputs=[
                 logsumexp,
+                max_scores,
             ],
             call_sizes=query.get_size(),
             **cur_kernel_options,
@@ -366,6 +378,7 @@ def flex_attention(
             key,
             value,
             logsumexp,
+            max_scores,
             kv_num_blocks,
             kv_indices,
             full_kv_num_blocks,
@@ -375,10 +388,10 @@ def flex_attention(
         + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(kv_indices),
-        5: create_indices_fake,
-        6: create_num_blocks_fake_generator(full_kv_indices),
-        7: create_indices_fake,
+        5: create_num_blocks_fake_generator(kv_indices),
+        6: create_indices_fake,
+        7: create_num_blocks_fake_generator(full_kv_indices),
+        8: create_indices_fake,
     }
 
     out = autotune_select_algorithm(
@@ -399,7 +412,7 @@ def flex_attention(
         subgraph_buffer, mask_graph_buffer
     )
 
-    return (out, logsumexp)
+    return (out, logsumexp, max_scores)
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
@@ -710,7 +723,9 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_bwd_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0

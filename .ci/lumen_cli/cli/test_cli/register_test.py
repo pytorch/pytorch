@@ -22,6 +22,18 @@ def common_args(parser: argparse.ArgumentParser) -> None:
     """
     Add common CLI arguments to the given parser.
     """
+    parser.add_argument(
+        "--shard-id",
+        type=int,
+        default=1,
+        help="a shard id to run, e.g. '0,1,2,3'",
+    )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=1,
+        help="a number of shards to run, e.g. '4'",
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "-tp",
@@ -29,7 +41,6 @@ def common_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="a pre-defined test plan to run, e.g. 'basic_correctness_test'",
     )
-    # TODO(elainewy):add another common option that user can trigger a specific test with test config
 
 
 def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
