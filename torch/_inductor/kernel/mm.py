@@ -944,7 +944,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
         )
         choices.extend(
-            V.choices.get_mm_configs(
+            V.choices.get_template_configs(
                 kernel_inputs,
                 [aten_addmm],
                 name,
