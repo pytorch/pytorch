@@ -140,6 +140,8 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
+    # TODO: Remove this once we clean up the code
+    'torch/distributed/distributed_c10d.py',
 ]
 command = [
     'python3',
