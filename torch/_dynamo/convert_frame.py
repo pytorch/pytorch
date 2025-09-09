@@ -906,7 +906,9 @@ class FrameInfo:
     closure: tuple[CellType]
 
 
-def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
+def fullgraph_capture(
+    frame: FrameInfo, *, _is_export_deprecated_do_not_use: bool = False
+) -> CaptureOutput:
     """
     A standalone function which takes a frame and returns dynamo captured graph
     plus other important compile information. This should serve as the common
@@ -948,6 +950,7 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
             frame.builtins,
             frame.closure,
             compiler_fn=fullgraph_compiler,
+            export=_is_export_deprecated_do_not_use,
             one_graph=True,
             restart_reasons=set(),
         )
