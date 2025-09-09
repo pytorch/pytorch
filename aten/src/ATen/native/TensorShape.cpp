@@ -563,9 +563,10 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
-  bool is_coalesced = !self.dim() ||
-      (self.is_coalesced() &&
-       (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
+  bool is_coalesced = (
+      self.is_coalesced() &&
+      (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1)
+  );
 
   // Replace non-broadcastable dims with 1 in the `size` vector {
   auto res_sparse_dim_broadcast_mask =
