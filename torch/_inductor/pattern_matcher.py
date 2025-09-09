@@ -2191,6 +2191,8 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
     #   dependency.
     waiting = defaultdict(list)
 
+    rank = torch.distributed.get_rank()
+
     # The cursor indicates the last processed node so we can add new nodes
     # after it.
     cursor = None
@@ -2209,6 +2211,32 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
             # Mark the nodes that have been waiting for this node to finish as
             # ready to check again.
             pending.extend(reversed(waiting.pop(node, ())))
+
+    if waiting or len(ready) != len(graph.nodes):
+        print(f"XXX[RANK:{rank}] TOPO: WAITING:{waiting}")
+        print(f"XXX[RANK:{rank}] TOPO: PENDING:{pending}")
+        print(f"XXX[RANK:{rank}] len(read) = {len(ready)}")
+        print(f"XXX[RANK:{rank}] len(graph.nodes) = {len(graph.nodes)}")
+        all_nodes = OrderedSet()
+        for n, wait_ns in waiting.items():
+            all_nodes.add(n)
+            for wn in wait_ns:
+                all_nodes.add(wn)
+
+        def _dfs(n, edges, path):
+            path.append(n)
+            for dst in edges[n]:
+                if dst in path:
+                    print(f"XXX[RANK:{rank}] CYCLE_DETECTED {dst}  path:{path}")
+                    return True
+                else:
+                    if _dfs(dst, edges, path):
+                        return True
+            path.pop()
+
+        for n in all_nodes:
+            if _dfs(n, waiting, []):
+                break
 
     assert not waiting and len(ready) == len(graph.nodes)
 

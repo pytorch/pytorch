@@ -907,7 +907,7 @@ class BaseSchedulerNode:
         if flops_est == 0 or flops_est is None:
             # no flops estimate, so fall back to memory estimate
             ns = self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
-            ms = ns / 1e6
+            ms = float(ns) / 1e6
             return ms
 
         # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
@@ -919,7 +919,7 @@ class BaseSchedulerNode:
 
         # Return estimated runtime in milliseconds
         ns = max(compute_time, transfer_time)
-        ms = ns / 1e6
+        ms = float(ns) / 1e6
         return ms
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
@@ -971,6 +971,12 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
 
 
 def _get_mm_like_fn(snode: BaseSchedulerNode) -> Optional[Callable[[Any], Any]]:
+    if config.runtime_estimations_triton_benchmark and not isinstance(
+        snode, ExternKernelSchedulerNode
+    ):
+        mean_op_time_ms, _ = snode.scheduler.benchmark_fused_nodes(snode.get_nodes())
+        return mean_op_time_ms
+
     if not isinstance(snode, ExternKernelSchedulerNode):
         return None
     mms_fns = {
@@ -989,6 +995,11 @@ def _get_mm_like_fn(snode: BaseSchedulerNode) -> Optional[Callable[[Any], Any]]:
 def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
     bench_fn = None
     args_kwargs_fn = None
+    if config.runtime_estimations_triton_benchmark and not isinstance(
+        snode, ExternKernelSchedulerNode
+    ):
+        mean_op_time_ms, _ = snode.scheduler.benchmark_fused_nodes(snode.get_nodes())
+        return mean_op_time_ms
     if config.runtime_estimations_mms_benchmark:
         mm_fn = _get_mm_like_fn(snode)
         if mm_fn is None:
@@ -2355,9 +2366,10 @@ class Scheduler:
                 },
                 payload_fn=lambda: "\n\n".join(
                     [
-                        f"snode[{i}]"
+                        f"\nsnode[{i}]"
                         + n.debug_str()
-                        + f" buffer_names:{n.get_buffer_names()}"
+                        + f"\nruntime_estimation(us):{n.get_estimated_runtime() / 1e3}"
+                        + f"\nconstant_args:{n.node.constant_args if n.node and hasattr(n.node, 'constant_args') else None}"
                         for i, n in enumerate(self.nodes)
                     ]
                 ),
