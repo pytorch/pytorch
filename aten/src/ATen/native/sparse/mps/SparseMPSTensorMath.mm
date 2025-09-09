@@ -82,23 +82,23 @@ static SparseTensor& mul_out_dense_sparse_mps(
               "mul(dense, sparse): sizes must match exactly (no broadcasting): ",
               dense.sizes(), " vs ", sparse.sizes());
 
-  const int64_t nDimI = sparse.sparse_dim();
-  const int64_t nDim = dense.dim();
+  const int64_t ndim_i = sparse.sparse_dim();
+  const int64_t ndim = dense.dim();
   TORCH_CHECK(
-    nDimI <= nDim,
-    "mul(dense, sparse): sparse_dim=", nDimI, " exceeds dense.dim()=", nDim);
+    ndim_i <= ndim,
+    "mul(dense, sparse): sparse_dim=", ndim_i, " exceeds dense.dim()=", ndim);
 
   // Prepare shapes
   int64_t view_rows = 1, view_cols = 1;
-  for (int64_t i = 0; i < nDimI; ++i) view_rows *= sparse.size(i);
-  for (int64_t i = nDimI; i < nDim; ++i) view_cols *= sparse.size(i);
+  for (int64_t i = 0; i < ndim_i; ++i) view_rows *= sparse.size(i);
+  for (int64_t i = ndim_i; i < ndim; ++i) view_cols *= sparse.size(i);
 
   auto dense_mps = dense.to(commonDtype).contiguous().reshape({view_rows, view_cols});
   auto out_vals = at::empty_like(values, values.options());
 
   const uint32_t u_view_cols = static_cast<uint32_t>(view_cols);
   const uint32_t u_nnz = static_cast<uint32_t>(nnz);
-  const uint32_t u_nDimI = static_cast<uint32_t>(nDimI);
+  const uint32_t u_ndim_i = static_cast<uint32_t>(ndim_i);
 
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -123,9 +123,7 @@ static SparseTensor& mul_out_dense_sparse_mps(
         out_vals,
         indices,
         sparse.sizes(),
-        u_nnz,
-        u_nDimI,
-        u_view_cols
+        std::array<uint32_t, 3>{u_nnz, u_ndim_i, u_view_cols}
       );
 
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
@@ -176,10 +174,10 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
-  const int64_t nDimI = lhs.sparse_dim();
+  const int64_t ndim_i = lhs.sparse_dim();
 
-  // nDimI == 0, at most one structural entry
-  if (nDimI == 0) {
+  // ndim_i == 0, at most one structural entry
+  if (ndim_i == 0) {
     r_.resize_as_(lhs);
     const bool has = (lhs_nnz && rhs_nnz);
 
@@ -239,7 +237,7 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
 
   r_.resize_as_(lhs);
 
-  auto out_indices = at::empty({nDimI, static_cast<int64_t>(M)}, at::device(device).dtype(at::kLong));
+  auto out_indices = at::empty({ndim_i, static_cast<int64_t>(M)}, at::device(device).dtype(at::kLong));
   auto lhs_match = outA_idx.narrow(0, 0, M);
   auto rhs_match = outB_idx.narrow(0, 0, M);
   auto out_val_sizes = lhs_values.sizes().vec();
@@ -265,10 +263,9 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
                   lhs_values, rhs_values,
                   lhs_match, rhs_match,
                   lhs_indices, out_indices,
-                  out_values, static_cast<uint32_t>(nDimI),
-                  static_cast<uint32_t>(lhs_nnz),
-                  static_cast<uint32_t>(M),
-                  cols);
+                  out_values,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(ndim_i), static_cast<uint32_t>(lhs_nnz)},
+                  std::array<uint32_t, 2>{M, cols});
       [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
     }
   });
