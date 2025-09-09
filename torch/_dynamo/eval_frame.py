@@ -148,6 +148,7 @@ unset = Unset.token
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
 else:
+
     def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
         # A wrapper on set_eval_frame that is guarded by a Justknob.
         # Users can disable torchDynamo by setting the JK to False.
