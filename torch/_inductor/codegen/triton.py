@@ -14,6 +14,7 @@ import textwrap
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from torch.utils._sympy.value_ranges import bound_sympy
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -4263,11 +4264,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = 128
-            while not V.graph.sizevars.statically_known_leq(rnumel, val):
-                if val > 16 * 1024:
-                    raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
-                val *= 2
+            val = bound_sympy(rnumel).upper
+            assert isinstance(val, int) or val.is_constant()
+
+            val = next_power_of_2(int(val))
+
+            if val > 16 * 1024:
+                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+
         return val
 
     @staticmethod
