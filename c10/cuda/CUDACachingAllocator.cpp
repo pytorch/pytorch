@@ -1653,10 +1653,6 @@ class DeviceCachingAllocator {
     cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
   };
 
-  // Returns the current set of "terminal" nodes in the CUDA graph for a given
-  // stream. These represent the current endpoints of the stream, and may
-  // include additional nodes if the graph branches. Any new work captured will
-  // be attached after one or more of these terminals.
   inline CaptureInfo stream_get_capture_info(cudaStream_t stream) {
     CaptureInfo info{};
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
