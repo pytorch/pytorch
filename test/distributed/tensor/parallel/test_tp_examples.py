@@ -27,12 +27,8 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
-<<<<<<< HEAD
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_device_type import skipIf
-=======
-from torch.testing._internal.common_device_type import skipXPUIf
->>>>>>> upstream/main
+from torch.testing._internal.common_device_type import skipIf, skipXPUIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -419,11 +415,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         + f"{str(dtype).split('.')[-1]}_"
         + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
     )
-<<<<<<< HEAD
     @skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
-=======
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
->>>>>>> upstream/main
     def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
         # Sample a subset of `requires_grad` patterns
 

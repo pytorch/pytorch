@@ -121,21 +121,6 @@ def evaluate_platform_supports_fp8_grouped_gemm():
             return SM90OrLater and not SM100OrLater
     return False
 
-<<<<<<< HEAD
-
-def _platform_supports_mx_gemm():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            return 'gfx95' in torch.cuda.get_device_properties(0).gcnArchName
-        else:
-            return TEST_CUDA and SM100OrLater
-    return False
-
-PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
-PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: _platform_supports_mx_gemm())
-
-=======
 def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -156,7 +141,6 @@ PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
->>>>>>> upstream/main
 
 if TEST_NUMBA:
     try:

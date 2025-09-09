@@ -296,8 +296,6 @@ class ComboKernelBenchmarkTests(TestCase):
 
         self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
 
-<<<<<<< HEAD
-=======
     @requires_cuda_and_triton
     def test_persistent_reduction_no_x_dim(self):
         def fn(x, y):
@@ -315,7 +313,6 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
->>>>>>> upstream/main
 
 @instantiate_parametrized_tests
 class ComboKernelDynamicShapesTests(TestCase):

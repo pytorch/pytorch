@@ -1467,16 +1467,12 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
-<<<<<<< HEAD
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
-=======
     @unittest.skipIf(
         # for archs where this isn't lowered to flash attention, the math
         # backend will be used and it doesn't work for bfloat16
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Some archs don't support SDPA with bfloat16",
     )
->>>>>>> upstream/main
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1749,13 +1745,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
-<<<<<<< HEAD
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
-=======
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
->>>>>>> upstream/main
     def test_fallback_kernel_with_symexpr_output(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4335,13 +4327,9 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-<<<<<<< HEAD
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
-=======
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
     )
->>>>>>> upstream/main
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")

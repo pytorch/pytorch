@@ -537,12 +537,6 @@ BatchNormBackend _select_batch_norm_backend(
   }
 
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
-<<<<<<< HEAD
-  // See #64427
-  // non static variable is used to be able to change environment variable in runtime for testing
-  // enabled by default for ROCm >= 7.0.0
-  bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(ROCM_VERSION >= 70000);
-=======
   // See https://github.com/pytorch/pytorch/issues/64427.
   // non static variable is used to be able to change environment variable in runtime for testing
   // enabled by default for ROCm >= 7.0.0 with miopen 3.5
@@ -550,7 +544,6 @@ BatchNormBackend _select_batch_norm_backend(
   bool is_miopen_3_4 = miopen_version >= 30400;  // ROCm 6.4
   bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
   bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(is_miopen_3_5);
->>>>>>> upstream/main
 
   if (
       detail::getCUDAHooks().compiledWithMIOpen()
@@ -565,17 +558,9 @@ BatchNormBackend _select_batch_norm_backend(
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
       && (input.suggest_memory_format() == MemoryFormat::Contiguous
-<<<<<<< HEAD
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60500)
-        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
-        || (input.suggest_memory_format() == MemoryFormat::ChannelsLast3d && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM)
-#endif
-        )
-=======
           || (is_miopen_3_5 && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM &&
               (input.suggest_memory_format() == MemoryFormat::ChannelsLast
                || input.suggest_memory_format() == MemoryFormat::ChannelsLast3d)))
->>>>>>> upstream/main
   ) {
     return BatchNormBackend::Miopen;
   }

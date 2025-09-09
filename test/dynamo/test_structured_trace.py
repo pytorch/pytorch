@@ -21,13 +21,8 @@ import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-<<<<<<< HEAD
 from torch.testing._internal.common_utils import find_free_port, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
-=======
-from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
->>>>>>> upstream/main
 
 
 if torch.distributed.is_available():
@@ -275,12 +270,8 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-<<<<<<< HEAD
-    @requires_cuda
     @skipIfRocm(msg="TODO: temp skip on ROCm 6.2")
-=======
     @requires_cuda_and_triton
->>>>>>> upstream/main
     def test_cudagraphs(self):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))

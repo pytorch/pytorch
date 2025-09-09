@@ -1406,15 +1406,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Miopen:
     case ConvBackend::MiopenDepthwise:
     case ConvBackend::MiopenTranspose:
-<<<<<<< HEAD
-      if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-        TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
-            "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
-=======
       if (detail::getCUDAHooks().compiledWithMIOpen()) {
         backend_memory_format = miopen_conv_suggest_memory_format(input, weight);
->>>>>>> upstream/main
       }
       break;
     case ConvBackend::Mkldnn:

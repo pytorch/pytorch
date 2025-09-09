@@ -1749,27 +1749,6 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-<<<<<<< HEAD
-    @parametrize("recipe", ["mxfp8", "mxfp4"] if TEST_WITH_ROCM else ["mxfp8", "nvfp4"])
-    def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
-        if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
-            raise unittest.SkipTest("fast_accum not supported in nvfp4 and mxfp4 cublas gemm, skipping")
-
-        device = "cuda"
-        M, K, N = mkn
-        if recipe == "nvfp4" and K % 32 != 0:
-            raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
-
-        if torch.version.hip:
-            if not (M % 32 == 0 and K % 32 == 0 and N % 32 == 0):
-                raise unittest.SkipTest("Matrix dimensions must be multiples of 32 on ROCm, skipping")
-        if torch.version.hip:
-            BLOCK_SIZE = 32
-            fp4_scaling_dtype = torch.float8_e8m0fnu
-        else:
-            BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
-            fp4_scaling_dtype = torch.float8_e4m3fn
-=======
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
@@ -1782,7 +1761,6 @@ class TestFP8Matmul(TestCase):
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
         BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
->>>>>>> upstream/main
         require_exact_match = True
         approx_match_sqnr_target = 22.0
 
@@ -1944,18 +1922,9 @@ class TestFP8Matmul(TestCase):
                 B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * ceil_div(K, BLOCK_SIZE), 1).float()).reshape(N, K)
                 B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
             else:  # nvfp4 # mxfp4
-<<<<<<< HEAD
-                if recipe == "mxfp4":
-                    A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE, recipe)
-                    B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE, recipe)
-                else:
-                    A_scale = data_to_nvfp4_scale(A_ref, BLOCK_SIZE)
-                    B_scale = data_to_nvfp4_scale(B_ref, BLOCK_SIZE)
-=======
                 scale_func = data_to_mx_scale if recipe == "mxfp4" else data_to_nvfp4_scale
                 A_scale = scale_func(*([A_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
                 B_scale = scale_func(*([B_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
->>>>>>> upstream/main
                 max_val = FP4_MAX_VAL
                 min_val = -1 * max_val
 
@@ -1970,13 +1939,8 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-<<<<<<< HEAD
-        if not torch.version.hip:
-            # convert to swizzled format
-=======
         # convert to swizzled format
         if not torch.version.hip:
->>>>>>> upstream/main
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 

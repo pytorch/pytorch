@@ -615,34 +615,12 @@ at::ROCmFABackend Context::getROCmFAPreferredBackend() {
 
 void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
 #ifdef USE_ROCM
-<<<<<<< HEAD
-  if(b == at::ROCmFABackend::Ck) {
-    static const bool ck_unsupported = []() {
-      static const std::vector<std::string> archs = {
-          "gfx90a",  "gfx942", "gfx950"
-      };
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          TORCH_WARN_ONCE(
-            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
-          return true;
-        }
-      }
-      return false;
-    }();
-    if(!ck_unsupported) rocm_fa_preferred_backend = b;
-  }
-  else {
-     rocm_fa_preferred_backend = b;
-  }
-=======
   static const bool hasCKSDPAFlag = hasCKSDPA();
   static const bool ckSupportedFlag = ckSupported();
   TORCH_CHECK((b != at::ROCmFABackend::Ck) || (hasCKSDPAFlag && ckSupportedFlag),
       "Cannot set preferred SDPA backend to CK since following conditions are not true: ",
       "architecture supported for CK: ", ckSupportedFlag,
       ", PyTorch built with CK SDPA support: ", hasCKSDPAFlag);
->>>>>>> upstream/main
 #endif
   rocm_fa_preferred_backend = b;
 }

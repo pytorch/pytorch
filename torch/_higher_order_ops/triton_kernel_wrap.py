@@ -462,24 +462,16 @@ def generate_ttir(
         ttir_module = src.make_ir(target, options, context)
     elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
-<<<<<<< HEAD
         ttir_module = src.make_ir(target, options, codegen_fns, context)
-    else:
-        codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
-        codegen_fns = backend.get_codegen_implementation(*codegen_args)
-        module_map = backend.get_module_map()
-=======
-        ttir_module = src.make_ir(options, codegen_fns, context)
     elif make_ir_sig_params == 4:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
-        ttir_module = src.make_ir(options, codegen_fns, module_map, context)
+        ttir_module = src.make_ir(target, codegen_fns, module_map, context)
     else:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
->>>>>>> upstream/main
         ttir_module = src.make_ir(target, options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
