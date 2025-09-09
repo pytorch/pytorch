@@ -927,10 +927,14 @@ static bool is_float_or_complex_list(
 }
 
 static bool is_int_or_symint(PyObject* obj) {
+  // Call checkLong first so that actual ints go fast.
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
-  // TODO: maybe we should be using checkLong here?
   if (torch::is_symint(py::handle(obj))) {
     return true;
   }
@@ -962,15 +966,15 @@ static bool is_int_or_symint_list(
     int broadcast_size,
     int64_t* failed_idx = nullptr,
     std::vector<PyObject*>* overloaded_args = nullptr) {
-  if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+  const bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size == 0) {
       return true;
     }
 
     // Check all elements, not just the first one, when looking for torch
     // functions
-    const bool is_tuple = PyTuple_Check(obj);
-    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
     bool has_torch_func = false;
 
     for (Py_ssize_t idx = 0; idx < size; idx++) {

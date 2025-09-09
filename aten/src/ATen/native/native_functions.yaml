@@ -7158,6 +7158,7 @@
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
   variants: function
   dispatch:
+    CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
 
 # NOTE [ Sparse: autograd and API ]
@@ -9943,7 +9944,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: igamma_out
+    CPU, CUDA, MPS: igamma_out
   tags: pointwise
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
@@ -9960,7 +9961,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: igammac_out
+    CPU, CUDA, MPS: igammac_out
   tags: pointwise
 
 - func: igammac(Tensor self, Tensor other) -> Tensor

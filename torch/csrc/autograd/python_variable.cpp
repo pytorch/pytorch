@@ -2111,7 +2111,7 @@ static PyObject* THPVariable_NewWithVar(
     std::optional<bool> has_torch_dispatch_if_known) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
-      PyType_IsSubtype(type, &THPVariableType),
+      type == &THPVariableType || PyType_IsSubtype(type, &THPVariableType),
       "Creating a Tensor subclass from a class ",
       "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
 
