@@ -425,6 +425,11 @@ class TestExecutionTrace(TestCase):
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
+        # clean up the local cache for triton kernel
+        from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+        PyCodeCache.cache_clear(purge=True)
+
         import os
 
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "1"
@@ -439,7 +444,9 @@ class TestExecutionTrace(TestCase):
         a, b, c = (torch.randn(4, 4, requires_grad=True).to(device) for _ in range(3))
 
         inputs = [a, b, c]
-        with torch._inductor.config.patch(compile_threads=1):
+        with torch._inductor.config.patch(
+            compile_threads=1, fx_graph_cache=False, fx_graph_remote_cache=False
+        ):
             fn(*inputs)
 
         with profile(
@@ -480,10 +487,12 @@ class TestExecutionTrace(TestCase):
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
-        import os
+        # clean up the local cache for triton kernel
+        from torch._inductor.codecache import PyCodeCache as PyCodeCache
 
-        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "1"
-        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "1"
+        PyCodeCache.cache_clear(purge=True)
+
+        import os
 
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -503,12 +512,18 @@ class TestExecutionTrace(TestCase):
         ):
             fn(*inputs)
 
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="fx_graph_et.json", delete=False)
+        fp.close()
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
+        et.set_extra_resource_collection(True)
         with profile(
             activities=torch.profiler.supported_activities(),
             record_shapes=True,
             schedule=torch.profiler.schedule(
                 skip_first=0, wait=1, warmup=1, active=1, repeat=1
             ),
+            execution_trace_observer=et,
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
@@ -550,23 +565,23 @@ class TestExecutionTrace(TestCase):
                         )
                         assert (
                             fx_graph[2]
-                            == "#   %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {})"  # noqa: B950
+                            == '#   %sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {})'  # noqa: B950
                         )
                         assert (
                             fx_graph[3]
-                            == "#   %permute_1 : [num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {})"  # noqa: B950
+                            == '#   %permute_1 : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {})'  # noqa: B950
                         )
                         assert (
                             fx_graph[4]
-                            == "#   %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {})"  # noqa: B950
+                            == '#   %mul : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {})'  # noqa: B950
                         )
                         assert (
                             fx_graph[5]
-                            == "#   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {})"  # noqa: B950
+                            == '#   %add : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {})'  # noqa: B950
                         )
                         assert (
                             fx_graph[6]
-                            == "#   %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {})"  # noqa: B950
+                            == '#   %cos : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {})'  # noqa: B950
                         )
                         assert fx_graph[7] == "#   return %cos"
 

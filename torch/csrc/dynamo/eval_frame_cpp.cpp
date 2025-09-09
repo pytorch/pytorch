@@ -140,6 +140,8 @@ PyObject* dynamo__custom_eval_frame(
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
 
 #if IS_PYTHON_3_12_PLUS
+  // skip tracing the frame if CPython is in a tracing state (e.g.
+  // sys.monitoring call)
   if (tstate->tracing > 0) {
     eval_default();
     return eval_result;

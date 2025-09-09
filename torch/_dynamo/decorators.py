@@ -585,6 +585,7 @@ def mark_dynamic(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
     *,
+    hint_override: Optional[int] = None,
     min: Optional[int] = None,
     max: Optional[int] = None,
     specialize_on: Optional[list[Any]] = None,
@@ -637,10 +638,13 @@ def mark_dynamic(
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+            t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
             t._specialize_on = {}
 
+        if hint_override:
+            t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
@@ -755,15 +759,6 @@ def mark_static_address(t: Any, guard: bool = True) -> None:
     is not needed for this input. The data_ptr will be guarded if guard=True. Note:
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
-    if torch._dynamo.config.caching_precompile:
-        # [Note] Static Addresses and Precompile
-        # When using precompile, `mark_static_address` is dangerous to use, because
-        # dynamo saves the addresses directly on the parameters of the graph. These addresses
-        # are process dependent, so are not serializable, and serializing
-        # their tensors would be extremely expensive. Instead, by treating mark_static_address
-        # as a no-op, dynamo will automatically inline them as inputs to the graph instead.
-        # See https://github.com/pytorch/pytorch/issues/159228
-        return
     if not isinstance(t, torch.Tensor):
         raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
@@ -923,15 +918,15 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
-class SetFullgraphDecoratorContextManager:
-    def __init__(self, fullgraph: bool) -> None:
-        self.fullgraph = fullgraph
+class ErrorOnGraphBreakDecoratorContextManager:
+    def __init__(self, error_on_graph_break: bool) -> None:
+        self.error_on_graph_break = error_on_graph_break
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_fullgraph = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.fullgraph)
+        self.prev_error_on_graph_break = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.error_on_graph_break)
 
     def __exit__(
         self,
@@ -939,14 +934,24 @@ class SetFullgraphDecoratorContextManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        _set_error_on_graph_break(self.prev_fullgraph)
+        _set_error_on_graph_break(self.prev_error_on_graph_break)
 
 
-def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+def error_on_graph_break(
+    error_on_graph_break: bool,
+) -> ErrorOnGraphBreakDecoratorContextManager:
     """
-    Context manager/decorator to toggle fullgraph setting.
+    Context manager/decorator to toggle torch.compile's `error_on_graph_break` setting at compile time.
 
-    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
-    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    If `fullgraph` is set, then `error_on_graph_break` does nothing
+    (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
+    `error_on_graph_break` determines whether `torch.compile` throws an error upon
+    encountering a graph break, or attempts to continue tracing.
+
+    `error_on_graph_break` can be toggled during compile time with this decorator to allow graph breaks in some
+    compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
+    does NOT guarantee that a single graph is captured from the compiled function.
+
+    The default value of torch.compile's `error_on_graph_break` setting is False.
     """
-    return SetFullgraphDecoratorContextManager(fullgraph)
+    return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)

@@ -57,7 +57,7 @@ if [ ! -f setup.py ]; then
   cd python
 fi
 
-pip_install pybind11==2.13.6
+pip_install pybind11==3.0.1
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
@@ -103,5 +103,5 @@ fi
 # It depends on torch and triton. We don't want to install
 # triton and torch from production on Docker CI images
 if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
-  pip_install helion==0.0.10 --no-deps
+  pip_install helion --no-deps
 fi

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -9,10 +9,13 @@ import torch
 
 from . import config
 from .codecache import write_text
+from .kernel_inputs import KernelInputs  # noqa: TC001
+from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .template_heuristics import (
+from .template_heuristics import get_template_heuristic
+from .template_heuristics.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
@@ -31,8 +34,12 @@ if TYPE_CHECKING:
 
     from torch.utils._ordered_set import OrderedSet
 
+    from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .ir import ChoiceCaller, Layout
+    from .kernel_template_choice import KernelTemplateChoice
+    from .select_algorithm import ExternKernelChoice
 
 
 class Sortable(typing.Protocol):
@@ -71,58 +78,6 @@ class InductorChoices:
         else:
             return BaseConfigHeuristic()
 
-    # GEMM configs
-    def get_base_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-            return mm_heuristics.get_mm_configs()
-        else:
-            return mm_heuristics.get_exhaustive_mm_configs()
-
-    def get_extra_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_extra_mm_configs()
-
-    def get_int8_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_int8_mm_configs()
-
-    def get_mixed_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_mixed_mm_configs()
-
-    def get_persistent_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_persistent_mm_configs()
-
-    def get_scaled_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_scaled_mm_configs()
-
-    def get_scaled_persistent_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_scaled_persistent_mm_configs()
-
-    def get_mm_plus_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_mm_plus_mm_configs()
-
     # Conv configs
     def get_conv_configs(
         self, device_type: Optional[str] = "cuda"
@@ -131,6 +86,7 @@ class InductorChoices:
         return conv_heuristics.get_conv_configs()
 
     # Flex attention configs
+    # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
     ) -> list[Any]:
@@ -148,6 +104,140 @@ class InductorChoices:
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def _finalize_mm_configs(
+        self,
+        template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        op_name: str,
+        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+    ) -> list[KernelTemplateChoice]:
+        """
+        This method can be subclassed to perform any override/modification of the choices.
+        The incoming parameters are cheap (generators), so you can do any overrides without
+        incurring too much cost. Override this method to customize the kernel template choices
+        before they are converted to ChoiceCaller objects, which is expensive on template codegen.
+
+        The full list of arguments are here to facilitate any overrides you may want to do,
+        as they can be used to start from scratch for each template if so desired.
+
+        Args:
+            template_choices: Dictionary mapping template UIDs to generators of KernelTemplateChoice objects
+            kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
+            layout: Output layout
+            templates: List of template objects (KernelTemplate or ExternKernelChoice) in use
+            op_name: Operation name (e.g., "bmm", "baddbmm", "addmm")
+            kwarg_overrides: Optional dict of kwargs to override for each template heuristic
+
+        Returns:
+            Flattened list of KernelTemplateChoice objects across all templates
+        """
+        choices: list[KernelTemplateChoice] = []
+        for choice_gen in template_choices.values():
+            choices.extend(choice_gen)
+        return choices
+
+    def get_ktc(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        template: Union[KernelTemplate, ExternKernelChoice],
+        op_name: str,
+        kwarg_overrides: Optional[dict[str, Any]] = None,
+    ) -> Generator[KernelTemplateChoice, None, None]:
+        """
+        Utility to get the KernelTemplateChoice generator for a specific input.
+
+        This is a per template/op call, whereas get_mm_configs is an op wide call (all templates).
+        Consider when overriding/using at which level you need to make decisions
+        """
+        # Extract device_type from kernel_inputs
+        device_type = kernel_inputs.device_type
+        assert device_type is not None, "get_mm_configs requires a valid device type"
+        # Extract template_name from the template object
+        template_name = template.uid
+
+        # Get the appropriate template-specific heuristic
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
+        cs = heuristic.get_template_configs(
+            kernel_inputs,
+            op_name,
+        )
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
+        # adjust the kernel inputs to the template-specific heuristic, if needed
+        # default here is to just return the kernel_inputs as is
+        inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
+        # Create KernelTemplateChoice generator using the moved function
+        overrides = kwarg_overrides or {}
+        return make_ktc_generator(
+            template=template,
+            cs=cs,
+            overrides=overrides,
+            extra_kwargs=extra_kwargs,
+            layout=layout,
+            inputs=inputs_val,
+        )
+
+    def get_mm_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        op_name: str,
+        layout: Optional[Layout] = None,
+        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+    ) -> list[ChoiceCaller]:
+        """
+        Get list of ChoiceCallers for MM templates using template-specific heuristics.
+
+        Args:
+            kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
+            layout: Output layout
+            templates: List of template objects (KernelTemplate or ExternKernelChoice)
+            op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
+            kwarg_overrides: Optional dict of kwargs to override for each template heuristic,
+                             indexed by template.uid. These only override the per config kwargs, not the extra kwargs
+        Returns:
+            List of ChoiceCaller objects from the templates
+        """
+        if kwarg_overrides is None:
+            kwarg_overrides = {}
+        input_tensors = kernel_inputs.nodes()
+        if len(input_tensors) < 2:
+            raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
+        if layout is None:
+            # TODO(coconutruben): remove this once we remove the layout argument entirely
+            # This is just here to the brief gap between commits where we still need this
+            # to accommodate fixed vs flexible layout decision externally
+            layout = kernel_inputs.output_layout(flexible=False)
+        # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
+        template_choices = {}
+        for template in templates:
+            template_choices[template.uid] = self.get_ktc(
+                kernel_inputs,
+                layout,
+                template,
+                op_name,
+                kwarg_overrides.get(template.uid, {}),
+            )
+
+        # Second pass: Adjust the template choices
+        adjusted_choices = self._finalize_mm_configs(
+            template_choices,
+            kernel_inputs,
+            layout,
+            templates,
+            op_name,
+            kwarg_overrides,
+        )
+        choices = []
+        # Third pass: Get adjusted choices and collect non-None ChoiceCaller objects
+        for ktc in adjusted_choices:
+            if ktc.choice is not None:
+                choices.append(ktc.choice)
+
+        return choices
 
     def triton_kernel_kwargs(
         self,
@@ -213,18 +303,6 @@ class InductorChoices:
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
-
-    @staticmethod
-    def want_no_x_dim(features: SIMDKernelFeatures) -> bool:
-        """
-        Heuristic to decide if we should drop the X dimension from a persistent reduction kernel.
-        So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
-        Strangely this is faster than a [1, RBLOCK] block in some cases.
-        """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
 
     @staticmethod
     def reduction_split_factor(

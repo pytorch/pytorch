@@ -86,7 +86,7 @@ def run_with_nativert(ep):
     MODEL_NAME = "forward"
 
     # TODO Does named tempfile have collision?
-    with tempfile.NamedTemporaryFile(delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
         torch.export.pt2_archive._package.package_pt2(
             f, exported_programs={MODEL_NAME: ep_infer}
         )
