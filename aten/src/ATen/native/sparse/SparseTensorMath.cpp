@@ -25,6 +25,7 @@
 #else
 #include <ATen/ops/_sparse_addmm.h>
 #include <ATen/ops/_sparse_addmm_native.h>
+#include <ATen/ops/_sparse_broadcast_to.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_mm_native.h>
 #include <ATen/ops/_sparse_sum.h>
@@ -41,6 +42,7 @@
 #include <ATen/ops/any.h>
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/broadcast_to.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/conj_physical.h>
 #include <ATen/ops/conj_physical_native.h>
@@ -830,17 +832,17 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 // operations.
 template <typename binary_func_t>
 static Tensor& intersection_binary_op_sparse_dense_out(
-    const Tensor& d,
+    const Tensor& d_,
     const SparseTensor& s_,
     Tensor& res,
     const char* const op_name,
     const binary_func_t& op,
     const bool coalesce = false) {
   // compute broadcasted shape.
-  const auto res_shape = infer_size(d.sizes(), s_.sizes());
+  const auto res_shape = infer_size(d_.sizes(), s_.sizes());
 
   // Short-circuit if either s_ or d is empty.
-  if (!s_._nnz() || !s_.numel() || !d.numel()) {
+  if (!s_._nnz() || !s_.numel() || !d_.numel()) {
     const int64_t dense_dim = s_.dense_dim();
     const int64_t sparse_dim = static_cast<int64_t>(res_shape.size()) - dense_dim;
     const int64_t nnz = 0;
@@ -855,13 +857,22 @@ static Tensor& intersection_binary_op_sparse_dense_out(
     return res._coalesced_(true);
   }
 
-  const auto d_dim = d.dim();
-  const auto s_dim = s_.dim();
+  // Broadcast inputs {
+  const auto s = [&]() -> auto {
+    if (s_.sizes() != res_shape) {
+      // Always coalesce when sparse broadcasts over dense,
+      // because new sparse dimensions are created and
+      // repeated indices have to be eliminated because of that.
+      return at::_sparse_broadcast_to(s_, res_shape).coalesce();
+    } else {
+      return coalesce ? s_.coalesce() : s_;
+    }
+  }();
+  const auto d = at::broadcast_to(d_, res_shape);
+  // }
 
-  // Always coalesce when sparse broadcasts over dense,
-  // because new sparse dimensions are created and
-  // repeated indices have to be eliminated because of that.
-  const auto s = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+  const auto d_dim = d.dim();
+  const auto s_dim = s.dim();
 
   const auto sparse_dim = s.sparse_dim();
   const auto dense_dim = s.dense_dim();
@@ -921,11 +932,7 @@ static Tensor& intersection_binary_op_sparse_dense_out(
     for (auto i = d_start_dim_intersec + sparse_dim_intersec; i < d_dim; ++i) {
       intersec_indices.emplace_back(Slice());
     }
-    // we need to expand d in the dimensions it is being indexed into
-    // to avoid out of bound indices
-    const auto d_expanded_shape = std::vector<int64_t>(
-        res_shape.end() - d_dim, res_shape.end());
-    return d.expand(d_expanded_shape).index(intersec_indices);
+    return d.index(intersec_indices);
   }();
 
   // When dims match or sparse is "larger", the result nnz is the same,
