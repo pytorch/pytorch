@@ -2037,10 +2037,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         forward_ad = torch.autograd.forward_ad
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return forward_ad._current_level == dual_level
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2056,10 +2056,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return compare_fn(states)
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2085,10 +2085,10 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2109,7 +2109,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+        self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
@@ -2184,7 +2184,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"__math_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+            self.get_guard_manager(guard).add_lambda_guard(
                 _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
@@ -2197,7 +2197,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"__numpy_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+            self.get_guard_manager(guard).add_lambda_guard(
                 _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
