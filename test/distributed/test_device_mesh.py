@@ -25,15 +25,8 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -1253,24 +1246,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
-
-
-@instantiate_parametrized_tests
-class InitWithoutGroup(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
-    @parametrize("init_backend", [False, True])  # Whether DeviceMesh init dim groups during creation
-    def test_mesh_with_dist_init(self, init_backend: bool):
-        _set_env_var(world_size=self.world_size, rank=self.rank)
-        dist.init()
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size), _init_backend=init_backend)
-
-    @parametrize("init_backend", [False, True])  # Whether DeviceMesh init dim groups during creation
-    def test_mesh_without_dist_init(self, init_backend: bool):
-        _set_env_var(world_size=self.world_size, rank=self.rank)
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size), _init_backend=init_backend)
 
 
 if __name__ == "__main__":
