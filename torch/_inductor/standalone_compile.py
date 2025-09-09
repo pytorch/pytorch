@@ -10,7 +10,6 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor.codecache import write_atomic
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
@@ -87,6 +86,9 @@ class CompiledArtifact:
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
+
+                from torch._inductor.codecache import write_atomic
+
                 write_atomic(path, writer.to_bytes())
             else:
                 assert format == "unpacked"
