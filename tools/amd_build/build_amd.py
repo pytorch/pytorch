@@ -221,8 +221,12 @@ hipify_v1_to_v2_files = [
 
 def hipify_v1_to_v2(line: str) -> str:
     line = line.replace("hip::HIPStreamMasqueradingAsCUDA", "cuda::CUDAStream")
-    line = line.replace("hip::HIPStreamGuardMasqueradingAsCUDA", "cuda::CUDAStreamGuard")
-    line = line.replace("hip::getStreamFromPoolMasqueradingAsCUDA", "cuda::getStreamFromPool")
+    line = line.replace(
+        "hip::HIPStreamGuardMasqueradingAsCUDA", "cuda::CUDAStreamGuard"
+    )
+    line = line.replace(
+        "hip::getStreamFromPoolMasqueradingAsCUDA", "cuda::getStreamFromPool"
+    )
     line = line.replace("getCurrentHIPStream", "getCurrentCUDAStream")
     return line
 
