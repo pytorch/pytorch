@@ -874,6 +874,25 @@ def forward(self, x):
         epm.const2[-1] = 321
         self.assertEqual(epm.const1[-1][-1], 321)
 
+    def test_storage_offset(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[:4]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2008,6 +2027,7 @@ def forward(self, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
     add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
     return pytree.tree_unflatten((add,), self._out_spec)""",

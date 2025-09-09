@@ -34,7 +34,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
-from .ir import ExternKernelOut
+from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -1093,7 +1093,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     kernel_name: str,
     is_extern: bool = False,
 ) -> Optional[int]:
@@ -1114,7 +1114,7 @@ def set_kernel_post_grad_provenance_tracing(
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernelOut)
+            assert isinstance(node_schedule, ExternKernel)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1250,7 +1250,7 @@ def aot_inductor_minifier_wrapper(
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
-    gm = exported_program.module()
+    gm = exported_program.module(check_guards=False)
     assert isinstance(gm, torch.fx.GraphModule)
 
     args, kwargs = exported_program.example_inputs
@@ -1279,7 +1279,7 @@ def aot_inductor_minifier_wrapper(
             tuple_inputs = tuple(flat_example_inputs)
             flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
             func(
-                flattened_ep.module(),
+                flattened_ep.module(check_guards=False),
                 tuple_inputs,
                 inductor_configs=config_copy,
                 package_path=package_path,
