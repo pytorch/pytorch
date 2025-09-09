@@ -12,9 +12,9 @@
 
 #include <ATen/cpu/vec/vec128/vec128_float_sve.h>
 
-#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_half_sve.h>
 
-#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
 
