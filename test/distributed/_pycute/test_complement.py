@@ -38,16 +38,15 @@ Unit tests for _pycute.complement
 """
 
 import logging
-import unittest
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestComplement(unittest.TestCase):
+class TestComplement(TestCase):
     def helper_test_complement(self, layout):
         layoutR = complement(layout)
 

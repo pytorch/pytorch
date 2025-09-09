@@ -37,13 +37,11 @@
 Unit tests for _pycute.int_tuple
 """
 
-import unittest
-
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestIntTuple(unittest.TestCase):
+class TestIntTuple(TestCase):
     def test_product(self):
         self.assertEqual(product(2), 2)
 
