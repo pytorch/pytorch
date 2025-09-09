@@ -26,7 +26,7 @@ using namespace mps;
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/Mul.metal>
+#include <ATen/native/mps/Mul_metallib.h>
 #endif
 
 static SparseTensor& mul_out_dense_sparse_mps(
