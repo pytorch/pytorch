@@ -1769,6 +1769,14 @@ These guards are at trunk or leaf, and not at the root.
 class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
  public:
   using LAMBDA_GUARD::LAMBDA_GUARD;
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return LAMBDA_GUARD::check_nopybind(value);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    return LAMBDA_GUARD::check_verbose_nopybind(value);
+  }
+
   bool check_nopybind(FrameLocalsMapping* map) override {
     throw std::runtime_error(
         "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS, use LAMBDA_GUARD instead");
