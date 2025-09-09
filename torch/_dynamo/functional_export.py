@@ -37,22 +37,14 @@ def post_process_error_msg(
     Because we trace a different callable, the sources are all messed up.
     Manually patch them so the error message looks correct.
     """
+    from torch.export._unlift import _get_input_paths, _replace_sources
+
     assert isinstance(mod, torch.nn.Module)
     orig_sig = inspect.signature(mod.forward)
-    bound_arguments = orig_sig.bind(*args, **kwargs)
-    bound_arguments.apply_defaults()
-    bound_args = bound_arguments.arguments
-
-    flat_input_paths, _ = pytree.tree_flatten_with_path(bound_args)
-    name_mapping = {}
-    for idx, (path, _) in enumerate(flat_input_paths):
-        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
-
-    replace = constraint_violation_error.args[0]
-    for key, val in name_mapping.items():
-        replace = replace.replace(key, val)
-
-    constraint_violation_error.args = (replace,)
+    flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
+    constraint_violation_error.args = (
+        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+    )
     return constraint_violation_error
 
 
