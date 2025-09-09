@@ -672,6 +672,7 @@ fw_metadata={str(fw_metadata)}"""
                 ]
             )
             != 0
+            and aot_config.export_trace_joint
         ):
             raise RuntimeError(
                 f"""\
@@ -1448,6 +1449,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             dynamic_shapes=dynamic_shapes,
+            trace_joint=trace_joint,
             kwargs=kwargs,
         )
 
@@ -1550,6 +1552,7 @@ def aot_export_joint_simple(
             func,
             args,
             decompositions=decompositions,
+            trace_joint=trace_joint,
         )
         in_spec, _kw_in_spec = in_spec.children_specs
     # At this point, we can just directly return the (joint or inference graph) that we traced.
@@ -1631,6 +1634,8 @@ def _aot_export_function(
     # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     keep_input_mutations: bool = False,
+    # Under export, configures whether we are getting inference or training IR
+    trace_joint: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1675,6 +1680,7 @@ def _aot_export_function(
         is_export=True,
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
+        export_trace_joint=trace_joint,
     )
     if fake_mode is None:
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)

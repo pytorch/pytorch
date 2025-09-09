@@ -1196,6 +1196,33 @@ class TestAutograd(TestCase):
                 tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
 
+    def test_gradient_edge_graph_ownership(self):
+        # Ensure we own the graph properly
+        class Clone(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gX):
+                return gX.clone()
+
+        inp = torch.rand(1, requires_grad=True).clone()
+
+        # C++ Node
+        out = inp.clone()
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
+
+        # python Node
+        out = Clone.apply(inp)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
@@ -3860,6 +3887,38 @@ class TestAutograd(TestCase):
         y = double2(x)
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
+
+    def test_custom_autograd_ac_early_stop(self):
+        refs = []
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.clone()
+                ctx.save_for_backward(y)
+                refs.append(weakref.ref(y))
+                return y
+
+            @staticmethod
+            def backward(ctx, *args):
+                _ = ctx.saved_tensors
+                return None
+
+        def fn(inp):
+            return Test.apply(inp)
+
+        inp = torch.randn(5, 5, requires_grad=True)
+
+        def scope():
+            # Early-stop is true by default in non-reentrant torch.utils.checkpoint
+            out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=False)
+            out.sum().backward()
+
+        with disable_gc():
+            scope()
+
+            for ref in refs:
+                self.assertIsNone(ref())
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -14114,13 +14173,27 @@ class TestNestedCheckpoint(TestCase):
             # early stop is enabled.
             return clone(x.sin().cos())
 
+        # Test default
         # Early stopping is enabled by default
         a = torch.tensor(1.0, requires_grad=True)
         out = checkpoint(fn, a, use_reentrant=False)
         out.backward()
         self.assertEqual(counter[0], 1)
 
-        # Try using the context manager to set early stopping to False.
+        # Test local setting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager
         # Expect early stopping to be disabled for all checkpoints ran under
         # the context manager, even though context manager is no longer active
         # when backward/recomputation is performed.
@@ -14128,9 +14201,39 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(1.0, requires_grad=True)
         with torch.utils.checkpoint.set_checkpoint_early_stop(False):
             out = checkpoint(fn, a, use_reentrant=False)
-
         out.backward()
         self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager nesting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+                out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test precedence
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
 
     def test_nested_checkpoint_set_early_stop_no_recompution_needed(self):
         # Case 1: We have one tensor saved and its the input
