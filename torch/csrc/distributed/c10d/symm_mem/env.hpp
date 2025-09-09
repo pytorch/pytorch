@@ -1,16 +1,15 @@
-#include <cstdlib>
-#include <cstring>
+#include <c10/util/env.h>
 
 namespace c10d::symmetric_memory {
 
 static int getenv_nblocks() {
   static int num_blocks = -1; // Uninitialized
   if (num_blocks == -1) {
-    const char* str = getenv("TORCH_SYMMMEM_NBLOCKS");
-    if (str && strlen(str) > 0) {
-      num_blocks = atoi(str);
+    auto str = c10::utils::get_env("TORCH_SYMMMEM_NBLOCKS");
+    if (str.has_value()) {
+      num_blocks = std::stoi(str.value());
     } else {
-      num_blocks = -2; // User did not set env
+      num_blocks = -2; // Not set
     }
   }
   return num_blocks;

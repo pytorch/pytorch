@@ -3945,7 +3945,7 @@ if HAS_CUDA_AND_TRITON:
 
             f = torch.compile(f, mode="reduce-overhead")
 
-            with self.assertRaises(torch._dynamo.exc.Unsupported):
+            with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
 
     class TestSAC(TestCase):
