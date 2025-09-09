@@ -10,53 +10,14 @@ import torch
 log = logging.getLogger(__name__)
 
 
-# Lazy import cache for pynvml
-_pynvml_cache: Optional[Any] = None
-_pynvml_initialized: bool = False
-
-# Lazy import cache for AMD ROCm SMI library
-_amd_smi_cache: Optional[Any] = None
-_amd_smi_initialized: bool = False
-
-
 def _get_pynvml() -> Optional[Any]:
-    """
-    Lazy import handler for pynvml.
-    Imports pynvml once on first call and caches the result.
-    Returns None if pynvml is not available.
-    """
-    global _pynvml_cache, _pynvml_initialized
-
-    if not _pynvml_initialized:
-        try:
-            import pynvml  # type: ignore[import]
-
-            _pynvml_cache = pynvml
-        except ImportError:
-            _pynvml_cache = None
-        _pynvml_initialized = True
-
-    return _pynvml_cache
+    """Get pynvml from torch.cuda if available."""
+    return getattr(torch.cuda, "pynvml", None) if torch.cuda._HAS_PYNVML else None
 
 
 def _get_amd_smi() -> Optional[Any]:
-    """
-    Lazy import handler for AMD SMI library.
-    Imports amdsmi once on first call and caches the result.
-    Returns None if amdsmi is not available.
-    """
-    global _amd_smi_cache, _amd_smi_initialized
-
-    if not _amd_smi_initialized:
-        try:
-            import amdsmi  # type: ignore[import]
-
-            _amd_smi_cache = amdsmi
-        except ImportError:
-            _amd_smi_cache = None
-        _amd_smi_initialized = True
-
-    return _amd_smi_cache
+    """Get AMD SMI from torch.cuda if available."""
+    return getattr(torch.cuda, "amdsmi", None) if torch.cuda._HAS_PYNVML else None
 
 
 @contextmanager
