@@ -96,7 +96,7 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11.0-arm64'
+mac_version='macosx-11_0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
@@ -132,11 +132,13 @@ RENAME_WHEEL=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
+        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
     3.14)
         echo "Using 3.14t deps"
+        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
@@ -190,7 +192,7 @@ _PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python setup.py bdi
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
-if [[ $package_type == 'libooootorch' ]]; then
+if [[ $package_type == 'libtorch' ]]; then
     echo "delocating wheel dependencies"
     retry pip install https://github.com/matthew-brett/delocate/archive/refs/tags/0.10.4.zip
     echo "found the following wheels:"
