@@ -346,6 +346,8 @@ class RootGuardManager(GuardManager):
     def add_epilogue_lambda_guard(
         self,
         guard: LeafGuard,
+        required_locals: dict[str, int],
+        construct_full_framelocals_dict: bool,
         verbose_code_parts: list[str],
     ) -> None: ...
     def clone_manager(

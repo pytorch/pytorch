@@ -234,7 +234,7 @@ dunder_attrs_assumed_constants = (
 )
 
 
-def get_framelocals_idx(code, var_name):
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> Optional[int]:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
     # NOTE: we need to find the LAST matching index because <= 3.10 contains
@@ -1359,6 +1359,7 @@ class GuardBuilder(GuardBuilderBase):
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
             framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
+            assert framelocals_idx is not None
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
