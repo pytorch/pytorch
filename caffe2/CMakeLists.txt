@@ -1762,6 +1762,10 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
+  if(USE_ROCM_CK_SDPA)
+    target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
   if(USE_FBGEMM_GENAI)
     if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE fbgemm_genai)
