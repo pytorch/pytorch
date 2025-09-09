@@ -228,10 +228,6 @@ def is_non_strict_test(test_name):
     )
 
 
-def is_strict_v2_test(test_name):
-    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
-
-
 def is_inline_and_install_strict_test(test_name: str) -> bool:
     return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
 
@@ -13742,22 +13738,6 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
-    def test_expand_copy_export_handles_implicit_true(self):
-        class ExpandModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, implicit):
-                return torch.expand_copy(x, [3, 3], implicit=implicit)
-
-        model = ExpandModel()
-        x = torch.ones([3])
-
-        model(x, False)
-        model(x, True)
-        export(model, (x, False))
-        export(model, (x, True))
-
     def test_unbacked_expand(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -14447,14 +14427,6 @@ graph():
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
-        # This is fine since both of these will be deprecated soon.
-        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
-            self.assertEqual(
-                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
-            )
-            self.assertEqual(
-                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
-            )
         else:
             self.assertEqual(
                 filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
@@ -15562,10 +15534,13 @@ class GraphModule(torch.nn.Module):
     @contextmanager
     def distributed_env(self, world_size):
         try:
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
             torch.distributed.init_process_group(
                 backend="fake",
                 world_size=world_size,
                 rank=0,
+                store=FakeStore(),
             )
             yield
 
@@ -16685,27 +16660,6 @@ def forward(self, x, y):
 
         ep = export(M(), inp)
         FileCheck().check_count("torch.ops.aten.mul", 1, exactly=True).run(
-            str(ep.graph)
-        )
-
-    def test_item(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = 5
-                self.b = 5.0
-
-            def forward(self, y):
-                at = torch.tensor(self.a)
-                # This becomes 5
-                a = at.item()
-                bt = torch.tensor(self.b)
-                # This becomes 5.0
-                b = bt.item()
-                return a * b * y
-
-        ep = export(M(), (torch.ones(3),))
-        FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
 
