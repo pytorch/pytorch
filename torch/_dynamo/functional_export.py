@@ -27,6 +27,35 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 log = logging.getLogger(__name__)
 
 
+def post_process_error_msg(
+    constraint_violation_error: ConstraintViolationError,
+    mod: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+):
+    """
+    Because we trace a different callable, the sources are all messed up.
+    Manually patch them so the error message looks correct.
+    """
+    assert isinstance(mod, torch.nn.Module)
+    orig_sig = inspect.signature(mod.forward)
+    bound_arguments = orig_sig.bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    bound_args = bound_arguments.arguments
+
+    flat_input_paths, _ = pytree.tree_flatten_with_path(bound_args)
+    name_mapping = {}
+    for idx, (path, _) in enumerate(flat_input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    replace = constraint_violation_error.args[0]
+    for key, val in name_mapping.items():
+        replace = replace.replace(key, val)
+
+    constraint_violation_error.args = (replace,)
+    return constraint_violation_error
+
+
 def clean_nn_module_stack(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in graph_module.graph.nodes:
         if "nn_module_stack" in node.meta:
@@ -443,6 +472,9 @@ def _dynamo_graph_capture_for_export(
                         'Set TORCH_LOGS="+export" for more information.'
                     )
         if constraint_violation_error:
+            constraint_violation_error = post_process_error_msg(
+                constraint_violation_error, mod, args, kwargs
+            )
             raise constraint_violation_error
 
         return transformed_graph
