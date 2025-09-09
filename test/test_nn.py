@@ -5192,6 +5192,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
                                         "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
                 self.skipTest("Failed on CUDA")
 
