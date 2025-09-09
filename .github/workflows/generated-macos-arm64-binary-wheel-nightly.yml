@@ -57,8 +57,10 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.10.4"
           freethreaded: false
       - name: Checkout PyTorch
@@ -165,9 +167,11 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
-          python-version: "3.11.0"
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "3.11.4"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -273,9 +277,11 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
-          python-version: "3.12.0"
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "3.12.4"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -381,9 +387,11 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
-          python-version: "3.13.0"
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "3.13.4"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -489,9 +497,11 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
-          python-version: "3.13.0"
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "3.13.4"
           freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -597,8 +607,10 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.14.0-rc.2"
           freethreaded: false
       - name: Checkout PyTorch
@@ -705,8 +717,10 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6
         with:
+          # TODO: Removeme once 3.14 is out
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.14.0-rc.2"
           freethreaded: true
       - name: Checkout PyTorch
