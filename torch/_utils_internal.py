@@ -117,6 +117,10 @@ def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def add_mlhub_insight(category: str, insight: str, insight_description: str):
+    pass
+
+
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
@@ -130,6 +134,10 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 
 def log_export_usage(**kwargs):
+    pass
+
+
+def log_draft_export_usage(**kwargs):
     pass
 
 
@@ -331,3 +339,29 @@ def deprecated():
         return func
 
     return decorator
+
+
+def get_default_numa_options():
+    """
+    When using elastic agent, if no numa options are provided, we will use these
+    as the default.
+
+    For external use cases, we return None, i.e. no numa binding. If you would like
+    to use torch's automatic numa binding capabilities, you should provide
+    NumaOptions to your launch config directly or use the numa binding option
+    available in torchrun.
+
+    Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
+    return None
+
+
+def log_triton_builds(fail: Optional[str]):
+    pass
+
+
+def find_compile_subproc_binary() -> Optional[str]:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None

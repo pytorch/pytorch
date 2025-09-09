@@ -10,8 +10,6 @@ BlenderbotForConditionalGeneration,16
 BlenderbotSmallForCausalLM,256
 BlenderbotSmallForConditionalGeneration,128
 CamemBert,32
-DebertaForMaskedLM,32
-DebertaForQuestionAnswering,32
 DebertaV2ForMaskedLM,8
 DebertaV2ForQuestionAnswering,8
 DistilBertForMaskedLM,256
@@ -42,7 +40,6 @@ PegasusForCausalLM,128
 PegasusForConditionalGeneration,64
 RobertaForCausalLM,32
 RobertaForQuestionAnswering,32
-Speech2Text2ForCausalLM,1024
 T5ForConditionalGeneration,8
 T5Small,8
 TrOCRForCausalLM,64

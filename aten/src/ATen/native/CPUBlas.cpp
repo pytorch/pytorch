@@ -51,7 +51,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 // brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
 #if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
 #define ONEDNN_UKERNEL_1
-#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#elif ((IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR >= 6) || (IDEEP_VERSION_MAJOR > 3))
 #define ONEDNN_UKERNEL_2
 #endif
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
@@ -496,18 +496,18 @@ void gemm(
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
-  std::vector<at::Half> float16_c(c_size, 0.f);
-  gemm_stub(
+  std::vector<float> float_c(c_size, 0.f);
+  gemm_no_downcast_stub(
       at::kCPU, at::kHalf,
-      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float16_c.data(), m);
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float_c.data(), m);
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
       auto offset = j * ldc + i;
       // beta == 0 won't propagate NaN from C
       if (beta == 0.f) {
-        c[offset] = c10::convert<float>(float16_c[j * m + i]);
+        c[offset] = float_c[j * m + i];
       } else {
-        c[offset] = beta * c[offset] + c10::convert<float>(float16_c[j * m + i]);
+        c[offset] = beta * c[offset] + float_c[j * m + i];
       }
     }
   }

@@ -1339,6 +1339,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape

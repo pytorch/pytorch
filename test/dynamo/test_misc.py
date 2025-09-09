@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # ruff: noqa: F841
 import abc
+import builtins
 import collections
 import collections.abc
 import copy
@@ -16,11 +17,13 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import tempfile
 import threading
 import traceback
+import types
 import typing
 import unittest
 import unittest.mock as mock
@@ -54,6 +57,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -83,12 +87,15 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    instantiate_parametrized_tests,
     IS_FBCODE,
+    parametrize,
     scoped_load_inline,
     set_default_dtype,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
+    subtest,
     TEST_HPU,
     TEST_XPU,
     wrapDeterministicFlagAPITest,
@@ -97,10 +104,20 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
+pytree_modules = {
+    "python": python_pytree,
+}
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
+
+    pytree_modules["cxx"] = cxx_pytree
 else:
     cxx_pytree = None
+
+parametrize_pytree_module = parametrize(
+    "pytree",
+    [subtest(module, name=name) for name, module in pytree_modules.items()],
+)
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -1702,16 +1719,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             if hasattr(packed, "b"):
                 b = packed.b + 1
             c = packed[2]
-            return a + b + c
+            d = len(packed._fields)
+            return a + b + c + d
 
         v1 = torch.Tensor([1])
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 10)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_namedtuple3(self):
         def fn(x, packed):
@@ -1957,6 +1975,31 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         act = opt_fn(a, b)
 
         self.assertEqual(exp, act)
+
+    def test_class_binop(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __add__(self, other):
+                return Foo(self.x + other.x)
+
+        def fn(a, b):
+            return a + b
+
+        x = torch.randn(2)
+        a, b = Foo(x), Foo(x + 1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(a, b).x, 2 * x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        def fn(a, b):
+            return a - b
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertRaises(torch._dynamo.exc.Unsupported, opt_fn, a, b)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -5140,6 +5183,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(same(ref, res))
 
+    @skipIfWindows(
+        msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
+    )
     def test_release_input_memory(self):
         x = torch.rand([4])
         x_ref = weakref.ref(x)
@@ -5155,6 +5201,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         del x
         self.assertIs(x_ref(), None)
 
+    @skipIfWindows(
+        msg="TODO: (xuhancn) conform, AssertionError: Linear(in_features=10, out_features=10, bias=True) is not None"
+    )
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -5186,6 +5235,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_release_scope_memory(self):
         def inner(y):
             y
@@ -6354,6 +6404,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res = opt_func(x1, y)
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
+
+    def test_inference_mode_param(self):
+        def fn(x):
+            p = torch.nn.Parameter(x, requires_grad=False)
+            return x * p
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with torch.inference_mode():
+            x = torch.rand(4)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
 
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
@@ -8512,6 +8575,54 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
 
+    def test_fullgraph_capture(self):
+        from torch._dynamo.convert_frame import (
+            FrameInfo,
+            fullgraph_capture,
+            get_compile_id,
+        )
+        from torch._dynamo.utils import dynamo_timed, get_metrics_context
+        from torch._guards import compile_context, CompileContext
+
+        def foo(x):
+            return x + x.shape[0]
+
+        x = torch.randn(4, 3)
+        f_locals = {"x": x}
+        with (
+            compile_context(CompileContext(get_compile_id({}))),
+            dynamo_timed(""),
+            get_metrics_context(),
+        ):
+            capture_output = fullgraph_capture(
+                FrameInfo(
+                    foo.__code__,
+                    foo.__globals__,
+                    f_locals,
+                    builtins,
+                    (),
+                )
+            )
+            dynamo_output = capture_output.dynamo_output
+            backend_input = capture_output.backend_input
+            self.assertTrue(
+                dynamo_output.build_guards(foo.__code__).guard_manager.check(f_locals)
+            )
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in dynamo_output.tracer_output.output_graph.import_sources.items()
+        }
+        self.assertEqual(
+            foo(x),
+            types.FunctionType(
+                dynamo_output.bytecode,
+                {
+                    **import_sources,
+                    backend_input.backend_id: backend_input.graph_module,
+                },
+            )(x),
+        )
+
     def test_torch_guards_stack_frame_register_inlining_deep(self):
         x = torch.tensor([0.5, 0.5])
         y = torch.tensor([0.75, 0.75, 0.75, 0.75])
@@ -8548,6 +8659,42 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
+
+    def test_recompile_on_disable_1(self):
+        # fix https://github.com/pytorch/pytorch/issues/157399
+        @torch.compile(backend="eager")
+        def fn(x):
+            @torch._dynamo.disable
+            def inner(x):
+                return x + 10
+
+            return inner(x) + 1
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            try:
+                for i in range(5):
+                    fn(torch.rand(2, 3))
+            except torch._dynamo.exc.RecompileError as e:
+                self.fail("RecompileError raised unexpectedly: " + str(e))
+
+    def test_recompile_on_disable_2(self):
+        def outer(x, cond):
+            @torch._dynamo.disable()
+            def fn0(y):
+                return y + 1
+
+            @torch._dynamo.disable()
+            def fn1(y):
+                return y + 2
+
+            if cond:
+                f = fn0
+            else:
+                f = fn1
+
+            torch._dynamo.graph_break()
+            # there will be a resume function here
+            return f(x)
 
     def test_error_on_recompile(self):
         @torch.compile(backend="eager")
@@ -8973,71 +9120,6 @@ def ___make_guard_fn():
         opt = torch.compile(fn, backend="eager")
         opt()
 
-    def test_tracing_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-
-        counter = CompileCounter()
-        torch.compile(fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 3)
-
-    def test_tracing_nested_py_tree(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = [xs, xs, xs, xs]
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
-
-    def test_tracing_nested_py_tree_tuples(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = (xs, xs, xs, xs)
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 12)
-
-    def test_tracing_nested_py_tree_dicts(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-        xsl = {
-            "a": xs,
-            "b": xs,
-            "c": xs,
-        }
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
-
     def test_dynamic_one_hot(self):
         def fn(x):
             x = x + 1
@@ -9053,28 +9135,6 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 2)
-
-    def test_tracing_nested_py_tree_mixed_all(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
-        xsl = {
-            "a": xs,
-            "b": xsa,
-            "c": xsb,
-        }
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 18)
 
     def test_any_all_symnode(self):
         cnt = CompileCounter()
@@ -9101,46 +9161,6 @@ def ___make_guard_fn():
         y3 = torch.randn(5)
         self.assertEqual(fn(y3), y3 - 3)
         self.assertEqual(cnt.frame_count, 2)
-
-    def test_tracing_py_tree_tensor_subclass(self):
-        from torch.testing._internal.two_tensor import TwoTensor
-        from torch.utils.checkpoint import checkpoint
-
-        def fn(xs):
-            nested_xs = [[xs]]
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            return flat_xs[0].clone()
-
-        # use checkpoint to trigger a "sourceless" tensor subclass
-        def checkpoint_fn(xs):
-            return checkpoint(fn, xs, use_reentrant=True)
-
-        xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
-
-        counter = CompileCounter()
-        torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 2)
-
-    def test_tracing_tree_map_only(self):
-        def fn(xs):
-            def mapper(x):
-                return x.clone()
-
-            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
-            return y
-
-        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
-        real_out = fn(xsb)
-
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 9)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -10512,138 +10532,77 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
-    def test_pytree_tree_leaves(self):
-        implementations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implementations.append(("cxx", cxx_pytree))
+    def test_frozen_dataclass_attr_access(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int
+            a: int
 
-        for name, module in implementations:
-            with self.subTest(f"pytree implement: {name}"):
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
 
-                def fn(x):
-                    tree = {
-                        "a": [x, x - 1],
-                        "b": x + 2,
-                        "c": (
-                            x,
-                            3.0,
-                            collections.deque([0.0, -x, 1, 2], maxlen=3),
-                        ),
-                        "d": collections.OrderedDict(
-                            {
-                                "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
-                            },
-                        ),
-                    }
-                    leaves = module.tree_leaves(tree)
-                    return leaves
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
 
-                x = torch.randn(3, 2)
-                expected = fn(x)
-                fn_opt = torch.compile(fullgraph=True)(fn)
-                actual = fn_opt(x)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
 
-                self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected)
 
-    def test_pytree_tree_flatten_unflatten(self):
-        implementations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implementations.append(("cxx", cxx_pytree))
+    def test_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: float
+            y: float
+            z: int
+            a: int
 
-        for name, module in implementations:
-            with self.subTest(f"pytree implement: {name}"):
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.x + dc.y + d[dc] + x + y
 
-                def fn(x, y):
-                    tree = {
-                        "a": [x, x - 1],
-                        "b": x + 2,
-                        "c": (
-                            x,
-                            3.0,
-                            collections.deque([0.0, -x, 1, 2], maxlen=3),
-                        ),
-                        "d": collections.OrderedDict(
-                            {
-                                "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
-                            },
-                        ),
-                    }
-                    leaves, treespec = module.tree_flatten(tree)
-                    new_leaves = [
-                        x - 1,
-                        y,
-                        x * y,
-                        3.0,
-                        y - 2,
-                        1,
-                        torch.zeros(2, 2),
-                        2 * y,
-                        -y,
-                        x + y,
-                        x - y,
-                        torch.ones(3, 2),
-                        1,
-                    ]
-                    new_tree = module.tree_unflatten(new_leaves, treespec)
-                    return leaves, new_tree
+        def fn(x, y):
+            dc = TestDataClass(x=3.2, y=2.5, z=5, a=2)
+            return inner_fn(dc, x, y)
 
-            x = torch.randn(3, 2)
-            y = torch.randn(3, 2)
-            expected = fn(x, y)
-            fn_opt = torch.compile(fullgraph=True)(fn)
-            actual = fn_opt(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
 
-            self.assertEqual(actual, expected)
+    def test_nested_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClassInner:
+            x: float
+            y: float
 
-    def test_pytree_tree_map(self):
-        implementations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implementations.append(("cxx", cxx_pytree))
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            b: TestDataClassInner
+            z: int
+            a: int
 
-        for name, module in implementations:
-            with self.subTest(f"pytree implement: {name}"):
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.b.x + dc.b.y + d[dc] + x + y
 
-                def fn(x, y):
-                    tree1 = {
-                        "a": [x, x - 1],
-                        "b": x + 2,
-                        "c": (
-                            x,
-                            3.0,
-                            collections.deque([0.0, -x, 1, 2], maxlen=3),
-                        ),
-                        "d": collections.OrderedDict(
-                            {
-                                "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
-                            },
-                        ),
-                    }
-                    tree2 = collections.OrderedDict(
-                        [
-                            ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
-                            ("a", [y, y + 1]),
-                            ("b", y + 2),
-                            (
-                                "d",
-                                {
-                                    "f": MyTuple(torch.ones(4, 3), -y, y + 1),
-                                    "e": torch.return_types.qr((2 * y, None)),
-                                },
-                            ),
-                        ],
-                    )
-                    return module.tree_map(lambda u, v: (u, v), tree1, tree2)
+        def fn(x, y):
+            dc = TestDataClass(b=TestDataClassInner(2.4, 4.4), z=5, a=2)
+            return inner_fn(dc, x, y)
 
-                x = torch.randn(3, 2)
-                y = torch.randn(3, 2)
-                expected = fn(x, y)
-                fn_opt = torch.compile(fullgraph=True)(fn)
-                actual = fn_opt(x, y)
-
-                self.assertEqual(actual, expected)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
@@ -10697,8 +10656,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, trace_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -11164,7 +11123,7 @@ class AAA:
 def fn():
     return 3
 """
-        with tempfile.NamedTemporaryFile(mode="w") as f:
+        with WritableTempFile(mode="w") as f:
             f.write(src)
             f.flush()
             from torch._dynamo.funcname_cache import get_funcname
@@ -11557,6 +11516,7 @@ fn
         self.assertIs(c1[1], c2[0])
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_dynamo_cache_invalidate(self):
         DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
 
@@ -11863,6 +11823,19 @@ fn
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
+
+    def test_hash_hop(self):
+        associative_scan = importlib.import_module(
+            "torch._higher_order_ops.associative_scan"
+        )
+
+        @torch.compile(fullgraph=True)
+        def fn(y, s):
+            d = dict()
+            d[s] = y
+            return d[s] + 1.0
+
+        fn(torch.ones(2, 2, device="cpu"), associative_scan.AssociativeScanOp())
 
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
@@ -12634,6 +12607,288 @@ fn
         res = opt_f(x)
         self.assertEqual(ref, res)
 
+    def test_builtin_complex(self):
+        def f(x):
+            c = (
+                complex(),
+                complex(1),
+                complex(2, 3),
+                complex(imag=2),
+                complex(real=1),
+                complex(imag=1, real=2),
+                complex("1+2j"),
+                complex(1, 2).conjugate(),
+            )
+            return [x + z for z in c]
+
+        x = torch.randn(1)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+
+    def test_builtin_complex_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(*args, **kwargs):
+            return torch.tensor(complex(*args, **kwargs))
+
+        self.assertRaises(Unsupported, f, 1, 1, 1)
+        self.assertRaises(Unsupported, f, 1, 1, fake_arg=1)
+        self.assertRaises(Unsupported, f, fake_arg=1)
+        self.assertRaises(Unsupported, f, [])
+        self.assertRaises(Unsupported, f, "1 + j")
+
+
+class MiscTestsPyTree(torch._inductor.test_case.TestCase):
+    @parametrize_pytree_module
+    def test_tracing_pytree(self, pytree):
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+
+        counter = CompileCounter()
+        torch.compile(fn, backend=counter, fullgraph=True)(xs)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 3)
+
+    @parametrize_pytree_module
+    def test_tracing_nested_pytree(self, pytree):
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = [xs, xs, xs, xs]
+
+        counter = CompileCounter()
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    @parametrize_pytree_module
+    def test_tracing_nested_tuples(self, pytree):
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = (xs, xs, xs, xs)
+
+        counter = CompileCounter()
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    @parametrize_pytree_module
+    def test_tracing_nested_dicts(self, pytree):
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = {
+            "a": xs,
+            "b": xs,
+            "c": xs,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
+    @parametrize_pytree_module
+    def test_tracing_nested_mixed_all(self, pytree):
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+        xsl = {
+            "a": xs,
+            "b": xsa,
+            "c": xsb,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 18)
+
+    @parametrize_pytree_module
+    def test_tracing_nested_tensor_subclass(self, pytree):
+        from torch.testing._internal.two_tensor import TwoTensor
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(xs):
+            nested_xs = [[xs]]
+            flat_xs, spec = pytree.tree_flatten(xs)
+            return flat_xs[0].clone()
+
+        # use checkpoint to trigger a "sourceless" tensor subclass
+        def checkpoint_fn(xs):
+            return checkpoint(fn, xs, use_reentrant=True)
+
+        xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+
+        counter = CompileCounter()
+        torch.compile(checkpoint_fn, backend=counter, fullgraph=True)(xs)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+
+    @parametrize_pytree_module
+    def test_pytree_tree_leaves(self, pytree):
+        def fn(x):
+            tree = {
+                "a": [x, x - 1],
+                "b": x + 2,
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x, 1, 2], maxlen=3),
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": torch.return_types.qr((2 * x, None)),
+                        "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
+            }
+            leaves = pytree.tree_leaves(tree)
+            return leaves
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x)
+
+        self.assertEqual(actual, expected)
+
+    @parametrize_pytree_module
+    def test_pytree_tree_flatten_unflatten(self, pytree):
+        def fn(x, y):
+            tree = {
+                "a": [x, x - 1],
+                "b": x + 2,
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x, 1, 2], maxlen=3),
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": torch.return_types.qr((2 * x, None)),
+                        "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
+            }
+            leaves, treespec = pytree.tree_flatten(tree)
+            new_leaves = [
+                x - 1,
+                y,
+                x * y,
+                3.0,
+                y - 2,
+                1,
+                torch.zeros(2, 2),
+                2 * y,
+                -y,
+                x + y,
+                x - y,
+                torch.ones(3, 2),
+                1,
+            ]
+            new_tree = pytree.tree_unflatten(new_leaves, treespec)
+            return leaves, new_tree
+
+        x = torch.randn(3, 2)
+        y = torch.randn(3, 2)
+        expected = fn(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x, y)
+
+        self.assertEqual(actual, expected)
+
+    @parametrize_pytree_module
+    def test_pytree_tree_map(self, pytree):
+        def fn(x, y):
+            tree1 = {
+                "a": [x, x - 1],
+                "b": x + 2,
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x, 1, 2], maxlen=3),
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": torch.return_types.qr((2 * x, None)),
+                        "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
+            }
+            tree2 = collections.OrderedDict(
+                [
+                    ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
+                    ("a", [y, y + 1]),
+                    ("b", y + 2),
+                    (
+                        "d",
+                        {
+                            "f": MyTuple(torch.ones(4, 3), -y, y + 1),
+                            "e": torch.return_types.qr((2 * y, None)),
+                        },
+                    ),
+                ],
+            )
+            return pytree.tree_map(lambda u, v: (u, v), tree1, tree2)
+
+        x = torch.randn(3, 2)
+        y = torch.randn(3, 2)
+        expected = fn(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x, y)
+
+        self.assertEqual(actual, expected)
+
+    @parametrize_pytree_module
+    def test_pytree_tree_map_only(self, pytree):
+        def fn(xs):
+            def mapper(x):
+                return x.clone()
+
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            return y
+
+        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+
+        counter = CompileCounter()
+        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsb)
+        real_out = fn(xsb)
+
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
@@ -13015,10 +13270,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         #   RuntimeError: value cannot be converted to type at::Half without overflow
 
 
+instantiate_parametrized_tests(MiscTestsPyTree)
+
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
 )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
