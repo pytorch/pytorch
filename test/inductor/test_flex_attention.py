@@ -1967,6 +1967,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
@@ -2060,6 +2061,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
@@ -2142,6 +2144,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""
@@ -2195,6 +2198,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     def test_dynamic_divisibility_guards(self, device, dtype):
         """Test guards for divisible/non-divisible shape transitions"""
