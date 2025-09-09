@@ -710,7 +710,7 @@ def _get_gradient_divide_factors(
 
     pre_factor: Optional[float]
     if overflow_risk:
-        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+        # Since fp16 has smaller dynamic ranges than fp32/bf16, we want to avoid
         # overflow/underflow. For N data parallel workers, each worker computes
         # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
         # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
