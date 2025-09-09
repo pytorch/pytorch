@@ -2070,6 +2070,11 @@ class TestSDPA(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
+    def test_scaled_dot_product_attention_fp16_overflow(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160841
+        x = torch.full((1, 32, 23, 80), 64.0, dtype=torch.half, device=device)
+        y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
+        self.assertFalse(y.isnan().any().item())
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
