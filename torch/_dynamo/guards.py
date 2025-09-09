@@ -242,6 +242,8 @@ def get_framelocals_idx(code, var_name):
     # and will take up 2 slots of the frame's localsplus. The correct behavior
     # is to refer to the cell, which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    if var_name not in framelocals_names_reversed:
+        return None
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
     )
@@ -1744,15 +1746,33 @@ class GuardBuilder(GuardBuilderBase):
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+
+        required_locals = {}
+        for var_name in guard_fn.__code__.co_consts:
+            if isinstance(var_name, str):
+                index = get_framelocals_idx(self.f_code, var_name)
+                if index is not None:
+                    required_locals[var_name] = index
+
+        construct_full_framelocals_dict = config.construct_full_framelocals_dict
+
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                required_locals,
+                construct_full_framelocals_dict,
+                verbose_code_parts,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(
+                guard_fn,
+                required_locals,
+                construct_full_framelocals_dict,
+                verbose_code_parts,
+            )
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
