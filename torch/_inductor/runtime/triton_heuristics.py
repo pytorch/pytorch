@@ -1935,7 +1935,6 @@ class DebugAutotuner(CachingAutotuner):
             kernel_name = f"{max(possible_names, key=len)}"
             if not re.match(self.regex_filter, kernel_name):
                 return
-
             if len(self.launchers) != 1:
                 if len(self.launchers) == 0:
                     start_time = time.time_ns()
@@ -2867,7 +2866,7 @@ def _persistent_reduction_configs(
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
-            for xblock in (1, 8, 32, 128)
+            for xblock in (1, 4, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
         ]
@@ -2892,8 +2891,13 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
-        configs = configs[:1]
+    elif reduction_hint == ReductionHint.INNER:
+        if rnumel > 1024:
+            configs = configs[:1]
+        elif rnumel <= 512:
+            configs = configs[2:3]
+        else:
+            configs = configs[1:2]
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
