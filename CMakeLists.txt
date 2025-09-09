@@ -378,10 +378,13 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
-# prioritized text linker, ON for AArch64 and OFF but visible to x86 and ppc64le.
-cmake_dependent_option(
-  USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
-  "${CPU_AARCH64}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+# prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
+set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
+if(LINUX AND CPU_AARCH64)
+  set(USE_PRIORITIZED_TEXT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
+  "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -1437,29 +1440,37 @@ if(USE_PRIORITIZED_TEXT_FOR_LD)
 
   add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
 
-  set(LINKER_OPT_TARGETS torch_python)
+  if(BUILD_PYTHON)
+    set(LINKER_OPT_TARGETS torch_python)
+  endif()
 
   if(NOT BUILD_LIBTORCHLESS)
-    list(APPEND LINKER_OPT_TARGETS torch torch_cpu)
+    list(APPEND LINKER_OPT_TARGETS torch_cpu c10)
     if(USE_CUDA)
       list(APPEND LINKER_OPT_TARGETS torch_cuda c10_cuda)
     endif()
     if(USE_XPU)
       list(APPEND LINKER_OPT_TARGETS torch_xpu c10_xpu)
     endif()
-
+    if(USE_ROCM)
+      list(APPEND LINKER_OPT_TARGETS torch_hip c10_hip)
+    endif()
   endif()
 
   foreach(tgt IN LISTS LINKER_OPT_TARGETS)
-    add_dependencies("${tgt}" generate_linker_script)
-    target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
-    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+    if(TARGET ${tgt})
+      add_dependencies("${tgt}" generate_linker_script)
+      target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
+      set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+    else()
+       message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
+    endif()
   endforeach()
 
 else()
   if(LINUX AND CPU_AARCH64)
     message(WARNING [[
-    It is strongly recommend to enable linker script optimization for all AArch64 builds.
+    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
     To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
     ]])
   endif()
