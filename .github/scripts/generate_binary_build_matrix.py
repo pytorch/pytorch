@@ -38,7 +38,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["13.0-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
