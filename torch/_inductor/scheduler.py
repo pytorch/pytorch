@@ -981,6 +981,17 @@ def _prune_redundant_deps(
 
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
+            scheduler = V.graph.scheduler
+            if dep.mutating_buf and scheduler:
+                node1 = scheduler.name_to_buf[dep.name].defining_op
+                node2 = scheduler.name_to_buf[dep.mutating_buf].defining_op
+                if (
+                    node1
+                    and node2
+                    and not scheduler.fusable_weak_dep(dep, node1, node2)
+                ):
+                    return False
+
             op_name = name_to_buf[dep.name].defining_op_name()
             is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
             # These can occur because fused nodes always gather deps from their snodes

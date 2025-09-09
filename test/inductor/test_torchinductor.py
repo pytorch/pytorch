@@ -13905,6 +13905,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
         return code_allowed != code_disallowed
 
+    def test_inplace_flip(self):
+        def f(x, y):
+            x.copy_(x.flip(1))
+            y = y.sum(dim=1, keepdim=True) + y
+            return x + y
+
+        x = torch.randn(20, 1024 * 1024)
+        y = torch.randn(20, 1024 * 1024)
+        self.common(f, (x, y), atol=1e-3, rtol=1e-3)
+
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
