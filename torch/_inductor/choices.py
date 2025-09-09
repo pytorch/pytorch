@@ -192,6 +192,7 @@ class InductorChoices:
         Returns:
             True if we need to fix the layout, False otherwise
         """
+        print(f"need to fix layout for {op_name}")
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
             return False
@@ -200,6 +201,7 @@ class InductorChoices:
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
         if len(adjusted_choices) > 0:
+            print(f"device type is {adjusted_choices[0].inputs.device_type}")
             if adjusted_choices[0].inputs.device_type == "mps":
                 return True
 
