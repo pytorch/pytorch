@@ -890,9 +890,14 @@ IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
   set(USE_FBGEMM_GENAI off)
 endif()
 
-# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a")
-  message(WARNING "Setting USE_FBGEMM_GENAI to ON for CUDA build on SM100")
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100. Details:
+# - pytorch is not built for *a variants of SM architectures, due to non-portability. However,
+#   we need fbgemm_gpu kernels built for sm100a.
+# - fbgemm_gpu builds for sm100a if using CUDA 12.8 or 12.9
+#   (source: https://github.com/pytorch/FBGEMM/blob/2033a0a08fbc08f83a1c8da5717546407f9bd972/.github/scripts/nova_dir.bash#L29-L32)
+# - Therefore, if pytorch is being built for sm100 with CUDA 12.8 or 12.9, we trigger fbgemm_gpu build which will build for sm100a.
+if(USE_CUDA AND ("$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" OR "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a") AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
+  message(WARNING "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
   set(USE_FBGEMM_GENAI ON)
 endif()
 
