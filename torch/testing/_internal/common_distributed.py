@@ -349,15 +349,7 @@ def requires_nccl_version(version, msg):
                 f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
             )
     else:
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
+        return lambda f: f
 
 
 def requires_nccl():
