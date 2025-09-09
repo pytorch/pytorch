@@ -558,6 +558,32 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
+def enable_zendnn_optimization() -> bool:
+    """
+    Determine if ZenDNN optimization should be used.
+
+    Returns True when:
+    - ZenDNN is available in torch AND
+    - Either explicitly enabled via config OR auto-enabled on AMD CPU with AVX512
+    """
+    import warnings
+
+    if not torch._C.has_zendnn:  # type: ignore[attr-defined]
+        if config.enable_zendnn:
+            warnings.warn(
+                "ZenDNN optimizations requested but torch is not built with ZenDNN support. "
+                "Rebuild torch with USE_ZENDNN=1 to enable ZenDNN optimizations."
+            )
+        return False
+
+    # Use if explicitly enabled or auto-enabled on AMD CPU with AVX512
+    return config.enable_zendnn or (
+        config.enable_zendnn is None
+        and torch._C._cpu._is_amd_cpu()
+        and torch._C._cpu._is_avx512_supported()
+    )
+
+
 def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
@@ -610,6 +636,13 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
             config.joint_custom_post_pass
         )
+        count += 1
+
+    # Check for ZenDNN availability and user configuration
+    if enable_zendnn_optimization():
+        from .zendnn_optimize import optimize
+
+        graph = optimize(graph)
         count += 1
 
     if count:
