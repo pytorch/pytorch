@@ -19,9 +19,9 @@ make_wheel_record() {
 
 change_wheel_version() {
   package=$1
-  wheel=$1
-  f_version=$2
-  t_version=$3
+  wheel=$2
+  f_version=$3
+  t_version=$4
 
   # Extract the wheel
   ${PYTHON_EXECUTABLE} -mwheel unpack $wheel
