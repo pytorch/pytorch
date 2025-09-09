@@ -26,20 +26,15 @@ using TeamPool = std::vector<nvshmem_team_t>;
 
 // Custom deletion function for freeing CUDA memory of the team pool
 static void dev_team_deleter(nvshmem_team_t* team_pool_dev) {
-  // We do it in a best effort manner because the team pool is managed by a
-  // static TeamManager and the destruction order of static objects is
-  // undetermined. If the destructor is called after the CUDA context is
-  // destroyed, cudaFree would fail.
-  try {
-    // cudaFree generally implies a device synchronization, meaning it will
-    // block until all preceding CUDA operations on the device have completed
-    // before freeing the memory. Thus we don't need to worry about freeing
-    // the memory before CUDA kernels complete.
-    c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
-  } catch (...) {
-    // Ignore the error
-    std::cerr << "Failed to free the team pool in device memory, skipping\n";
-  }
+  // Today the team pool is managed by a static TeamManager and the destruction
+  // order of static objects is undetermined. If the destructor is called after
+  // the CUDA context is destroyed, cudaFree could fail with CUDA error or even
+  // segfault.  To avoid that, we leak the memory here, and hope the OS will
+  // reclaim the resources as the program exits. These team pools are small
+  // spaces too (128 ints).
+  // Alternatively, if this deleter could be triggered actively, e.g. via
+  // `destroy_process_group`, the code here could have been:
+  // c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
 }
 
 // A unique pointer to a team pool in device memory, so that the custom deleter
