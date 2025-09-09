@@ -3844,19 +3844,29 @@ class TestSparse(TestSparseBase):
         for s0, s1 in itertools.combinations(sizes, r=2):
             t = make_tensor(s0, dtype=dtype, device=device, low=-9, high=9)
             for sparse_dims in range(1, len(s0) + 1):
-                s = t.to_sparse(sparse_dims)
-                if can_broadcast(s0, s1):
-                    t_res = torch.broadcast_to(t, s1)
-                    s_res = torch._sparse_broadcast_to(s, s1)
-                    torch._validate_sparse_coo_tensor_args(s_res._indices(), s_res._values(), s_res.shape)
-                    if s_res.is_coalesced():
-                        # ensure that is_coalesced is estimated correctly
-                        self.assertEqual(s_res, torch.sparse_coo_tensor(s_res._indices(), s_res._values(), s_res.shape).coalesce())
-                    self.assertEqual(s_res.to_dense(), t_res)
-                else:
-                    with self.assertRaisesRegex(RuntimeError,
-                                                r"does not broadcast"):
-                        torch._sparse_broadcast_to(s, s1)
+                s_coalesced_variants = [
+                    # coalesced
+                    sc:=make_tensor(s0, dtype=dtype, device=device).to_sparse(sparse_dims),
+                    # double nnz in a non-coalesced fashion
+                    torch.sparse_coo_tensor(
+                        sc._indices().unsqueeze(1).expand(-1, 2, -1).flatten(-2, -1),
+                        sc._values().unsqueeze(0).expand(2, *sc._values().shape).flatten(0, 1),
+                        sc.shape,
+                    ),
+                ]
+                for s in s_coalesced_variants:
+                    if can_broadcast(s0, s1):
+                        t_res = torch.broadcast_to(s.to_dense(), s1)
+                        s_res = torch._sparse_broadcast_to(s, s1)
+                        torch._validate_sparse_coo_tensor_args(s_res._indices(), s_res._values(), s_res.shape)
+                        if s_res.is_coalesced():
+                            # ensure that is_coalesced is estimated correctly
+                            self.assertEqual(s_res, torch.sparse_coo_tensor(s_res._indices(), s_res._values(), s_res.shape).coalesce())
+                        self.assertEqual(s_res.to_dense(), t_res)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError,
+                                                    r"does not broadcast"):
+                            torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff
     @expectedFailureMPS
