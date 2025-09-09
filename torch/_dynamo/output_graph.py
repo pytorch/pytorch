@@ -379,10 +379,6 @@ class ExportMetaData:
     out_spec: Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec] = (
         torch.utils._pytree._LEAF_SPEC
     )
-    module_call_spec: dict[
-        str,
-        dict[str, Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec]],
-    ] = dc_field(default_factory=dict)
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -1699,19 +1695,6 @@ class OutputGraph(OutputGraphGuardsState):
                     if isinstance(
                         mut_type, (AttributeMutationExisting, ValueMutationExisting)
                     ):
-                        if isinstance(var, UserDefinedDictVariable) and isinstance(
-                            var.value, _ExportModuleSpecTrackerDict
-                        ):
-                            for k, v in var.items.items():
-                                specs = {}
-                                for k_spec, val in v.items.items():
-                                    specs[k_spec.vt.as_python_constant()] = (
-                                        val.as_python_constant()
-                                    )
-                                assert ["in_spec", "out_spec"] == list(specs.keys())
-                                self.export_metadata.module_call_spec[
-                                    k.vt.as_python_constant()
-                                ] = specs
                         # export uses tracepoint pass to dump submodule inp/out spec
                         # into global state, so we filter it here
                         if not (

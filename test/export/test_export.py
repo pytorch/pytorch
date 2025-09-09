@@ -217,19 +217,12 @@ TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp_strict"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_nonstrict"
 CPP_RUNTIME_STRICT_SUFFIX = "_cpp_runtime_strict"
 CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
-STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
-        STRICT_EXPORT_V2_SUFFIX
-    )
-
-
-def is_strict_v2_test(test_name):
-    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
+    return not test_name.endswith(STRICT_SUFFIX)
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
@@ -9743,7 +9736,6 @@ graph():
         inputs = {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
         self.assertEqual(ep.module()(**inputs), m(**inputs))
 
-    @testing.expectedFailureStrictV2  # AssertionError: RuntimeError not raised
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -11772,7 +11764,6 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -12079,8 +12070,6 @@ graph():
 
         test(export(M(), inp))
 
-    # Preserving signature hook is messing with dynamo tracing
-    @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -13699,7 +13688,7 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
+        ep = torch.export.export(
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
@@ -14547,14 +14536,6 @@ graph():
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
-        # This is fine since both of these will be deprecated soon.
-        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
-            self.assertEqual(
-                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
-            )
-            self.assertEqual(
-                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
-            )
         else:
             self.assertEqual(
                 filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
@@ -15393,7 +15374,6 @@ class GraphModule(torch.nn.Module):
         )
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
-    @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureRetraceability  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureTrainingIRToRunDecomp  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureSerDerNonStrict  # TODO: serde torch.FunctionSchema is not implemented yet

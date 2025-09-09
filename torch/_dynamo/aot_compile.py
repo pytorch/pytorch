@@ -193,7 +193,6 @@ def aot_compile_fullgraph(
     backend_input = capture_output.backend_input
     output_graph = dynamo_output.tracer_output.output_graph
     assert output_graph is not None
-    assert backend_input is not None
     import_sources = output_graph.import_sources
     with torch._guards.tracing(TracingContext(backend_input.fake_mode)):
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
