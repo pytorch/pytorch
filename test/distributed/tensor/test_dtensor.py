@@ -899,6 +899,35 @@ class DTensorMeshTest(DTensorTestBase):
         )
 
     @with_comms
+    def test_max_item(self):
+        mesh = DeviceMesh(
+            device_type=self.device_type, mesh=torch.arange(self.world_size)
+        )
+        x = torch.arange(self.world_size)
+        from torch.distributed.tensor import distribute_tensor
+
+        x = distribute_tensor(x, mesh, [Shard(0)])
+        y = x.max().item()
+
+        self.assertEqual(y, self.world_size - 1)
+
+    @with_comms
+    def test_sharded_item(self):
+        mesh = DeviceMesh(
+            device_type=self.device_type, mesh=torch.arange(self.world_size)
+        )
+        x = torch.arange(self.world_size)
+        from torch.distributed.tensor import distribute_tensor
+
+        x = distribute_tensor(x, mesh, [Shard(0)])
+        assert self.world_size > 1
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"a Tensor with {self.world_size} elements cannot be converted to Scalar",
+        ):
+            _ = x.item()
+
+    @with_comms
     def test_metadata_consistency_check(self):
         device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
