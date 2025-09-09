@@ -92,7 +92,7 @@ at::Tensor& wrapper_set_source_Storage_storage_offsetset_(
     at::Storage storage,
     int64_t storage_offset,
     c10::IntArrayRef size,
-    c10::IntArrayRef stride) {
+    at::OptionalIntArrayRef stride) {
   return at::native::openreg::set_source_Storage_storage_offset_(
       result, storage, storage_offset, size, stride);
 }
