@@ -1,16 +1,11 @@
-import collections
 import logging
 from collections import defaultdict
 from typing import Any, Callable, Optional
 
 import torch
-import torch.distributed as dist
 import torch.utils._pytree as pytree
-from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -42,26 +37,7 @@ def bucket_all_gather(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx, mode)
-    if len(ag_buckets) == 0:
-        return
-    merge_all_gather(gm, ag_buckets, mode)
-
-
-def bucket_all_gather_all(
-    gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
-    mode: Optional[str] = None,
-) -> None:
-    if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_cap_mb_by_bucket_idx_default,
-        )
-
-        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    ag_buckets = bucket_all_gather_by_mb_all(
-        gm, bucket_cap_mb_by_bucket_idx, None, mode
-    )
+    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx, None, mode)
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets, mode)
@@ -78,30 +54,12 @@ def bucket_reduce_scatter(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    rs_buckets = bucket_reduce_scatter_by_mb(gm, bucket_cap_mb_by_bucket_idx)
-    if len(rs_buckets) == 0:
-        return
-    merge_reduce_scatter(gm, rs_buckets, mode)
-
-
-def bucket_reduce_scatter_all(
-    gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
-    mode: Optional[str] = None,
-) -> None:
-    if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_cap_mb_by_bucket_idx_default,
-        )
-
-        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    rs_buckets = bucket_reduce_scatter_by_mb_all(
+    rs_buckets = bucket_reduce_scatter_by_mb(
         gm, bucket_cap_mb_by_bucket_idx, None, mode
     )
     if len(rs_buckets) == 0:
-        return rs_buckets
+        return
     merge_reduce_scatter(gm, rs_buckets, mode)
-    return rs_buckets
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
@@ -129,17 +87,17 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def collect_node_descendants(
+def collect_node_descendents(
     graph: torch.fx.Graph,
 ) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
-    Collects the descendants of each node in the graph.
+    Collects the descendents of each node in the graph.
     Args:
-        graph (torch.fx.Graph): The graph to collect descendants from.
+        graph (torch.fx.Graph): The graph to collect descendents from.
     Returns:
-        dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendants.
+        dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendents.
     """
-    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
+    node_descendents: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
         collections.defaultdict(OrderedSet)
     )
     outdegree = collections.defaultdict(int)
@@ -155,14 +113,14 @@ def collect_node_descendants(
     while queue:
         node = queue.pop()
         for input_node in node.all_input_nodes:
-            node_descendants[input_node] |= node_descendants[node]
-            node_descendants[input_node].add(node)
+            node_descendents[input_node] |= node_descendents[node]
+            node_descendents[input_node].add(node)
             outdegree[input_node] -= 1
 
             if outdegree[input_node] == 0:
                 queue.append(input_node)
 
-    return node_descendants
+    return node_descendents
 
 
 def greedy_bucket_collective_by_mb(
@@ -188,7 +146,7 @@ def greedy_bucket_collective_by_mb(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendants = collect_node_descendants(gm.graph)
+    node_descendents = collect_node_descendents(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -212,7 +170,6 @@ def greedy_bucket_collective_by_mb(
 
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
-        log += "\n"
         cur_bucket: list[torch.fx.Node] = []
         cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
@@ -240,148 +197,10 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendants[node]
+            cur_bucket_descendents |= node_descendents[node]
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fx_bucketing_greedy_bucket_collective_by_mb",
-            "encoding": "string",
-        },
-        payload_fn=lambda: log,
-    )
     return buckets
-
-
-def greedy_bucket_collective_by_mb_all(
-    gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_node: Callable[[torch.fx.Node], bool],
-    node_group_key: Callable[[torch.fx.Node], Any],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
-) -> list[list[torch.fx.Node]]:
-    g = gm.graph
-    found_candidates = False
-    for node in g.nodes:
-        if filter_node(node):
-            found_candidates = True
-            break
-    if not found_candidates:
-        return []
-
-    # TODO: pearce kelly algorithm for detecting cycles
-    log = ""
-
-    nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
-
-    for node in g.nodes:
-        if is_wait_tensor(node) and filter_node(node.args[0]):
-            if (filter_wait_node is None) or filter_wait_node(node):
-                coll_node = node.args[0]
-                group_key = node_group_key(coll_node)
-                nodes_groups[group_key].append(coll_node)
-
-    node_descendants = collect_node_descendants(gm.graph)
-    log = []
-    for group_key, ns_group in nodes_groups.items():
-        log.append(
-            f"\n \nBUCKETING KEY:{group_key} {len(ns_group)} -> GROUP:{ns_group}"
-        )
-        buckets = _greedy_bucket(
-            ns_group, bucket_cap_mb_by_bucket_idx, node_descendants, log, try_left=16
-        )
-    num_total = sum(len(ns) for ns in nodes_groups.values())
-    num_bucketed = sum(len(bucket) for bucket in buckets)
-    log.append(
-        f"\n XXX TOTAL:{num_total} num_bucketed:{num_bucketed} perc:{num_bucketed / num_total}"
-    )
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
-            "encoding": "string",
-        },
-        payload_fn=lambda: "".join(log),
-    )
-    return buckets
-
-    # buckets: list[list[torch.fx.Node]] = []
-    # for group_key, _nodes in nodes_groups.items():
-    #     node_descendants = collect_node_descendants(gm.graph)
-    #     nodes = sorted(_nodes, key=lambda n: len(node_descendants[n]))
-    #     log += f"\n GROUP[{group_key}]: {nodes}"
-    #     cur_bucket: list[torch.fx.Node] = []
-    #     cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
-    #     cur_bucket_size_bytes: int = 0
-    #     cur_bucket_id: int = 0
-    #     bucket_size_bytes = int(
-    #         bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
-    #     )
-
-    #     def _add_bucket(bucket_ns, bucket_descendents):
-    #         nonlocal node_descendants
-    #         if len(cur_bucket) <= 1:
-    #             nonlocal log
-    #             log += f"\n cur_bucket <= 1 {cur_bucket} SKIP"
-    #             return False
-    #         buckets.append(bucket_ns)
-    #         bucket_ns_set = OrderedSet(bucket_ns)
-    #         for n, descendents in node_descendants.items():
-    #             if (n in bucket_ns_set) or (descendents & bucket_ns_set):
-    #                 node_descendants[n] |= bucket_descendents
-    #         return True
-
-    #     for node in nodes:
-    #         node_desc = node_descendants[node]
-    #         bucket_n_in_node_desc = True
-    #         for bucket_n in cur_bucket:
-    #             if bucket_n in node_desc:
-    #                 log += (
-    #                     f"\ni {node} SKIP BUCKET_NODE {bucket_n} in NODE_DESC"
-    #                 )
-    #                 bucket_n_in_node_desc = True
-    #                 break
-    #         if bucket_n_in_node_desc:
-    #             break
-    #         if node in cur_bucket_descendents:
-    #             # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
-    #             log += (
-    #                 f"\n{node} SKIP in cur_bucket_descendents cur_bucket:{cur_bucket}"
-    #             )
-    #             continue
-    #         assert "val" in node.meta
-    #         n_val = node.meta["val"]
-    #         out_size_bytes = n_val.numel() * n_val.element_size()
-    #         n_input_val = node.all_input_nodes[0].meta["val"]
-    #         in_size_bytes = n_input_val.numel() * n_input_val.element_size()
-    #         size_bytes = max(out_size_bytes, in_size_bytes)
-    #         if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
-    #             # Current bucket is full, create new bucket
-    #             _add_bucket(cur_bucket, cur_bucket_descendents)
-    #             cur_bucket = []
-    #             cur_bucket_size_bytes = 0
-    #             cur_bucket_id += 1
-    #             cur_bucket_descendents = OrderedSet()
-    #         cur_bucket_size_bytes += size_bytes
-    #         cur_bucket.append(node)
-    #         cur_bucket_descendents |= node_descendants[node]
-    #         cur_bucket_set = set(cur_bucket)
-    #         for n, descendents in node_descendants.items():
-    #             if (n in cur_bucket_set) or (descendents & cur_bucket_set):
-    #                 node_descendants[n] |= cur_bucket_descendents
-
-    #     _add_bucket(cur_bucket, cur_bucket_descendents)
-    # log += f"\nBUCKETS:{str(buckets)}"
-    # trace_structured(
-    #     "artifact",
-    #     metadata_fn=lambda: {
-    #         "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
-    #         "encoding": "string",
-    #     },
-    #     payload_fn=lambda: log,
-    # )
-    # return buckets
 
 
 def bucket_all_gather_by_mb(
@@ -427,36 +246,6 @@ def bucket_all_gather_by_mb(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_all_gather_into_tensor,
-        _ag_group_key,
-        filter_wait_node,
-    )
-
-
-def bucket_all_gather_by_mb_all(
-    gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
-    mode: Optional[str] = None,
-) -> list[list[torch.fx.Node]]:
-    def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:
-        _, group_size, group_name = node.args
-        dtype = node.meta["val"].dtype
-        assert isinstance(group_name, str)
-        return (group_name, dtype)
-
-    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str, torch.dtype]:
-        _, group_size, group_name = node.args
-        assert isinstance(group_name, str)
-        return group_name
-
-    group_key_fn = (
-        _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
-    )
-
-    return greedy_bucket_collective_by_mb_all(
-        gm,
-        bucket_cap_mb_by_bucket_idx,
-        is_all_gather_into_tensor,
         group_key_fn,
         filter_wait_node,
     )
@@ -466,6 +255,7 @@ def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -501,38 +291,6 @@ def bucket_reduce_scatter_by_mb(
     )
 
     return greedy_bucket_collective_by_mb(
-        gm,
-        bucket_cap_mb_by_bucket_idx,
-        is_reduce_scatter_tensor,
-        group_key_fn,
-        filter_wait_node,
-    )
-
-
-def bucket_reduce_scatter_by_mb_all(
-    gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
-    mode: Optional[str] = None,
-) -> list[list[torch.fx.Node]]:
-    def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
-        _, reduce_op, group_size, group_name = node.args
-        dtype = node.meta["val"].dtype
-        assert isinstance(group_name, str)
-        assert isinstance(reduce_op, str)
-        return (group_name, reduce_op, dtype)
-
-    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
-        _, reduce_op, group_size, group_name = node.args
-        assert isinstance(group_name, str)
-        assert isinstance(reduce_op, str)
-        return (group_name, reduce_op)
-
-    group_key_fn = (
-        _rs_group_key_multidtype if mode and "multidtype" in mode else _rs_group_key
-    )
-
-    return greedy_bucket_collective_by_mb_all(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_reduce_scatter_tensor,
@@ -610,6 +368,7 @@ def reduce_scatter_merge_fn_to_trace(
     group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],  # unused
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
@@ -1018,7 +777,6 @@ def merge_all_gather(
             bucket_dtype = pick_bucket_dtype(_ag_dtypes)
 
             ag0 = _ag_ns[0]
-            ag0_val = ag0.meta["val"]
             _, group_size, group_name = ag0.args
             assert isinstance(group_name, str)
 

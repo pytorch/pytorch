@@ -159,10 +159,10 @@ class ReorderInfo:
     moves: int = 0
     grouped: int = 0
     grouped_info: str = ""
-    comm_time: float = -1
-    comp_time: float = -1
-    initial_exposed: float = -1
-    final_exposed: float = -1
+    comm_time: float = -1.0
+    comp_time: float = -1.0
+    initial_exposed: float = -1.0
+    final_exposed: float = -1.0
     overlap_info: str = "None"
 
     @property
@@ -643,11 +643,13 @@ def _reorder_communication_preserving_peak_memory_internal(
                     ) -> tuple[bool, Optional[str]]:
                         # This pass processes collectives left to right,
                         # Do not group with processed collectives.
-                        # if contains_async_collective(candidate):
-                        #     return (
-                        #         False,
-                        #         f"candidate contains_collective {candidate.get_name()}",
-                        #     )
+                        # Leaving config for experimentation in 2D
+                        if not config_comms.reorder_iterative_group_with_collectives:
+                            if contains_async_collective(candidate):
+                                return (
+                                    False,
+                                    f"candidate contains_collective {candidate.get_name()}",
+                                )
                         if not config_comms.reorder_iterative_use_runtime_estimations:
                             if contains_gemm_like(candidate):
                                 return False, "contains_gemm_like"
@@ -656,7 +658,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     is_groupable_result, grouping_reason = is_groupable(candidate)
                     if is_groupable_result:
                         group_head = candidate
-                        if config.reorder_iterative_use_runtime_estimations:
+                        if config_comms.reorder_iterative_use_runtime_estimations:
                             if contains_wait(candidate):
                                 comm_time, comp_time, _ = (
                                     wait_exposed_communication_time(
@@ -1090,10 +1092,10 @@ class SinkWaitInfo:
     moves: int = 0
     moves_info: str = ""
     limiting_factor: str = "None"
-    comm_time: float = -1
-    comp_time: float = -1
-    initial_exposed: float = -1
-    final_exposed: float = -1
+    comm_time: float = -1.0
+    comp_time: float = -1.0
+    initial_exposed: float = -1.0
+    final_exposed: float = -1.0
     overlap_info: str = "None"
 
     @property
@@ -1312,11 +1314,10 @@ def _sink_waits_iterative_internal(
                 # Conservative sink wait, limiting by space before next collective.
                 # The global strategy is that bucketing should create space.
                 # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
-                # if contains_async_collective(candidate):
-                #     info.limiting_factor = (
-                #         f"candidate contains_async_collective {candidate.get_name()}"
-                #     )
-                #     break
+                if not config_comms.sink_waits_iterative_swap_with_collectives:
+                    if contains_async_collective(candidate):
+                        info.limiting_factor = f"candidate contains_async_collective {candidate.get_name()}"
+                        break
 
                 # 1. If we have data_dep - we can not swap => trying to group
                 # 2. If swap candidate and current node both contain collectives => trying to group

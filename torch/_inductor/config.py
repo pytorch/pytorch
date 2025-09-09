@@ -393,7 +393,7 @@ reorder_prefetch_limit: Optional[int] = None
 reorder_for_peak_memory = False
 
 bucket_fx_collectives_all = None
-bucket_fx_collectives_trie = ["ag", "rs"]
+bucket_fx_collectives_trie = None  # ["ag", "rs"]
 bucket_fx_collectives_trie_use_nn_module_stack = False
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"

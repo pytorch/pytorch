@@ -1,7 +1,25 @@
+import collections
+import logging
+from collections import defaultdict
 from dataclasses import dataclass
-
 from enum import Enum
 from typing import Any, Callable, Optional, TypeVar, Union
+
+import torch
+import torch.distributed as dist
+import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch._logging import trace_structured
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._ordered_set import OrderedSet
+
+from .bucketing import collect_node_descendents, merge_all_gather, merge_reduce_scatter
+
+
+logger: logging.Logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class CType(str, Enum):
@@ -156,7 +174,7 @@ def _get_nn_module_stack_path(n) -> str:
 def _greedy_bucket(
     ns,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    node_descendants,
+    node_descendents,
     log,
     try_left=3,
 ):
@@ -175,26 +193,26 @@ def _greedy_bucket(
         if len(bucket_ns) <= 1:
             log.append(f"\n cur_bucket <= 1 {bucket_ns} SKIP")
             return False
-        # sorted_bucket_ns = sorted(bucket_ns, key=lambda n: -len(node_descendants[n]))
+        # sorted_bucket_ns = sorted(bucket_ns, key=lambda n: -len(node_descendents[n]))
         # sorted_bucket_ns = bucket_ns
-        # d = {n: -len(node_descendants[n]) for n in sorted_bucket_ns}
+        # d = {n: -len(node_descendents[n]) for n in sorted_bucket_ns}
         # log += f"\n _ADD_BUCKET(sorted:{d})"
         buckets.append(bucket_ns)
         # bucket_ns_set = OrderedSet(bucket_ns)
         # print(f"XXX ADD_BUCKET:{bucket_ns}")
         # print(f"XXX BUCKET_DESC:{bucket_descendents}")
-        # for n, descendents in node_descendants.items():
+        # for n, descendents in node_descendents.items():
         #     if n in bucket_ns or descendents & bucket_ns_set:
-        #         node_descendants[n] |= bucket_descendents
+        #         node_descendents[n] |= bucket_descendents
         return True
 
     # We want to maximize number of bucketed nodes
-    sorted_ns = sorted(ns, key=lambda n: len(node_descendants[n]))
-    d = {n: len(node_descendants[n]) for n in sorted_ns}
+    sorted_ns = sorted(ns, key=lambda n: len(node_descendents[n]))
+    d = {n: len(node_descendents[n]) for n in sorted_ns}
     log.append(f"\n SORTED:{d}")
     log.append(f"\n sorted_ns: {sorted_ns}")
     for node in sorted_ns:
-        node_desc = node_descendants[node]
+        node_desc = node_descendents[node]
         if node in cur_bucket_descendents or any(bn in node_desc for bn in cur_bucket):
             log.append(
                 f"\n {node} SKIP, in cur_bucket_descendents for cur_bucket:{cur_bucket}"
@@ -221,13 +239,13 @@ def _greedy_bucket(
         cur_bucket.append(node)
         log.append(f"\nXXX CUR_BUCKET++:{cur_bucket}")
         # print(f"XXX CUR_BUCKET_DESC_BEFORE[{node}]:{cur_bucket_descendents}")
-        # print(f"XXX CUR_BUCKET_APPEND node:{node} DESCENDENTS:{node_descendants[node]}")
-        cur_bucket_descendents |= node_descendants[node]
+        # print(f"XXX CUR_BUCKET_APPEND node:{node} DESCENDENTS:{node_descendents[node]}")
+        cur_bucket_descendents |= node_descendents[node]
         # print(f"XXX CUR_BUCKET_DESC_ADD[{node}]:{cur_bucket_descendents}")
         cur_bucket_set = OrderedSet(cur_bucket)
-        for n, descendents in node_descendants.items():
+        for n, descendents in node_descendents.items():
             if n in cur_bucket_set or descendents & cur_bucket_set:
-                node_descendants[n] |= cur_bucket_descendents
+                node_descendents[n] |= cur_bucket_descendents
     if not _add_bucket(cur_bucket, cur_bucket_descendents):
         left_ns.extend(cur_bucket)
     # Nothing was bucketed
@@ -235,7 +253,7 @@ def _greedy_bucket(
         return _greedy_bucket(
             ns[:-1],
             bucket_cap_mb_by_bucket_idx,
-            node_descendants,
+            node_descendents,
             log,
             try_left,
         )
@@ -248,7 +266,7 @@ def _greedy_bucket(
         left_buckets = _greedy_bucket(
             ns_to_bucket,
             bucket_cap_mb_by_bucket_idx,
-            node_descendants,
+            node_descendents,
             log,
             try_left=try_left - 1,
         )
@@ -271,7 +289,7 @@ def bucket_collectives_trie(gm, config):
         },
         payload_fn=lambda: g_str,
     )
-    node_descendants = collect_node_descendants(gm.graph)
+    node_descendents = collect_node_descendents(gm.graph)
     root_cts = get_collectives_trie(gm)
     log = []
 
@@ -339,7 +357,7 @@ def bucket_collectives_trie(gm, config):
             g_buckets = _greedy_bucket(
                 ns_group,
                 bucket_cap_mb_by_bucket_idx,
-                node_descendants,
+                node_descendents,
                 log,
                 try_left=16,
             )
@@ -411,12 +429,12 @@ def bucket_collectives_trie(gm, config):
     # for n in gm.graph.nodes:
     #     if is_all_gather_into_tensor(n) or is_reduce_scatter_tensor(n):
     #         total_num_ag_rs += 1
-    merge_all_gather(gm, ag_buckets, "custom_ops")
+    merge_all_gather(gm, ag_buckets, "custom_ops_multidtype")
     for i, rs_bucket in enumerate(rs_buckets):
         log.append(f"\n RS_BUCKET[{i}]:{len(rs_bucket)} nodes:{rs_bucket}")
         for n in rs_bucket:
             bucketed_ag_rs.add(n)
-    merge_reduce_scatter(gm, rs_buckets, "custom_ops")
+    merge_reduce_scatter(gm, rs_buckets, "custom_ops_multidtype")
     rs_buckets = bucket_reduce_scatter_all(
         gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype"
     )
@@ -446,3 +464,234 @@ def __bucket_collectives_trie(gm, config):
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] = lambda id: 2000
     bucket_all_gather_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")
     bucket_reduce_scatter_all(gm, bucket_cap_mb_by_bucket_idx, "custom_ops_multidtype")
+
+
+def bucket_all_gather_all(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    mode: Optional[str] = None,
+) -> None:
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
+
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    ag_buckets = bucket_all_gather_by_mb_all(
+        gm, bucket_cap_mb_by_bucket_idx, None, mode
+    )
+    if len(ag_buckets) == 0:
+        return
+    merge_all_gather(gm, ag_buckets, mode)
+
+
+def bucket_reduce_scatter_all(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    mode: Optional[str] = None,
+) -> None:
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
+
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    rs_buckets = bucket_reduce_scatter_by_mb_all(
+        gm, bucket_cap_mb_by_bucket_idx, None, mode
+    )
+    if len(rs_buckets) == 0:
+        return rs_buckets
+    merge_reduce_scatter(gm, rs_buckets, mode)
+    return rs_buckets
+
+
+def bucket_all_gather_by_mb_all(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
+) -> list[list[torch.fx.Node]]:
+    def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+        _, group_size, group_name = node.args
+        dtype = node.meta["val"].dtype
+        assert isinstance(group_name, str)
+        return (group_name, dtype)
+
+    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+        _, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        return group_name
+
+    group_key_fn = (
+        _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
+    )
+
+    return greedy_bucket_collective_by_mb_all(
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        is_all_gather_into_tensor,
+        group_key_fn,
+        filter_wait_node,
+    )
+
+
+def bucket_reduce_scatter_by_mb_all(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
+) -> list[list[torch.fx.Node]]:
+    def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        dtype = node.meta["val"].dtype
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op, dtype)
+
+    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op)
+
+    group_key_fn = (
+        _rs_group_key_multidtype if mode and "multidtype" in mode else _rs_group_key
+    )
+
+    return greedy_bucket_collective_by_mb_all(
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        is_reduce_scatter_tensor,
+        group_key_fn,
+        filter_wait_node,
+    )
+
+
+def greedy_bucket_collective_by_mb_all(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    filter_node: Callable[[torch.fx.Node], bool],
+    node_group_key: Callable[[torch.fx.Node], Any],
+    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+) -> list[list[torch.fx.Node]]:
+    g = gm.graph
+    found_candidates = False
+    for node in g.nodes:
+        if filter_node(node):
+            found_candidates = True
+            break
+    if not found_candidates:
+        return []
+
+    # TODO: pearce kelly algorithm for detecting cycles
+    log = ""
+
+    nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
+
+    for node in g.nodes:
+        if is_wait_tensor(node) and filter_node(node.args[0]):
+            if (filter_wait_node is None) or filter_wait_node(node):
+                coll_node = node.args[0]
+                group_key = node_group_key(coll_node)
+                nodes_groups[group_key].append(coll_node)
+
+    node_descendents = collect_node_descendents(gm.graph)
+    log = []
+    for group_key, ns_group in nodes_groups.items():
+        log.append(
+            f"\n \nBUCKETING KEY:{group_key} {len(ns_group)} -> GROUP:{ns_group}"
+        )
+        buckets = _greedy_bucket(
+            ns_group, bucket_cap_mb_by_bucket_idx, node_descendents, log, try_left=16
+        )
+    num_total = sum(len(ns) for ns in nodes_groups.values())
+    num_bucketed = sum(len(bucket) for bucket in buckets)
+    log.append(
+        f"\n XXX TOTAL:{num_total} num_bucketed:{num_bucketed} perc:{num_bucketed / num_total}"
+    )
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
+            "encoding": "string",
+        },
+        payload_fn=lambda: "".join(log),
+    )
+    return buckets
+
+    # buckets: list[list[torch.fx.Node]] = []
+    # for group_key, _nodes in nodes_groups.items():
+    #     node_descendents = collect_node_descendents(gm.graph)
+    #     nodes = sorted(_nodes, key=lambda n: len(node_descendents[n]))
+    #     log += f"\n GROUP[{group_key}]: {nodes}"
+    #     cur_bucket: list[torch.fx.Node] = []
+    #     cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
+    #     cur_bucket_size_bytes: int = 0
+    #     cur_bucket_id: int = 0
+    #     bucket_size_bytes = int(
+    #         bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
+    #     )
+
+    #     def _add_bucket(bucket_ns, bucket_descendents):
+    #         nonlocal node_descendents
+    #         if len(cur_bucket) <= 1:
+    #             nonlocal log
+    #             log += f"\n cur_bucket <= 1 {cur_bucket} SKIP"
+    #             return False
+    #         buckets.append(bucket_ns)
+    #         bucket_ns_set = OrderedSet(bucket_ns)
+    #         for n, descendents in node_descendents.items():
+    #             if (n in bucket_ns_set) or (descendents & bucket_ns_set):
+    #                 node_descendents[n] |= bucket_descendents
+    #         return True
+
+    #     for node in nodes:
+    #         node_desc = node_descendents[node]
+    #         bucket_n_in_node_desc = True
+    #         for bucket_n in cur_bucket:
+    #             if bucket_n in node_desc:
+    #                 log += (
+    #                     f"\ni {node} SKIP BUCKET_NODE {bucket_n} in NODE_DESC"
+    #                 )
+    #                 bucket_n_in_node_desc = True
+    #                 break
+    #         if bucket_n_in_node_desc:
+    #             break
+    #         if node in cur_bucket_descendents:
+    #             # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
+    #             log += (
+    #                 f"\n{node} SKIP in cur_bucket_descendents cur_bucket:{cur_bucket}"
+    #             )
+    #             continue
+    #         assert "val" in node.meta
+    #         n_val = node.meta["val"]
+    #         out_size_bytes = n_val.numel() * n_val.element_size()
+    #         n_input_val = node.all_input_nodes[0].meta["val"]
+    #         in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+    #         size_bytes = max(out_size_bytes, in_size_bytes)
+    #         if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
+    #             # Current bucket is full, create new bucket
+    #             _add_bucket(cur_bucket, cur_bucket_descendents)
+    #             cur_bucket = []
+    #             cur_bucket_size_bytes = 0
+    #             cur_bucket_id += 1
+    #             cur_bucket_descendents = OrderedSet()
+    #         cur_bucket_size_bytes += size_bytes
+    #         cur_bucket.append(node)
+    #         cur_bucket_descendents |= node_descendents[node]
+    #         cur_bucket_set = set(cur_bucket)
+    #         for n, descendents in node_descendents.items():
+    #             if (n in cur_bucket_set) or (descendents & cur_bucket_set):
+    #                 node_descendents[n] |= cur_bucket_descendents
+
+    #     _add_bucket(cur_bucket, cur_bucket_descendents)
+    # log += f"\nBUCKETS:{str(buckets)}"
+    # trace_structured(
+    #     "artifact",
+    #     metadata_fn=lambda: {
+    #         "name": "fx_bucketing_greedy_bucket_collective_by_mb_ALL",
+    #         "encoding": "string",
+    #     },
+    #     payload_fn=lambda: log,
+    # )
+    # return buckets

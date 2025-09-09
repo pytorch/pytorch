@@ -1,4 +1,6 @@
+import os
 import sys
+from typing import Optional
 
 from torch.utils._config_module import install_config_module
 
@@ -41,6 +43,9 @@ sink_iterative_peak_memory_budget: float = 0.2
 # which can result in collective hangs.
 reorder_iterative_unsafe_collectives_reorder: bool = True
 sink_waits_iterative_unsafe_collectives_reorder: bool = True
+
+reorder_iterative_group_with_collectives: bool = True
+sink_waits_iterative_swap_with_collectives: bool = True
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
