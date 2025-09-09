@@ -7291,7 +7291,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool),
+            {"x": 0},
+            False,
+            ["isinstance(L['x'], bool)"],
         )
 
         def injected_bool(x: bool):
