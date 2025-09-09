@@ -35,8 +35,12 @@ mm_long_configs = op_bench.cross_product_configs(
 class MmOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_one": torch.randn(M, N, device=device, requires_grad=self.auto_set(), dtype=dtype),
-            "input_two": torch.randn(N, K, device=device, requires_grad=self.auto_set(), dtype=dtype),
+            "input_one": torch.randn(
+                M, N, device=device, requires_grad=self.auto_set(), dtype=dtype
+            ),
+            "input_two": torch.randn(
+                N, K, device=device, requires_grad=self.auto_set(), dtype=dtype
+            ),
         }
         self.op_func = op_func
 

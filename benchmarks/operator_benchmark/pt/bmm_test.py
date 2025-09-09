@@ -40,8 +40,12 @@ batched_binary_configs_long = op_bench.cross_product_configs(
 class BatchedBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, B, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "batch1": torch.rand((B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()),
-            "batch2": torch.rand((B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()),
+            "batch1": torch.rand(
+                (B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch2": torch.rand(
+                (B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
         }
         self.op_func = op_func
 
@@ -71,9 +75,15 @@ batched_ternary_ops = op_bench.op_list(
 class BatchedTernaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, B, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_": torch.rand((B, M, K), device=device, dtype=dtype, requires_grad=self.auto_set()),
-            "batch1": torch.rand((B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()),
-            "batch2": torch.rand((B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()),
+            "input_": torch.rand(
+                (B, M, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch1": torch.rand(
+                (B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch2": torch.rand(
+                (B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
         }
         self.op_func = op_func
 

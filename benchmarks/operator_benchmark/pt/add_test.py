@@ -1,7 +1,6 @@
 import operator_benchmark as op_bench
 
 import torch
-from torch._C import dtype
 
 
 """Microbenchmarks for add_ operator. Supports both Caffe2/PyTorch."""
@@ -66,9 +65,15 @@ op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenc
 class AddmmBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype):
         self.inputs = {
-            "input_one": torch.rand(M, K, device=device, requires_grad=self.auto_set(), dtype=dtype),
-            "mat1": torch.rand(M, N, device=device, requires_grad=self.auto_set(), dtype=dtype),
-            "mat2": torch.rand(N, K, device=device, requires_grad=self.auto_set(), dtype=dtype),
+            "input_one": torch.rand(
+                M, K, device=device, requires_grad=self.auto_set(), dtype=dtype
+            ),
+            "mat1": torch.rand(
+                M, N, device=device, requires_grad=self.auto_set(), dtype=dtype
+            ),
+            "mat2": torch.rand(
+                N, K, device=device, requires_grad=self.auto_set(), dtype=dtype
+            ),
         }
         self.set_module_name("addmm")
 
