@@ -113,20 +113,20 @@ class _Layout:
     def coalesce(self) -> "_Layout":
         sizes: list[int] = []
         strides: list[int] = []
-        for shape, stride in self.sizes_and_strides:
-            # skip their shape-1s
-            if shape == 1:
+        for size, stride in self.sizes_and_strides:
+            # skip their size-1s
+            if size == 1:
                 continue
-            # replace our shape-1 with anything
+            # replace our size-1 with anything
             elif sizes[-1] == 1:
-                sizes[-1] = shape
+                sizes[-1] = size
                 strides[-1] = stride
-            # merge modes if the shape*stride match
+            # merge modes if the size*stride match
             elif sizes[-1] * strides[-1] == stride:
-                sizes[-1] = sizes[-1] * shape
+                sizes[-1] = sizes[-1] * size
             # append a new mode
             else:
-                sizes.append(shape)
+                sizes.append(size)
                 strides.append(stride)
 
         return _Layout(tuple(sizes), tuple(strides))
@@ -143,29 +143,29 @@ class _Layout:
 
         res_sizes: list[int] = []
         res_strides: list[int] = []
-        numel_so_far = layout.sizes[0]
-        assert isinstance(numel_so_far, int)
+        rest_size = layout.sizes[0]
         rest_stride = layout.strides[0]
+        assert isinstance(rest_size, int)
         assert isinstance(rest_stride, int)
         flat_layout = self.coalesce()
-        for curr_shape, curr_stride in zip(
+        for curr_size, curr_stride in zip(
             _Layout.flatten(flat_layout.sizes)[:-1],
             _Layout.flatten(flat_layout.sizes)[:-1],
         ):
-            assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0
-            new_shape = min(max(1, curr_shape // rest_stride), numel_so_far)
+            assert curr_size % rest_stride == 0 or rest_stride % curr_size == 0
+            new_size = min(max(1, curr_size // rest_stride), rest_size)
 
-            if new_shape != 1:
-                res_sizes.append(new_shape)
+            if new_size != 1:
+                res_sizes.append(new_size)
                 res_strides.append(rest_stride * curr_stride)
 
-            numel_so_far = numel_so_far // new_shape
+            rest_size = rest_size // new_size
             rest_stride = -(
-                -rest_stride // curr_shape
+                -rest_stride // curr_size
             )  # Python exclusive impl: "//" is always floor div so == ceil_div(abs(rest_stride), curr_shape) * signum(rest_stride)
 
-        if numel_so_far != 1 or len(res_sizes) == 0:
-            res_sizes.append(numel_so_far)
+        if rest_size != 1 or len(res_sizes) == 0:
+            res_sizes.append(rest_size)
             res_strides.append(rest_stride * _Layout.flatten(flat_layout.strides)[-1])
 
         return _Layout(tuple(res_sizes), tuple(res_strides))
@@ -177,17 +177,17 @@ class _Layout:
         current_idx = 1
 
         sorted_DS = sorted(self.sizes_and_strides)
-        for stride, shape in sorted_DS:
-            if stride == 0 or shape == 1:
+        for stride, size in sorted_DS:
+            if stride == 0 or size == 1:
                 continue
 
-            in_bound = current_idx <= shape * stride
+            in_bound = current_idx <= size * stride
             # To support symbolic value which can't be evaluated now
             assert (type(in_bound) is not bool) or in_bound
 
             res_sizes.append(stride // current_idx)
             res_strides.append(current_idx)
-            current_idx = shape * stride
+            current_idx = size * stride
 
         res_sizes.append((max_idx + current_idx - 1) // current_idx)  # ceil_div
         res_strides.append(current_idx)
