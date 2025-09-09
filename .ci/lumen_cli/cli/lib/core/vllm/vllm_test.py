@@ -104,20 +104,26 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         self.prepare()
-        with working_directory(self.work_directory):
-            if self.test_type == TestInpuType.TEST_PLAN:
-                if self.num_shards > 1:
-                    run_test_plan(
-                        self.test_plan,
-                        "vllm",
-                        sample_vllm_test_library(),
-                        self.shard_id,
-                        self.num_shards,
-                    )
+        try:
+            with working_directory(self.work_directory):
+                if self.test_type == TestInpuType.TEST_PLAN:
+                    if self.num_shards > 1:
+                        run_test_plan(
+                            self.test_plan,
+                            "vllm",
+                            sample_vllm_test_library(),
+                            self.shard_id,
+                            self.num_shards,
+                        )
+                    else:
+                        run_test_plan(
+                            self.test_plan, "vllm", sample_vllm_test_library()
+                        )
                 else:
-                    run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
-            else:
-                raise ValueError(f"Unknown test type {self.test_type}")
+                    raise ValueError(f"Unknown test type {self.test_type}")
+        finally:
+            # double check the torches are not overridden by other packages
+            check_versions()
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
