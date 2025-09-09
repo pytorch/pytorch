@@ -7158,6 +7158,7 @@
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
   variants: function
   dispatch:
+    CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
 
 # NOTE [ Sparse: autograd and API ]
