@@ -36,7 +36,19 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/kernels/AutoFunctionalizeKernel.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/CallTorchBindKernel.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/HigherOrderKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/SubgraphRewriter.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/GraphPasses.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/TritonKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/triton/CpuTritonKernelManager.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/DelegateExecutor.cpp
 )
+
+if(USE_CUDA)
+  list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/triton/CudaTritonKernelManager.cpp)
+endif(MSVC)
+
 
 add_executable(test_nativert
   ${TORCH_ROOT}/test/cpp/common/main.cpp
