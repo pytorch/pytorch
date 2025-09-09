@@ -38,16 +38,15 @@ Unit tests for _pycute.typing
 """
 
 import logging
-import unittest
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestTyping(unittest.TestCase):
+class TestTyping(TestCase):
     def helper_test_typing(self, _cls, _obj, cls, expected: bool):
         _LOGGER.debug(f"issubclass({_cls}, {cls})")
         _LOGGER.debug(f"isinstance({_obj}, {cls})")
