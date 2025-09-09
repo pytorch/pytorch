@@ -459,6 +459,9 @@ struct ConvParams {
 
   // Use cudnn for FP16 depthwise convolutions
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
+    if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+      return false;
+    }
     if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous && use_cudnn(input, weight)) {
       // always use cudnn_depthwise for channels_last format
       return true;
@@ -1419,10 +1422,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Miopen:
     case ConvBackend::MiopenDepthwise:
     case ConvBackend::MiopenTranspose:
-      if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-        TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
-            "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+      if (detail::getCUDAHooks().compiledWithMIOpen()) {
+        backend_memory_format = miopen_conv_suggest_memory_format(input, weight);
       }
       break;
     case ConvBackend::Mkldnn:
