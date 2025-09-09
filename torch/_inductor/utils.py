@@ -2564,6 +2564,12 @@ def is_collective(
 
     from . import ir
 
+    is_coll = (
+        isinstance(node, ir._CollectiveKernel)
+        and not isinstance(node, ir._WaitKernel)
+        and (op is None or node.op_overload is op)
+    )
+
     return (
         isinstance(node, ir._CollectiveKernel)
         and not isinstance(node, ir._WaitKernel)
@@ -2590,6 +2596,33 @@ def is_collective(
                 and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
             )
         )
+    )
+
+
+def maybe_get_collective_group_name(snode) -> Optional[str]:
+    from . import ir
+    node = snode.node
+    assert isinstance(node, ir._CollectiveKernel) and not isinstance(
+        node, ir._WaitKernel
+    )
+    if (
+        node.op_overload
+        == torch.ops._c10d_functional.all_gather_into_tensor_out.default
+        or node.op_overload
+        == torch.ops._c10d_functional.all_gather_into_tensor.default
+    ):
+        group_size, group_name = node.constant_args
+        return group_name
+    elif node.op_overload == torch.ops._c10d_functional.reduce_scatter_tensor.default:
+        reduce_op, group_size, group_name = node.constant_args
+        return group_name
+    elif node.op_overload == torch.ops._c10d_functional.all_reduce_.default:
+        reduce_op, group_name = node.constant_args
+        return group_name
+
+    log.warning(
+        "torch._inductor.utils.maybe_get_collective_group_name unknown collective %s constant_args:%s",
+        snode.debug_str(), node.constant_args
     )
 
 

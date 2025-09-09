@@ -41,6 +41,7 @@ from .utils import (
     is_collective,
     is_fallback_op,
     is_wait,
+    maybe_get_collective_group_name
 )
 from .virtualized import V
 
@@ -666,6 +667,11 @@ def _reorder_communication_preserving_peak_memory_internal(
                                     )
                                 )
                                 group_waits[candidate] = comm_time, comp_time
+                            if contains_collective(candidate):
+                                for gw in group_waits.keys():
+                                    if is_corresponding_collective_wait(candidate, gw):
+                                        group_waits.pop(gw)
+                                        break
                             if not contains_async_collective(candidate):
                                 group_runtime += runtimes[candidate]
 
@@ -689,6 +695,13 @@ def _reorder_communication_preserving_peak_memory_internal(
                 if config_comms.reorder_iterative_use_runtime_estimations:
                     # Check if candidate has sync runtime
                     if not contains_async_collective(candidate):
+                        # Candidate has runtime,
+                        # Our group contains Waits
+                        # C1 C(R) [G0 ...W1...GN C0]
+                        # ->
+                        # C1 [G0 ...W1...GN C0] C(R)
+                        # Swapping group with this runtime potentially decreses overlap of C1 - W1
+
                         c_runtime = runtimes[candidate]
 
                         if c_runtime > 0 and len(group_waits) > 0:
@@ -705,12 +718,12 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                                 exposed_delta += gw_exposed_after - gw_exposed_before
 
-                            if exposed_delta > 0:
-                                info.limiting_factor = (
-                                    f"candidate has compute {c_runtime},"
-                                    f" group contains waits, total_exposed_delta {exposed_delta}"
-                                )
-                                break
+                            # if exposed_delta > 0:
+                            #     info.limiting_factor = (
+                            #         f"candidate has compute {c_runtime},"
+                            #         f" group contains waits, total_exposed_delta {exposed_delta}"
+                            #     )
+                            #     break
                             else:
                                 # Update all group_colls comm_time, comp_time
                                 for gw, (
@@ -736,13 +749,13 @@ def _reorder_communication_preserving_peak_memory_internal(
                                 0, comm_time - comp_time + group_runtime
                             )
                             exposed_delta = exposed_after - exposed_before
-                            if exposed_delta > 0:
-                                info.limiting_factor = (
-                                    f"candidate {candidate.get_name()} is collective,"
-                                    f" group_runtime:{group_runtime},"
-                                    f" exposed_delta:{exposed_delta} c_comm_time:{comm_time} c_comp_time:{comp_time}"
-                                )
-                                break
+                            # if exposed_delta > 0:
+                            #     info.limiting_factor = (
+                            #         f"candidate {candidate.get_name()} is collective,"
+                            #         f" group_runtime:{group_runtime},"
+                            #         f" exposed_delta:{exposed_delta} c_comm_time:{comm_time} c_comp_time:{comp_time}"
+                            #     )
+                            #     break
 
                 candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
                 candidate_delta_mem: int = (
@@ -858,7 +871,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     ]
     rows = [
         [
-            node_summary(snode),
+            f"group:{maybe_get_collective_group_name(snode)}" + node_summary(snode),
             node_info.comm_time / 1e3,
             node_info.comp_time / 1e3,
             node_info.initial_exposed / 1e3,
@@ -1332,11 +1345,12 @@ def _sink_waits_iterative_internal(
                         # => we do not group with processed Waits on the right.
                         if contains_wait(snode):
                             return False, f"candidate contains wait {snode.get_name()}"
-                        if contains_async_collective(snode):
-                            return (
-                                False,
-                                f"candidate contains_async_collective {snode.get_name()}",
-                            )
+                        if not config_comms.sink_waits_iterative_swap_with_collectives:
+                            if contains_async_collective(snode):
+                                return (
+                                    False,
+                                    f"candidate contains_async_collective {snode.get_name()}",
+                                )
 
                         if not config_comms.sink_iterative_use_runtime_estimations:
                             # Heuristics pre-use_runtime_estimations:

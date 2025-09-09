@@ -407,7 +407,9 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
 
-runtime_estimations_mms_benchmark: bool = False
+runtime_estimations_mms_benchmark: bool = True
+runtime_estimations_triton_benchmark: bool = True
+runtime_estimations_collectives_benchmark: bool = True
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
@@ -1935,7 +1937,7 @@ _cache_config_ignore_prefix: list[str] = [
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 bucket_fx_collectives_all = None
-bucket_fx_collectives_trie = None  # ["ag", "rs"]
+bucket_fx_collectives_trie = ["ag", "rs"]
 bucket_fx_collectives_trie_use_nn_module_stack = False
 
 

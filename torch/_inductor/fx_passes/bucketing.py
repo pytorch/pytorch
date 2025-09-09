@@ -244,7 +244,7 @@ def bucket_all_gather_by_mb(
         return (group_name,)
 
     group_key_fn = (
-        _ag_group_key if mode and "multidtype" in mode else _ag_group_key_multidtype
+        _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
     )
 
     return greedy_bucket_collective_by_mb(

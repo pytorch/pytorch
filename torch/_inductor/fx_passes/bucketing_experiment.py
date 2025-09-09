@@ -15,7 +15,14 @@ from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
 
-from .bucketing import collect_node_descendents, merge_all_gather, merge_reduce_scatter
+from .bucketing import (
+    collect_node_descendents,
+    is_all_gather_into_tensor,
+    is_reduce_scatter_tensor,
+    is_wait_tensor,
+    merge_all_gather,
+    merge_reduce_scatter,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
