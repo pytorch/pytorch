@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import logging
 import warnings
 from typing import Any, Callable, Optional, Union
@@ -18,7 +19,10 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
+    check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -52,6 +56,52 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
+
+    def gen_schema(self, pred, true_fn, false_fn, operands):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        then_gm: torch.fx.GraphModule = (
+            true_fn
+            if isinstance(true_fn, torch.fx.GraphModule)
+            else materialize_as_graph(true_fn, operands)
+        )
+        else_gm: torch.fx.GraphModule = (
+            false_fn
+            if isinstance(false_fn, torch.fx.GraphModule)
+            else materialize_as_graph(false_fn, operands)
+        )
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in then_gm.graph.find_nodes(op="placeholder")
+        ]
+        (
+            _,
+            _,
+            _,
+            then_mutated_inputs,
+            then_outputs,
+        ) = check_input_alias_and_mutation_return_outputs(then_gm, example_inputs)
+        (
+            _,
+            _,
+            _,
+            else_mutated_inputs,
+            else_outputs,
+        ) = check_input_alias_and_mutation_return_outputs(else_gm, example_inputs)
+        mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("pred", pred)
+        schema_gen.add_arg("true_fn", then_gm)
+        schema_gen.add_arg("false_fn", else_gm)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
+
+        for out in then_outputs:
+            schema_gen.add_output(out)
+        schema_gen.add_schema_tree_spec(pred, true_fn, false_fn, operands)
+        return schema_gen.gen_schema()
 
 
 cond_op = CondOp()
@@ -191,7 +241,9 @@ def cond(
     ):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             if metadata_mode:
-                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                backend: Union[str, Callable[..., Any]] = (
+                    make_eager_backend_with_torch_function_mode(metadata_mode)
+                )
             else:
                 backend = "eager"
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
@@ -293,15 +345,32 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
+
+        grads_tensor_masks = []
+
+        def create_fn_remove_none(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                nonlocal grads_tensor_masks
+
+                true_outputs = fn(*args)
+                grads_tensor_masks = [
+                    True if isinstance(out, torch.Tensor) else False
+                    for out in true_outputs
+                ]
+                return filter_with_masks(true_outputs, grads_tensor_masks)
+
+            return wrapped
+
         true_bw_gm = materialize_as_graph(
-            ctx._true_bw_fn,
+            create_fn_remove_none(ctx._true_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
         false_bw_gm = materialize_as_graph(
-            ctx._false_bw_fn,
+            create_fn_remove_none(ctx._false_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -313,7 +382,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_bw_gm,
             args,
         )
-        return None, None, None, *grads
+        return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 # Note:

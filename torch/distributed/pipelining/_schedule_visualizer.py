@@ -10,7 +10,7 @@ visualize_schedule(ops, "test.png")
 """
 
 import collections
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 from unittest import mock
 
 from torch.distributed.pipelining.schedules import (
@@ -24,11 +24,18 @@ from torch.distributed.pipelining.schedules import (
 from torch.distributed.pipelining.stage import PipelineStage
 
 
+class OpKey(NamedTuple):
+    stage_index: int
+    computation_type: _ComputationType
+    microbatch_index: int
+
+
 def get_schedule_ops(
     schedule: Union[str, type[_PipelineSchedule]],
     pp_degree: int,
     num_microbatches: int,
     num_stages_per_rank: Optional[int] = None,
+    add_spacing: bool = False,
 ) -> list[list[Optional[_Action]]]:
     """
     Get all actions for a given schedule, pp_degree, and num_microbatches. The actions are returned in a list of lists
@@ -77,6 +84,15 @@ def get_schedule_ops(
     for rank in range(pp_degree):
         all_actions.append(schedule_instance.pipeline_order[rank])
 
+    # Add spacing
+    if add_spacing:
+        # remove all Nones, then respace
+        # TODO: later we can change this at the schedule creation level to not use Nones
+        all_actions = [
+            [action for action in rank if action is not None] for rank in all_actions
+        ]
+        all_actions = add_schedule_op_spacing(all_actions)
+
     # Return the pipeline order
     return all_actions
 
@@ -118,7 +134,7 @@ def add_schedule_op_spacing(
     not finished processing the required microbatch), it adds None instead.
 
     For example, Forward microbatch 0 on rank 1 depends on rank 0 processing
-    forward microbatch 0 first.
+    Forward microbatch 0 first.
 
     Args:
         schedule: The original schedule as a list of lists where each inner list
@@ -145,21 +161,16 @@ def add_schedule_op_spacing(
     rank_ops = [collections.deque(ops) for ops in schedule]
 
     # Track completion times: (stage_index, action_type, microbatch_index) -> completion_time
-    scheduled_ops: dict[tuple[int, _ComputationType, int], int] = {}
-    current_timestep = 0
-    timesteps_without_progress = 0
-    rank_completion_times = dict.fromkeys(range(num_ranks), 0)
+    scheduled_ops: dict[OpKey, int] = {}
 
-    def is_dependency_ready(
-        dependency_key: tuple[int, _ComputationType, int], timestep: int
-    ) -> bool:
+    def is_dependency_ready(dependency_key: OpKey, timestep: int) -> bool:
         """Check if a dependency operation has completed by the given timestep."""
         return (
             dependency_key in scheduled_ops
             and timestep >= scheduled_ops[dependency_key]
         )
 
-    def get_dependencies(action: _Action) -> list[tuple[int, _ComputationType, int]]:
+    def get_dependencies(action: _Action) -> list[OpKey]:
         """Get the list of dependencies for an action."""
         stage_idx = action.stage_index
         comp_type = action.computation_type
@@ -167,9 +178,6 @@ def add_schedule_op_spacing(
 
         # Ensure mb_idx is not None for dependency tracking
         assert mb_idx is not None, f"Action {action} has None microbatch_index"
-
-        if stage_idx == 4 and mb_idx == 5:
-            print(f"get_dependencies: {action=}")
 
         # First stage forward has no dependencies
         if stage_idx == 0 and comp_type == _ComputationType.FORWARD:
@@ -180,11 +188,11 @@ def add_schedule_op_spacing(
             _ComputationType.FULL_BACKWARD,
             _ComputationType.BACKWARD_INPUT,
         ):
-            return [(stage_idx - 1, _ComputationType.FORWARD, mb_idx)]
+            return [OpKey(stage_idx - 1, _ComputationType.FORWARD, mb_idx)]
 
         # Forward depends on previous stage forward
         if comp_type == _ComputationType.FORWARD:
-            return [(stage_idx - 1, _ComputationType.FORWARD, mb_idx)]
+            return [OpKey(stage_idx - 1, _ComputationType.FORWARD, mb_idx)]
 
         # Backward depends on next stage backward
         if comp_type in (
@@ -192,13 +200,13 @@ def add_schedule_op_spacing(
             _ComputationType.BACKWARD_INPUT,
         ):
             return [
-                (stage_idx + 1, _ComputationType.FULL_BACKWARD, mb_idx),
-                (stage_idx + 1, _ComputationType.BACKWARD_INPUT, mb_idx),
+                OpKey(stage_idx + 1, _ComputationType.FULL_BACKWARD, mb_idx),
+                OpKey(stage_idx + 1, _ComputationType.BACKWARD_INPUT, mb_idx),
             ]
 
         # Weight backward depends on input backward
         if comp_type == _ComputationType.BACKWARD_WEIGHT:
-            return [(stage_idx, _ComputationType.BACKWARD_INPUT, mb_idx)]
+            return [OpKey(stage_idx, _ComputationType.BACKWARD_INPUT, mb_idx)]
 
         raise RuntimeError(f"Unknown computation type: {comp_type}")
 
@@ -227,8 +235,8 @@ def add_schedule_op_spacing(
         else:
             raise RuntimeError(f"Unknown computation type: {action.computation_type}")
 
-    def schedule_action(action: _Action, rank: int, timestep: int) -> None:
-        """Schedule an action and update completion times."""
+    def schedule_action(action: _Action, rank: int, timestep: int) -> int:
+        """Schedule an action and return completion time."""
         spaced_schedule[rank].append(action)
         comp_type = action.computation_type
         comp_time = action_type_to_color_mapping[comp_type].width
@@ -249,7 +257,7 @@ def add_schedule_op_spacing(
                 ].width
                 cumulative_time += sub_comp_time
                 scheduled_ops[
-                    (
+                    OpKey(
                         sub_action.stage_index,
                         sub_action.computation_type,
                         sub_action.microbatch_index,
@@ -259,12 +267,16 @@ def add_schedule_op_spacing(
             assert action.microbatch_index is not None, (
                 f"Action {action} has None microbatch_index"
             )
-            scheduled_ops[(action.stage_index, comp_type, action.microbatch_index)] = (
-                completion_time
-            )
-        rank_completion_times[rank] = completion_time
+            scheduled_ops[
+                OpKey(action.stage_index, comp_type, action.microbatch_index)
+            ] = completion_time
+
+        return completion_time
 
     # Main scheduling loop
+    current_timestep = 0
+    timesteps_without_progress = 0
+    rank_completion_times = dict.fromkeys(range(num_ranks), 0)
     while rank_ops:
         print(f"Current timestep: {current_timestep}")
         # Process all operations during timestep until we run out of ready operations
@@ -282,7 +294,9 @@ def add_schedule_op_spacing(
             elif current_timestep >= rank_completion_times[rank] and is_action_ready(
                 action, current_timestep
             ):
-                schedule_action(action, rank, current_timestep)
+                rank_completion_times[rank] = schedule_action(
+                    action, rank, current_timestep
+                )
                 op_queue.popleft()
                 timesteps_without_progress = 0
 
@@ -296,7 +310,9 @@ def add_schedule_op_spacing(
         current_timestep += 1
         timesteps_without_progress += 1
 
-        if timesteps_without_progress >= 10:
+        if timesteps_without_progress > max(
+            visual.width for visual in action_type_to_color_mapping.values()
+        ):
             raise RuntimeError("No progress made in scheduling - possible deadlock")
 
     return spaced_schedule
@@ -305,7 +321,6 @@ def add_schedule_op_spacing(
 def visualize_schedule(
     schedule: list[list[Optional[_Action]]],
     filename: Optional[str] = None,
-    add_schedule_spacing: bool = False,
 ) -> None:
     """
     Visualize the schedule using matplotlib.
@@ -319,8 +334,6 @@ def visualize_schedule(
         add_schedule_spacing: If True, add spacing to the schedule based on dependencies between ranks.
 
     """
-    if add_schedule_spacing:
-        schedule = add_schedule_op_spacing(schedule)
 
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
