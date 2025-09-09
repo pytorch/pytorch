@@ -1934,9 +1934,9 @@ def _new_process_group_helper(
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
     """
-    global _world
+    world = _World.get()
 
-    if group_name in _world.pg_names.values():
+    if group_name in world.pg_names.values():
         raise ValueError(
             "The specified group name has already been "
             "created, please use a different group name"
@@ -1954,7 +1954,7 @@ def _new_process_group_helper(
         # creating with the same tag and rank set results in the same underlying PG
         existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
         if existing_group:
-            _, prefix_store = _world.pg_map[existing_group]
+            _, prefix_store = world.pg_map[existing_group]
             return existing_group, prefix_store
 
     group_desc = "undefined" if group_desc is None else group_desc
@@ -1976,7 +1976,7 @@ def _new_process_group_helper(
     # If this is a subgroup (which means group_ranks is specified),
     # we check if the current process is a member of the new group.
     if not is_default_group:
-        global_rank = _get_default_group().rank()
+        global_rank = world.rank
         if global_rank not in global_ranks_in_group:
             # If we are using `ncclCommSplit` (or similar split from
             # other APIs) to create the communicator, we will need to
@@ -2196,20 +2196,20 @@ def _new_process_group_helper(
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    _world.pg_map[pg] = (backend, prefix_store)
-    _world.pg_names[pg] = group_name
+    world.pg_map[pg] = (backend, prefix_store)
+    world.pg_names[pg] = group_name
     _register_process_group(group_name, pg)
 
-    _world.pg_backend_config[pg] = str(backend_config)
+    world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
-        _world.tags_to_pg.setdefault("", []).append(pg)
+        world.tags_to_pg.setdefault("", []).append(pg)
     else:
         pg_tag = f"user:{pg_tag}"
 
-    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
-    _world.pg_to_tag[pg] = pg_tag
+    world.tags_to_pg.setdefault(pg_tag, []).append(pg)
+    world.pg_to_tag[pg] = pg_tag
     return pg, prefix_store
 
 
@@ -5371,23 +5371,36 @@ def _new_group_with_tag(
     :: N.B. The mechanism is experimental and tied to the functional collectives effort, see
     ``torch.distributed._functional_collectives`` for reference on how to use it.
     """
-    global _world
+    world = _World.get()
 
-    default_pg = _get_default_group()
+    try:
+        default_pg = _get_default_group()
+    except ValueError:
+        default_pg = None
+
+    # Infer device_id from parent group if not specified.
     if device_id is None:
-        device_id = default_pg.bound_device_id
-    elif default_pg.bound_device_id is not None:
-        assert device_id == default_pg.bound_device_id, (
-            "Mismatched bound device between new pg and the default pg."
-        )
-    default_backend, default_store = _world.pg_map[default_pg]
-    global_rank = default_pg.rank()
-    global_world_size = default_pg.size()
+        if default_pg is not None:
+            device_id = default_pg.bound_device_id
 
-    # Default to the same backend as the global process group
-    # if the backend is not specified.
-    if not backend:
-        backend = default_backend
+    global_rank = world.rank
+    global_world_size = world.world_size
+    default_store = world.store
+
+    # Infer backend if not specified.
+    if backend is None:
+        # Default to the same backend as the global process group
+        # if the backend is not specified.
+        if default_pg is not None:
+            backend, _ = world.pg_map[default_pg]
+        elif device_id is not None:
+            # Get it from our default map
+            backend = get_default_backend_for_device(device_id)
+        else:
+            raise ValueError(
+                "A device id or a backend must be specified when creating a new group, got neither"
+            )
+
     backend = Backend(backend)
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
@@ -5448,7 +5461,7 @@ def _new_group_with_tag(
     )
 
     # Create the global rank to group rank mapping
-    _world.pg_group_ranks[pg] = {
+    world.pg_group_ranks[pg] = {
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 

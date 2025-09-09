@@ -11,6 +11,7 @@ from itertools import chain, zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
+from torch.distributed.distributed_c10d import get_default_backend_for_device
 from torch.utils._typing_utils import not_none
 
 
@@ -23,10 +24,10 @@ if True:  # just to temporarily avoid reindentation
         _get_default_group,
         _resolve_process_group,
         get_backend,
+        get_default_backend_for_device,
         get_process_group_ranks,
         get_rank,
         get_world_size,
-        init_process_group,
         is_initialized,
         new_group,
         ProcessGroup,
@@ -447,6 +448,26 @@ if True:  # just to temporarily avoid reindentation
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._thread_id = None
 
+            # Optionally init distributed environment if user has not done so.
+            try:
+                get_world_size()
+            except RuntimeError:
+                logger.debug(
+                    "Distributed environment is not initialized, initializing "
+                    "it during DeviceMesh creation with an assumption that "
+                    "the DeviceMesh has the same scope as the world."
+                )
+                torch.distributed.init()
+
+            # Check if the requested mesh is valid
+            world_size = get_world_size()
+            if self.mesh.numel() > world_size:
+                raise RuntimeError(
+                    f"Mesh should not be bigger than world size {world_size}, but found {self.mesh.numel()} ranks!"
+                )
+
+            self._setup_device()
+
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
             if device_type != "xla":
@@ -454,8 +475,7 @@ if True:  # just to temporarily avoid reindentation
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
-                    self._setup_world_group_and_device()
-                    self._init_process_groups(backend_override)
+                    self._init_dim_groups(backend_override)
 
                 if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
@@ -467,19 +487,7 @@ if True:  # just to temporarily avoid reindentation
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
-        def _setup_world_group_and_device(self):
-            default_initialized = is_initialized()
-            # TODO: think about how to allow pg options to be passed to world group
-            # or mesh dimension groups
-            if not default_initialized:
-                init_process_group()
-
-            world_size = get_world_size()
-            if self.mesh.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
-                )
-
+        def _setup_device(self):
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self.device_type)
@@ -504,6 +512,7 @@ if True:  # just to temporarily avoid reindentation
                     )
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
+                    world_size = get_world_size()
                     num_devices_per_host = device_handle.device_count()
                     if num_devices_per_host:
                         if (
@@ -516,9 +525,7 @@ if True:  # just to temporarily avoid reindentation
                             )
                         device_handle.set_device(get_rank() % num_devices_per_host)
 
-            return _get_default_group()
-
-        def _init_process_groups(
+        def _init_dim_groups(
             self,
             backend_override: tuple[
                 tuple[Optional[str], Optional[C10dBackend.Options]], ...
@@ -528,121 +535,106 @@ if True:  # just to temporarily avoid reindentation
             # mesh dimension should have one sub-group per rank
             #
             dim_group_names: list[str] = []
-            default_group = _get_default_group()
 
-            if (
-                self.mesh.ndim == 1
-                and self.mesh.numel() == get_world_size()
-                and _mesh_resources.mesh_dim_group_options.get(0, (None, None))
-                == (None, None)
-                and backend_override[0] == (None, None)
-            ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
-                # Otherwise, create new pg.
-                ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
-                        backend="cpu:gloo,cuda:nccl",
-                        ranks=ranks,
-                        group_desc="mesh_default",
-                    )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
+            # If default group has been created, we can use `split_group` to create subgroups;
+            # otherwise, we create subgroups through `new_group`.
+            try:
+                default_group = _get_default_group()
+            except ValueError:
+                default_group = None
+
+            # create sub pgs base on the mesh argument specified
+            for dim in range(self.mesh.ndim):
+                # swap the current dim to the last dim
+                # then reshape to flatten out other dims
+                pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
+                    -1, self.mesh.size(dim)
                 )
-                dim_group_names.append(dim_group.group_name)
-            else:
-                # create sub pgs base on the mesh argument specified
-                for dim in range(self.mesh.ndim):
-                    # swap the current dim to the last dim
-                    # then reshape to flatten out other dims
-                    pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
-                        -1, self.mesh.size(dim)
-                    )
 
-                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                    # Inherit from the parent group if no options are specified for the group.
-                    if dim in _mesh_resources.mesh_dim_group_options:
-                        if backend_override[dim] != (None, None):
-                            raise RuntimeError(
-                                f"Dimension {dim} present both in the backend_override argument "
-                                "and via _mesh_resources._set_mesh_dim_group_options"
-                            )
-                        (
-                            backend,
-                            pg_options,
-                        ) = _mesh_resources.mesh_dim_group_options[dim]
-                    else:
-                        backend, pg_options = backend_override[dim]
-
-                    # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
-                    # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
-                    # If the mesh doesn't not have a mesh_dim_names, then the group description of the
-                    # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
-                    group_desc = (
-                        f"mesh_{self.mesh_dim_names[dim]}"
-                        if self.mesh_dim_names
-                        else f"mesh_dim_{dim}"
-                    )
-
-                    # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
-                    # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
-                    # In this case, we only need to make one API call (`split_group``) for the subgroup creation
-                    # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
-                    # all the subgroups.
-                    # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
-                    # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
-                    # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
-                    dim_group = None
-                    has_split_group = False
-                    if (
-                        (
-                            bound_device_id := getattr(
-                                default_group, "bound_device_id", None
-                            )
+                # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                # Inherit from the parent group if no options are specified for the group.
+                if dim in _mesh_resources.mesh_dim_group_options:
+                    if backend_override[dim] != (None, None):
+                        raise RuntimeError(
+                            f"Dimension {dim} present both in the backend_override argument "
+                            "and via _mesh_resources._set_mesh_dim_group_options"
                         )
-                        is not None
-                        and torch.cuda.is_available()
-                        and (
-                            backend is None
-                            or default_group._get_backend(torch.device("cuda")).name()
-                            == backend
+                    (
+                        backend,
+                        pg_options,
+                    ) = _mesh_resources.mesh_dim_group_options[dim]
+                else:
+                    backend, pg_options = backend_override[dim]
+
+                # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+                # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+                # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+                # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
+                group_desc = (
+                    f"mesh_{self.mesh_dim_names[dim]}"
+                    if self.mesh_dim_names
+                    else f"mesh_dim_{dim}"
+                )
+
+                # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+                # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+                # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+                # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+                # all the subgroups.
+                # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+                # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+                # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
+                dim_group = None
+                has_split_group = False
+                if (
+                    (
+                        bound_device_id := getattr(
+                            default_group, "bound_device_id", None
                         )
-                    ):
-                        dim_group = split_group(
-                            parent_pg=default_group,
+                    )
+                    is not None
+                    and torch.cuda.is_available()
+                    and (
+                        backend is None
+                        or default_group._get_backend(torch.device("cuda")).name()
+                        == backend
+                    )
+                ):
+                    dim_group = split_group(
+                        parent_pg=default_group,
+                        pg_options=pg_options,
+                        split_ranks=pg_ranks_by_dim.tolist(),
+                        group_desc=group_desc,
+                    )
+                    has_split_group = True
+
+                # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+                # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
+                # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+                # along with appending information to the `dim_group_names` list whenever necessary.
+                for dim_mesh in pg_ranks_by_dim:
+                    subgroup_ranks = dim_mesh.tolist()
+
+                    # We temporarily revert the reuse subgroup, since it breaks two internal tests.
+                    # Temporarily reverting to resolve test timeout while root-causing.
+                    # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                    if bound_device_id is None or not has_split_group:
+                        backend = backend or get_default_backend_for_device(self.device_type)
+                        dim_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
                             pg_options=pg_options,
-                            split_ranks=pg_ranks_by_dim.tolist(),
                             group_desc=group_desc,
                         )
-                        has_split_group = True
 
-                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
-                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-                    # along with appending information to the `dim_group_names` list whenever necessary.
-                    for dim_mesh in pg_ranks_by_dim:
-                        subgroup_ranks = dim_mesh.tolist()
-
-                        # We temporarily revert the reuse subgroup, since it breaks two internal tests.
-                        # Temporarily reverting to resolve test timeout while root-causing.
-                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        if bound_device_id is None or not has_split_group:
-                            dim_group = new_group(
-                                ranks=subgroup_ranks,
-                                backend=backend,
-                                pg_options=pg_options,
-                                group_desc=group_desc,
+                    # only add to dim_groups if the current rank in the subgroup
+                    if self.get_rank() in subgroup_ranks:
+                        if len(dim_group_names) > dim:
+                            raise RuntimeError(
+                                f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
+                                f"in {subgroup_ranks}!"
                             )
-
-                        # only add to dim_groups if the current rank in the subgroup
-                        if self.get_rank() in subgroup_ranks:
-                            if len(dim_group_names) > dim:
-                                raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
-                                    f"in {subgroup_ranks}!"
-                                )
-                            dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
+                        dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
             self._dim_group_names = dim_group_names
 
         def __enter__(self) -> "DeviceMesh":
