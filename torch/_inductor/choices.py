@@ -32,8 +32,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from torch.utils._ordered_set import OrderedSet
-
     from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
@@ -41,6 +39,8 @@ if TYPE_CHECKING:
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
     from .kernel_template_choice import KernelTemplateChoice
+
+    from torch.utils._ordered_set import OrderedSet  # isort: skip
 
 
 class Sortable(typing.Protocol):
@@ -106,7 +106,7 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _finalize_mm_configs(
+    def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -192,18 +192,22 @@ class InductorChoices:
         Returns:
             True if we need to fix the layout, False otherwise
         """
-        print(f"need to fix layout for {op_name}")
-        if not (config.max_autotune or config.max_autotune_gemm):
-            # no danger of using other backends than ATEN
-            return False
-
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
         if len(adjusted_choices) > 0:
             print(f"device type is {adjusted_choices[0].inputs.device_type}")
-            if adjusted_choices[0].inputs.device_type == "mps":
+            if adjusted_choices[0].inputs.device_type == "mps" and op_name not in [
+                "mm",
+                "addmm",
+            ]:
                 return True
+
+        # Since the following backends are not using get_mm_configs yet through the singular call,
+        print(f"need to fix layout for {op_name}")
+        if not (config.max_autotune or config.max_autotune_gemm):
+            # no danger of using other backends than ATEN
+            return False
 
         # Since the following backends are not using get_template_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
@@ -256,7 +260,7 @@ class InductorChoices:
             )
 
         # Second pass: Adjust the template choices
-        adjusted_choices = self._finalize_mm_configs(
+        adjusted_choices = self._finalize_template_configs(
             template_choices,
             kernel_inputs,
             templates,
