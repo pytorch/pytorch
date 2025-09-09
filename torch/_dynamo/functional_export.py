@@ -327,13 +327,6 @@ def _dynamo_graph_capture_for_export(
         )
 
         dynamo_config_ctx = torch._dynamo.config.patch(
-            specialize_int=True,
-            specialize_float=True,
-            assume_static_by_default=True,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=False,
             log_graph_in_out_metadata=True,
         )
 
