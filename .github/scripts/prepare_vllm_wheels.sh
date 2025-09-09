@@ -18,10 +18,10 @@ make_wheel_record() {
 }
 
 change_wheel_version() {
-  package=$1
-  wheel=$2
-  f_version=$3
-  t_version=$4
+  local package=$1
+  local wheel=$2
+  local f_version=$3
+  local t_version=$4
 
   # Extract the wheel
   ${PYTHON_EXECUTABLE} -mwheel unpack $wheel
@@ -54,19 +54,20 @@ change_wheel_version() {
 }
 
 repackage_wheel() {
-  package=$1
+  local package=$1
   pushd $package
 
-  orig_wheel=$(find . -name *${package//-/_}*)
-  orig_version=$(unzip -p $orig_wheel '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
+  local orig_wheel=$(find . -name *${package//-/_}*)
+  local orig_version=$(unzip -p $orig_wheel '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
 
+  local version=""
   if [[ "${package}" == vllm ]]; then
     # Copied from vllm/.buildkite/scripts/upload-wheels.sh
     version=1.0.0
   else
     version=$(echo $orig_version | tr '.+' '.' | cut -d'.' -f1-3)
   fi
-  nightly_version=$version.$nightly
+  local nightly_version=$version.$nightly
 
   # Use nightly version
   change_wheel_version ${package//-/_} $orig_wheel $orig_version $nightly_version
@@ -75,8 +76,8 @@ repackage_wheel() {
 
   auditwheel repair --plat $PLATFORM *.whl \
     --exclude libc10* --exclude libtorch* --exclude libcu* --exclude libnv*
-  repair_wheel=$(find wheelhouse -name *${PLATFORM}*)
-  repair_wheel=$(basename ${repair_wheel})
+  local repair_wheel=$(find wheelhouse -name *${PLATFORM}*)
+  local repair_wheel=$(basename ${repair_wheel})
   popd
 
   cp ${package}/wheelhouse/${repair_wheel} .
