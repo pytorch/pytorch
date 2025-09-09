@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -296,7 +295,6 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     to exp functions as well as reuse of softmax implementation for
     log_softmax.
   */
-  using accscalar_t = at::acc_type<scalar_t, false>;
   auto sparse_dim = input.sparse_dim();
   auto indices = input._indices().contiguous();
   auto values = input._values().contiguous();
@@ -342,14 +340,14 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
           continue;
 
         /* Prepare scratch space */
-        std::vector<accscalar_t> mx_row(nvalues, -std::numeric_limits<accscalar_t>::infinity());
+        std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
         std::vector<scalar_t> exp_sums_row(nvalues, 0);
 
         /* Compute mx */
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           for (const auto j : c10::irange(nvalues)) {
-            mx_row[j] = std::max(mx_row[j], accscalar_t(values_row[j]));
+            mx_row[j] = std::max(mx_row[j], values_row[j]);
           }
         }
 
