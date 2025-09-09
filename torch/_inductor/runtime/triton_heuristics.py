@@ -2920,7 +2920,7 @@ def _persistent_reduction_configs(
                     rnumel,
                 )
             ]
-            
+
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:

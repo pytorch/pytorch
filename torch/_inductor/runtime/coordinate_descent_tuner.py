@@ -239,7 +239,7 @@ class CoordescTuner:
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
-        log.error("= Do coordinate descent tuning for %s =", self.name)
+        log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
             "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
         )
@@ -290,7 +290,7 @@ class CoordescTuner:
                         old_best_timing / best_timing,
                     )
 
-        log.error(
+        log.debug(
             "Improve from %s %f -> %s %f, %.3fx",
             baseline_config,
             baseline_timing,
@@ -298,8 +298,5 @@ class CoordescTuner:
             best_timing,
             baseline_timing / best_timing,
         )
-
-        log.error(f"Inductor Meta: {self.inductor_meta}")
-        log.error(f"Size Hints: {self.size_hints}")
 
         return best_config
