@@ -3846,7 +3846,7 @@ class TestSparse(TestSparseBase):
             for sparse_dims in range(1, len(s0) + 1):
                 s_coalesced_variants = [
                     # coalesced
-                    sc:=make_tensor(s0, dtype=dtype, device=device).to_sparse(sparse_dims),
+                    sc := make_tensor(s0, dtype=dtype, device=device).to_sparse(sparse_dims),
                     # double nnz in a non-coalesced fashion
                     torch.sparse_coo_tensor(
                         sc._indices().unsqueeze(1).expand(-1, 2, -1).flatten(-2, -1),
@@ -3861,7 +3861,10 @@ class TestSparse(TestSparseBase):
                         torch._validate_sparse_coo_tensor_args(s_res._indices(), s_res._values(), s_res.shape)
                         if s_res.is_coalesced():
                             # ensure that is_coalesced is estimated correctly
-                            self.assertEqual(s_res, torch.sparse_coo_tensor(s_res._indices(), s_res._values(), s_res.shape).coalesce())
+                            self.assertEqual(
+                                s_res,
+                                torch.sparse_coo_tensor(s_res._indices(), s_res._values(), s_res.shape).coalesce()
+                            )
                         self.assertEqual(s_res.to_dense(), t_res)
                     else:
                         with self.assertRaisesRegex(RuntimeError,
