@@ -1,6 +1,8 @@
 #pragma once
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(__aarch64__)
+#include <ATen/cpu/vec/vec_common_aarch64.h>
+#elif defined(CPU_CAPABILITY_AVX512)
 #include <ATen/cpu/vec/vec512/vec512.h>
 #else
 #include <ATen/cpu/vec/vec128/vec128.h>
