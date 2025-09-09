@@ -20,6 +20,7 @@ from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
     create_block_mask,
+    flex_attention,
 )
 from torch.overrides import TorchFunctionMode
 
@@ -46,6 +47,7 @@ class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
     TORCH_FUNCTION = auto()
     TORCH_DISPATCH = auto()
+    MODULE_WRAPPER = auto()
 
 
 _dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
@@ -1088,11 +1090,84 @@ def create_cp_block_mask(
     return block_mask
 
 
+class _FlexAttentionModule(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self._attention = torch.compile(
+            flex_attention, fullgraph=True, mode="max-autotune"
+        )
+        self.enable_cp_dispatcher = False
+        self.cp_mesh = None
+        self.seq_dim = 2
+
+    @staticmethod
+    def flex_call(fn, mesh, seq_dim, *args, **kwargs) -> torch.Tensor:
+        assert mesh is not None
+        args_list = list(args)
+        for idx, name in enumerate(
+            ("query", "key", "value", "score_mod", "block_mask")
+        ):
+            if idx >= len(args):
+                args_list.append(kwargs.pop(name, None))
+
+        query, key, value, score_mod, block_mask = args_list[:5]
+        assert isinstance(query, torch.Tensor)
+        assert isinstance(key, torch.Tensor)
+        assert isinstance(value, torch.Tensor)
+        assert isinstance(block_mask, (BlockMask, tuple))
+
+        global_key = ft_c.all_gather_tensor_autograd(key, seq_dim, mesh)
+        global_value = ft_c.all_gather_tensor_autograd(value, seq_dim, mesh)
+        args_list[1] = global_key
+        args_list[2] = global_value
+
+        # shape rewrite: because torch.nn.flex_attention() checks
+        # the QKV shape against the block_mask object, we need to
+        # manually rewrite the shape info in block_mask tuple to
+        # make it compatible with q_shard, k_global, v_global
+        orig_seq_lengths = None
+        if isinstance(block_mask, tuple):
+            if block_mask[1] != global_key.size(-2):
+                block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
+        else:
+            if block_mask.seq_lengths[1] != global_key.size(-2):
+                orig_seq_lengths = block_mask.seq_lengths
+                block_mask.seq_lengths = (
+                    block_mask.seq_lengths[0],
+                    global_key.size(-2),
+                )
+
+        ret = fn(*tuple(args_list), **kwargs)
+        if orig_seq_lengths is not None:
+            assert isinstance(block_mask, BlockMask)
+            block_mask.seq_lengths = orig_seq_lengths
+
+        return ret
+
+    def forward(self, *args, **kwargs) -> torch.Tensor:
+        if self.enable_cp_dispatcher:
+            return self.flex_call(
+                self._attention, self.cp_mesh, self.seq_dim, *args, **kwargs
+            )
+        else:
+            return self._attention(*args, **kwargs)
+
+
+_flex_attention_module = None
+
+
+def _flex_attention_wrapper(*args, **kwargs) -> torch.Tensor:
+    global _flex_attention_module
+    if _flex_attention_module is None:
+        _flex_attention_module = _FlexAttentionModule()
+    return _flex_attention_module(*args, **kwargs)
+
+
 @contextlib.contextmanager
 def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
-    def attention_input_fn(
+    def sdpa_input_fn(
         mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         placement = [Shard(seq_dim)]
@@ -1108,7 +1183,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
         return new_args, new_kwargs
 
-    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
+    def sdpa_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
             output = output.to_local() if isinstance(output, DTensor) else output
@@ -1143,34 +1218,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
             # special handler for flex_attention
             if func == torch._higher_order_ops.flex_attention:
-                query, key, value, score_mod, block_mask = args[:5]
-                assert isinstance(query, torch.Tensor)
-                assert isinstance(key, torch.Tensor)
-                assert isinstance(value, torch.Tensor)
-                assert isinstance(block_mask, tuple)
-
-                global_key = ft_c.all_gather_tensor_autograd(
-                    key, seq_dim, self._device_mesh
-                )
-                global_value = ft_c.all_gather_tensor_autograd(
-                    value, seq_dim, self._device_mesh
-                )
-
-                # shape rewrite: because torch.nn.flex_attention() checks
-                # the QKV shape against the block_mask object, we need to
-                # manually rewrite the shape info in block_mask tuple to
-                # make it compatible with q_shard, k_global, v_global
-                if block_mask[1] != global_key.size(-2):
-                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
-
-                return func(
-                    query,
-                    global_key,
-                    global_value,
-                    score_mod,
-                    block_mask,
-                    *args[5:],
-                    **kwargs,
+                return _FlexAttentionModule.flex_call(
+                    func, self._device_mesh, seq_dim, *args, **kwargs
                 )
 
             if func != self._fn:
@@ -1188,8 +1237,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             F.scaled_dot_product_attention,
             F,
             mesh,
-            attention_input_fn,
-            attention_output_fn,
+            sdpa_input_fn,
+            sdpa_output_fn,
         )
         with _enable_cp_dispatcher():
             yield
@@ -1200,14 +1249,26 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             tf_mode = DistributeFunction(
                 F.scaled_dot_product_attention,
                 mesh,
-                attention_input_fn,
-                attention_output_fn,
+                sdpa_input_fn,
+                sdpa_output_fn,
             )
             _cp_global_vars.torch_function_mode = tf_mode
 
         with tf_mode:
             with _enable_cp_dispatcher():
                 yield
+    elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+        global _flex_attention_module
+
+        if _flex_attention_module is None:
+            _flex_attention_module = _FlexAttentionModule()
+
+        _flex_attention_module.enable_cp_dispatcher = True
+        _flex_attention_module.cp_mesh = mesh
+        _flex_attention_module.seq_dim = seq_dim
+        yield
+        _flex_attention_module.cp_mesh = None
+        _flex_attention_module.enable_cp_dispatcher = False
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
