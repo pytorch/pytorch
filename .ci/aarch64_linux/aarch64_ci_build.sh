@@ -41,9 +41,6 @@ else
         echo "Bundling CUDA libraries with wheel for aarch64."
     else
         echo "Using nvidia libs from pypi for aarch64."
-        # Fix platform constraints in PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64
-        # Replace 'platform_machine == "x86_64"' with 'platform_machine == "aarch64"'
-        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS//platform_machine == \'x86_64\'/platform_machine == \'aarch64\'}"
         echo "Updated PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64: $PYTORCH_EXTRA_INSTALL_REQUIREMENTS"
         export USE_NVIDIA_PYPI_LIBS=1
     fi
