@@ -147,10 +147,7 @@ class TestAOTInductorPackage(TestCase):
 
     def cmake_compile_and_run(self, base_dir):
         custom_env = os.environ.copy()
-        custom_env["CMAKE_PREFIX_PATH"] = ":".join(
-            [str(Path(torch.__file__).parent)]
-            + os.environ.get("CMAKE_PREFIX_PATH", "").split(":")
-        )
+        custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
         build_path = Path(base_dir) / "build"
         build_path.mkdir()
         subprocess.run(
@@ -197,10 +194,7 @@ class TestAOTInductorPackage(TestCase):
             self.assertTrue(not build_path.exists())
             build_path.mkdir()
             custom_env = os.environ.copy()
-            custom_env["CMAKE_PREFIX_PATH"] = ":".join(
-                [str(Path(torch.__file__).parent)]
-                + os.environ.get("CMAKE_PREFIX_PATH", "").split(":")
-            )
+            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
             subprocess.run(
                 ["cmake", ".."],
                 cwd=build_path,
