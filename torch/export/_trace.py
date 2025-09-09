@@ -135,7 +135,7 @@ class ExportDynamoConfig:
     do_not_emit_runtime_asserts: bool = True
     specialize_int: bool = True
     specialize_float: bool = True
-    assume_static_by_default: bool = False
+    assume_static_by_default: bool = True
     automatic_dynamic_shapes: bool = False
     capture_dynamic_output_shape_ops: bool = True
     capture_scalar_outputs: bool = True
@@ -799,7 +799,7 @@ def _export_to_torch_ir(
         (args, kwargs),
     )
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+    with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig(prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards))):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
@@ -810,14 +810,15 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                if _use_new_tracer_experimental:
+                if True:
                     from torch._dynamo.functional_export import (
                         _dynamo_graph_capture_for_export,
                     )
 
-                    gm_torch_level = _dynamo_graph_capture_for_export(
-                        f, constraints=constraints, dynamic_shapes=dynamic_shapes
-                    )(*args, **kwargs)
+                    with _compiling_state_context():
+                        gm_torch_level = _dynamo_graph_capture_for_export(
+                            f, constraints=constraints, dynamic_shapes=dynamic_shapes
+                        )(*args, **kwargs)
 
                 else:
                     gm_torch_level, _ = torch._dynamo.export(
