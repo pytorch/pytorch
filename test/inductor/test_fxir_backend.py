@@ -20,6 +20,7 @@ from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
@@ -782,6 +783,43 @@ class AOTFxirTestCase(InductorTestCase):
             dynamic_shapes=dynamic_shapes,
             strict=True,
         )
+
+    def test_custom_backend(self):
+        """
+        Test registering a custom FX backend.
+        """
+        called = False
+
+        class CustomWrapperCodegen(WrapperFxCodegen):
+            def compile_graph(self, gm):
+                """
+                Simply records whether this override was called.
+                """
+                nonlocal called
+                called = True
+                return super().compile_graph(gm)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        # Register a custom FX backend.
+        custom_backend = common.DeviceCodegen(
+            TritonScheduling,
+            PythonWrapperCodegen,
+            fx_wrapper_codegen=CustomWrapperCodegen,
+        )
+        with unittest.mock.patch.dict(
+            common.device_codegens, {self.device: custom_backend}
+        ):
+            # The backend should not have been called yet.
+            self.assertFalse(called)
+
+            inp = (torch.randn(8, device=self.device),)
+            self.check(M().to(self.device), inp)
+
+        # Now the backend should have been called.
+        self.assertTrue(called)
 
 
 if __name__ == "__main__":
