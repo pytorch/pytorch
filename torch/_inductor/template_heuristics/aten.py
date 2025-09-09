@@ -45,11 +45,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         yield dict()
 
 
-# None here indicates that this is valid for all device types on that op
-# Note (None, op) takes precedence over (device_type, None)
-@register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
-@register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
-class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeuristics):
+class BaseATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -63,6 +59,15 @@ class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeurist
             "alpha": alpha,
             "beta": beta,
         }
+
+
+# None here indicates that this is valid for all device types on that op
+# Note (None, op) takes precedence over (device_type, None)
+@register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+@register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
+class ATenAddMMConfigHeuristics(
+    AddMMBiasExpansionConfigMixin, BaseATenAddMMConfigHeuristics
+):
 
     def adjust_kernel_inputs(
         self,
@@ -83,7 +88,9 @@ class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeurist
 
 @register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")
 class ATenBiasAddMMConfigHeuristics(
-    ATenAddMMConfigHeuristics, GemmMaxAutotuneTemplateConfigHeuristics
+    ATenAddMMConfigHeuristics,
+    BaseATenAddMMConfigHeuristics,
+    GemmMaxAutotuneTemplateConfigHeuristics,
 ):
     def _get_template_configs_impl(
         self,

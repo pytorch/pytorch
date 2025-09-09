@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 from torch._inductor.kernel_inputs import MMKernelInputs
 
+from ..ir import TensorBox
 from ..kernel.mm_common import addmm_epilogue
 from ..lowering import expand
 from ..select_algorithm import realize_inputs
@@ -29,6 +30,9 @@ class AddMMBiasExpansionConfigMixin(TemplateConfigHeuristics):
         )
         nodes = kernel_inputs.nodes()
         bias = nodes[0]
+        if not isinstance(bias, TensorBox):
+            # bias has already been expanded
+            return kernel_inputs
         layout = kernel_inputs.output_layout()
         bias = realize_inputs(expand(bias, layout.size))
         return MMKernelInputs(

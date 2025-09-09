@@ -32,9 +32,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -201,8 +201,7 @@ class InductorChoices:
         # that for mps, everything stays as it was before this optimization
         if len(adjusted_choices) > 0:
             if adjusted_choices[0].inputs.device_type == "mps":
-                if op_name not in ["mm", "addmm"]:
-                    return True
+                return True
 
         # Since the following backends are not using get_mm_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
@@ -218,7 +217,7 @@ class InductorChoices:
             not isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
         )
 
-    def get_mm_configs(
+    def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
