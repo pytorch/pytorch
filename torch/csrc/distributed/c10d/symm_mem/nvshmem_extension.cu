@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -75,50 +76,22 @@ void nvshmemx_cumodule_init(uintptr_t module) {
     "nvshmemx_cumodule_init failed");
 }
 
-static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
-
-nvshmem_team_t group_to_team(
-    const std::string& group_name,
-    const std::vector<int>& global_ranks) {
-  auto it = group_name_to_team_.find(group_name);
-  if (it != group_name_to_team_.end()) {
-    return it->second;
-  }
-  TORCH_CHECK(global_ranks.size() > 1);
-  int stride = global_ranks[1] - global_ranks[0];
-  for (size_t r = 1; r < global_ranks.size(); ++r) {
-    TORCH_CHECK(global_ranks[r] - global_ranks[r - 1] == stride);
-  }
-
-  nvshmem_team_t team;
-  NVSHMEM_CHECK(
-      nvshmem_team_split_strided(
-          NVSHMEM_TEAM_WORLD,
-          global_ranks[0],
-          stride,
-          global_ranks.size(),
-          nullptr,
-          0,
-          &team),
-          "nvshmem_team_split_strided failed");
-  group_name_to_team_[group_name] = team;
-  TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
-  return team;
-}
-
-at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
+at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  int world_size = input_hdl->get_world_size();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
-  void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* buffer_ptr = input.mutable_data_ptr();
+  auto buffer_size = input.numel() * input.element_size();
+  auto& team_manager = TeamManager::get(input.device());
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  int team_size = nvshmem_team_n_pes(team);
+  TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), 0, stream);
+  nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, buffer_size, root, stream);
   return input;
 }
 
-void nvshmem_put(at::Tensor& tensor, int64_t peer) {
+void nvshmem_put(at::Tensor& tensor, const int64_t peer) {
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -127,13 +100,14 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
-void nvshmem_get(at::Tensor& tensor, int64_t peer) {
+void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
@@ -142,10 +116,11 @@ void nvshmem_get(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-  nvshmemx_getmem_on_stream(tensor.data_ptr(), buffer_ptr, buffer_size, peer, stream);
+  nvshmemx_getmem_on_stream(tensor.mutable_data_ptr(), buffer_ptr, buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -156,11 +131,17 @@ at::Tensor nvshmem_all_to_all(
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto& team_manager = TeamManager::get(input.device());
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
-  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
-  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
-  size_t bytes_per_rank = input_hdl->get_buffer_size() / world_size;
+  void* input_ptr = input.data_ptr();
+  void* output_ptr = out.mutable_data_ptr();
+  TORCH_CHECK(input.is_contiguous() && out.is_contiguous());
+  TORCH_CHECK_EQ(input.numel(), out.numel());
+  TORCH_CHECK_EQ(input.dtype(), out.dtype());
+  TORCH_CHECK_EQ(input.numel() % world_size, 0);
+  auto buffer_size = input.numel() * input.element_size();
+  size_t bytes_per_rank = buffer_size / world_size;
 
   auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
   nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
@@ -199,15 +180,19 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 // - input splits (IN)
 // - output splits (OUT) and
 // - source offsets (OUT).
-__global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
+__global__ void exchangeSplitAndOffset(int64_t* in_out_splits, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
+  int mype = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int tid = threadIdx.x;
 
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
 
   // Scan input splits to get the source offsets
@@ -216,9 +201,10 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
 
   // Use 1 block to do the exchange
   if (tid < npes) {
-    int peer = tid;
-    nvshmem_int64_p(source_offsets + mype, peer_offsets[peer], peer);
-    nvshmem_int64_p(output_splits + mype, input_splits[peer], peer);
+    // tid is peer index within team, but put calls require global rank
+    int peer_global = nvshmem_team_translate_pe(team, tid, NVSHMEM_TEAM_WORLD);
+    nvshmem_int64_p(source_offsets + mype, peer_offsets[tid], peer_global);
+    nvshmem_int64_p(output_splits + mype, input_splits[tid], peer_global);
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
@@ -228,10 +214,13 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
+__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
+  int mype = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
@@ -239,6 +228,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   int blocks_per_peer = max(gridDim.x / npes, 1);
 
   // Calculate the output offsets
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
   prefixSum(peer_offsets, output_splits, npes);
   __syncthreads();
@@ -246,6 +236,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   // Target a different peer based on bid
   for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
     int peer = (mype + i) % npes;
+    auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
     // Total amount from `peer`
     auto peer_size = output_splits[peer] * stride;
     // Amount to get from `peer` in this block
@@ -256,16 +247,18 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = peer_offsets[peer] * stride + block_offset;
-    nvshmemx_getmem_block(
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       block_size,
-      peer);
+      peer_global);
   }
   // Write out the output offsets (to the scratchpad line)
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
@@ -289,18 +282,22 @@ at::Tensor all_to_all_vdev(
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
 
-  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
-  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
-  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+  void* input_ptr = input.data_ptr();
+  void* output_ptr = out.mutable_data_ptr();
+  int64_t* splits_ptr = (int64_t*)(in_out_splits.mutable_data_ptr());
 
-  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+  TORCH_CHECK_EQ(input.device(), out.device());
+  auto device = input.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
   // Exchange output splits and source offsets
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
       &splits_ptr,
-      &rank,
-      &world_size};
+      &team};
   nvshmemx_collective_launch(
       (const void*)exchangeSplitAndOffset,
       dim3(1),
@@ -342,8 +339,7 @@ at::Tensor all_to_all_vdev(
       &output_ptr,
       &splits_ptr,
       &stride_bytes,
-      &rank,
-      &world_size};
+      &team};
   nvshmemx_collective_launch(
       (const void*)allToAllV,
       dim3(num_blocks),
@@ -374,10 +370,13 @@ at::Tensor all_to_all_vdev(
 */
 
 template <bool HAS_IN_OFFSETS>
-__global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, int mype, int npes, int ne, size_t input_dim0, bool rank_is_row_in) {
+__global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, nvshmem_team_t team, int ne, size_t input_dim0, bool rank_is_row_in) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
+  int mype = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
   int nsplits = npes * ne;
   auto input_splits = in_splits_offsets;
   auto output_splits = out_splits_offsets;
@@ -416,8 +415,9 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
     // (or vice versa).
     auto split_val = input_splits[tid];
     CUDA_KERNEL_ASSERT(split_val >= 0 && "split value is negative\n");
-    nvshmem_int64_p(source_offsets + dst_offset, input_offsets[tid], peer);
-    nvshmem_int64_p(output_splits + dst_offset, split_val, peer);
+    auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
+    nvshmem_int64_p(source_offsets + dst_offset, input_offsets[tid], peer_global);
+    nvshmem_int64_p(output_splits + dst_offset, split_val, peer_global);
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
@@ -470,7 +470,7 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // In dispatch case, rank_is_row_out = false, major_size = ne, minor_size = npes.
 // In combine case, rank_is_row_out = true, major_size = npes, minor_size = ne.
 
-__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_is_row_out) {
+__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_is_row_out, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
@@ -542,16 +542,19 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
     auto source_offset = source_offsets[eid] * stride;
     auto e_offset = tile_prefix_sums[row][col];
     auto write_offset = e_offset * stride;
-    nvshmemx_getmem_block(
+    auto peer_global = nvshmem_team_translate_pe(team, rank_is_row_out ? row : col, NVSHMEM_TEAM_WORLD);
+    nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       peer_size,
-      rank_is_row_out ? row : col);  // peer
+      peer_global);  // peer's global index
   }
   // Write out the output offsets (to the scratchpad line)
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
   }
+  // Make sure getmem_nbi calls finish
+  nvshmem_quiet();
 #endif
 }
 
@@ -611,10 +614,10 @@ void all_to_all_vdev_2d(
   int64_t major_align_val = major_align.value_or(1);
   TORCH_CHECK(major_align_val > 0, "major_align must be positive");
 
-  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
-  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
-  int64_t* in_splits_ptr = (int64_t*)(in_splits_hdl->get_buffer_ptrs()[rank]);
-  int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets_hdl->get_buffer_ptrs()[rank]);
+  void* input_ptr = input.data_ptr();
+  void* output_ptr = out.mutable_data_ptr();
+  int64_t* in_splits_ptr = (int64_t*)(in_splits.data_ptr());
+  int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets.mutable_data_ptr());
 
   // Shape checks
   TORCH_CHECK(in_splits.is_contiguous()
@@ -653,6 +656,8 @@ void all_to_all_vdev_2d(
       "all tensor arguments must be on the same CUDA device");
   c10::cuda::CUDAGuard guard(device);
   auto stream = at::cuda::getCurrentCUDAStream();
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
@@ -661,8 +666,7 @@ void all_to_all_vdev_2d(
   void* args0[] = {
       &in_splits_ptr,
       &out_splits_offsets_ptr,
-      &rank,
-      &world_size,
+      &team,
       &ne,
       &input_dim0,
       &rank_is_row_in};
@@ -693,7 +697,8 @@ void all_to_all_vdev_2d(
       &world_size,
       &ne,
       &major_align_val,
-      &rank_is_row_out};
+      &rank_is_row_out,
+      &team};
   nvshmemx_collective_launch(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
@@ -745,10 +750,10 @@ void all_to_all_vdev_2d_offset(
 
   int64_t major_align_val = 0;
 
-  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
-  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
-  int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets_hdl->get_buffer_ptrs()[rank]);
-  int64_t* in_splits_offsets_ptr = (int64_t*)(in_splits_offsets_hdl->get_buffer_ptrs()[rank]);
+  void* input_ptr = input.data_ptr();
+  void* output_ptr = out.mutable_data_ptr();
+  int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets.mutable_data_ptr());
+  int64_t* in_splits_offsets_ptr = (int64_t*)(in_splits_offsets.data_ptr());
 
   // Shape checks
   TORCH_CHECK(out_splits_offsets.is_contiguous()
@@ -786,6 +791,8 @@ void all_to_all_vdev_2d_offset(
       "all tensor arguments must be on the same CUDA device");
   c10::cuda::CUDAGuard guard(device);
   auto stream = at::cuda::getCurrentCUDAStream();
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
@@ -794,8 +801,7 @@ void all_to_all_vdev_2d_offset(
   void* args0[] = {
       &in_splits_offsets_ptr,
       &out_splits_offsets_ptr,
-      &rank,
-      &world_size,
+      &team,
       &ne,
       &input_dim0,
       &rank_is_row_in};
@@ -826,7 +832,8 @@ void all_to_all_vdev_2d_offset(
       &ne,
       &world_size,
       &major_align_val,
-      &rank_is_row_out};
+      &rank_is_row_out,
+      &team};
   nvshmemx_collective_launch(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
