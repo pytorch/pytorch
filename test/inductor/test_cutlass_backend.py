@@ -107,7 +107,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     return True
 
 
-un_ops_under_test = [torch.relu, torch.tanh]
+un_ops_under_test = [torch.relu, torch.tanh, torch.exp, torch.sigmoid]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
 evt_all_ops = parametrize(
