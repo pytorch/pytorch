@@ -1934,10 +1934,6 @@ _cache_config_ignore_prefix: list[str] = [
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
-bucket_fx_collectives_all = None
-bucket_fx_collectives_trie = None  # ["ag", "rs"]
-bucket_fx_collectives_trie_use_nn_module_stack = False
-
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
