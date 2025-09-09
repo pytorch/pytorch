@@ -63,9 +63,12 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
-from typing import Callable, Optional, Union
+from __future__ import annotations
+
+from typing import Callable, Optional
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
+    _LogPrefixContext,
     _validate_full_rank,
     DefaultLogsSpecs,
     LogsDest,
@@ -101,11 +104,12 @@ __all__ = [
 
 def start_processes(
     name: str,
-    entrypoint: Union[Callable, str],
+    entrypoint: Callable | str,
     args: dict[int, tuple],
     envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,
-    log_line_prefixes: Optional[dict[int, str]] = None,
+    log_prefix_template: str | None = None,
+    per_rank_log_prefix_context: list[_LogPrefixContext] | None = None,
     start_method: str = "spawn",
     numa_options: Optional[NumaOptions] = None,
 ) -> PContext:
@@ -195,6 +199,9 @@ def start_processes(
         args: arguments to each replica
         envs: env vars to each replica
         log_dir: directory used to write log files
+        log_prefix_template: the template used to format the log line prefix.
+        log_prefix_context: the context used to format the log line prefix.
+                            must be present if log_line_prefix_template is set.
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
         redirects: which std streams to redirect to a log file
@@ -215,7 +222,8 @@ def start_processes(
             args=args,
             envs=envs,
             logs_specs=logs_specs,
-            log_line_prefixes=log_line_prefixes,
+            log_prefix_template=log_prefix_template,
+            per_rank_log_prefix_context=per_rank_log_prefix_context,
             numa_options=numa_options,
         )
     else:
@@ -224,7 +232,8 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
-            log_line_prefixes=log_line_prefixes,
+            log_prefix_template=log_prefix_template,
+            per_rank_log_prefix_context=per_rank_log_prefix_context,
             start_method=start_method,
             logs_specs=logs_specs,
             numa_options=numa_options,

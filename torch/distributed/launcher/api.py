@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -63,6 +64,10 @@ class LaunchConfig:
                         as a period of monitoring workers.
         start_method: The method is used by the elastic agent to start the
                     workers (spawn, fork, forkserver).
+        log_line_prefix_template: The template used to format the log line prefix.
+                                  If this is not set, the environment variable
+                                  `TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE` will be used.
+                                  See ``LocalElasticAgent`` for more details.
         metrics_cfg: configuration to initialize metrics.
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
@@ -102,6 +107,9 @@ class LaunchConfig:
             self.rdzv_configs["timeout"] = self.rdzv_timeout
         elif "timeout" not in self.rdzv_configs:
             self.rdzv_configs["timeout"] = default_timeout
+
+        if self.log_line_prefix_template is None:
+            self.log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
 
         # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
         if self.logs_specs is None:
@@ -211,20 +219,21 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint         : %(entrypoint)s\n"
-        "  min_nodes          : %(min_nodes)s\n"
-        "  max_nodes          : %(max_nodes)s\n"
-        "  nproc_per_node     : %(nproc_per_node)s\n"
-        "  run_id             : %(run_id)s\n"
-        "  rdzv_backend       : %(rdzv_backend)s\n"
-        "  rdzv_endpoint      : %(rdzv_endpoint)s\n"
-        "  rdzv_configs       : %(rdzv_configs)s\n"
-        "  max_restarts       : %(max_restarts)s\n"
-        "  monitor_interval   : %(monitor_interval)s\n"
-        "  log_dir            : %(log_dir)s\n"
-        "  metrics_cfg        : %(metrics_cfg)s\n"
-        "  event_log_handler  : %(event_log_handler)s\n"
-        "  numa_options       : %(numa_options)s\n",
+        "  entrypoint               : %(entrypoint)s\n"
+        "  min_nodes                : %(min_nodes)s\n"
+        "  max_nodes                : %(max_nodes)s\n"
+        "  nproc_per_node           : %(nproc_per_node)s\n"
+        "  run_id                   : %(run_id)s\n"
+        "  rdzv_backend             : %(rdzv_backend)s\n"
+        "  rdzv_endpoint            : %(rdzv_endpoint)s\n"
+        "  rdzv_configs             : %(rdzv_configs)s\n"
+        "  max_restarts             : %(max_restarts)s\n"
+        "  monitor_interval         : %(monitor_interval)s\n"
+        "  log_dir                  : %(log_dir)s\n"
+        "  log_line_prefix_template : %(log_line_prefix_template)s\n"
+        "  metrics_cfg              : %(metrics_cfg)s\n"
+        "  event_log_handler        : %(event_log_handler)s\n"
+        "  numa_options             : %(numa_options)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -236,7 +245,8 @@ def launch_agent(
             "rdzv_configs": config.rdzv_configs,
             "max_restarts": config.max_restarts,
             "monitor_interval": config.monitor_interval,
-            "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
+            "log_dir": config.logs_specs.root_log_dir,
+            "log_line_prefix_template": config.log_line_prefix_template,
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
             "numa_options": config.numa_options,

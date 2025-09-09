@@ -7,6 +7,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import abc
 import logging
 import os
@@ -23,6 +25,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
+from string import Template
 from types import FrameType
 from typing import Any, Callable, Optional, Union
 
@@ -428,11 +431,29 @@ class RunProcsResult:
         return len(self.failures) > 0
 
 
+@dataclass
+class _LogPrefixContext:
+    """
+    Context for template substitution (not supposed to be used by end users directly)
+    Note this is a subset of what are actually supported.
+    See ``PContext`` docstring for more details.
+    """
+
+    role_name: str
+    rank: int
+    local_rank: int
+
+
 class PContext(abc.ABC):
     """
     The base class that standardizes operations over a set of processes that are launched via different mechanisms.
 
     The name ``PContext`` is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
+
+    For log prefixing, the following macros (identifiers) are substituted at runtime:
+    ``${role_name}, ${local_rank}, ${rank}, ${pid}``.
+    For example, to prefix each log line with global rank instead of the local rank,
+    set ``log_line_prefix_template = "[${rank}]:``.
 
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
@@ -442,11 +463,12 @@ class PContext(abc.ABC):
     def __init__(
         self,
         name: str,
-        entrypoint: Union[Callable, str],
+        entrypoint: Callable | str,
         args: dict[int, tuple],
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
+        log_prefix_template: str | None = None,
+        per_rank_log_prefix_context: list[_LogPrefixContext] | None = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -467,12 +489,11 @@ class PContext(abc.ABC):
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
 
-        self._stdout_tail = TailLog(
-            name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes
-        )
-        self._stderr_tail = TailLog(
-            name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes
-        )
+        self._logs_dest = logs_dest
+        self._log_prefix_template = log_prefix_template
+        self._per_rank_log_prefix_context = per_rank_log_prefix_context
+        self._stdout_tail: Optional[TailLog] = None
+        self._stderr_tail: Optional[TailLog] = None
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
@@ -488,6 +509,32 @@ class PContext(abc.ABC):
                 "This could lead to orphaned worker processes if the torchrun is terminated."
             )
         self._start()
+
+        log_line_prefixes: dict[int, str] | None = None
+        if self._log_prefix_template is not None:
+            assert self._per_rank_log_prefix_context is not None
+            log_line_prefixes = {}
+            pids = self.pids()
+            for r, ctx in enumerate(self._per_rank_log_prefix_context):
+                pid = pids[r]
+                log_line_prefix = Template(
+                    self._log_line_prefix_template
+                ).safe_substitute(
+                    role_name=ctx.role_name,
+                    rank=ctx.rank,
+                    local_rank=ctx.local_rank,
+                    pid=pid,
+                )
+                log_line_prefixes[ctx.local_rank] = log_line_prefix
+
+
+        self._stdout_tail = TailLog(
+            self.name, self._logs_dest.tee_stdouts, sys.stdout, log_line_prefixes
+        )
+        self._stderr_tail = TailLog(
+            self.name, self._logs_dest.tee_stderrs, sys.stderr, log_line_prefixes
+        )
+
         self._stdout_tail.start()
         self._stderr_tail.start()
 
@@ -630,8 +677,9 @@ class MultiprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         start_method: str,
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
-        numa_options: Optional[NumaOptions] = None,
+        log_prefix_template: dict[int, str] | None = None,
+        per_rank_log_prefix_context: list[_LogPrefixContext] | None = None,
+        numa_options: NumaOptions | None = None,
     ):
         super().__init__(
             name,
@@ -639,7 +687,8 @@ class MultiprocessContext(PContext):
             args,
             envs,
             logs_specs,
-            log_line_prefixes,
+            log_prefix_template,
+            per_rank_log_prefix_context,
         )
 
         self.start_method = start_method
@@ -815,7 +864,8 @@ class SubprocessContext(PContext):
         args: dict[int, tuple],
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
+        log_prefix_template: Optional[str] = None,
+        log_prefix_context: Optional[_LogPrefixContext] = None,
         numa_options: Optional[NumaOptions] = None,
     ):
         super().__init__(
@@ -824,7 +874,8 @@ class SubprocessContext(PContext):
             args,
             envs,
             logs_specs,
-            log_line_prefixes,
+            log_prefix_template,
+            log_prefix_context
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
