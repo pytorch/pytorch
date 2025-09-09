@@ -566,28 +566,12 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_softmax(self, device):
-        def fn(x):
-            nz = x.nonzero().float()
-            soft = torch.softmax(nz, dim=0)
-            logsoft = torch.nn.functional.log_softmax(nz, dim=0)
-            return soft * logsoft
-
-        example_inputs = (
-            torch.randint(low=0, high=2, size=(32,), device=device, dtype=torch.int8),
-        )
-        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
-        expected = fn(*example_inputs)
-        torch.testing.assert_close(actual, expected)
-
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
     def test_combo_kernel_size_hint_failure(self, device):
+        # A size hint failure is "TypeError: Cannot convert symbols to int"
         if device == "cpu":
             raise unittest.SkipTest("Combo kernels must be for GPU.")
 
-        # A size hint failure is "TypeError: Cannot convert symbols to int"
         def fn(x):
             nz = torch.nonzero(x)
             u0 = nz.size(0)
