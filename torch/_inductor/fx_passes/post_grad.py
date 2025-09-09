@@ -198,43 +198,67 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
-    if config.bucket_reduce_scatters_fx != "none":
-        from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
-
-        p = (
-            bucket_fsdp_reduce_scatter
-            if "fsdp" in config.bucket_reduce_scatters_fx
-            else bucket_reduce_scatter
+    if config.bucket_fx_collectives_all is not None:
+        from torch._inductor.fx_passes.bucketing_experiment import (
+            __bucket_collectives_trie,
         )
-        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
-            lambda graph: p(
-                graph.owning_module,
-                config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,
+
+        GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
+            lambda graph: __bucket_collectives_trie(
+                graph.owning_module, config.bucket_fx_collectives_all
             )
         )
         collectives_bucketing = True
 
-    # Fx all_gather bucketing introduces mutation op
-    # Keeping it in the end to keep invariant of functional graph for previous passes.
-    if config.bucket_all_gathers_fx != "none":
-        from torch._inductor.fx_passes.bucketing import bucket_all_gather
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
-
-        p = (
-            bucket_fsdp_all_gather  # type: ignore[assignment]
-            if "fsdp" in config.bucket_all_gathers_fx
-            else bucket_all_gather
+    elif config.bucket_fx_collectives_trie is not None:
+        from torch._inductor.fx_passes.bucketing_experiment import (
+            bucket_collectives_trie,
         )
-        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
-            lambda graph: p(
-                graph.owning_module,
-                config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,
+
+        GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
+            lambda graph: bucket_collectives_trie(
+                graph.owning_module, config.bucket_fx_collectives_trie
             )
         )
         collectives_bucketing = True
+    else:
+        if config.bucket_reduce_scatters_fx != "none":
+            from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
+            from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
+
+            p = (
+                bucket_fsdp_reduce_scatter
+                if "fsdp" in config.bucket_reduce_scatters_fx
+                else bucket_reduce_scatter
+            )
+            GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+                lambda graph: p(
+                    graph.owning_module,
+                    config.bucket_reduce_scatters_fx_bucket_size_determinator,
+                    config.bucket_reduce_scatters_fx,
+                )
+            )
+            collectives_bucketing = True
+
+        # Fx all_gather bucketing introduces mutation op
+        # Keeping it in the end to keep invariant of functional graph for previous passes.
+        if config.bucket_all_gathers_fx != "none":
+            from torch._inductor.fx_passes.bucketing import bucket_all_gather
+            from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+            p = (
+                bucket_fsdp_all_gather  # type: ignore[assignment]
+                if "fsdp" in config.bucket_all_gathers_fx
+                else bucket_all_gather
+            )
+            GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+                lambda graph: p(
+                    graph.owning_module,
+                    config.bucket_all_gathers_fx_bucket_size_determinator,
+                    config.bucket_all_gathers_fx,
+                )
+            )
+            collectives_bucketing = True
 
     if collectives_bucketing:
         # Fx collectives bucketing passes require topological sort for the cases:
@@ -267,6 +291,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # wait_ag0 = wait_bucket[0]
         # wait_ag1 = wait_bucket[1]
         # user1(wait_ag1)
+        gm.recompile()
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "PRE_TOPO_SORT",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(False),
+        )
         stable_topological_sort(gm.graph)
 
     # Keep these last, since they introduce mutation. Look at

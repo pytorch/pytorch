@@ -2355,9 +2355,9 @@ class Scheduler:
                 },
                 payload_fn=lambda: "\n\n".join(
                     [
-                        f"snode[{i}]"
+                        f"\nsnode[{i}]"
                         + n.debug_str()
-                        + f" buffer_names:{n.get_buffer_names()}"
+                        + f"\nruntime_estimation(us):{n.get_estimated_runtime() / 1e3}"
                         for i, n in enumerate(self.nodes)
                     ]
                 ),
