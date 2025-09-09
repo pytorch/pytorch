@@ -640,6 +640,23 @@ class CachingAutotuner(KernelInterface):
         self.fn._hash_lock = None
         return old_values
 
+    def restore_after_unpickle(
+        self, old_values: Optional[tuple[Any, Any, Any, Any, Any, Any]]
+    ) -> None:
+        if old_values:
+            (
+                self.fn.fn,
+                self.fn.__globals__,
+                self.fn.used_global_vals,
+                self.fn.repr,
+                self.launchers,
+                self.fn._hash_lock,
+            ) = old_values
+        else:
+            # even if we don't need/have specific values, we do need the
+            # _hash_lock to be a valid RLock
+            self.fn._hash_lock = threading.RLock()
+
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
@@ -745,15 +762,6 @@ class CachingAutotuner(KernelInterface):
                     "num_buffers_warp_spec": compile_meta.get(
                         "num_buffers_warp_spec", 0
                     ),
-                }
-            )
-        if self.device_props.type == "cuda":
-            options.update(
-                {
-                    "launch_cooperative_grid": compile_meta.get(
-                        "launch_cooperative_grid", False
-                    ),
-                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
         if self.device_props.type == "hip":
@@ -1493,11 +1501,6 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if inductor_meta.get("store_cubin", None):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
-
-            if kernel.metadata.launch_pdl or kernel.metadata.launch_cooperative_grid:
-                raise CannotStaticallyLaunchKernel(
-                    "static launch does not support launch attributes"
-                )
 
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
@@ -2813,9 +2816,6 @@ def cooperative_reduction(
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
-
-    triton_meta = {} if triton_meta is None else triton_meta
-    triton_meta["launch_cooperative_grid"] = True
 
     # Cooperative reductions currently only support a single reduction dimension.
     assert len(size_hints) == 2, (
