@@ -869,7 +869,7 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
   c10::SymDimVector res;
   const auto size = PyTuple_GET_SIZE(obj);
   res.reserve(size);
-  for (const auto idx: c10::irange(size)) {
+  for (const auto idx : c10::irange(size)) {
     PyObject* item = PyTuple_GET_ITEM(obj, idx);
     if (THPUtils_checkLongExact(item)) {
       res.emplace_back(THPUtils_unpackLong(item));
@@ -919,8 +919,9 @@ static PyObject* THPVariable_dtensor_new(
   const auto& local_tensor = r.tensor(1);
   const bool requires_grad = r.toBool(3);
   if (local_tensor.requires_grad() && !requires_grad) {
-    TORCH_WARN("To construct DTensor from torch.Tensor, it's recommended to use "
-               "local_tensor.detach() and make requires_grad consistent.");
+    TORCH_WARN(
+        "To construct DTensor from torch.Tensor, it's recommended to use "
+        "local_tensor.detach() and make requires_grad consistent.");
   }
   const auto options = TensorOptions()
                            .dtype(local_tensor.dtype())
@@ -939,7 +940,9 @@ static PyObject* THPVariable_dtensor_new(
   py::handle spec = py::handle(r.pyobject(2));
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
   const auto sizes = tensor_meta.attr(dtensor_interned_strings.shape);
-  TORCH_CHECK(THPSize_Check(sizes.ptr()), "spec.tensor_meta.shape must be a torch.Size");
+  TORCH_CHECK(
+      THPSize_Check(sizes.ptr()),
+      "spec.tensor_meta.shape must be a torch.Size");
   const auto stride = tensor_meta.attr(dtensor_interned_strings.stride);
   TORCH_CHECK(PyTuple_Check(stride.ptr()));
 
@@ -950,13 +953,14 @@ static PyObject* THPVariable_dtensor_new(
       options,
       /*storage_size=*/std::nullopt,
       extra_dispatch_keys);
-  py::object py_tensor = py::reinterpret_steal<py::object>(THPVariable_NewWithVar(
-      (PyTypeObject*)cls,
-      tensor,
-      // false is the default
-      /*allow_preexisting_pyobj=*/false,
-      // we know DTensor has __torch_dispatch__; avoid checking again.
-      /*has_torch_dispatch_if_known=*/true));
+  py::object py_tensor =
+      py::reinterpret_steal<py::object>(THPVariable_NewWithVar(
+          (PyTypeObject*)cls,
+          tensor,
+          // false is the default
+          /*allow_preexisting_pyobj=*/false,
+          // we know DTensor has __torch_dispatch__; avoid checking again.
+          /*has_torch_dispatch_if_known=*/true));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
   py_tensor.attr(dtensor_interned_strings._local_tensor) = local_tensor;
   return py_tensor.release().ptr();
