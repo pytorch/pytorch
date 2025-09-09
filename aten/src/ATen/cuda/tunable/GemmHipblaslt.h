@@ -91,7 +91,10 @@ constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
 #if ROCM_VERSION >= 70000
   return HIP_R_4F_E2M1;
 #else
+<<<<<<< HEAD
   // Return HIP_R_4F_E2M1 enum value for earlier ROCm version.
+=======
+>>>>>>> upstream/main
   return static_cast<hipDataType>(33);
 #endif
 }

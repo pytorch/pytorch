@@ -70,6 +70,7 @@ CPU_TEST_FAILURES = {
     "test_cond_with_multiple_outputs": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
+    "test_custom_op_in_subgraph": fail_minimal_arrayref_interface(),
     "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
     "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),

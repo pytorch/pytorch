@@ -1,22 +1,26 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
+    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_bw_fn,
     first_slice_copy,
+    first_slice_copy_with_grad,
+    get_tensor_mask,
+    mask_list,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -57,50 +61,6 @@ def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
         .repeat(*([scan_length] + [1] * y.ndim))
         .clone(memory_format=torch.contiguous_format)
     )
-
-
-# NOTE: These functions can be reused in associative_scan and eventually moved to
-# torch._higher_order_ops.utils
-def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
-    # Returns a mask whether a list element is a tensor or not
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
-
-
-def mask_list(
-    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
-) -> list[Any]:
-    # Masks elements on an `inp` list.
-    # If other is None, then the elements of the `inp` list where the mask is False are removed
-    # If other is not None, then the elements of the `inp` list where the mask is False are
-    # replaced with the elements of the `other` list
-    assert len(mask) == len(inp), (
-        "The length of the mask needs to be identical to the length of the input"
-    )
-    if other is not None:
-        assert len(inp) == len(other), (
-            "If an input and an other list is provided, they need to have the same length"
-        )
-        return [i if m else o for m, i, o in zip(mask, inp, other)]
-    else:
-        return [i for m, i in zip(mask, inp) if m]
-
-
-def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
-    # First_slice_copy does not keep the original requires_grad flag,
-    # but we need it for materialize_as_graph
-    # in order to compute the correct gradients
-    # The reason why first_slice_copy doesn't keep requires_grad flag is
-    # because it's called in torch.autograd.Function.backward/forward.
-    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-    return slc
-
-
-def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    assert sum(chunk_sizes) == len(iterable), (
-        "the sum of all chunks needs to match the length of the iterable."
-    )
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 def call_operator(operator, *args):
@@ -273,6 +233,56 @@ class ScanOp(HigherOrderOperator):
         )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, additional_inputs)
+
+    def gen_schema(self, combine_fn, init, xs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        all_inputs = tuple(
+            list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
+        )
+
+        combine_gm: torch.fx.GraphModule = (
+            combine_fn
+            if isinstance(combine_fn, torch.fx.GraphModule)
+            else materialize_as_graph(combine_fn, all_inputs)
+        )
+
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in combine_gm.graph.find_nodes(op="placeholder")
+        ]
+
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("combine_fn", combine_gm)
+
+        for idx, arg in enumerate(init):
+            schema_gen.add_arg(f"init{idx}", arg)
+
+        for idx, arg in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", arg)
+
+        for idx, arg in enumerate(additional_inputs):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(combine_fn, init, xs, additional_inputs)
+        return schema_gen.gen_schema()
 
 
 scan_op = ScanOp()

@@ -29,6 +29,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
+from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
@@ -197,6 +198,32 @@ class TestAutocastMPS(TestCase):
 
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
+
+    def test_conv_transpose3d_autocast_fp32(self):
+        m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
+        x = torch.randn(20, 16, 10, 50, 100, device="mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = m(x)
+        self.assertEqual(y.dtype, torch.float32)
+
+    def test_conv3d_autocast(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160415
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv3d(3, 3, 1)
+                self.c2 = nn.Conv3d(3, 3, 1)
+
+            def forward(self, x):
+                x = self.c1(x)
+                x = self.c2(x)
+                return x
+
+        x = torch.randn(2, 3, 4, 4, 4, device="mps")
+        model = Foo().to("mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = model(x)
+        self.assertEqual(y.dtype, torch.float16)
 
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
@@ -711,6 +738,33 @@ class TestAvgPool(TestCaseMPS):
             padding=(0, 1), stride=2)
         self.assertFalse(torch.isnan(y).any())
 
+    # Test some cases for avg_pool2d which used to mismatch CPU results.
+    # Addresses this issue: https://github.com/pytorch/pytorch/issues/160743
+    def test_avg_pool2d_ceil_mode_mismatch(self):
+        sizes = [
+            (4, 2, 3),
+            (5, 2, 3),
+            (50, 2, 3),
+            (4, 1, 2, 3),
+            (4, 4, 2, 3),
+            (2, 2, 4, 6),
+            (5, 40, 60),
+            (2, 2, 40, 60),
+        ]
+
+        kwargs = dict(kernel_size=[1, 3],
+                      stride=[2, 3],
+                      ceil_mode=True,
+                      divisor_override=7)
+
+        for input_size in sizes:
+            model = torch.nn.AvgPool2d(**kwargs)
+            x = torch.arange(math.prod(input_size), dtype=torch.float).reshape(input_size)
+            out_cpu = model(x)
+            out_mps = model(x.to("mps"))
+            msg = f'{input_size=}, {kwargs=}'
+            self.assertEqual(out_mps, out_cpu, msg=msg)
+
 
 class TestMPS(TestCaseMPS):
     def test_exp(self, device="mps", dtype=torch.float):
@@ -1189,6 +1243,17 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "argument input is on cpu but expected on mps"):
             torch.nn.functional.linear(torch.rand(size, device='cpu'),
                                        torch.rand(size, device='mps'))
+
+    def test_linear_non_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161640
+        # Slice tensors to force non-contiguity
+        large_weight = torch.randn(12, 8, device='mps')
+        weight_sliced = large_weight[::2, ::1]
+        weight_contiguous_equiv = weight_sliced.contiguous()
+        input_s = torch.randn(2, 8, device='mps')
+        result_sliced = torch.nn.functional.linear(input_s, weight_sliced)
+        result_contig = torch.nn.functional.linear(input_s, weight_contiguous_equiv)
+        self.assertEqual(result_contig, result_sliced)
 
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
@@ -5294,6 +5359,9 @@ class TestMPS(TestCaseMPS):
 
         helper()
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/160738
+        self.assertTrue(torch.var(torch.tensor(3.13, device='mps'), dim=0).isnan().item())
+
     # Test forward amax
     def test_amax(self):
         def helper(shape, dim, keepdim):
@@ -7456,6 +7524,39 @@ class TestMPS(TestCaseMPS):
             uniq = mps_out.unique()
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_dropout(self, dtype):
+        shapes = [
+            (100_000,),
+            (100, 1000),
+            (10, 100, 100),
+            (10, 10, 10, 10, 10),
+        ]
+        p_list = [0, 0.34, 0.78, 1]
+
+        for shape, p, train in itertools.product(shapes, p_list, [False, True]):
+            input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
+            output, mask = torch.native_dropout(input, p, train=train)
+
+            p_actual_mps = 1 - (mask.sum() / mask.numel())
+            if train:
+                self.assertEqual(p_actual_mps, p, atol=1e-2, rtol=1e-2)
+                self.assertTrue((output[mask.logical_not()] == 0).all())
+                self.assertEqual(output[mask], input[mask] / (1 - p))
+            else:
+                self.assertEqual(output, input)
+                self.assertTrue(mask.all())
+
+            output_grad = torch.randn_like(output)
+            output.backward(output_grad)
+
+            grad_scale = 0 if p == 1 else 1 / (1 - p)
+            if train:
+                self.assertEqual(input.grad, output_grad * mask * grad_scale)
+            else:
+                self.assertEqual(input.grad, output_grad)
+
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -7735,6 +7836,8 @@ class TestMPS(TestCaseMPS):
         y = torch.arange(32, device='mps', dtype=torch.int32)
         self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
         self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+        # Regression test for https://github.com/pytorch/pytorch/issues/160208
+        self.assertEqual(torch.add(y, x, alpha=2).cpu(), torch.add(y.cpu(), x.cpu(), alpha=2))
 
     # Test add
     def test_add_scalars(self):
@@ -7946,6 +8049,14 @@ class TestMPS(TestCaseMPS):
         for x in [x_mps, x_cpu]:
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
+
+    def test_empty_posneginf(self):
+        # just to check that it doesnt crash
+        input_tensor = torch.empty(0, device="mps")
+        out_pos = torch.isposinf(input_tensor)
+        out_neg = torch.isposinf(input_tensor)
+        self.assertEqual(out_pos.numel(), 0)
+        self.assertEqual(out_neg.numel(), 0)
 
 
 class TestLargeTensors(TestCaseMPS):
@@ -8872,6 +8983,12 @@ class TestPad(TestCaseMPS):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_constant_pad_nd_with_empty_pad(self):
+        # Empty constant pad is no-op
+        # See https://github.com/pytorch/pytorch/issues/161066
+        input_mps = torch.randn((2, 3, 4), device="mps")
+        output_mps = torch.constant_pad_nd(input_mps, [])
+        self.assertEqual(output_mps, input_mps)
 
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
@@ -9445,6 +9562,78 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+
+
+
+class TestSDPAMetaDispatchMode(TorchDispatchMode):
+    """
+    TorchDispatchMode which intercepts the
+    _scaled_dot_product_attention_math_for_mps aten operator to check that the
+    meta kernel is correct.
+    """
+
+    def __init__(self, test):
+        self.test = test
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args, kwargs=None):
+        kwargs = kwargs or {}
+        res = func(*args, **kwargs)
+        if func != torch.ops.aten._scaled_dot_product_attention_math_for_mps.default:
+            return res
+
+        meta_args, meta_kwargs = pytree.tree_map_only(torch.Tensor, lambda t: t.to(device="meta"), (args, kwargs))
+        meta_res = func(*meta_args, **meta_kwargs)
+
+        def format_res(res):
+            return [
+                (t.shape, t.stride(), t.dtype) if isinstance(t, torch.Tensor) else t
+                for t in pytree.tree_flatten(res)[0]
+            ]
+
+        # Format the output so that we only look at the tensor metadata
+        self.test.assertEqual(format_res(res), format_res(meta_res))
+        return res
+
+
+def create_sdpa_meta_test():
+    """
+    Creates a new class which takes every test in TestSDPA and adds the
+    TestSDPAMetaDispatchMode context in order to test the
+    scaled_dot_product_attention_for_mps meta kernel. This allows us to test all
+    the branches for the sdpa op. If there are changes to the sdpa kernel
+    without changing the meta kernel, a torch.compile guard will catch the issue
+    but not necessarily export.
+    """
+    orig_test_cls = TestSDPA
+
+    new_test_cls = type(f"{orig_test_cls.__name__}Meta", orig_test_cls.__bases__, {})
+    new_test_cls.__qualname__ = new_test_cls.__name__
+
+    for name in dir(orig_test_cls):
+        if name.startswith("test_"):
+            fn = getattr(orig_test_cls, name)
+            if not callable(fn):
+                setattr(new_test_cls, name, getattr(orig_test_cls, name))
+                continue
+
+            new_name = f"{name}_meta"
+
+            def new_fn(self, *args, **kwargs):
+                with TestSDPAMetaDispatchMode(self):
+                    fn(self, *args, **kwargs)
+
+            new_fn.__name__ = new_name
+
+            setattr(new_test_cls, new_name, new_fn)
+
+        elif not hasattr(new_test_cls, name):
+            setattr(new_test_cls, name, getattr(orig_test_cls, name))
+
+    return new_test_cls
+
+TestSDPAMeta = create_sdpa_meta_test()
+instantiate_parametrized_tests(TestSDPAMeta)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -12144,6 +12333,18 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
+            if op.name in ["grid_sampler_3d", "asinh"]:
+                atol, rtol = 1e-4, 1e-4
+
+            if op.name == "kthvalue":
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                # kthvalue is non-deterministic if input has repeated values
+                dim = cpu_args[2] if len(cpu_args) > 2 else -1
+                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
+                self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -12244,6 +12445,39 @@ class TestConsistency(TestCaseMPS):
                 # together, introducing significant error for float16.
                 atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+    # The CPU impl of grid_sampler_3d gives a large amount of error for half
+    # precision types. So instead of testing MPS-vs-CPU outputs, test
+    # full-vs-half precision dtypes for MPS.
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_grid_sampler_3d_half_precision(self, device, dtype):
+        op = next((op for op in test_consistency_op_db if op.name == "grid_sampler_3d"), None)
+        include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
+
+        def get_samples():
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                include_conjugated_inputs=include_conjugated_inputs,
+                set_seed=True,
+            )
+
+        for half_sample in get_samples():
+            half_input = half_sample.input
+            half_grid, mode, padding_mode, align_corners = half_sample.args
+
+            full_input = half_input.to(torch.float).detach()
+            full_grid = half_grid.to(torch.float).detach()
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                half_out = op(half_input, half_grid, mode, padding_mode, align_corners)
+                full_out = op(full_input, full_grid, mode, padding_mode, align_corners)
+
+            atol, rtol = 1e-4, 1e-4
+
+            self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
         # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
@@ -12570,58 +12804,6 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
-
-
-
-class TestSparseMPS(TestCaseMPS):
-    def _get_basic_sparse_coo(self, device="mps"):
-        indices = torch.tensor([[0, 1], [2, 0]], dtype=torch.int64, device=device)
-        values = torch.tensor([1, 2], dtype=torch.float32, device=device)
-        size = (2, 3)
-        return torch.sparse_coo_tensor(indices, values, size, device=device)
-
-    def test_sparse_coo_tensor_with_dims(self):
-        indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
-        values = torch.tensor([], dtype=torch.float32, device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-
-    def test_sparse_coo_tensor_with_dims_and_tensors(self):
-        indices = torch.tensor([[0, 1], [2, 0]], device="mps")
-        values = torch.tensor([1., 2.], device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-        self.assertEqual(t._indices().cpu(), indices.cpu())
-        self.assertEqual(t._values().cpu(), values.cpu())
-
-    def test_nnz(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t._nnz(), 2)
-
-    def test_sparse_dim(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t.sparse_dim(), 2)
-
-    def test_to_sparse(self):
-        t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x = t.to_sparse()
-        t_cpu = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x_cpu = t.to_sparse()
-        self.assertEqual(x.cpu(), x_cpu)
-
-    def test_resize(self):
-        indices = torch.tensor([[0, 1], [2, 0]])
-        values = torch.tensor([3.0, 4.0])
-        size = torch.Size([2, 3])
-        sparse = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
-        sparse = sparse.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        self.assertEqual(sparse, sparse_cpu)
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

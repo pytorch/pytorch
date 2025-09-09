@@ -44,6 +44,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -104,6 +105,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -167,10 +169,10 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -629,7 +631,7 @@ class VariableBuilder:
 
         from ..decorators import (
             DynamoConfigPatchProxy,
-            SetFullgraphDecoratorContextManager,
+            ErrorOnGraphBreakDecoratorContextManager,
         )
 
         if has_triton():
@@ -688,13 +690,10 @@ class VariableBuilder:
             )
             and type(value) not in config.nontraceable_tensor_subclasses
         ):
-            if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
-                # This case it's either tensor or subclass with default
-                # torch_dispatch (they might override torch_function or not),
-                # and we can always trace into them.
-                return self.wrap_tensor(value)
-            elif is_traceable_wrapper_subclass(value):
-                # For non-default torch_dispatch, we have more requirements.
+            if (
+                type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__
+                or is_traceable_wrapper_subclass(value)
+            ):
                 return self.wrap_tensor(value)
 
         if is_namedtuple(value):
@@ -709,7 +708,7 @@ class VariableBuilder:
             result = NamedTupleVariable(
                 output, tuple_cls=type(value), source=self.source
             )
-            return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -990,8 +989,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
-        elif isinstance(value, SetFullgraphDecoratorContextManager):
-            return SetFullgraphVariable(value.fullgraph)
+        elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
+            return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1332,9 +1331,16 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
-            # This is a userdefined class, so install an ID_MATCH even if its a
-            # global variable.
-            self.install_guards(GuardBuilder.ID_MATCH)
+
+            if not is_from_closure_source(self.source):
+                # For closure source, the variable comes from LOAD_SUPER_ATTR,
+                # which calls self.__class__. This is internal Cpython
+                # implementation, and it is rare for the user to modify
+                # self.__class__ manually.
+                # For other cases, this is a userdefined class, so install an
+                # ID_MATCH even if its a global variable.
+                self.install_guards(GuardBuilder.ID_MATCH)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1516,7 +1522,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return MutableMappingVariable(value, source=self.source)
+            result = MutableMappingVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
@@ -1735,11 +1742,6 @@ class VariableBuilder:
 
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
-
-        # See [Note] Static Addresses and Precompile
-        # https://github.com/pytorch/pytorch/issues/159228
-        if torch._dynamo.config.caching_precompile:
-            return
 
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
@@ -2052,32 +2054,8 @@ class VariableBuilder:
             return self.tx.output.input_source_to_var[source]
 
         options = {}
-        if type(value) in (
-            torch.Tensor,
-            torch.nn.Parameter,
-            torch._subclasses.fake_tensor.FakeTensor,
-            torch._subclasses.functional_tensor.FunctionalTensor,
-        ) or is_traceable_wrapper_subclass(value):
-            # Ordinarily, we would fakeify a tensor so that it can get dynamic
-            # shapes and be computed on without triggering actual operations.
-            # However, how can we fakeify a tensor subclass?  Ordinary
-            # inheritance (nor multiple inheritance) won't work work.
-            #
-            # Instead, our plan is to *manually simulate* the tensor subclass
-            # inheriting from a fake tensor with dynamo.  This means our
-            # data representation for a tensor subclass will be a fake tensor
-            # + tensor subclass type + any extra data the subclass may have
-            # been storing on the tensor.  Because all Python accesses are
-            # mediated through TensorWithTFOverrideVariable, we can ensure
-            # that we dispatch differently, e.g., according to
-            # __torch_function__
-            #
-            # To simplify things for now, the __dict__ tracking bits haven't
-            # been implemented yet, but they can be added into this design at
-            # a later point in time.
-            subclass_type = None
-        else:
-            subclass_type = type(value)
+        subclass_type = infer_subclass_type(value)
+        if subclass_type is not None:
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
@@ -2935,7 +2913,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
+        tx.output.current_tracer.track_produced_symints(example_value, proxy)
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
@@ -2977,6 +2955,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.seed,
             operator.mod,
             torch._functorch.vmap._validate_and_get_batch_size,
+            torch._functorch.predispatch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_decrement_nesting,
             # some mac builds are missing torch.distributed.get_rank()
             getattr(torch.distributed, "get_rank", _missing),
             getattr(torch.distributed, "get_world_size", _missing),
@@ -3010,15 +2990,10 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is call_torchbind
-    ):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is flat_apply
+    elif isinstance(example_value, (int, float, bool)) and (
+        proxy.node.target is call_torchbind
+        or proxy.node.target is flat_apply
+        or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3032,6 +3007,55 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             explanation="torch.* ops that return a non-Tensor cannot be traced into the Dynamo FX graph output",
             hints=[],
         )
+
+
+def infer_subclass_type(value):
+    if type(value) in (
+        torch.Tensor,
+        torch.nn.Parameter,
+        torch._subclasses.fake_tensor.FakeTensor,
+        torch._subclasses.functional_tensor.FunctionalTensor,
+    ) or is_traceable_wrapper_subclass(value):
+        # Ordinarily, we would fakeify a tensor so that it can get dynamic
+        # shapes and be computed on without triggering actual operations.
+        # However, how can we fakeify a tensor subclass?  Ordinary
+        # inheritance (nor multiple inheritance) won't work work.
+        #
+        # Instead, our plan is to *manually simulate* the tensor subclass
+        # inheriting from a fake tensor with dynamo.  This means our
+        # data representation for a tensor subclass will be a fake tensor
+        # + tensor subclass type + any extra data the subclass may have
+        # been storing on the tensor.  Because all Python accesses are
+        # mediated through TensorWithTFOverrideVariable, we can ensure
+        # that we dispatch differently, e.g., according to
+        # __torch_function__
+        #
+        # To simplify things for now, the __dict__ tracking bits haven't
+        # been implemented yet, but they can be added into this design at
+        # a later point in time.
+        return None
+    else:
+        return type(value)
+
+
+def get_specialized_props(target_cls, tx, example_value, subclass_type):
+    specialized_props = target_cls.specialize(example_value)
+    # TODO: not sure about this fake mode test
+    if (
+        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+        and example_value.fake_mode is tx.fake_mode
+    ):
+        if subclass_type:
+            tensor_type = subclass_type
+        elif isinstance(example_value, torch.nn.Parameter):
+            tensor_type = torch.nn.Parameter
+        elif isinstance(example_value, torch.nn.Buffer):
+            tensor_type = torch.nn.Buffer
+        else:
+            tensor_type = torch.Tensor
+        specialized_props["class_type"] = tensor_type
+
+    return specialized_props
 
 
 def construct_tensor_variable(
@@ -3050,24 +3074,9 @@ def construct_tensor_variable(
     # So that subgraphs can access the unbacked symbol's proxy in parent graph
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
-    tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
-    specialized_props = target_cls.specialize(example_value)
-    # TODO: not sure about this fake mode test
-    if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
-    ):
-        if subclass_type:
-            tensor_type = subclass_type
-        elif isinstance(example_value, torch.nn.Parameter):
-            tensor_type = torch.nn.Parameter
-        elif isinstance(example_value, torch.nn.Buffer):
-            tensor_type = torch.nn.Buffer
-        else:
-            tensor_type = torch.Tensor
-        specialized_props["class_type"] = tensor_type
-
-    options.update(specialized_props)
+    if proxy.node.op != "placeholder":
+        tx.output.current_tracer.track_produced_symints(example_value, proxy)
+    options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
     return target_cls(proxy, **options)
 
 
@@ -3239,7 +3248,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3490,13 +3498,19 @@ def wrap_to_fake_tensor_and_record(
             type(e),
         )
 
-        fake_e = wrap_fake_exception(
-            lambda: tx.fake_mode.from_tensor(
-                e,
-                source=source,
-                symbolic_context=symbolic_context,
+        # Note [enable_python_dispatcher in dynamo]
+        # Dynamo disables itself when it runs fake tensor prop, which means that tensor subclasses
+        # have no way to know (purely based off of global state) if they are currently being run under compile or not.
+        # we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
+        # can check it to know if they are running in an eager context or not
+        with enable_python_dispatcher():
+            fake_e = wrap_fake_exception(
+                lambda: tx.fake_mode.from_tensor(
+                    e,
+                    source=source,
+                    symbolic_context=symbolic_context,
+                )
             )
-        )
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
@@ -3588,6 +3602,12 @@ class SourcelessBuilder:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
+        elif callable(value) and UserDefinedClassVariable.is_supported_new_method(
+            value
+        ):
+            # NamedTuple._make uses an alias of tuple.__new__
+            obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
+            return GetAttrVariable(obj, "__new__")
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
         elif isinstance(

@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_XPU,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
 
@@ -135,7 +135,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_CUDA else 0
+        expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -146,7 +146,7 @@ class TestDecomposeMemMM(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 3 if should_decompose and HAS_CUDA else 0
+        expected_val = 3 if should_decompose and HAS_CUDA_AND_TRITON else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -195,7 +195,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_CUDA else 0
+        expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -248,7 +248,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and HAS_CUDA else 0
+            expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
@@ -293,7 +293,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_CUDA else 0
+        expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             expected_val,
@@ -305,7 +305,7 @@ class TestDecomposeMemMM(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 1 if should_decompose and HAS_CUDA else 0
+        expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
@@ -361,7 +361,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and HAS_CUDA else 0
+            expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -373,7 +373,7 @@ class TestDecomposeMemMM(TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = 1 if should_decompose and HAS_CUDA else 0
+            expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
@@ -397,7 +397,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_CUDA else 0
+        expected_val = 1 if should_decompose and HAS_CUDA_AND_TRITON else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -411,7 +411,7 @@ class TestDecomposeMemMM(TestCase):
         self.compare_gradients(module, traced)
 
         expected_val = 0
-        if HAS_CUDA:
+        if HAS_CUDA_AND_TRITON:
             expected_val = 1 if has_bias else 2
 
         self.assertEqual(

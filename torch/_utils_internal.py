@@ -117,6 +117,10 @@ def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def add_mlhub_insight(category: str, insight: str, insight_description: str):
+    pass
+
+
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
@@ -348,5 +352,16 @@ def get_default_numa_options():
     available in torchrun.
 
     Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
+    return None
+
+
+def log_triton_builds(fail: Optional[str]):
+    pass
+
+
+def find_compile_subproc_binary() -> Optional[str]:
+    """
+    Allows overriding the binary used for subprocesses
     """
     return None

@@ -1,6 +1,7 @@
 # Owner(s): ["module: nn"]
 import itertools
 import math
+import os
 import unittest
 import warnings
 from itertools import product
@@ -60,6 +61,10 @@ from torch.testing._internal.common_utils import (
 
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+
+if TEST_WITH_ROCM:
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
 if TEST_SCIPY:
@@ -2843,6 +2848,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
+    @expectedFailureMPS  # No double support
     def test_conv_backend(
         self,
         device,
@@ -3239,17 +3245,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         _model_cpu = model.cpu().float()
         output_cpu = model(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
-
-    @onlyCUDA
-    @skipCUDAIfRocm
-    @largeTensorTest("24GB", "cpu")
-    @largeTensorTest("20GB", "cuda")
-    def test_conv3d_large_batch_1(self, device):
-        x = torch.rand(1, 32, 512, 512, 256)
-        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
-        yref = m(x)
-        y = m.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y.cpu())
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
@@ -4043,6 +4038,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest('40GB')
     @largeTensorTest('24GB', 'cpu')
@@ -4060,13 +4056,22 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half)
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
         c = nn.Conv2d(
             2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
-        )
+        ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        del y, yref
+
+        # try a batch-splittable case
+        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

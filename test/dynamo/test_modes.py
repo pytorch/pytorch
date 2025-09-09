@@ -11,7 +11,10 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._dynamo.utils import counters
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -58,6 +61,54 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_torch_dispatch_ignore_compile_internals(self):
+        counters.clear()
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        def checksum(x):
+            return x.abs().sum()
+
+        _checksums = []
+
+        class ChecksumFoo(TorchDispatchMode):
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+
+                if func is torch.ops.mylib.foo.default:
+                    # Do some compute, smoketest to see if there's a bad interaction
+                    _checksums.append(args[0].abs().sum())
+
+                return func(*args, **kwargs)
+
+        # test e2e, with Inductor, as smoketest.
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend="inductor")
+        def g(x):
+            return 2 * x.sin().cos()
+
+        x = torch.randn(3)
+
+        with ChecksumFoo():
+            foo(x)
+            g(x)
+            foo(x)
+
+        self.assertEqual(len(_checksums), 2)
+        # The correct result here is 1: Dynamo should capture the `g` frame.
+        self.assertEqual(counters["frames"]["total"], 1)
+        self.assertEqual(counters["frames"]["ok"], 1)
 
     def test_skip_torch_dispatch_modes(self):
         class RewriteAddToMul(TorchDispatchMode):
@@ -678,6 +729,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             torch.compile(mod, fullgraph=True)(x)
 
     @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
         import torch
         import torch._higher_order_ops
@@ -685,7 +737,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             flex_attention = torch.compile(flex_attention_eager, dynamic=False)
 
             with self.assertRaisesRegex(
@@ -701,6 +753,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     )
 
     @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
         import torch
         import torch._higher_order_ops
@@ -708,7 +761,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "raised exception HopDetectionError([ConstantVariable(str: 'test')])",

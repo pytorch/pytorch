@@ -29,6 +29,7 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
         public_include_directories = ["../.."],
         public_preprocessor_flags = pp_flags,
         public_raw_headers = native.glob([
+            "core/**/*.h",
             "cpu/**/*.h",
             "macros/*.h",
             "util/*.h",

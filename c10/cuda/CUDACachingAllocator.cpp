@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -62,6 +63,10 @@ namespace cuda::CUDACachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
+
+// Included here as this is externally used in CUDAAllocatorConfig
+const size_t kLargeBuffer =
+    20971520; // "large" allocations may be packed in 20 MiB blocks
 
 namespace Native {
 
@@ -1162,8 +1167,13 @@ class DeviceCachingAllocator {
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
-  // See free() for this thing's purpose
-  std::vector<Block*> needs_events_deferred_until_no_capture;
+  // Map of blocks whose freeing is deferred until after CUDA graph capture.
+  //   - Key: Block* to be freed.
+  //   - Value: List of "empty nodes" inserted as free markers during capture.
+  //     If the vector is empty, the block must always be deferred until capture
+  //     ends.
+  ska::flat_hash_map<Block*, std::vector<cudaGraphNode_t>> deferred_blocks;
+
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
@@ -1218,7 +1228,7 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
     stats.max_split_size =
-        static_cast<int64_t>(AcceleratorAllocatorConfig::max_split_size());
+        static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
   }
 
@@ -1324,6 +1334,11 @@ class DeviceCachingAllocator {
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
       process_events(context);
+    } else {
+      if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+        // We check if there is some block that is safe to reuse on this stream
+        free_safe_blocks_in_capture(context, stream);
+      }
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -1343,8 +1358,7 @@ class DeviceCachingAllocator {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
               set_fraction &&
-              AcceleratorAllocatorConfig::garbage_collection_threshold() >
-                  0.0)) {
+              CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks(context);
       }
       // Attempt allocate
@@ -1596,7 +1610,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
     });
-    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+    if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
 
     auto allocated_bytes_gauge =
@@ -1613,6 +1627,248 @@ class DeviceCachingAllocator {
         c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
+  }
+
+  // Insert "free marker" (empty nodes) into the CUDA graph for all streams that
+  // have used the block, including the allocation stream. These nodes mark the
+  // last use of the block in the capture graph. Returns a vector of the
+  // inserted nodes, or an empty vector if any stream is not capturing.
+  std::vector<cudaGraphNode_t> insert_free_marker(Block* block) {
+    std::vector<cudaGraphNode_t> empty_nodes;
+
+    auto try_add_empty_node = [&](cudaStream_t stream) -> bool {
+      cudaStreamCaptureStatus status{};
+      cudaGraph_t graph{};
+      const cudaGraphNode_t* deps = nullptr;
+      size_t num_deps = 0;
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+          stream, &status, nullptr, &graph, &deps, nullptr, &num_deps));
+#else
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+          stream, &status, nullptr, &graph, &deps, &num_deps));
+#endif
+
+      TORCH_INTERNAL_ASSERT(
+          status != cudaStreamCaptureStatusInvalidated,
+          "Invalid stream capture status");
+
+      if (status == cudaStreamCaptureStatusNone) {
+        return false;
+      }
+
+      cudaGraphNode_t node{};
+      C10_CUDA_CHECK(cudaGraphAddEmptyNode(&node, graph, deps, num_deps));
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+          stream, &node, nullptr, 1, cudaStreamSetCaptureDependencies));
+#else
+      C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+          stream, &node, 1, cudaStreamSetCaptureDependencies));
+#endif
+      empty_nodes.push_back(node);
+      return true;
+    };
+
+    // If any stream is not currently capturing, return an empty node vector.
+    // An empty vector indicates that the block should be deferred for freeing
+    // until after capture.
+
+    // Attempt to add an empty node for the allocation stream.
+    if (!try_add_empty_node(block->stream)) {
+      return {};
+    }
+    // Attempt to add empty nodes for all streams that have used the block.
+    for (const auto& s : block->stream_uses) {
+      if (!try_add_empty_node(s.stream())) {
+        return {};
+      }
+    }
+    return empty_nodes;
+  }
+
+  // Returns the current set of "terminal" nodes in the CUDA graph for a given
+  // stream. These represent the current endpoints of the stream, and may
+  // include additional nodes if the graph branches. Any new work captured will
+  // be attached after one or more of these terminals.
+  std::vector<cudaGraphNode_t> get_terminals(cudaStream_t stream) {
+    std::vector<cudaGraphNode_t> result;
+
+    cudaStreamCaptureStatus status{};
+    cudaGraph_t graph{};
+    const cudaGraphNode_t* dependencies = nullptr;
+    size_t num_dependencies = 0;
+
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &status,
+        nullptr,
+        &graph,
+        &dependencies,
+        nullptr,
+        &num_dependencies));
+#else
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+        stream, &status, nullptr, &graph, &dependencies, &num_dependencies));
+#endif
+
+    TORCH_INTERNAL_ASSERT(
+        status == cudaStreamCaptureStatusActive,
+        "Invalid stream capture status");
+
+    for (size_t i = 0; i < num_dependencies; i++) {
+      auto node = dependencies[i];
+      if (node != nullptr) {
+        result.push_back(node);
+      }
+    }
+
+    return result;
+  }
+
+  // Returns the set of "reusable" free markers (empty nodes) in the current
+  // CUDA graph capture. A free marker is considered reusable if it is a
+  // predecessor of every terminal node.
+  // This ensures that all future captured work will occur after the free
+  // marker, making it safe to reuse.
+  ska::flat_hash_set<cudaGraphNode_t> get_reusable_empty_nodes(
+      cudaStream_t stream) {
+    auto terminals = get_terminals(stream);
+    if (terminals.empty()) {
+      // No terminal nodes found; nothing to free.
+      return {};
+    }
+
+    auto get_dependencies = [](cudaGraphNode_t node,
+                               cudaGraphNode_t* pDependencies,
+                               size_t* pNumDependencies) -> void {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          node, pDependencies, nullptr, pNumDependencies));
+#else
+      C10_CUDA_CHECK(
+          cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies));
+#endif
+    };
+
+    // Helper to retrieve all parent nodes (dependencies) of a given node.
+    auto get_parents =
+        [&](cudaGraphNode_t node) -> std::vector<cudaGraphNode_t> {
+      size_t count = 0;
+      get_dependencies(node, nullptr, &count);
+      std::vector<cudaGraphNode_t> out(count);
+      if (count) {
+        get_dependencies(node, out.data(), &count);
+        out.resize(count);
+      }
+      return out;
+    };
+
+    // Helper to determine if a node is an empty node (used as a free marker).
+    auto is_empty_node = [](cudaGraphNode_t n) -> bool {
+      cudaGraphNodeType type{};
+      C10_CUDA_CHECK(cudaGraphNodeGetType(n, &type));
+      return type == cudaGraphNodeTypeEmpty;
+    };
+
+    // For each terminal node, perform a reverse DFS to count, for each empty
+    // node, how many terminals it can reach (i.e., for how many terminals it is
+    // a predecessor). An empty node is reusable if it is a predecessor of all
+    // terminal nodes.
+    ska::flat_hash_map<cudaGraphNode_t, size_t> num_terminals_reachable;
+
+    for (auto terminal : terminals) {
+      ska::flat_hash_set<cudaGraphNode_t> visited;
+      ska::flat_hash_set<cudaGraphNode_t> empty_nodes;
+
+      std::function<void(cudaGraphNode_t)> reverse_dfs =
+          [&](cudaGraphNode_t node) {
+            if (!visited.insert(node).second)
+              return;
+
+            if (is_empty_node(node)) {
+              num_terminals_reachable[node]++;
+              empty_nodes.insert(node);
+            }
+            auto parents = get_parents(node);
+            for (auto p : parents) {
+              reverse_dfs(p);
+            }
+          };
+
+      reverse_dfs(terminal);
+    }
+
+    ska::flat_hash_set<cudaGraphNode_t> reusable_empty_nodes;
+    for (auto [node, count] : num_terminals_reachable) {
+      if (count == terminals.size()) {
+        reusable_empty_nodes.insert(node);
+      }
+    }
+
+    return reusable_empty_nodes;
+  }
+
+  // A block is considered reusable during CUDA graph capture if every free
+  // marker (empty node) associated with the block is a predecessor of every
+  // terminal node.
+  //
+  // This ensures that any new operation added to the graph will be attached
+  // after all terminal nodes, which themselves are after all free markers. As a
+  // result, all future work is guaranteed to occur after the block's last use
+  // on every stream, so the block's previous lifetime ends before any new
+  // lifetime begins. This check relies solely on the DAG topology and does not
+  // require event queries, making it safe to use during capture.
+  //
+  // This function iterates over all deferred blocks, determines if their empty
+  // nodes are reusable according to the above criteria, and frees the block if
+  // so.
+  void free_safe_blocks_in_capture(
+      const std::shared_ptr<GatheredContext>& context,
+      cudaStream_t stream) {
+    auto reusable_empty_nodes = get_reusable_empty_nodes(stream);
+
+    // If there are no reusable empty nodes (e.g., not currently capturing),
+    // there is nothing to do.
+    if (reusable_empty_nodes.empty()) {
+      return;
+    }
+
+    std::vector<Block*> blocks_to_erase;
+
+    for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
+      // Skip this block if it has no empty nodes, as we defer its freeing until
+      // after graph capture. Also skip if the block was not allocated on the
+      // current stream; such blocks will be freed when
+      // free_safe_blocks_in_capture is attempted on that stream.
+      if (inserted_empty_nodes.empty() || block->stream != stream) {
+        continue;
+      }
+
+      bool is_reusable = true;
+
+      for (const auto& node : inserted_empty_nodes) {
+        if (reusable_empty_nodes.find(node) == reusable_empty_nodes.end()) {
+          is_reusable = false;
+          break;
+        }
+      }
+
+      if (is_reusable) {
+        // Clear stream uses since the graph ensures proper synchronization.
+        // No need to insert events.
+        block->stream_uses.clear();
+
+        free_block(block, context);
+        blocks_to_erase.push_back(block);
+      }
+    }
+
+    // Remove blocks that were freed from the deferred_blocks map.
+    for (auto* block : blocks_to_erase) {
+      deferred_blocks.erase(block);
+    }
   }
 
   void free(Block* block) {
@@ -1647,17 +1903,25 @@ class DeviceCachingAllocator {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
-    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+    if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
 
+    // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
-        // It's forbidden to cudaEventQuery an event recorded during CUDA graph
-        // capture. We conservatively defer recording end-of-life events until
-        // the next call to process_events() (which won't happen until no
-        // captures are underway)
-        needs_events_deferred_until_no_capture.push_back(block);
+        if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+          // insert_free_marker returns a vector of free markers,
+          // or an empty vector if any associated stream is not currently
+          // capturing. The empty vector means that we will defer the free until
+          // capture is finished.
+          deferred_blocks.emplace(block, insert_free_marker(block));
+        } else {
+          // If graph_capture_record_stream_reuse is not enabled, always defer
+          // the free until capture is finished.
+          deferred_blocks.emplace(block, std::vector<cudaGraphNode_t>{});
+        }
       } else {
+        // If not in a capture, insert events for the block.
         insert_events(block);
       }
     } else {
@@ -2196,8 +2460,7 @@ class DeviceCachingAllocator {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      auto divisions =
-          AcceleratorAllocatorConfig::roundup_power2_divisions(size);
+      auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
@@ -2676,7 +2939,7 @@ class DeviceCachingAllocator {
     if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < AcceleratorAllocatorConfig::max_split_size()) &&
+      return (size < CUDAAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
@@ -2696,7 +2959,7 @@ class DeviceCachingAllocator {
 
     if (C10_UNLIKELY(
             set_fraction &&
-            AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+            CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
     }
@@ -2738,13 +3001,13 @@ class DeviceCachingAllocator {
     }
 
     // Do not return an oversized block for a large request
-    if ((p.size() < AcceleratorAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()))
+    if ((p.size() < CUDAAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= CUDAAllocatorConfig::max_split_size()))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= AcceleratorAllocatorConfig::max_split_size()) &&
+    if ((p.size() >= CUDAAllocatorConfig::max_split_size()) &&
         ((*it)->size >=
-         p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
+         p.size() + CUDAAllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -2767,7 +3030,7 @@ class DeviceCachingAllocator {
     // therefore should be of less overheads.
 
     size_t gc_threshold = static_cast<size_t>(
-        AcceleratorAllocatorConfig::garbage_collection_threshold() *
+        CUDAAllocatorConfig::garbage_collection_threshold() *
         static_cast<double>(allowed_memory_maximum));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
@@ -2915,7 +3178,7 @@ class DeviceCachingAllocator {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
-    if (size >= AcceleratorAllocatorConfig::max_split_size())
+    if (size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_segments.increase(1);
     auto reserved_bytes_gauge =
         STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
@@ -2944,7 +3207,7 @@ class DeviceCachingAllocator {
   bool release_available_cached_blocks(
       const AllocParams& p,
       const std::shared_ptr<GatheredContext>& context) {
-    if (AcceleratorAllocatorConfig::max_split_size() ==
+    if (CUDAAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
@@ -2952,8 +3215,8 @@ class DeviceCachingAllocator {
     // because of std::unique_ptr, block cannot be trivially copied
     // Use constructor for search key.
     Block key(p.search_key.device, p.search_key.stream, p.search_key.size);
-    key.size = (key.size < AcceleratorAllocatorConfig::max_split_size())
-        ? AcceleratorAllocatorConfig::max_split_size()
+    key.size = (key.size < CUDAAllocatorConfig::max_split_size())
+        ? CUDAAllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
@@ -2966,7 +3229,7 @@ class DeviceCachingAllocator {
       --it; // Back up one item.  Now on the largest block for the correct
             // stream
       while ((totalReleased < key.size) &&
-             ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()) &&
+             ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
         bool is_first = cur == pool.blocks.begin();
@@ -2974,8 +3237,8 @@ class DeviceCachingAllocator {
           --it;
         }
         if (!(*cur)->expandable_segment_) {
-          release_block(*cur, context);
           totalReleased += (*cur)->size;
+          release_block(*cur, context);
         }
         if (is_first) {
           break;
@@ -3091,7 +3354,7 @@ class DeviceCachingAllocator {
         stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
             .current);
 
-    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+    if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_segments.decrease(1);
     pool->blocks.erase(block);
     delete block;
@@ -3284,8 +3547,8 @@ class DeviceCachingAllocator {
 
   void insert_events_deferred_until_no_capture(
       const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
-      for (auto* block : needs_events_deferred_until_no_capture) {
+    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+      for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // only streams recorded before cudagraph will be used to insert events
         // since we know all streams recorded during cudagraph must have
@@ -3297,7 +3560,7 @@ class DeviceCachingAllocator {
           free_block(block, context);
         }
       }
-      needs_events_deferred_until_no_capture.clear();
+      deferred_blocks.clear();
     }
   }
 
@@ -3718,8 +3981,8 @@ class NativeCachingAllocator : public CUDAAllocator {
 
     auto& md = result.config_metadata;
     md.garbage_collection_threshold =
-        AcceleratorAllocatorConfig::garbage_collection_threshold();
-    md.max_split_size = AcceleratorAllocatorConfig::max_split_size();
+        CUDAAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = CUDAAllocatorConfig::max_split_size();
     md.pinned_num_register_threads =
         CUDAAllocatorConfig::pinned_num_register_threads();
     md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
@@ -3727,10 +3990,11 @@ class NativeCachingAllocator : public CUDAAllocator {
         CUDAAllocatorConfig::release_lock_on_cudamalloc();
     md.pinned_use_host_register =
         CUDAAllocatorConfig::pinned_use_cuda_host_register();
-    md.last_allocator_settings =
-        AcceleratorAllocatorConfig::last_allocator_settings();
+    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
+    md.graph_capture_record_stream_reuse =
+        CUDAAllocatorConfig::graph_capture_record_stream_reuse();
     md.roundup_power2_divisions =
-        AcceleratorAllocatorConfig::roundup_power2_divisions();
+        CUDAAllocatorConfig::roundup_power2_divisions();
 
     return result;
   }
@@ -4108,17 +4372,67 @@ CUDAAllocator* allocator();
 } // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
+  // Parses env for backend at load time, duplicating some logic from
+  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
+  // runtime). Defers verbose exceptions and error checks, including Cuda
+  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
+  // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    // If the environment variable is set, we use the CudaMallocAsync allocator.
-    if (CUDAAllocatorConfig::use_async_allocator()) {
-      return CudaMallocAsync::allocator();
+    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+    // convenience for ROCm users to allow either CUDA or HIP env var
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+    }
+#endif
+    if (val.has_value()) {
+      const std::string& config = val.value();
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          if (kv[0] == "backend") {
+#ifdef USE_ROCM
+            // convenience for ROCm users to allow either CUDA or HIP env var
+            if (kv[1] ==
+                    "cud"
+                    "aMallocAsync" ||
+                kv[1] == "hipMallocAsync")
+#else
+            if (kv[1] == "cudaMallocAsync")
+#endif
+              return CudaMallocAsync::allocator();
+            if (kv[1] == "native")
+              return &Native::allocator;
+          }
+        }
+      }
     }
     return &Native::allocator;
   }
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+// Register this HIP allocator as the CUDA allocator to allow it to work
+// with both c10::GetAllocator(kCUDA) and c10::getDeviceAllocator(kCUDA)
+// APIs. We don't perform this masquerading inside
+// HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
+// initialization, and doing so there may introduce static initialization
+// order (SIOF) issues.
+#define HIP_MASQUERADING_AS_CUDA \
+  "cud"                          \
+  "a"
+    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
+#undef HIP_MASQUERADING_AS_CUDA
   }
 };
 
@@ -4145,11 +4459,8 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom,
-    bool symmetric)
-    : allocator_(allocator),
-      is_user_created_(is_user_created),
-      symmetric_(symmetric) {
+    bool use_on_oom)
+    : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4170,10 +4481,6 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
-}
-
-bool MemPool::is_symmetric() {
-  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {

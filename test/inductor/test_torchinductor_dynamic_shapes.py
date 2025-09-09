@@ -37,6 +37,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
+    HAS_MPS,
     patch_inductor_backend,
 )
 
@@ -60,9 +61,34 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
+        ("cpu", "cuda", "xpu", "mps")
+    ),
+    "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
+    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
+    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
+    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
+    "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
+    "test_roll_dynamic_shapes": TestFailure(("mps",)),
+    "test_std_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
+    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
+        ("mps",), is_skip=True
     ),
 }
+
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
         ("cuda",)
@@ -79,10 +105,17 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
-if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
-    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
-    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    # After https://github.com/pytorch/pytorch/pull/161586, starts failing UBSAN so we can't even xfail.
+    # Root cause seems to be SymInt issues in StorageImpl, see
+    # https://github.com/pytorch/pytorch/pull/161586#issuecomment-3246530671
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -107,7 +140,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -122,7 +155,7 @@ class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
-        # HAS_CUDA also checks compute capability to skip tests
+        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
         # on older devices
         if not HAS_GPU:
             self.skipTest("Triton not available")
@@ -1135,5 +1168,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
