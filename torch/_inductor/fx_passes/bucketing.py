@@ -238,13 +238,13 @@ def bucket_all_gather_by_mb(
         assert isinstance(group_name, str)
         return (group_name, dtype)
 
-    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
         _, group_size, group_name = node.args
         assert isinstance(group_name, str)
         return (group_name,)
 
     group_key_fn = (
-        _ag_group_key if mode and "multidtype" in mode else _ag_group_key_multidtype
+        _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
     )
 
     return greedy_bucket_collective_by_mb(
@@ -285,7 +285,7 @@ def bucket_reduce_scatter_by_mb(
         assert isinstance(reduce_op, str)
         return (group_name, reduce_op, dtype)
 
-    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str]:
         _, reduce_op, group_size, group_name = node.args
         assert isinstance(group_name, str)
         assert isinstance(reduce_op, str)
@@ -437,7 +437,7 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
-def _dtype_size_bytes(dtype: torch.dtype):
+def _dtype_size_bytes(dtype: torch.dtype) -> int:
     if dtype.is_floating_point:
         return torch.finfo(dtype).bits // 8
 
@@ -629,7 +629,7 @@ def merge_reduce_scatter(
     with dynamo_timed("fx.bucketing.merge_reduce_scatter", log_pt2_compile_event=True):
         rs_merge_fn = reduce_scatter_merge_fn_to_trace
         if mode and "custom_ops" in mode:
-            rs_merge_fn = reduce_scatter_merge_fn_to_trace_custom_ops
+            rs_merge_fn = reduce_scatter_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -730,7 +730,7 @@ def merge_all_gather(
 
         ag_merge_fn = all_gather_merge_fn_to_trace
         if mode and "custom_ops" in mode:
-            ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops
+            ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
         trace_structured(
             "artifact",

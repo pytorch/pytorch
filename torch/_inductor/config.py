@@ -381,9 +381,9 @@ reorder_for_compute_comm_overlap_passes: list[
         ],
     ]
 ] = [
-    "reorder_communication_preserving_peak_memory",
-    "sink_waits_iterative",
-    "reorder_communication_preserving_peak_memory",
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
 ]
 
 # Maximum number of positions to advance a given collective, unlimited by default
@@ -392,6 +392,15 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -1933,10 +1942,6 @@ _cache_config_ignore_prefix: list[str] = [
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
-
-bucket_fx_collectives_all = None
-bucket_fx_collectives_trie = None  # ["ag", "rs"]
-bucket_fx_collectives_trie_use_nn_module_stack = False
 
 
 class test_configs:

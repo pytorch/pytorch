@@ -1765,6 +1765,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         ):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=1,
+                    exactly=True,
+                )
+                .run(code)
+            )
         out = compiled(*inputs, **self.get_world_trs())
         _, y_ag0, y_ag1 = out
         assert y_ag0.dtype == ag_0.dtype
@@ -1774,7 +1783,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops"])
+    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
     def test_reduce_scatter_bucket_multidtype(self, bucket_mode):
         def func(x, w, rs_0, rs_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -2008,6 +2017,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 4)
+        it = iter(node_stats.values())
+        node_stat0 = next(it)
+        self.assertTrue(node_stat0.limiting_factor == "None")
+        node_stat1 = next(it)
+        self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
