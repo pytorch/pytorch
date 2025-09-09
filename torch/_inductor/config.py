@@ -390,7 +390,7 @@ reorder_for_compute_comm_overlap_passes: list[
 reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = False
+reorder_for_peak_memory = True
 
 bucket_fx_collectives_all = None
 bucket_fx_collectives_trie = None  # ["ag", "rs"]
