@@ -4092,6 +4092,8 @@ class Scheduler:
     ) -> bool:
         if weak_dep.name not in node1.get_buffer_names():
             return False
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            return False
 
         # A weak dep can be fused if and only if the fused operation acts inplace
         # on the buffer being mutated. i.e. the same index is being read then mutated
