@@ -33,13 +33,9 @@ class KernelInputs(ABC):
         """
         Initialize with a tuple of input nodes.
 
-        You can use scalars to propagate through scalar values that are not nodes
-
         Args:
             input_nodes: A tuple of input nodes to store
             out_dtype: Optional output dtype to store
-            scalars: Optional dictionary of scalar values
-                e.g. {'alpha': 0.5}
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
@@ -186,15 +182,6 @@ class KernelInputs(ABC):
         Returns:
             The output dtype
         """
-
-    def scalars(self) -> dict[str, Union[float, int]]:
-        """
-        Get the scalar values for all input nodes.
-
-        Returns:
-            A dictionary of scalar values for each input node
-        """
-        return self._scalars
 
     def get_scalar(self, name: str) -> Union[float, int]:
         """
