@@ -841,6 +841,7 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            self._validate_launcher_call(cloned_args, cloned_kwargs, launcher)
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -955,6 +956,35 @@ class CachingAutotuner(KernelInterface):
                     "self.reset_to_zero_arg_names should only contain valid argument names"
                 )
                 arg.zero_()
+
+    def _validate_launcher_call(self, pos_args, kw_args, launcher) -> None:
+        code = launcher.__code__
+        expected = code.co_argcount - 1
+        expected_names = code.co_varnames[:expected]
+
+        kernel_name = self.inductor_meta.get("kernel_name", "unknown_kernel")
+
+        provided_pos = len(pos_args)
+        if provided_pos > expected:
+            raise TypeError(
+                f"{kernel_name}: parameter count mismatch. "
+                f"Expected {expected} arguments, but got {provided_pos} positional."
+            )
+
+        matched_kw = sum(1 for k in kw_args.keys() if k in expected_names)
+
+        extra_kw = [
+            k for k in kw_args.keys() if k not in expected_names and k not in ["stream"]
+        ]
+        if extra_kw:
+            raise TypeError(f"{kernel_name}: Extra parameters: {', '.join(extra_kw)}.")
+
+        total_provided = provided_pos + matched_kw
+        if total_provided < expected:
+            missing = [
+                name for name in expected_names[provided_pos:] if name not in kw_args
+            ]
+            raise TypeError(f"{kernel_name}: Missing parameters: {', '.join(missing)}.")
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
@@ -1267,6 +1297,7 @@ class CachingAutotuner(KernelInterface):
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
+        self._validate_launcher_call(args, kwargs, launcher)
         if autograd_profiler._is_profiler_enabled:
             profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
 

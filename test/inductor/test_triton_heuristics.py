@@ -300,6 +300,53 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    def _mk_autotuner_with_mock_launcher(self):
+        args = self._get_cos_kernel_caching_autotuner_args()
+        autotuner = CachingAutotuner(**args)
+        autotuner.inductor_meta["kernel_name"] = "unit_test_kernel"
+        with patch.object(autotuner, "_make_launchers"):
+            autotuner.precompile()
+        mock_launcher = MagicMock()
+        mock_launcher.config = args["configs"][0]
+
+        def _fake_launcher(in_ptr0, out_ptr0, xnumel, stream=None):
+            return "ok"
+
+        mock_launcher.__code__ = _fake_launcher.__code__
+        mock_launcher.store_cubin = False
+        autotuner.launchers = [mock_launcher]
+        return autotuner, mock_launcher
+
+    def test_arg_validation_ok(self):
+        autotuner, launcher = self._mk_autotuner_with_mock_launcher()
+        autotuner.run("in_ptr0", "out_ptr0", 16, stream=torch.cuda.current_stream())
+        launcher.assert_called_once_with(
+            "in_ptr0", "out_ptr0", 16, stream=torch.cuda.current_stream()
+        )
+
+    def test_arg_validation_too_many(self):
+        autotuner, _ = self._mk_autotuner_with_mock_launcher()
+        with self.assertRaisesRegex(TypeError, "parameter count mismatch"):
+            autotuner.run(
+                "in_ptr0", "out_ptr0", 16, "extra", stream=torch.cuda.current_stream()
+            )
+
+    def test_arg_validation_unexpected_kw(self):
+        autotuner, _ = self._mk_autotuner_with_mock_launcher()
+        with self.assertRaisesRegex(TypeError, "Extra parameters"):
+            autotuner.run(
+                "in_ptr0",
+                "out_ptr0",
+                16,
+                stream=torch.cuda.current_stream(),
+                extra_kw="v",
+            )
+
+    def test_arg_validation_too_few(self):
+        autotuner, _ = self._mk_autotuner_with_mock_launcher()
+        with self.assertRaisesRegex(TypeError, "Missing parameters"):
+            autotuner.run("in_ptr0", stream=torch.cuda.current_stream())
+
 
 class TestArgumentCloneAndRestore(TestCase):
     # Our tensor is large enough. If a unexpected copy happens, the
