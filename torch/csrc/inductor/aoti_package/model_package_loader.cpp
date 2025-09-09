@@ -53,13 +53,11 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
-#ifdef _WIN32
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  return normalized_path;
-#else
-  return orig_path;
 #endif
+  return normalized_path;
 }
 
 bool file_exists(const std::string& path) {
@@ -109,6 +107,14 @@ const char* extension_file_ext() {
   return ".so";
 #endif
 }
+
+bool _is_windows_os() {
+#ifdef _WIN32
+  return true;
+#else
+  return false;
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -143,7 +149,8 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     source_args += source + " ";
   }
 
-  std::string file_ext = compile_only ? ".o" : ".so";
+  std::string file_ext =
+      compile_only ? object_file_ext() : extension_file_ext();
   std::string target_file = output_dir + filename + file_ext;
   std::string target_dir = output_dir;
   if (target_dir.empty()) {
@@ -153,32 +160,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    cflags_args += "-" + arg.get<std::string>() + " ";
+    cflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args += "-D " + arg.get<std::string>() + " ";
+    definitions_args +=
+        _is_windows_os() ? "/D" : "-D " + arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args += "-I" + arg.get<std::string>() + " ";
+    include_dirs_args +=
+        _is_windows_os() ? "/I" : "-I" + arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += "-" + arg.get<std::string>() + " ";
+    ldflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
-    libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_dirs_args +=
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
+    } else {
+      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
-    libraries_args += "-l" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
+    } else {
+      libraries_args += "-l" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string passthrough_parameters_args;
@@ -191,21 +209,39 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg = compile_only ? "-c" : "";
+  std::string compile_only_arg =
+      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
 
-  std::string cmd = normalize_path_separator(fmt::format(
-      "{} {} {} {} {} {} {} {} {} {} -o {}",
-      compiler,
-      source_args,
-      definitions_args,
-      cflags_args,
-      include_dirs_args,
-      passthrough_parameters_args,
-      ldflags_args,
-      libraries_args,
-      libraries_dirs_args,
-      compile_only_arg,
-      target_file));
+  std::string cmd;
+  if (_is_windows_os()) {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
+        compiler,
+        include_dirs_args,
+        definitions_args,
+        cflags_args,
+        source_args,
+        passthrough_parameters_args,
+        target_file,
+        compile_only_arg,
+        libraries_dirs_args,
+        libraries_args,
+        ldflags_args));
+  } else {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} {} {} {} {} -o {}",
+        compiler,
+        source_args,
+        definitions_args,
+        cflags_args,
+        include_dirs_args,
+        passthrough_parameters_args,
+        ldflags_args,
+        libraries_args,
+        libraries_dirs_args,
+        compile_only_arg,
+        target_file));
+  }
 
   return std::make_tuple(cmd, target_file);
 }
@@ -409,7 +445,8 @@ class RAIIMinizArchive {
  public:
   RAIIMinizArchive(const std::string& zip_path) {
     mz_zip_zero_struct(&_zip_archive);
-    if (!mz_zip_reader_init_file(&_zip_archive, zip_path.c_str(), 0)) {
+    if (!mz_zip_reader_init_file(
+            &_zip_archive, normalize_path_separator(zip_path).c_str(), 0)) {
       throw std::runtime_error(fmt::format(
           "Failed to initialize zip archive: {}",
           mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
@@ -510,32 +547,36 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
   std::vector<std::string> obj_filenames;
-  std::string model_directory = file_prefix + "data" + k_separator +
-      "aotinductor" + k_separator + model_name;
-  std::string const_directory =
-      file_prefix + "data" + k_separator + "constants";
+  std::string model_directory = normalize_path_separator(
+      file_prefix + "data" + k_separator + "aotinductor" + k_separator +
+      model_name);
+  std::string const_directory = normalize_path_separator(
+      file_prefix + "data" + k_separator + "constants");
 
-  for (const std::string& filename_str : found_filenames) {
+  // zip_filename_str can't be normalize_path_separator, because it should be
+  // as index for mz_zip_reader_extract_file_to_file.
+  for (auto const& zip_filename_str : found_filenames) {
+    auto cur_filename = normalize_path_separator(zip_filename_str);
     // Only compile files in the specified model directory
-    if (c10::starts_with(filename_str, model_directory) ||
-        c10::starts_with(filename_str, const_directory)) {
+    if (c10::starts_with(cur_filename, model_directory) ||
+        c10::starts_with(cur_filename, const_directory)) {
       std::string output_path_str = temp_dir_;
 
-      if (c10::starts_with(filename_str, model_directory)) {
+      if (c10::starts_with(cur_filename, model_directory)) {
         output_path_str += k_separator;
-        output_path_str += filename_str;
-      } else { // startsWith(filename_str, const_directory)
+        output_path_str += cur_filename;
+      } else { // startsWith(zip_filename_str, const_directory)
         // Extract constants to the same directory as the rest of the files
         // to be consistent with internal implementation
-        size_t lastSlash = filename_str.find_last_of(k_separator);
-        std::string filename = filename_str;
+        size_t lastSlash = cur_filename.find_last_of(k_separator);
+        std::string filename = cur_filename;
         if (lastSlash != std::string::npos) {
-          filename = filename_str.substr(lastSlash + 1);
+          filename = cur_filename.substr(lastSlash + 1);
         }
         output_path_str.append(k_separator)
             .append(model_directory)
@@ -543,16 +584,17 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(filename);
       }
 
-      LOG(INFO) << "Extract file: " << filename_str << " to "
-                << output_path_str;
+      std::string output_file_path = normalize_path_separator(output_path_str);
+      LOG(INFO) << "Extract file: " << zip_filename_str << " to "
+                << output_file_path;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+      size_t parent_path_idx = output_file_path.find_last_of(k_separator);
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
-            "Failed to find parent path in " + output_path_str);
+            "Failed to find parent path in " + output_file_path);
       }
-      std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      std::string parent_path = output_file_path.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
@@ -561,18 +603,18 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      zip_archive.extract_file(filename_str, output_path_str);
+      zip_archive.extract_file(zip_filename_str, output_path_str);
 
       // Save the file for bookkeeping
-      size_t extension_idx = output_path_str.find_last_of('.');
+      size_t extension_idx = output_file_path.find_last_of('.');
       if (extension_idx != std::string::npos) {
-        std::string filename_extension = output_path_str.substr(extension_idx);
+        std::string filename_extension = output_file_path.substr(extension_idx);
         if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
+          cpp_filename = output_file_path;
         } else if (filename_extension == object_file_ext()) {
-          obj_filenames.push_back(output_path_str);
+          obj_filenames.push_back(output_file_path);
         } else if (filename_extension == extension_file_ext()) {
-          so_filename = output_path_str;
+          so_filename = output_file_path;
         }
       }
     }

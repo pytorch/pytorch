@@ -203,6 +203,9 @@ class _DisableUpdateTensorTracker(threading.local):
 _disable_update_tensor_tracker_tls = _DisableUpdateTensorTracker()
 
 
+_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT: dict[int, torch.fx.Node] = {}
+
+
 def _is_proxy_tensor_update_tensor_tracker_disabled() -> bool:
     """
     Returns current state of disabling update tensor tracker.
@@ -817,6 +820,49 @@ def _maybe_record_pointwise_barrier(
     last_node.meta["low_precision_pointwise_barrier"] = True
 
 
+def _fetch_proxies_and_all_constant_flag(
+    flat_args_kwargs: Union[list[object], tuple[object, ...]], tracer: _ProxyTracer
+) -> tuple[list[object], tuple[object, ...], bool]:
+    """
+    Given flat arguments, fetch the proxies and whether they are all constants.
+    This is later used in proxy_call or when someone is trying to stitch together
+    graph node in tf or td modes.
+    """
+    f_flat_args_kwargs = [
+        (
+            fetch_object_proxy(tracer, x)
+            if isinstance(x, (Tensor, _AnyScriptObject))
+            else x
+        )
+        for x in flat_args_kwargs
+    ]
+
+    # If there are SymInts, we also should not consider this constant.
+    # However, fake tensor handling of SymInts is sufficiently broken that
+    # I couldn't write a test for this case
+    all_constant = (
+        not any(
+            t.constant is None
+            for t in f_flat_args_kwargs
+            if isinstance(t, _ProxyTensor)
+        )
+        # TODO: maybe constant SymInts should also be allowed?  Not sure if
+        # this can happen
+        and not any(isinstance(x, py_sym_types) for x in flat_args_kwargs)
+    )
+
+    proxy_flat_args_kwargs = [
+        e.proxy if isinstance(e, _ProxyTensor) else e for e in f_flat_args_kwargs
+    ]
+
+    proxy_flat_args_kwargs = [
+        (fetch_sym_proxy(tracer)(e) if isinstance(e, py_sym_types) else e)
+        for e in proxy_flat_args_kwargs
+    ]
+
+    return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -869,27 +915,8 @@ def proxy_call(
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
-    f_flat_args_kwargs = [
-        (
-            fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject))
-            else x
-        )
-        for x in flat_args_kwargs
-    ]
-
-    # If there are SymInts, we also should not consider this constant.
-    # However, fake tensor handling of SymInts is sufficiently broken that
-    # I couldn't write a test for this case
-    all_constant = (
-        not any(
-            t.constant is None
-            for t in f_flat_args_kwargs
-            if isinstance(t, _ProxyTensor)
-        )
-        # TODO: maybe constant SymInts should also be allowed?  Not sure if
-        # this can happen
-        and not any(isinstance(x, py_sym_types) for x in flat_args_kwargs)
+    f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant = (
+        _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
     )
 
     if torch.Tag.data_dependent_output in func.tags:
@@ -917,13 +944,6 @@ def proxy_call(
                 "in your make_fx call."
             )
 
-    proxy_flat_args_kwargs = [
-        e.proxy if isinstance(e, _ProxyTensor) else e for e in f_flat_args_kwargs
-    ]
-    proxy_flat_args_kwargs = [
-        (fetch_sym_proxy(proxy_mode.tracer)(e) if isinstance(e, py_sym_types) else e)
-        for e in proxy_flat_args_kwargs
-    ]
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
     # When we trace through a torch.tensor invocation, you never actually
@@ -1430,9 +1450,32 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 torch.amp.autocast_mode._exit_autocast,
             ]:
                 node.meta["val"] = None
+            # For autocast, the python APIs run so we don't have to run them again
+            # here.
+            if func is torch._C._set_grad_enabled:
+                func(*args, **kwargs)
             return node
-            # Don't actually run the function! We just want to trace the calls
-            # into a graph. We don't actually want to change global autograd state.
+
+        # We need more complicated handling here because the inputs
+        # to these functions are sometimes tensors or symints where
+        # we need to fetch the proxies properly.
+        if func in [
+            torch._functorch.predispatch._add_batch_dim,
+            torch._functorch.predispatch._remove_batch_dim,
+            torch._functorch.predispatch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_decrement_nesting,
+            torch._functorch.vmap.lazy_load_decompositions,
+        ]:
+            _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
+            out_proxy = self.tracer.create_proxy(
+                "call_function",
+                func,
+                proxies,
+                {},
+            )
+            res = func(*args, **kwargs)
+            track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            return res
         return func(*args, **kwargs)
 
 
@@ -1864,6 +1907,25 @@ class _ModuleStackTracer(PythonKeyTracer):
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
 
+        # NOTE [export non-strict fake tensor leak detection]
+        # In non-strict export, we don't have dynamo's side effect
+        # tracking logic which makes some cases hard to detect.
+        # In general, our detecting strategy is:
+        #  (1) We do gc.collect() before export and get the alive fake tensors
+        #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT)
+        #  (3) We query gc again to get alive fake tensors
+        #  (4) We take the delta between (1) and (3)
+        #  (5) Filter out fake tensors that are:
+        #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
+        #      (2) Associated with gm.meta
+        #  (6) Do ID match with the proxies
+
+        global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
+        _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
+
+        for key, val in self.tensor_tracker.items():
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
         # to the tracer while tracing, the proxy object gets registered
@@ -1959,7 +2021,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
             if "nn_module_stack" not in node.meta:
-                node.meta["nn_module_stack"] = self.module_stack
+                node.meta["nn_module_stack"] = self.module_stack.copy()
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
             for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
                 if isinstance(mod_cls, type):
@@ -1993,6 +2055,7 @@ class _MakefxTracer:
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool,
         record_stack_traces: bool = False,
+        parent_tracer: Optional[_MakefxTracer] = None,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2024,6 +2087,7 @@ class _MakefxTracer:
             nullcontext()
         )
         self.record_stack_traces = record_stack_traces
+        self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2272,6 +2336,15 @@ class _MakefxTracer:
                 )
                 raise
 
+        if (
+            self.is_hop_subgraph_tracer()
+            and (fake_mode := torch._guards.detect_fake_mode(args))
+            and fake_mode.shape_env is not None
+        ):
+            from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+            insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
+            t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None
@@ -2281,6 +2354,9 @@ class _MakefxTracer:
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:
         with self._init_modes_from_inputs(f, args):
             return self._trace_inner(f, *args)
+
+    def is_hop_subgraph_tracer(self) -> bool:
+        return self.parent_tracer is not None
 
     def trace_subgraph(self, f: Callable, *args: object) -> GraphModule:
         # Create a new tracer based on parent's config
@@ -2292,6 +2368,7 @@ class _MakefxTracer:
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops,
+            parent_tracer=self,
         )
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
@@ -2343,7 +2420,8 @@ def make_fx(
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops,
-        record_stack_traces=record_stack_traces or config.trace.provenance_tracking,
+        record_stack_traces=record_stack_traces
+        or config.trace.provenance_tracking_level == 1,
     )
 
     @functools.wraps(f)

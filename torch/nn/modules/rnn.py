@@ -652,6 +652,9 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        """
+        Runs the forward pass.
+        """
         self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1

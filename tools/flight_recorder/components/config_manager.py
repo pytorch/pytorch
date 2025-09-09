@@ -67,6 +67,7 @@ class JobConfig:
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
+        self.parser.add_argument("--print_stack_trace", action="store_true")
 
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]

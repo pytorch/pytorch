@@ -56,7 +56,11 @@ def list_benchmarks():
     print(f"Available benchmarks: {list(BENCHMARK_REGISTRY.keys())}")
 
 
-def run_benchmark(benchmark_name: str, should_visualize: bool = False):
+def run_benchmark(
+    benchmark_name: str,
+    should_visualize: bool = False,
+    compile_mode: str = "max-autotune-no-cudagraphs",
+):
     """Run a specific benchmark."""
     if benchmark_name not in BENCHMARK_REGISTRY:
         print(f"Error: Unknown benchmark '{benchmark_name}'")
@@ -64,10 +68,11 @@ def run_benchmark(benchmark_name: str, should_visualize: bool = False):
         return False
 
     print(f"Running benchmark: {benchmark_name}")
+    print(f"Torch compile mode: {compile_mode}")
     print("=" * 60)
 
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
-    benchmark = benchmark_class()
+    benchmark = benchmark_class(compile_mode)
     benchmark.benchmark()
     if should_visualize:
         benchmark.visualize()
@@ -75,14 +80,15 @@ def run_benchmark(benchmark_name: str, should_visualize: bool = False):
     return True
 
 
-def run_all_benchmarks(should_visualize: bool = False):
+def run_all_benchmarks(should_visualize: bool = False, compile_mode: str = "default"):
     """Run all available benchmarks."""
     print("Running all benchmarks...")
+    print(f"Torch compile mode: {compile_mode}")
     print("=" * 60)
 
     for name, cls in BENCHMARK_REGISTRY.items():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
-        benchmark = cls()
+        benchmark = cls(compile_mode)
         benchmark.benchmark()
         if should_visualize:
             benchmark.visualize()
@@ -124,6 +130,13 @@ Examples:
         help="Visualize results after running benchmarks",
     )
 
+    parser.add_argument(
+        "--compile-mode",
+        choices=["default", "max-autotune-no-cudagraphs"],
+        default="max-autotune-no-cudagraphs",
+        help="Torch compile mode to use (default: default)",
+    )
+
     args = parser.parse_args()
 
     # Handle list option
@@ -133,7 +146,7 @@ Examples:
 
     # Handle all option
     if args.all:
-        run_all_benchmarks(args.visualize)
+        run_all_benchmarks(args.visualize, args.compile_mode)
         return
 
     # Handle specific benchmarks
@@ -144,7 +157,7 @@ Examples:
         sys.exit(1)
 
     for benchmark_name in args.benchmarks:
-        run_benchmark(benchmark_name, args.visualize)
+        run_benchmark(benchmark_name, args.visualize, args.compile_mode)
         print()  # Add spacing between benchmarks
 
 

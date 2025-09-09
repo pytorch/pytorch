@@ -131,21 +131,6 @@
   - Lint
   - pull
 
-- name: Mobile
-  patterns:
-  - ios/**
-  - android/**
-  - test/mobile/**
-  approved_by:
-  - linbinyu
-  - IvanKobzarev
-  - dreiss
-  - raziel
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: PrimTorch
   patterns:
   - torch/_meta_registrations.py
@@ -492,6 +477,23 @@
   - srossross
   - chillee
   - zou3519
+  - guilhermeleobas
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Dynamo
+  patterns:
+  - torch/_dynamo/**
+  - torch/csrc/dynamo/**
+  - test/dynamo/**
+  - test/dynamo_expected_failures/**
+  - test/dynamo_skips/**
+  - test/inductor_expected_failures/**
+  - test/inductor_skips/**
+  approved_by:
+  - guilhermeleobas
   mandatory_checks_name:
   - EasyCLA
   - Lint

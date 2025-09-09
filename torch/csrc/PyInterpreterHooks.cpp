@@ -17,4 +17,4 @@ using c10::impl::PyInterpreterHooksRegistry;
 using c10::impl::RegistererPyInterpreterHooksRegistry;
 using PyInterpreterHooks = torch::detail::PyInterpreterHooks;
 // Register the implementation
-REGISTER_PYTHON_HOOKS(PyInterpreterHooks);
+REGISTER_PYTHON_HOOKS(PyInterpreterHooks)

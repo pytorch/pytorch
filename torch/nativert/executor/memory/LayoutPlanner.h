@@ -5,6 +5,7 @@
 #include <thread>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/LeftRight.h>
 
@@ -50,7 +51,10 @@ class LayoutPlanner {
           kernelSchemas,
       const std::vector<bool>& persistentValues,
       const torch::nativert::LayoutPlannerSettings& settings);
-  ~LayoutPlanner();
+#if !defined(_MSC_VER)
+  TORCH_API // TODO Doesn't work on msvc.
+#endif
+      ~LayoutPlanner();
 
   LayoutPlanner(LayoutPlanner&& other) = delete;
   LayoutPlanner(const LayoutPlanner& other) = delete;
@@ -130,6 +134,8 @@ class LayoutPlanner {
 
   LayoutPlannerAlgorithm* algorithm_;
   c10::LeftRight<LayoutPlan> plan_;
+
+  c10::once_flag worker_once_flag_;
 
 #ifndef NDEBUG
   AliasAnalyzer alias_analyzer_;

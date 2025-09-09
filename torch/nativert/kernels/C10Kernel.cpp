@@ -13,10 +13,9 @@ namespace torch::nativert {
 
 C10Kernel::C10Kernel(
     const Node* node,
-    c10::Device device,
     OpKernelKind kind,
     AliasingSpec&& aliasingSpec)
-    : OpKernel(node, device, kind),
+    : OpKernel(node, kind),
       op_(getOperatorForTarget(node->target(), node)),
       schema_(op_.schema(), std::move(aliasingSpec), kind_),
       arguments_(prefillStackWithStaticArgs(node, op_.schema())) {}

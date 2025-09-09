@@ -259,7 +259,8 @@ using namespace c10::xpu;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || \
+    __CUDA_ARCH__ == 1200
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -318,16 +319,32 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // depending on the target device, and then always set it to 64 for host code.
 // Host pass of HIP compiler needs C10_WARP_SIZE defined to _something_ so we
 // set it to something unreasonable to trigger obvious host code errors.
-#if defined(__HIP_DEVICE_COMPILE__)
+
+namespace at::cuda {
+TORCH_CUDA_CPP_API int warp_size();
+}
+#ifdef __HIPCC__
+static inline int __host__ C10_WARP_SIZE_INTERNAL() {
+  return at::cuda::warp_size();
+}
+
+static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
 #if defined(__GFX9__)
-static constexpr int C10_WARP_SIZE = 64;
+  return 64;
 #else // __GFX9__
-static constexpr int C10_WARP_SIZE = 32;
+  return 32;
 #endif // __GFX9__
-#else
-static constexpr int C10_WARP_SIZE = 1;
-#endif // __HIP_DEVICE_COMPILE__
-#else
+}
+#else // __HIPCC__
+static inline int C10_WARP_SIZE_INTERNAL() {
+  return at::cuda::warp_size();
+}
+#endif // __HIPCC__
+
+#define C10_WARP_SIZE (C10_WARP_SIZE_INTERNAL())
+#define C10_WARP_SIZE_STATIC 64
+
+#else // defined(USE_ROCM)
 #define C10_WARP_SIZE 32
 #endif
 
@@ -395,6 +412,13 @@ extern SYCL_EXTERNAL void __assert_fail(
     const char* expr,
     const char* file,
     unsigned int line,
+    const char* func);
+#elif (defined(__EMSCRIPTEN__))
+// As defined in assert.h in the Emscripten stdlib
+_Noreturn void __assert_fail(
+    const char* expr,
+    const char* file,
+    int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))

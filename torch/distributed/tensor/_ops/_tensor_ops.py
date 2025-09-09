@@ -528,7 +528,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -547,7 +547,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -565,7 +565,12 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    [
+        aten.scatter_.value,
+        aten.scatter.value,
+        aten.scatter_.src,
+        aten.scatter.src,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(op_schema: OpSchema) -> StrategyType:
@@ -591,11 +596,44 @@ def scatter_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_op_strategy(aten.gather.default)
+@register_op_strategy(aten.scatter_add.default, schema_info=RuntimeSchemaInfo(1))
+def scatter_add_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = op_schema.args_schema[0]
+    dim = op_schema.args_schema[1]
+    index_strategy = op_schema.args_schema[2]
+
+    assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(index_strategy, OpStrategy)
+    assert isinstance(dim, int)
+    dim = normalize_dim(dim, input_strategy.ndim)
+    mesh = input_strategy.mesh
+    input_shape = input_strategy.shape
+    index_shape = index_strategy.shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    all_replicate: PlacementList = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim and input_shape[d] == index_shape[d]:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+    )
+
+
+@register_op_strategy(aten.gather.default, schema_info=RuntimeSchemaInfo(1))
 def gather_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = op_schema.get_mesh_from_args()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, input_strategy.ndim)
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
 
     input_shape = input_strategy.shape
@@ -611,7 +649,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # input sharding, input sharded, index accepts mask partial, output follows index
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
-    if index_shape[dim] == 1:
+    if dim < len(index_shape) and index_shape[dim] == 1:
         index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
@@ -624,6 +662,12 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the sharding dimension is the gather dimension
     index_sharding: PlacementList = [Shard(dim), Replicate(), Shard(dim)]
     single_mesh_dim_strategies.append(index_sharding)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=1
