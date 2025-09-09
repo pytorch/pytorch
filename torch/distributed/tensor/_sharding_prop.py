@@ -336,6 +336,10 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
+            arg_spec = op_schema.args_spec[0]
+            placements = arg_spec.placements
+            if all(isinstance(p, Replicate) for p in placements):
+                return OutputSharding(None, op_schema)
             # Need to Replicate() the input before calling .item() on the local tensor,
             # to resolve any Partial(...) placements.
             arg_spec = op_schema.args_spec[0]
