@@ -96,7 +96,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def tanh(x0: str) -> str:
-        raise NotImplementedError("tanh is not supported in CUTLASS python evt")
+        return CutlassEVTOpsMixIn._prefix_un_op("tanh", x0)
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
