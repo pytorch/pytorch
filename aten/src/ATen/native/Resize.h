@@ -127,7 +127,7 @@ template <typename T>
 inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
                                    ArrayRef<T> size, OptionalArrayRef<T> stride, bool check_offset_in_bounds = true) {
   if (stride.has_value()) {
-    TORCH_CHECK(size.size() == stride.value().size(), "unequal size length (", size.size(),
+    TORCH_CHECK_VALUE(size.size() == stride.value().size(), "unequal size length (", size.size(),
                 ") and stride length (", stride.value().size(), ")");
   }
 
