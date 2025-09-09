@@ -211,7 +211,6 @@ class TestMatmulCuda(TestCase):
             self.cublas_addmm(size, dtype, False, True)
 
     @onlyCUDA
-    @skipIfRocm
     def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
         orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_fp16_accumulation = True
@@ -739,7 +738,6 @@ class TestMatmulCuda(TestCase):
 
 
     @onlyCUDA
-    @skipIfRocm
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
