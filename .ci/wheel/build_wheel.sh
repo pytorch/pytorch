@@ -96,11 +96,11 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11_0-arm64'
+mac_version='macosx-11.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
-wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//-/_}.whl"
+wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//[-,]/_}.whl"
 
 ###########################################################
 
@@ -186,7 +186,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-_PYTHON_HOST_PLATFORM=${mac_version} python setup.py bdist_wheel -d "$whl_tmp_dir"
+_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name "${mac_version//[-.]/_}"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
