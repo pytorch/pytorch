@@ -99,6 +99,7 @@ def _get_autocast_states():
 
 
 def make_boxed_func(f):
+    @simple_wraps(f)
     def g(args):
         return f(*args)
 

@@ -11,6 +11,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import functools
 import itertools
 import pprint
 from contextlib import AbstractContextManager, nullcontext
@@ -307,6 +308,7 @@ def _create_runtime_wrapper(
         if cm is not None:
             cm.__exit__(None, None, None)
 
+    @simple_wraps(compiled_fn)
     def runtime_wrapper(args: list[Any]):
         # Create context manager for profiler
         cm = record_runtime_wrapper_prologue_enter()
@@ -465,6 +467,7 @@ def _create_runtime_wrapper(
         return runtime_wrapper
 
     # Disabling saved tensors hooks
+    @simple_wraps(runtime_wrapper)
     def _runtime_wrapper(*args, **kwargs):
         with _disable_saved_tensors_hooks():
             return runtime_wrapper(*args, **kwargs)
@@ -1929,6 +1932,33 @@ def _disable_saved_tensors_hooks():
             )
 
 
+@dataclass
+class SerializableCompiledFunction:
+    """
+    Represents a result of AOTDispatch after calling the inner compiler
+    that can be serialized
+    """
+
+    compiled_fn: Callable
+    serialize_fn: Callable
+
+    def __init__(self, compiled_fn: Callable, serialize_fn: Callable):
+        self.compiled_fn = compiled_fn
+        self.serialize_fn = serialize_fn
+        # Equivalent to functools.wraps
+        functools.update_wrapper(
+            self,
+            compiled_fn,
+            assigned=("__doc__", "__annotations__", "__type_params__"),
+        )
+
+    def serialize(self) -> Any:
+        return self.serialize_fn()
+
+    def __call__(self, *args, **kwargs):
+        return self.compiled_fn(*args, **kwargs)
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -2037,7 +2067,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
-        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
+        serialize: Optional[Callable],  # Serialization function
     ):
         # For additional context see Note [CUDA Graph Safe RNG Functionalization]
         # Each pair forward, backward rng states must be equal prior to its invocation on any
@@ -2075,6 +2105,37 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
+
+            @staticmethod
+            def serialize():
+                """
+                Serialize the compiled function. This function should only be called
+                from cold start after the backward has been compiled.
+
+                In a warm start from cache, the cache result is already serializable, so
+                this function is never needed.
+                """
+                assert serialize is not None
+                assert CompiledFunction.compiled_bw is not None
+                assert CompiledFunction._lazy_backward_info is not None
+                if isinstance(
+                    CompiledFunction._lazy_backward_info,
+                    AutogradLazyBackwardCompileInfo,
+                ):
+                    bw_module = CompiledFunction._lazy_backward_info.bw_module
+                else:
+                    assert isinstance(
+                        CompiledFunction._lazy_backward_info,
+                        CachedAutogradLazyBackwardCompileInfo,
+                    )
+                    bw_module = CompiledFunction._lazy_backward_info.bw_module_fn()
+
+                return serialize(
+                    CompiledFunction.compiled_bw,
+                    bw_module,
+                    fw_metadata,
+                    aot_config,
+                )
 
             @staticmethod
             def _compiled_autograd_key(ctx):
@@ -2433,13 +2494,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
-                        if try_save_cache_entry is not None:
-                            try_save_cache_entry(
-                                CompiledFunction.compiled_bw,
-                                bw_module,
-                                fw_metadata,
-                                aot_config,
-                            )
+                        if serialize is not None:
+                            CompiledFunction.serialize()
 
                 if (
                     torch._functorch.config.donated_buffer
@@ -2475,6 +2531,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             aot_config,
             runtime_metadata=fw_metadata,
         )
+
+        if serialize is not None:
+            compiled_function = SerializableCompiledFunction(
+                compiled_function, CompiledFunction.serialize
+            )
 
         return compiled_function
 
