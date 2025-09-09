@@ -2033,14 +2033,8 @@ class GuardBuilder(GuardBuilderBase):
         dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, code)
-        # TODO(anijain2305) - Consider this moving this guard to C++
-        forward_ad = torch.autograd.forward_ad
-
-        def fn(x: Any) -> bool:
-            return forward_ad._current_level == dual_level
-
-        self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard)
+        self.guard_manager.root.add_dual_level_match_guard(
+            dual_level, get_verbose_code_parts(code, guard)
         )
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:

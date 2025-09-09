@@ -2136,6 +2136,41 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
+// Check if the dual level is the same as the one in fx graph
+class DUAL_LEVEL_MATCH : public LeafGuard {
+ public:
+   DUAL_LEVEL_MATCH(
+      RootGuardManager* root_guard_manager,
+      int64_t level,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+        _level(level) {
+    py::object forward_ad_module = py::module_::import("torch.autograd.forward_ad");
+    current_level = forward_ad_module.attr("_current_level");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool _check() {
+    if (!PyLong_CheckExact(current_level.ptr())) {
+      return false;
+    }
+    return PyLong_AsLongLong(current_level.ptr()) == _level;
+  }
+
+ private:
+  int64_t _level;
+  py::object current_level;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -6691,6 +6726,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "SET_CONTAINS")
       .def(py::init<RootGuardManager*, bool, py::object, py::list>())
       .def("__call__", &SET_CONTAINS::check);
+  py::class_<DUAL_LEVEL_MATCH, LeafGuard, std::shared_ptr<DUAL_LEVEL_MATCH>>(
+      py_m, "DUAL_LEVEL_MATCH")
+      .def(py::init<RootGuardManager*, int64_t, py::list>())
+      .def("__call__", &DUAL_LEVEL_MATCH::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<RootGuardManager*, py::set, py::list>())
@@ -7098,6 +7137,16 @@ PyObject* torch_c_dynamo_guards_init() {
                 self.get_root(),
                 contains,
                 std::move(item),
+                std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_dual_level_match_guard",
+          [](GuardManager& self,
+             int64_t level,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
+                self.get_root(),
+                level,
                 std::move(verbose_code_parts)));
           })
       .def(
