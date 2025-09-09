@@ -36,8 +36,6 @@ from ._internal.torchscript_exporter._type_utils import (
     JitScalarType,  # Deprecated members that are excluded from __all__
 )
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
-    _run_symbolic_function,
-    _run_symbolic_method,
     register_custom_op_symbolic,
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
@@ -76,7 +74,7 @@ def export(
     | Mapping[str, Sequence[int]]
     | None = None,
     keep_initializers_as_inputs: bool = False,
-    dynamo: bool = False,
+    dynamo: bool = True,
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
@@ -88,7 +86,7 @@ def export(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
+    fallback: bool = True,
     # Deprecated options
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
