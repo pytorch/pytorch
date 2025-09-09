@@ -90,7 +90,10 @@ def _default_custom_combo_kernel_horizontal_partition(
         long_reduction = [
             n
             for n in reduction
-            if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
+            if (
+                V.graph.sizevars.shape_env.has_hint(n.group[-1][-1])
+                and V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
+            )
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -103,6 +106,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not kernel_map[n].inside_reduction
             and len(kernel_map[n].numels) == 2
+            and V.graph.sizevars.shape_env.has_hint(kernel_map[n].numels["x"])
             and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
         ]
         if large_pointwise:
@@ -485,7 +489,11 @@ class ComboKernel(Kernel):
 
     def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, dict[str, int]]:
         size_hints = {
-            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
+            prefix: next_power_of_2(
+                V.graph.sizevars.size_hint(
+                    numel, fallback=config.unbacked_symint_fallback
+                )
+            )
             for prefix, numel in sub_kernel.numels.items()
             if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
         }
@@ -726,7 +734,13 @@ class ComboKernel(Kernel):
                 if numel_name not in self.dynamic_shape_args:
                     continue
                 if not tree.is_reduction or sub_kernel.inside_reduction:
-                    extra_args.append(str(V.graph.sizevars.size_hint(tree.numel)))
+                    extra_args.append(
+                        str(
+                            V.graph.sizevars.size_hint(
+                                tree.numel, fallback=config.unbacked_symint_fallback
+                            )
+                        )
+                    )
         return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
@@ -810,14 +824,26 @@ class ComboKernel(Kernel):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
+                    size = V.graph.sizevars.size_hints(
+                        buf.get_size(), fallback=config.unbacked_symint_fallback
+                    )
+                    stride = V.graph.sizevars.size_hints(
+                        buf.get_stride(), fallback=config.unbacked_symint_fallback
+                    )
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(buf.get_size())}, {V.graph.sizevars.size_hints(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
+                    size = V.graph.sizevars.size_hints(
+                        const_tensor.size(), fallback=config.unbacked_symint_fallback
+                    )
+                    stride = V.graph.sizevars.size_hints(
+                        const_tensor.stride(), fallback=config.unbacked_symint_fallback
+                    )
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
