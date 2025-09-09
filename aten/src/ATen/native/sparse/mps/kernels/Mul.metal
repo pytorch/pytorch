@@ -11,7 +11,7 @@ kernel void dense_sparse_mul_kernel(
     device const long* indices    [[buffer(3)]],
     device const long* sizes      [[buffer(4)]],
     constant uint& nnz            [[buffer(5)]],
-    constant uint& nDimI          [[buffer(6)]],
+    constant uint& ndim_i          [[buffer(6)]],
     constant uint& view_cols      [[buffer(7)]],
     uint3 gid                     [[thread_position_in_grid]])
 {
@@ -19,18 +19,18 @@ kernel void dense_sparse_mul_kernel(
   uint i = gid.z;
 
   long key = 0;
-  for (uint d = 0; d < nDimI; ++d) {
+  for (uint d = 0; d < ndim_i; ++d) {
     long idx_d = indices[(ulong)d * (ulong)nnz + (ulong)i];
-    long sz_d  = sizes[d];
+    const auto sz_d  = sizes[d];
     key = key * sz_d + idx_d;
   }
 
   ulong dense_idx = (ulong)key * (ulong)view_cols + (ulong)col;
   ulong val_idx = (ulong)i * (ulong)view_cols + (ulong)col;
 
-  float a = (float)values[val_idx];
-  float b = (float)dense[dense_idx];
-  out_values[val_idx] = (T)(a * b);
+  const auto a = static_cast<float>(values[val_idx]);
+  const auto b = static_cast<float>(dense[dense_idx]);
+  out_values[val_idx] = static_cast<T>(a * b);
 }
 
 kernel void intersect_binary_search(
