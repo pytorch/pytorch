@@ -66,7 +66,7 @@ class TestDeviceInfo(TestCase):
         mock_pynvml = MagicMock()
         mock_pynvml.nvmlInit = MagicMock()
         mock_pynvml.nvmlDeviceGetHandleByIndex.return_value = "mock_handle"
-        mock_pynvml.nvmlDeviceGetClockInfo.return_value = 1500
+        mock_pynvml.nvmlDeviceGetMaxClockInfo.return_value = 1500
         mock_pynvml.NVML_CLOCK_SM = "clock_key"
         mock_pynvml.nvmlShutdown = MagicMock()
         mock_get_pynvml.return_value = mock_pynvml
@@ -413,7 +413,7 @@ class TestDeviceInfo(TestCase):
     @unittest.skipIf(
         True, "pynvml and amdsmi are not available in CI, run these tests locally"
     )
-    @unittest.skipIf(not torch.version.hip, "only nvidia")
+    @unittest.skipIf(torch.version.hip, "only nvidia")
     def test_pynvml_integration(self):
         """Test direct pynvml library integration."""
         try:
@@ -424,12 +424,12 @@ class TestDeviceInfo(TestCase):
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 
             # Test clock frequency retrieval
-            sm_clock_mhz = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            sm_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
             self.assertIsInstance(sm_clock_mhz, int)
             self.assertGreater(sm_clock_mhz, 0)
 
             # Test memory clock frequency retrieval
-            mem_clock_mhz = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
+            mem_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_MEM)
             self.assertIsInstance(mem_clock_mhz, int)
             self.assertGreater(mem_clock_mhz, 0)
 
@@ -476,17 +476,17 @@ class TestDeviceInfo(TestCase):
             clock_info = amdsmi.amdsmi_get_clock_info(
                 device_handle, amdsmi.AmdSmiClkType.SYS
             )
-            self.assertTrue("clk" in clock_info)
-            self.assertIsInstance(clock_info["clk"], int)
-            self.assertGreater(clock_info["clk"], 0)
+            self.assertTrue("max_clk" in clock_info)
+            self.assertIsInstance(clock_info["max_clk"], int)
+            self.assertGreater(clock_info["max_clk"], 0)
 
             # Test GPU memory clock info retrieval (matches current implementation)
             mem_clock_info = amdsmi.amdsmi_get_clock_info(
                 device_handle, amdsmi.AmdSmiClkType.MEM
             )
-            self.assertTrue("clk" in mem_clock_info)
-            self.assertIsInstance(mem_clock_info["clk"], int)
-            self.assertGreater(mem_clock_info["clk"], 0)
+            self.assertTrue("max_clk" in mem_clock_info)
+            self.assertIsInstance(mem_clock_info["max_clk"], int)
+            self.assertGreater(mem_clock_info["max_clk"], 0)
 
             amdsmi.amdsmi_shut_down()
 
