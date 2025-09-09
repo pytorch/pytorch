@@ -201,8 +201,7 @@ class InductorChoices:
         # that for mps, everything stays as it was before this optimization
         if len(adjusted_choices) > 0:
             if adjusted_choices[0].inputs.device_type == "mps":
-                if op_name not in ["mm", "addmm"]:
-                    return True
+                return True
 
         # Since the following backends are not using get_mm_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
