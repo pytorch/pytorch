@@ -253,6 +253,8 @@ class _Layout:
 
         In distributed terms, complement() is often used to derive the "other"
         rank grouping when splitting processes into 2D meshes.
+
+        For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
         res_sizes: list[int] = []
         res_strides: list[int] = []
@@ -290,25 +292,25 @@ class _Layout:
             local_ranks = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
-        sizes   = (2, 3)        # 2 rows, 3 cols
+        sizes = (2, 3)        # 2 rows, 3 cols
         strides = (3, 1)        # row-major layout
-        coords  = (0,0) -> 0*3 + 0*1 = 0
-                  (0,1) -> 0*3 + 1*1 = 1
-                  (0,2) -> 0*3 + 2*1 = 2
-                  (1,0) -> 1*3 + 0*1 = 3
-                  (1,1) -> 1*3 + 1*1 = 4
-                  (1,2) -> 1*3 + 2*1 = 5
+        coords = (0,0) -> 0*3 + 0*1 = 0
+                 (0,1) -> 0*3 + 1*1 = 1
+                 (0,2) -> 0*3 + 2*1 = 2
+                 (1,0) -> 1*3 + 0*1 = 3
+                 (1,1) -> 1*3 + 1*1 = 4
+                 (1,2) -> 1*3 + 2*1 = 5
         result = [0, 1, 2, 3, 4, 5]
 
         Example B:
-        sizes   = (2, 3)
+        sizes = (2, 3)
         strides = (1, 2)        # non-standard / strided layout
-        coords  = (0,0) -> 0*1 + 0*2 = 0
-                  (0,1) -> 0*1 + 1*2 = 2
-                  (0,2) -> 0*1 + 2*2 = 4
-                  (1,0) -> 1*1 + 0*2 = 1
-                  (1,1) -> 1*1 + 1*2 = 3
-                  (1,2) -> 1*1 + 2*2 = 5
+        coords = (0,0) -> 0*1 + 0*2 = 0
+                 (0,1) -> 0*1 + 1*2 = 2
+                 (0,2) -> 0*1 + 2*2 = 4
+                 (1,0) -> 1*1 + 0*2 = 1
+                 (1,1) -> 1*1 + 1*2 = 3
+                 (1,2) -> 1*1 + 2*2 = 5
         result = [0, 2, 4, 1, 3, 5]
         """
         return [
@@ -326,14 +328,17 @@ class _Layout:
         the communicator underlying the layout.
 
         Example:
-        group ranks    = [0, 1, 2, 3]
-        group offsets  = [0, 4, 8, 12]
-        result         = [
-                            [0+0, 0+1, 0+2, 0+3],              # → [0, 1, 2, 3]
-                            [4+0, 4+1, 4+2, 4+3],              # → [4, 5, 6, 7]
-                            [8+0, 8+1, 8+2, 8+3],              # → [8, 9, 10,11]
-                            [12+0, 12+1, 12+2, 12+3],          # → [12,13,14,15]
-                        ]
+        world_size = 16
+        self.size = 4
+        self.stride = 1
+        group ranks = [0, 1, 2, 3]
+        group offsets = [0, 4, 8, 12]
+        result = [
+            [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
+            [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
+            [8+0, 8+1, 8+2, 8+3],  # → [8, 9, 10,11]
+            [12+0, 12+1, 12+2, 12+3],  # → [12,13,14,15]
+        ]
         """
         return [
             [group_offset + group_rank for group_rank in self.local_ranks()]
