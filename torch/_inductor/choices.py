@@ -163,10 +163,9 @@ class InductorChoices:
         heuristic = get_template_heuristic(template_name, device_type, op_name)
         cs = heuristic.get_template_configs(
             kernel_inputs,
-            layout,
             op_name,
         )
-        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
@@ -184,9 +183,9 @@ class InductorChoices:
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
+        layout: Optional[Layout] = None,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[ChoiceCaller]:
         """
@@ -207,7 +206,11 @@ class InductorChoices:
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
-
+        if layout is None:
+            # TODO(coconutruben): remove this once we remove the layout argument entirely
+            # This is just here to the brief gap between commits where we still need this
+            # to accommodate fixed vs flexible layout decision externally
+            layout = kernel_inputs.output_layout(flexible=False)
         # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
         template_choices = {}
         for template in templates:
