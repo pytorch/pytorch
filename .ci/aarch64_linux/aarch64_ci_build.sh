@@ -36,6 +36,19 @@ if [ "$DESIRED_CUDA" = "cpu" ]; then
 else
     echo "BASE_CUDA_VERSION is set to: $DESIRED_CUDA"
     export USE_SYSTEM_NCCL=1
+
+    # Check if we should use NVIDIA libs from PyPI (similar to x86 build_cuda.sh logic)
+    if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
+        echo "Bundling CUDA libraries with wheel for aarch64."
+    else
+        echo "Using nvidia libs from pypi for aarch64."
+        # Fix platform constraints in PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64
+        # Replace 'platform_machine == "x86_64"' with 'platform_machine == "aarch64"'
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS//platform_machine == \'x86_64\'/platform_machine == \'aarch64\'}"
+        echo "Updated PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64: $PYTORCH_EXTRA_INSTALL_REQUIREMENTS"
+        export USE_NVIDIA_PYPI_LIBS=1
+    fi
+
     #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
     USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
 fi
