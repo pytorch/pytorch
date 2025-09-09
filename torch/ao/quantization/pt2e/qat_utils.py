@@ -651,6 +651,14 @@ def _fuse_conv_bn_qat_helper(
 
     Note: This also handles the (conv + bn + relu) pattern.
     """
+    if hasattr(m, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by ExecuTorch pass infra.
+        node = next(iter(m.graph.find_nodes(op="call_module", target="_guards_fn")))
+        m.graph.erase_node(node)
+        delattr(m, "_guards_fn")
+        m.recompile()
+
     m.graph.eliminate_dead_code()
     m.recompile()
 
@@ -906,6 +914,13 @@ def _fold_conv_bn_qat_helper(
     """
     Replace the quantized (conv + bn) pattern with conv with bn weights folded into the weights of conv.
     """
+    if hasattr(m, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by ExecuTorch pass infra.
+        node = next(iter(m.graph.find_nodes(op="call_module", target="_guards_fn")))
+        m.graph.erase_node(node)
+        delattr(m, "_guards_fn")
+        m.recompile()
 
     m.graph.eliminate_dead_code()
     m.recompile()
