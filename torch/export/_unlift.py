@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
 import copy
+import inspect
+import math
 import warnings
 from collections.abc import Sequence
 from itertools import chain
 from typing import Any, Optional
+
+import sympy
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,11 +16,16 @@ from torch._export.non_strict_utils import (
     _exit_enable_graph_inputs_of_type_nn_module,
     _get_graph_inputs_of_type_nn_module,
 )
+from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+    _convert_range_to_int,
+)
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.traceback import NodeSource, NodeSourceAction
+from torch.utils._sympy.solve import try_solve
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 from ._tree_utils import reorder_kwargs
@@ -73,18 +82,105 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     return flat_args_with_path
 
 
+def _convert_guards_code_to_fn(
+    guards_code: list[str],
+    paths_of_placeholders: list[pytree.KeyPath],
+):
+    """
+    Generates Python code given guards code and paths of placeholders.
+    We assume that, based on source information,
+    - the tracer generates the guards code
+    - the input spec generates the paths of placeholders.
+
+    Example:
+
+    Suppose we are given the guards code "L['z']['k'].size()[1] == 3"
+    and we are given that ['z']['k'] is the path of placeholder #2.
+    Then we will generate:
+    ```
+    torch._assert(
+        args[2].size()[0] == 3,
+        "Guard failed: z['k'].size()[0] == 3",
+    )
+    ```
+
+    FAQ: Why do we generate code based on (flattened) args instead of
+    the original (unflattened) inputs? Because this would require
+    inserting an additional pytree.unflatten call in our graph.
+
+    FAQ: Why do we not emit RuntimeError on guard failure as we used to?
+    Because it is inconvenient :/, get used to AssertionError instead.
+    """
+
+    import ast
+
+    from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+
+    actual_guards_code = []
+    shadow_guards_code = []
+    for c in guards_code:
+        a, s = c, c
+        for idx, path in enumerate(paths_of_placeholders):
+            # e.g., replace L['z']['k'] with args[2] for Python code (actual)
+            a = a.replace("L" + pytree.keystr(path), f"args[{idx}]")
+            # e.g., replace L['z']['k'] with z['k'] for error message (shadow)
+            s = s.replace(
+                "L" + pytree.keystr(path),
+                path[0].key + pytree.keystr(path[1:]),  # type: ignore[attr-defined]
+            )
+        actual_guards_code.append(a)
+        shadow_guards_code.append(s.replace("\n", ""))
+
+    # generate function code as str
+    code_str = "\ndef _(*args):\n"
+    for actual, shadow in zip(actual_guards_code, shadow_guards_code):
+        # printing guards code may potentially introduce redundant parens;
+        # we can normalize them out for readability by parsing/unparsing
+        # NOTE: this is not necessary for correctness, just deemed desirable
+        _shadow = ast.unparse(ast.parse(shadow, mode="eval"))
+        # actual code and shadow error message
+        code_str += f'  torch._assert({actual}, "Guard failed: {_shadow}")\n'
+    code_str += "  return\n"
+
+    # populate namespace with sympy globals, materialize function (named `_`)
+    namespace = {**SYMPY_INTERP}
+    exec(code_str, namespace)
+
+    # create and return a module whose forward is the materialized function
+    # NOTE: we want Dynamo to trace through this module, to repopulate guards:
+    # otherwise we would lose them when retracing
+    # NOTE: calling this module will be a side effect (no users): so it must
+    # be marked impure to avoid being not cleaned up by DCE
+    guards_fn = GuardsFn()
+    guards_fn.forward = torch._dynamo.dont_skip_tracing(namespace["_"])  # type: ignore[call-overload, method-assign]
+    guards_fn._is_impure = True  # type: ignore[assignment]
+    return guards_fn
+
+
 @torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, args, kwargs):
-    if not self.validate_inputs:
-        return
-
+def _check_input_constraints_for_module(self, args, kwargs):
     flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
-
     _check_input_constraints_for_graph(
-        [node for node in self.graph.nodes if node.op == "placeholder"],
+        self.graph.find_nodes(op="placeholder"),
         flat_args_with_path,
         self.range_constraints,
     )
+
+
+def _check_input_constraints_pre_hook(self, args, kwargs):
+    # preserve current behavior for clients that do not want any validation
+    if not self.validate_inputs:
+        return
+
+    # when a guards function exists, assume that the graph does calls it!
+    # so we do not need to check input constraints...but we still want
+    # to check inputs match, otherwise we'd get obscure pytree errors
+    if hasattr(self, "_guards_fn"):
+        _check_inputs_match(args, kwargs, self._in_spec)
+        return
+
+    # NOTE: this call is Dynamo disabled, as it used to be
+    _check_input_constraints_for_module(self, args, kwargs)
 
 
 def _unlift_inputs_as_getattr(
@@ -419,10 +515,149 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
+def _get_input_paths(example_inputs, signature):
+    """
+    Generate paths of placeholders, needed for generating the guards function.
+
+    NOTE: Here we make use of the example inputs used for export as well as
+    the signature of the unlifted graph module (not preserved by export).
+    """
+
+    args, kwargs = example_inputs
+    ctx = signature.bind(*args, **kwargs).arguments
+    flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
+    return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _get_input_guards_for_graph(
+    placeholders: list[torch.fx.Node],
+    range_constraints: dict[sympy.Symbol, ValueRanges],
+    paths_for_placeholders: list[pytree.KeyPath],
+):
+    """
+    Guards generated by the tracer include conditions observed in code, but
+    but do not include some additional checks we typically do in export.
+    For example, when dynamic shapes get specialized, are specified to be
+    within a range, or are specified to be in some equational relation,
+    corresponding input invalidation is done within a pre_hook, specifically,
+    `_check_input_constraints_for_graph`.
+
+    Here we generate guards corresponding to the checks that happen in
+    `_check_input_constraints_for_graph`, and add them to the guards already
+    generated by the tracer. In the future, it may be worthwhile to separate
+    them so that we can allow clients to turn off one but not the other.
+    (Looking at you, AOTI.)
+
+    NOTE: We should eventually reconcile this logic with `build_guards` that
+    is used by AOT Precompile.
+    """
+
+    deferred_expressions = []
+    new_guards_code = []
+    sources: dict[sympy.Expr, str] = {}
+
+    def handle_symint(expr, src):
+        if len(expr.free_symbols) == 1:
+            # complex equations (e.g., involving derived dims) need to
+            # handled later, since we may not have enough information
+            # just as we are passing through the placeholders in order
+            deferred_expressions.append((src, expr))
+        if expr in sources:
+            # expressions that appear in multiple sources should force
+            # inputs corresponding to those sources to be equal
+            # e.g., x.shape[0] == y.shape[1]
+            orig_src = sources[expr]
+            new_guards_code.append(f"{src} == {orig_src}")
+        else:
+            sources[expr] = src
+            # process value ranges as elsewhere in export
+            min_val, max_val = _convert_range_to_int(range_constraints[expr])
+            if min_val > 2:
+                new_guards_code.append(f"{src} >= {min_val}")
+            if max_val < math.inf:
+                new_guards_code.append(f"{src} <= {max_val}")
+
+    for placeholder, path in zip(placeholders, paths_for_placeholders):
+        src = "L" + pytree.keystr(path)
+        meta = placeholder.meta["val"]
+        # specializations
+        if isinstance(meta, int):
+            new_guards_code.append(f"{src} == {meta}")
+        if isinstance(meta, float):
+            if meta == math.inf:
+                new_guards_code.append(f"{src} == math.inf")
+            elif meta == -math.inf:
+                new_guards_code.append(f"{src} == -math.inf")
+            else:
+                new_guards_code.append(f"{src} == {meta}")
+        elif isinstance(meta, str):
+            new_guards_code.append(f"{src} == '{meta}'")
+        # range constraints and equalities
+        elif isinstance(meta, torch.SymInt) and meta.node.expr in range_constraints:
+            handle_symint(meta.node.expr, src)
+        elif isinstance(meta, torch.Tensor):
+            for i, dim in enumerate(meta.shape):
+                src = "L" + pytree.keystr(path) + f".size()[{i}]"
+                if isinstance(dim, int):
+                    # specializations
+                    new_guards_code.append(f"{src} == {dim}")
+                elif (
+                    isinstance(dim, torch.SymInt) and dim.node.expr in range_constraints
+                ):
+                    # range constraints and equalities
+                    handle_symint(dim.node.expr, src)
+
+    unification_map: dict[sympy.Symbol, sympy.Expr] = {}
+    py_printer = torch.utils._sympy.printers.PythonPrinter()
+
+    # process complex equations (e.g., involving derived dims)
+    for src, expr in deferred_expressions:
+        # we know this is the only symbol in expr (see check above)
+        symbol = next(iter(expr.free_symbols))
+        if symbol in sources:
+            # if s0 is already known to be directly sourced from inputs,
+            # e.g., z.shape[2], we do not need to do anything further
+            # (assume we have already processed constraints on s0 above)
+            continue
+
+        # otherwise s0 has some "hidden" source like 'dim'
+        # example: src = y.shape[1], expr = s0 + 1
+        if symbol in unification_map:
+            # suppose that we already know that s0 = x.shape[0] * 2
+            # so we can emit the guard: x.shape[0] * 2 + 1 = y.shape[1]
+            substitution = expr.subs(unification_map)
+            new_guards_code.append(
+                py_printer.doprint(sympy.Eq(substitution, sympy.Symbol(src)))
+            )
+        else:
+            # we do not yet know what s0 is, but given s0 + 1 = y.shape[1],
+            # we can solve for s0...now knowing that s0 = y.shape[1] - 1
+            solution = try_solve(sympy.Eq(expr, sympy.Symbol(src)), symbol)
+            if solution is not None:
+                definition = solution[1]
+                unification_map[symbol] = definition
+
+    return new_guards_code
+
+
+def _unlift_exported_program_lifted_states(
+    ep: ExportedProgram, check_guards=True
+) -> torch.fx.GraphModule:
+    # force check_guards=False for executorch because
+    # its pass infra has too many calls to .module()
+    # and but does not like call modules in the graph
+    # TODO: update executorch to check_guards=False
+    frame = inspect.currentframe()
+    while frame is not None:
+        if "executorch" in frame.f_code.co_filename:
+            check_guards = False
+            break
+        frame = frame.f_back
+
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
+
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (
@@ -489,4 +724,37 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
     unlift_gm.meta.update(ep.graph_module.meta)
+
+    # create a _guards_fn submodule and insert a call to it after placeholders
+    graph = unlift_gm.graph
+    placeholders = graph.find_nodes(op="placeholder")
+    if check_guards and placeholders and ep.example_inputs:
+        input_paths = _get_input_paths(
+            ep.example_inputs,
+            inspect.signature(unlift_gm.forward),
+        )
+        guards_code = _get_input_guards_for_graph(
+            placeholders, ep.range_constraints, input_paths
+        )
+        guards_code.extend(ep._guards_code)
+        unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
+
+        root_nn_module_stack = torch.fx._utils.first_call_function_nn_module_stack(
+            graph
+        )
+        with graph.inserting_after(placeholders[-1]):
+            node = graph.call_module("_guards_fn", tuple(placeholders))
+            node.meta["nn_module_stack"] = root_nn_module_stack
+
+        unlift_gm.recompile()
+
     return unlift_gm
+
+
+class GuardsFn(torch.nn.Module):
+    """
+    Module class for guard functions.
+    """
+
+    def forward(self, *args):
+        pass
