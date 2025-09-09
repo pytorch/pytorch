@@ -2634,11 +2634,14 @@ def _reduction_configs(
             register_intensive=register_intensive,
         )
 
-    contiguous_config = make_config(
-        1,
-        min(rnumel, MAX_R0_BLOCK),
-        register_intensive=register_intensive,
-    )
+    def inner_config():
+        return make_config(
+            1 if rnumel > 2048 else 2, # 1024 or less is persistent
+            min(rnumel, MAX_R0_BLOCK),
+            register_intensive=register_intensive,
+        )
+
+    contiguous_config = inner_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2671,6 +2674,13 @@ def _reduction_configs(
     ):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
+        if rnumel > 512:
+            # Less warps is much better sometimes for nice
+            # cache access patterns, decreases cache contention
+            # and large speedups on higher memory bw (B200)
+            inner_cfg = inner_config()
+            inner_cfg.num_warps = 4
+            configs.append(inner_cfg)
         return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
         return configs + [outer_config]
