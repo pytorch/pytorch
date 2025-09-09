@@ -258,6 +258,7 @@ def aot_compile_fullgraph(
     backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
     output_graph = dynamo_output.tracer_output.output_graph
     assert output_graph is not None
+    assert backend_input is not None
     import_sources = output_graph.import_sources
     with (
         torch._guards.tracing(TracingContext(backend_input.fake_mode)),
