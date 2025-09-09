@@ -10,7 +10,6 @@ from ..kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
-from .triton_addmm import AddMMBiasExpansionConfigMixin
 
 
 if TYPE_CHECKING:
@@ -49,7 +48,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
-class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeuristics):
+class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -63,22 +62,6 @@ class ATenAddMMConfigHeuristics(AddMMBiasExpansionConfigMixin, ATenConfigHeurist
             "alpha": alpha,
             "beta": beta,
         }
-
-    def adjust_kernel_inputs(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> KernelInputs:
-        # This is a compatibility layer, as the previous implementation relied on this
-        # and it yields sometimes slightly different numerics
-        # TODO: figure out if this can be handled cleaner e.g. through a subgraph or
-        # through a different decomposition
-        max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
-        if op_name == "addmm" and not max_autotune:
-            # nothing to do in that case
-            return kernel_inputs
-        # do the regular bias expansion
-        return super().adjust_kernel_inputs(kernel_inputs, op_name)
 
 
 @register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")

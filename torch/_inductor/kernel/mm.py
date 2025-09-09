@@ -919,11 +919,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        # NOTE: due to slight differences between inp and inp_expanded, we pass
-        # the unexpanded inp here, and the heuristics that need an expanded inp
-        # can use AddMMBiasExpansionConfigMixin to achieve that
-        [inp, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
+        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
     choices: list[ChoiceCaller] = []
 
@@ -938,6 +934,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
+    if (not is_nonzero) or (
+        not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
+    ):
+        # TODO(coconutruben): combine this with the main flow of addmm through
+        # a subgraph or something as inp vs inp_expanded causes some slight numeric
+        # differences
+        kernel_inputs = MMKernelInputs(
+            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        )
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                [aten_addmm],
+                name,
+            )
+        )
+        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
@@ -965,7 +978,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
-            [mat1, mat2, inp_expanded],
+            # reorder here because CUTLASS expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
             alpha=alpha,
             beta=beta,
         )
@@ -974,7 +989,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
-            [mat1, mat2, inp_expanded],
+            # reorder here because CK expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
@@ -984,13 +1001,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CppGemmTemplate.add_choices(
             choices,
             layout,
-            [inp_expanded, mat1, mat2],
+            kernel_inputs.nodes(),
             alpha=alpha,
             beta=beta,
             has_bias=True,
         )
 
-    return autotune_select_algorithm(name, choices, [inp_expanded, mat1, mat2], layout)
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
