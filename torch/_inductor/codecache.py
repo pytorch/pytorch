@@ -2196,14 +2196,14 @@ end
                 header_file = _get_cpp_wrapper_header(
                     device_type, aot_mode=graph.aot_mode
                 )
-                wrapper_build_options.precompiled_header = _precompile_header(
+                wrapper_build_options.precompiled_header = _precompile_torch_header(
                     header_file,
                     cpp_command,
                     min_optimize=not config.aot_inductor.package_cpp_only,
                     **compile_command,
                 )
                 if cpp_prefix := _get_cpp_prefix_header(device_type):
-                    kernel_build_options.precompiled_header = _precompile_header(
+                    kernel_build_options.precompiled_header = _precompile_torch_header(
                         cpp_prefix,
                         cpp_command,
                         **compile_command,
@@ -2562,7 +2562,7 @@ _HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
 
 
 @functools.cache
-def _precompile_header(
+def _precompile_torch_header(
     header: str,
     hashable_cmd_line: str,
     **compile_command: Any,
@@ -2570,6 +2570,7 @@ def _precompile_header(
     assert not _IS_WINDOWS, (
         "CppBuilder does not currently support precompiling on Windows!"
     )
+    assert header.startswith("torch/"), "Only torch includes are supported!"
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
@@ -2598,6 +2599,14 @@ def _precompile_header(
 
         preprocessor_hash = _get_file_checksum(preprocessor.get_target_file_path())
 
+    # We also need to check the mtime for the header file to be precompiled.
+    # Even if nothing in the preprocessed output has changed, GCC will still
+    # error if the mtime has changed.
+    header_path = (
+        Path(torch.__file__).resolve().parent.joinpath("include", *(header.split("/")))
+    )
+    mtime = header_path.stat().st_mtime_ns
+
     header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
     header_hash, header_full_path = write(
         content=f"#include <{header}>\n",
@@ -2605,6 +2614,7 @@ def _precompile_header(
         extra=(
             hashable_cmd_line
             + preprocessor_hash
+            + str(mtime)
             + get_compiler_version_info(header_build_option.get_compiler())
         ),
         specified_dir=_HEADER_DIR,
@@ -2754,7 +2764,7 @@ class CppCodeCache:
             # if requested, pre-compile any headers
             if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
                 if header := cls._get_uncompiled_header(device_type):
-                    main_build_option.precompiled_header = _precompile_header(
+                    main_build_option.precompiled_header = _precompile_torch_header(
                         header,
                         main_cmd_line,
                         min_optimize=optimized_code is not None,
@@ -2765,10 +2775,12 @@ class CppCodeCache:
                 # so go ahead and precompile the relevant header here.  Revisit this
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
-                    optimized_build_option.precompiled_header = _precompile_header(
-                        header,
-                        optimized_cmd_line,
-                        **compile_command,
+                    optimized_build_option.precompiled_header = (
+                        _precompile_torch_header(
+                            header,
+                            optimized_cmd_line,
+                            **compile_command,
+                        )
                     )
 
             main_name, output_dir = get_name_and_dir_from_output_file_path(main_path)
