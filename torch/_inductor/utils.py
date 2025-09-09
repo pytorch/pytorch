@@ -59,6 +59,7 @@ from unittest import mock
 import sympy
 
 import torch
+import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -1634,7 +1635,11 @@ def _use_conv_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(
-    layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1651,7 +1656,8 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
+        # some callers handle max-autotune checking externally
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1679,7 +1685,7 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
 
-    def _is_tma_compatible(x: IRNode) -> bool:
+    def _is_tma_compatible_default(x: IRNode) -> bool:
         sizes = x.get_size()
         strides = x.get_stride()
         rank = len(sizes)
@@ -1739,7 +1745,25 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
         return True
 
-    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+    def _is_tma_compatible_xpu(x: IRNode) -> bool:
+        strides = x.get_stride()
+        strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
+        # Find the single contiguous (“inner”) dim
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
+            return False
+        return True
+
+    return has_triton_tma_device() and all(
+        _is_tma_compatible_default(m)
+        if (m_device := m.get_device()) is None or m_device.type != "xpu"
+        else _is_tma_compatible_xpu(m)
+        for m in matrices
+    )
 
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
@@ -1819,7 +1843,7 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     Check if we should use the contiguous subgraph transform.
     This transform makes the second matrix contiguous before the matmul.
     """
-    decompose_k_threshold = config.triton.decompose_k_threshold
+    contiguous_threshold = config.rocm.contiguous_threshold
 
     # Similar conditions to decompose_k but for contiguous transform
     from torch._inductor.virtualized import V
@@ -1828,8 +1852,8 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         bool(torch.version.hip)  # Only relevant on AMD
         and V.graph.sizevars.statically_known_true(
             sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
+                sympy.Ge(k, contiguous_threshold * m),
+                sympy.Ge(k, contiguous_threshold * n),
             )
         )
         and not V.graph.aot_mode
@@ -3372,8 +3396,8 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
 def is_using_cudagraph_partition() -> bool:
     return (
         torch._inductor.config.triton.cudagraphs
-        and torch._inductor.config.graph_partition
-    )
+        or _unstable_customized_partition_wrapper.wrapper is not None
+    ) and torch._inductor.config.graph_partition
 
 
 def dtype_from_size(size: int) -> torch.dtype:
@@ -3598,3 +3622,83 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
+
+
+@dataclasses.dataclass(frozen=True)
+class CUDAGraphWrapperMetadata:
+    """
+    Metadata for Customized CUDAGraphWrapper.
+
+    Currently assumes there is 1 dynamo graph and will extend to
+    multiple graphs in the future.
+    """
+
+    # The number of partitions that are cudagraphable.
+    num_partitions: int
+
+    # Index of the current partition.
+    partition_index: int
+
+
+PartitionFnType = Callable[..., Any]
+CUDAGraphWrapperType = Callable[
+    [PartitionFnType, CUDAGraphWrapperMetadata], PartitionFnType
+]
+
+
+# only incremented by user call of mark_step_begin
+class CUDAGraphWrapper:
+    wrapper: Optional[CUDAGraphWrapperType] = None
+
+
+# A customized partition wrappers from users. Interface should be:
+#
+# def wrapper(fn: PartitionFnType, metadata: CUDAGraphWrapperMetadata) -> PartitionFnType
+#
+# Inductor generates N wrapper functions for N partition functions, and mechanically wrap
+# each partition fn with the generated wrapper function. Users need to handle all details
+# such as static inputs, dynamic shapes, etc.
+# Users could customize the wrapper based on the metadata. One example is to have special
+# handle for the first and last wrapper function.
+#
+# Warning: This API is unstable and may change in the future.
+_unstable_customized_partition_wrapper = CUDAGraphWrapper()
+
+
+def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
+    _unstable_customized_partition_wrapper.wrapper = wrapper
+
+
+def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
+    args = snode.node.inputs  # type: ignore[union-attr]
+    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
+        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
+        snode.node.kwargs,  # type: ignore[union-attr]
+    )
+    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+
+    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
+        return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
+            x, torch._inductor.ir.GeneratorState
+        )
+
+    flat_args = [
+        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
+        if _is_tensor_ir(a)
+        else a
+        for a in flat_args
+    ]
+
+    def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
+        return torch.empty(size, dtype=dtype, device=device)
+
+    def to_real_tensor(e: Any) -> Any:
+        if not isinstance(e, torch.Tensor):
+            return e
+        out = _tensor(e.size(), e.dtype, e.device)
+        return out
+
+    flat_args = [to_real_tensor(a) for a in flat_args]
+    args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
+    return args, kwargs

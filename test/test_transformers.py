@@ -2070,6 +2070,11 @@ class TestSDPA(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
+    def test_scaled_dot_product_attention_fp16_overflow(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160841
+        x = torch.full((1, 32, 23, 80), 64.0, dtype=torch.half, device=device)
+        y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
+        self.assertFalse(y.isnan().any().item())
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
@@ -3164,7 +3169,7 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" in os.environ
+        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
         prefer_cudnn = prefer_cudnn and device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
 
         # TODO we are currently disabling this by default, lets assert that this returns
