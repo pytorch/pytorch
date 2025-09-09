@@ -2438,15 +2438,8 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
-        # TODO: we don't support Zero Bubble with torch.compile so we
-        # should disable it for now
-        for stage in stages:
-            if isinstance(stage.submod, OptimizedModule):
-                raise RuntimeError(
-                    "The Zero Bubble schedule is not supported with \
-stage modules that have used torch.compile"
-                )
-
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2639,6 +2632,8 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2810,6 +2805,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -3207,3 +3204,24 @@ def _dump_chrometrace(schedule, filename):
 
     with open(filename, "w") as f:
         json.dump({"traceEvents": events}, f)
+
+
+def _check_torch_compile_compatibility(
+    stages: list[_PipelineStageBase], schedule_name: str
+):
+    """
+    Check if the schedule is compatible with torch.compile.
+
+    Args:
+        stages: List of pipeline stages to check
+        schedule_name: Name of the schedule for error message
+
+    Raises:
+        RuntimeError: If any stage uses torch.compile
+    """
+    for stage in stages:
+        if isinstance(stage.submod, OptimizedModule):
+            raise RuntimeError(
+                f"The {schedule_name} schedule is not supported with "
+                "stage modules that have used torch.compile"
+            )
