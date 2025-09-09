@@ -1,3 +1,6 @@
+# ruff: noqa: PGH004, G004, F403
+# flake8: noqa
+# Owner(s): ["oncall: distributed"]
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -31,66 +34,55 @@
 #################################################################################################
 
 """
-Unit tests for pycute.left_inverse
+Unit tests for _pycute.int_tuple
 """
 
-import logging
 import unittest
 
-from torch.distributed.pycute import *
+from torch.distributed._pycute import *
+from torch.testing._internal.common_utils import run_tests
 
-_LOGGER = logging.getLogger(__name__)
 
+class TestIntTuple(unittest.TestCase):
+    def test_product(self):
+        self.assertEqual(product(2), 2)
 
-class TestRightInverse(unittest.TestCase):
-  def helper_test_right_inverse(self, layout):
-    inv_layout = right_inverse(layout)
+        self.assertEqual(product((3, 2)), 6)
 
-    _LOGGER.debug(f"{layout}  =>  {inv_layout}")
+        self.assertEqual(product(product(((2, 3), 4))), 24)
 
-    for i in range(size(inv_layout)):
-      self.assertEqual(layout(inv_layout(i)), i)
+    def test_inner_product(self):
+        self.assertEqual(inner_product(2, 3), 6)
 
-  def test_right_inverse(self):
-    test = Layout(1,0)
-    self.helper_test_right_inverse(test)
+        self.assertEqual(inner_product((1, 2), (3, 2)), 7)
 
-    test = Layout((1,1),(0,0))
-    self.helper_test_right_inverse(test)
+        self.assertEqual(inner_product(((2, 3), 4), ((2, 1), 2)), 15)
 
-    test = Layout((3,7),(0,0))
-    self.helper_test_right_inverse(test)
+    def test_shape_div(self):
+        self.assertEqual(shape_div((3, 4), 6), (1, 2))
 
-    test = Layout(1,1)
-    self.helper_test_right_inverse(test)
+        self.assertEqual(shape_div((3, 4), 12), (1, 1))
 
-    test = Layout(4,0)
-    self.helper_test_right_inverse(test)
+        self.assertEqual(shape_div((3, 4), 36), (1, 1))
 
-    test = Layout(4,1)
-    self.helper_test_right_inverse(test)
+        self.assertEqual(shape_div(((3, 4), 6), 36), ((1, 1), 2))
 
-    test = Layout(4,2)
-    self.helper_test_right_inverse(test)
+        self.assertEqual(shape_div((6, (3, 4)), 36), (1, (1, 2)))
 
-    test = Layout((2,4),(0,2))
-    self.helper_test_right_inverse(test)
+    def test_prefix_product(self):
+        self.assertEqual(prefix_product(2), 1)
 
-    test = Layout((8,4),(1,8))
-    self.helper_test_right_inverse(test)
+        self.assertEqual(prefix_product((3, 2)), (1, 3))
 
-    test = Layout((8,4),(4,1))
-    self.helper_test_right_inverse(test)
+        self.assertEqual(prefix_product((3, 2, 4)), (1, 3, 6))
 
-    test = Layout((2,4,6),(1,2,8))
-    self.helper_test_right_inverse(test)
+        self.assertEqual(prefix_product(((2, 3), 4)), ((1, 2), 6))
 
-    test = Layout((2,4,6),(4,1,8))
-    self.helper_test_right_inverse(test)
-
-    test = Layout((4,2),(1,16))
-    self.helper_test_right_inverse(test)
+        self.assertEqual(
+            prefix_product(((2, 3), (2, 1, 2), (5, 2, 1))),
+            ((1, 2), (6, 12, 12), (24, 120, 240)),
+        )
 
 
 if __name__ == "__main__":
-  unittest.main()
+    run_tests()

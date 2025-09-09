@@ -1,3 +1,6 @@
+# ruff: noqa: PGH004, G004, F403
+# flake8: noqa
+# Owner(s): ["oncall: distributed"]
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -31,48 +34,64 @@
 #################################################################################################
 
 """
-Unit tests for pycute.int_tuple
+Unit tests for _pycute.complement
 """
 
+import logging
 import unittest
 
-from torch.distributed.pycute import *
+from torch.distributed._pycute import *
+from torch.testing._internal.common_utils import run_tests
 
 
-class TestIntTuple(unittest.TestCase):
-  def test_product(self):
-    self.assertEqual(product(2), 2)
+_LOGGER = logging.getLogger(__name__)
 
-    self.assertEqual(product((3,2)), 6)
 
-    self.assertEqual(product(product(((2,3),4))), 24)
+class TestComplement(unittest.TestCase):
+    def helper_test_complement(self, layout):
+        layoutR = complement(layout)
 
-  def test_inner_product(self):
-    self.assertEqual(inner_product(2, 3), 6)
+        _LOGGER.debug(f"{layout}  =>  {layoutR}")
 
-    self.assertEqual(inner_product((1,2), (3,2)), 7)
+        # Post-condition: test disjointness of the codomains
+        for a in range(size(layout)):
+            for b in range(size(layoutR)):
+                assert (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
 
-    self.assertEqual(inner_product(((2,3),4), ((2,1),2)), 15)
+    def test_complement(self):
+        test = Layout(1, 0)
+        self.helper_test_complement(test)
 
-  def test_shape_div(self):
-    self.assertEqual(shape_div((3,4), 6), (1,2))
+        test = Layout(1, 1)
+        self.helper_test_complement(test)
 
-    self.assertEqual(shape_div((3,4), 12), (1,1))
+        test = Layout(4, 0)
+        self.helper_test_complement(test)
 
-    self.assertEqual(shape_div((3,4), 36), (1,1))
+        test = Layout((2, 4), (1, 2))
+        self.helper_test_complement(test)
 
-    self.assertEqual(shape_div(((3,4),6), 36), ((1,1),2))
+        test = Layout((2, 3), (1, 2))
+        self.helper_test_complement(test)
 
-    self.assertEqual(shape_div((6,(3,4)), 36), (1,(1,2)))
+        test = Layout((2, 4), (1, 4))
+        self.helper_test_complement(test)
 
-  def test_prefix_product(self):
-    self.assertEqual(prefix_product(2), 1)
+        test = Layout((2, 4, 8), (8, 1, 64))
+        self.helper_test_complement(test)
 
-    self.assertEqual(prefix_product((3,2)), (1,3))
+        test = Layout(((2, 2), (2, 2)), ((1, 4), (8, 32)))
+        self.helper_test_complement(test)
 
-    self.assertEqual(prefix_product((3,2,4)), (1,3,6))
+        test = Layout((2, (3, 4)), (3, (1, 6)))
+        self.helper_test_complement(test)
 
-    self.assertEqual(prefix_product(((2,3),4)), ((1,2),6))
+        test = Layout((4, 6), (1, 6))
+        self.helper_test_complement(test)
 
-    self.assertEqual(prefix_product(((2,3),(2, 1, 2),( 5,  2,  1))),
-                                    ((1,2),(6,12,12),(24,120,240)))
+        test = Layout((4, 10), (1, 10))
+        self.helper_test_complement(test)
+
+
+if __name__ == "__main__":
+    run_tests()

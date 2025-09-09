@@ -1,3 +1,6 @@
+# ruff: noqa: PGH004, G004, F403
+# flake8: noqa
+# Owner(s): ["oncall: distributed"]
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -31,62 +34,68 @@
 #################################################################################################
 
 """
-Unit tests for pycute.complement
+Unit tests for _pycute.left_inverse
 """
 
 import logging
 import unittest
 
-from torch.distributed.pycute import *
+from torch.distributed._pycute import *
+from torch.testing._internal.common_utils import run_tests
+
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestComplement(unittest.TestCase):
-  def helper_test_complement(self, layout):
-    layoutR = complement(layout)
+class TestRightInverse(unittest.TestCase):
+    def helper_test_right_inverse(self, layout):
+        inv_layout = right_inverse(layout)
 
-    _LOGGER.debug(f"{layout}  =>  {layoutR}")
+        _LOGGER.debug(f"{layout}  =>  {inv_layout}")
 
-    # Post-condition: test disjointness of the codomains
-    for a in range(size(layout)):
-      for b in range(size(layoutR)):
-        assert (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
+        for i in range(size(inv_layout)):
+            self.assertEqual(layout(inv_layout(i)), i)
 
-  def test_complement(self):
-    test = Layout(1,0)
-    self.helper_test_complement(test)
+    def test_right_inverse(self):
+        test = Layout(1, 0)
+        self.helper_test_right_inverse(test)
 
-    test = Layout(1,1)
-    self.helper_test_complement(test)
+        test = Layout((1, 1), (0, 0))
+        self.helper_test_right_inverse(test)
 
-    test = Layout(4,0)
-    self.helper_test_complement(test)
+        test = Layout((3, 7), (0, 0))
+        self.helper_test_right_inverse(test)
 
-    test = Layout((2,4),(1,2))
-    self.helper_test_complement(test)
+        test = Layout(1, 1)
+        self.helper_test_right_inverse(test)
 
-    test = Layout((2,3),(1,2))
-    self.helper_test_complement(test)
+        test = Layout(4, 0)
+        self.helper_test_right_inverse(test)
 
-    test = Layout((2,4),(1,4))
-    self.helper_test_complement(test)
+        test = Layout(4, 1)
+        self.helper_test_right_inverse(test)
 
-    test = Layout((2,4,8),(8,1,64))
-    self.helper_test_complement(test)
+        test = Layout(4, 2)
+        self.helper_test_right_inverse(test)
 
-    test = Layout(((2,2),(2,2)),((1,4),(8,32)))
-    self.helper_test_complement(test)
+        test = Layout((2, 4), (0, 2))
+        self.helper_test_right_inverse(test)
 
-    test = Layout((2,(3,4)),(3,(1,6)))
-    self.helper_test_complement(test)
+        test = Layout((8, 4), (1, 8))
+        self.helper_test_right_inverse(test)
 
-    test = Layout((4,6),(1,6))
-    self.helper_test_complement(test)
+        test = Layout((8, 4), (4, 1))
+        self.helper_test_right_inverse(test)
 
-    test = Layout((4,10),(1,10))
-    self.helper_test_complement(test)
+        test = Layout((2, 4, 6), (1, 2, 8))
+        self.helper_test_right_inverse(test)
+
+        test = Layout((2, 4, 6), (4, 1, 8))
+        self.helper_test_right_inverse(test)
+
+        test = Layout((4, 2), (1, 16))
+        self.helper_test_right_inverse(test)
 
 
 if __name__ == "__main__":
-  unittest.main()
+    run_tests()

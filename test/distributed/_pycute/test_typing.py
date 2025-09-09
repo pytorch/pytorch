@@ -1,5 +1,6 @@
 # flake8: noqa
-# ruff: noqa: PGH004, B011
+# ruff: noqa: PGH004
+# Owner(s): ["oncall: distributed"]
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -32,7 +33,34 @@
 #
 #################################################################################################
 
-from .int_tuple import *
-from .layout import *
-from .swizzle import *
-from .typing import *
+"""
+Unit tests for _pycute.typing
+"""
+
+import logging
+import unittest
+
+from torch.distributed._pycute import *
+from torch.testing._internal.common_utils import run_tests
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class TestTyping(unittest.TestCase):
+    def helper_test_typing(self, _cls, _obj, cls, expected: bool):
+        _LOGGER.debug(f"issubclass({_cls}, {cls})")
+        _LOGGER.debug(f"isinstance({_obj}, {cls})")
+
+        self.assertEqual(expected, issubclass(_cls, cls))
+        self.assertEqual(expected, isinstance(_obj, cls))
+
+    def test_typing(self):
+        self.helper_test_typing(int, 1, Integer, True)
+        self.helper_test_typing(float, 1.0, Integer, False)
+        self.helper_test_typing(str, "hi", Integer, False)
+        self.helper_test_typing(bool, False, Integer, False)
+
+
+if __name__ == "__main__":
+    run_tests()
