@@ -1,7 +1,7 @@
 # torch.onnx.testing
 
 ```{eval-rst}
-.. automodule:: torch.onnx.ops
+.. automodule:: torch.onnx.testing
 ```
 
 ```{eval-rst}
