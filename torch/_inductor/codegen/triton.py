@@ -4267,6 +4267,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = bound_sympy(rnumel).upper
             assert isinstance(val, int) or val.is_constant()
 
+            if val == torch.utils._sympy.numbers.IntInfinity():
+                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+
             val = next_power_of_2(int(val))
 
             if val > 16 * 1024:
