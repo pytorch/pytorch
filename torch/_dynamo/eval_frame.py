@@ -36,6 +36,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -113,7 +114,7 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from torch._dynamo.package import CompilePackage, DynamoCaptureOutput
+    from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
     from torch.fx.node import Argument, Node, Target
@@ -597,11 +598,13 @@ class _TorchDynamoContext:
         patch_fn: Callable[[], Any] = nothing,
         first_ctx: bool = False,
         *,
-        error_on_graph_break: bool = False,
+        fullgraph: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -609,6 +612,7 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
+        self.fullgraph = fullgraph
         self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
@@ -616,6 +620,7 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        self._hooks = hooks
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -699,6 +704,27 @@ class _TorchDynamoContext:
 
         fn = innermost_fn(fn)
 
+        def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if not self.fullgraph:
+                raise RuntimeError(
+                    "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+                )
+
+            if not callable(self.callback):
+                raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+            assert self._hooks is not None
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
+
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
@@ -739,7 +765,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.wrap_top_frame or (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -758,13 +786,13 @@ class _TorchDynamoContext:
             callback = self.callback  # type: ignore[assignment]
 
         is_jit_tracing = torch._C._is_tracing
-        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
-                if is_fx_tracing():
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -784,7 +812,7 @@ class _TorchDynamoContext:
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_error_on_graph_break = None
-                if self.error_on_graph_break is not None:
+                if not self.fullgraph and self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
                     _set_error_on_graph_break(self.error_on_graph_break)
 
@@ -831,9 +859,14 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
-        )
+        if self.error_on_graph_break is not None:
+            compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+                external_utils.wrap_inline_with_error_on_graph_break(
+                    fn, self.error_on_graph_break
+                )
+            )
+        else:
+            compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -843,6 +876,8 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(compile_wrapper, "get_compiler_config")
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if torch._dynamo.config.enable_aot_compile:
+            compile_wrapper.aot_compile = aot_compile  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -893,7 +928,8 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor: Callable[[], contextlib.AbstractContextManager[Any]],
         first_ctx: bool = False,
         *,
-        error_on_graph_break: bool = False,
+        fullgraph: bool = False,
+        error_on_graph_break: Optional[bool] = None,
         export: bool = False,
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
@@ -901,6 +937,7 @@ class OptimizeContext(_TorchDynamoContext):
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -911,11 +948,13 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            fullgraph=fullgraph,
             error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
             package=package,
+            hooks=hooks,
         )
 
         if config.compiled_autograd:
@@ -1035,7 +1074,8 @@ def _optimize_catch_errors(
     backend_ctx_ctor: Callable[
         [], contextlib.AbstractContextManager[Any]
     ] = null_context,
-    error_on_graph_break: bool = False,
+    fullgraph: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     export: bool = False,
     dynamic: Optional[bool] = None,
     compiler_config: Optional[Any] = None,
@@ -1046,12 +1086,14 @@ def _optimize_catch_errors(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        fullgraph=fullgraph,
         error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        hooks=hooks,
     )
 
 
@@ -1080,6 +1122,89 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
             f"A callable function is expected, but {type(fn)} is provided."
         )
         return fn
+
+
+# Make dynamo graph to have same input/output spec as user code
+def argument_names(
+    f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
+) -> list[str]:
+    def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
+        # Get a list of Parameter objects from the Signature object
+        params = list(sig.parameters.values())
+        # Separate positional arguments, keyword-only arguments and varargs/varkw
+        args = [
+            p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwonlyargs = [
+            p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        varargs = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
+            None,
+        )
+        varkw = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
+            None,
+        )
+        # Get default values for positional arguments and keyword-only arguments
+        defaults = tuple(
+            p.default
+            for p in params
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and p.default is not inspect.Parameter.empty
+        )
+        kwonlydefaults = {
+            p.name: p.default
+            for p in params
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        # Get annotations for parameters and return value
+        annotations = {}
+        if sig.return_annotation:
+            annotations = {"return": sig.return_annotation}
+        for parameter in params:
+            annotations[parameter.name] = parameter.annotation
+        # Return a FullArgSpec object with the extracted attributes
+        return inspect.FullArgSpec(
+            args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+        )
+
+    fullargspec = signature_to_fullargspec(f_sig)
+
+    # 1. Map `args` 1-to-1 to positional arguments in original signature.
+    input_strs = fullargspec.args[: len(args)]
+
+    if len(args) > len(fullargspec.args):
+        # 2. If there are more arguments left in `args`, they map to varargs in original
+        # signature. Assign names as {varargs}_0, {varargs}_1, ...
+        assert fullargspec.varargs is not None, "More arguments than expected"
+        input_strs += [
+            f"{fullargspec.varargs}_{i}" for i in range(0, len(args) - len(input_strs))
+        ]
+    elif len(args) < len(fullargspec.args):
+        # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+        # it implies these are arguments either with default values, or provided in
+        # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+        # export them as part of the function signature. The latter will be handled
+        # in the next step.
+        for unprovided_arg in fullargspec.args[
+            len(args) : -len(fullargspec.defaults or [])
+        ]:
+            assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+    # 4. Keyword arguments provided in `kwargs`.
+    input_strs += list(kwargs.keys())
+
+    # 5. Keyword-only arguments with default values if not provided are not exported
+    # as part of the function signature.
+    for kwonly_arg in fullargspec.kwonlyargs:
+        kwonlydefaults = fullargspec.kwonlydefaults or {}
+        assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
+            f"Missing keyword only argument {kwonly_arg}"
+        )
+
+    return input_strs
 
 
 def check_if_dynamo_supported() -> None:
@@ -1143,6 +1268,7 @@ def _optimize(
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
     nopython: bool = False,
+    error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
@@ -1165,6 +1291,11 @@ def _optimize(
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
+        error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
+            See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
+
+            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
+            If `nopython` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
@@ -1195,6 +1326,15 @@ def _optimize(
     ):
         return _NullDecorator()
 
+    if nopython and not config.debug_force_graph_break_on_leaf_return:
+        return optimize_assert(
+            backend,
+            dynamic=dynamic,
+            hooks=hooks,
+            rebuild_ctx=rebuild_ctx,
+            package=package,
+        )
+
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1219,7 +1359,9 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
+        fullgraph=False,
+        error_on_graph_break=error_on_graph_break
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1591,91 +1733,6 @@ def rewrite_signature(
         fake_mode,
     ).transform()
 
-    # Make dynamo graph to have same input/output spec as user code
-    def argument_names(
-        f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
-    ) -> list[str]:
-        def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
-            # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
-            # Separate positional arguments, keyword-only arguments and varargs/varkw
-            args = [
-                p.name
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            ]
-            kwonlyargs = [
-                p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
-            ]
-            varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
-                None,
-            )
-            varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
-                None,
-            )
-            # Get default values for positional arguments and keyword-only arguments
-            defaults = tuple(
-                p.default
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-                and p.default is not inspect.Parameter.empty
-            )
-            kwonlydefaults = {
-                p.name: p.default
-                for p in params
-                if p.kind == inspect.Parameter.KEYWORD_ONLY
-                and p.default is not inspect.Parameter.empty
-            }
-            # Get annotations for parameters and return value
-            annotations = {}
-            if sig.return_annotation:
-                annotations = {"return": sig.return_annotation}
-            for parameter in params:
-                annotations[parameter.name] = parameter.annotation
-            # Return a FullArgSpec object with the extracted attributes
-            return inspect.FullArgSpec(
-                args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
-            )
-
-        fullargspec = signature_to_fullargspec(f_sig)
-
-        # 1. Map `args` 1-to-1 to positional arguments in original signature.
-        input_strs = fullargspec.args[: len(args)]
-
-        if len(args) > len(fullargspec.args):
-            # 2. If there are more arguments left in `args`, they map to varargs in original
-            # signature. Assign names as {varargs}_0, {varargs}_1, ...
-            assert fullargspec.varargs is not None, "More arguments than expected"
-            input_strs += [
-                f"{fullargspec.varargs}_{i}"
-                for i in range(0, len(args) - len(input_strs))
-            ]
-        elif len(args) < len(fullargspec.args):
-            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
-            # it implies these are arguments either with default values, or provided in
-            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
-            # export them as part of the function signature. The latter will be handled
-            # in the next step.
-            for unprovided_arg in fullargspec.args[
-                len(args) : -len(fullargspec.defaults or [])
-            ]:
-                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
-
-        # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
-
-        # 5. Keyword-only arguments with default values if not provided are not exported
-        # as part of the function signature.
-        for kwonly_arg in fullargspec.kwonlyargs:
-            kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
-
-        return input_strs
-
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
             argument_names(f_sig, orig_args, orig_kwargs),
@@ -1702,7 +1759,6 @@ def export(
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
@@ -1760,6 +1816,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
@@ -1926,7 +1985,6 @@ def export(
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             _compiling_state_context(),
         ):
@@ -2139,10 +2197,11 @@ def _optimize_assert(
     package: Optional[CompilePackage] = None,
 ) -> OptimizeContext:
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`,
-    but ignores symbolic_convert.error_on_graph_break setting.
+    Guarantees single-graph capture.
+    The same as `torch._dynamo.optimize(backend)` but ignores
+    symbolic_convert.error_on_graph_break setting.
 
-    Used for export, since we must always error on graph breaks and ignore
+    Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
@@ -2169,6 +2228,7 @@ def _optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
+        fullgraph=True,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
@@ -2288,83 +2348,3 @@ def skip_code(code: types.CodeType) -> None:
     set_code_exec_strategy(
         code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
-
-
-@dataclass
-class BackendInput:
-    graph_module: torch.fx.GraphModule
-    example_inputs: tuple[Any, ...]
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
-
-
-@dataclass
-class CaptureOutput:
-    """
-    Core data structure that contains the all the information dynamo generates
-    from fullgraph=True. Ideally, this is should be the "return" type if dynamo
-    has a standard API to return compilation artifacts.
-    """
-
-    dynamo_artifacts: DynamoCaptureOutput
-    backend_inputs: dict[str, BackendInput]
-
-
-def fullgraph_capture(model: Callable[..., Any]) -> Callable[..., Any]:
-    """
-    A helper function which wraps a model and returns a callable like optimize().
-    The callable can be called with normal inputs like torch.compile()-ed functions
-    and user can dump dynamo compilation artifacts through `get_artifacts()` call.
-
-    The CaptureOutput is separated into two parts:
-    1. Dynamo specific information from DynamoCaptureOutput, which includes:
-        - guards
-        - generated bytecode
-        - python source information
-    2. Backend specific information (indexed by unique backend id) such as:
-        - fx graph
-        - example inputs
-
-    Example:
-        def fn(*args):
-            ...
-
-        compiled_fn = fullgraph_capture(fn)
-        compiled_fn(args)
-        compiled_fn(another_args)
-        artifacts = compiled_fn.get_artifacts()
-    """
-    from torch._dynamo.package import CompilePackage
-
-    package = CompilePackage(model)
-
-    backend_inputs: dict[str, BackendInput] = {}
-
-    def _backend(
-        gm: torch.fx.GraphModule, example_inputs: tuple[Any, ...]
-    ) -> torch.fx.GraphModule:
-        from torch._guards import TracingContext
-
-        fake_mode = TracingContext.get().fake_mode
-        assert fake_mode is not None
-        backend_id = gm._backend_id
-        assert isinstance(backend_id, str)
-        backend_inputs[backend_id] = BackendInput(gm, example_inputs, fake_mode)
-        return gm
-
-    # TODO For now we use eval_frame to give us the frame. This is can be simplified to
-    #      a manual frame creation helper.
-    optimized_model = optimize(nopython=True, backend=_backend, package=package)(model)
-
-    @functools.wraps(model)
-    def capture_context(*args: Any, **kwargs: Any) -> Any:
-        return optimized_model(*args, **kwargs)
-
-    def get_artifacts() -> CaptureOutput:
-        cache_entry = package.cache_entry()
-        assert len(cache_entry.codes) == 1
-        return CaptureOutput(
-            dynamo_artifacts=cache_entry.codes[0], backend_inputs=backend_inputs
-        )
-
-    capture_context.get_artifacts = get_artifacts  # type: ignore[attr-defined]
-    return capture_context

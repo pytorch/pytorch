@@ -52,6 +52,28 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
+def align_runtime_estimations_across_all_distributed_ranks(
+    snodes: list[BaseSchedulerNode],
+):
+    runtime_estimations = {}
+    for snode in snodes:
+        runtime_estimations[snode] = snode.get_estimated_runtime()
+    import torch.distributed as dist
+    from torch.distributed.distributed_c10d import _get_default_group
+
+    world_size = dist.get_world_size()
+    pg = _get_default_group()
+    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
+    dist.all_gather_object(
+        gathered_runtime_estimations, list(runtime_estimations.values()), pg
+    )
+    median_runtime_estimations = torch.median(
+        torch.tensor(gathered_runtime_estimations), dim=0
+    ).values.tolist()
+    for i in range(len(snodes)):
+        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+
+
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
@@ -199,21 +221,23 @@ def wait_exposed_communication_time(
         if contains_wait(c):
             waits_found.append(c)
         if contains_collective(c):
-            if contains_async_collective(c):
-                comp_time = 0
-                continue
-            else:
-                for w in waits_found:
-                    if is_corresponding_collective_wait(c, w):
-                        comp_time = 0
-                        continue
-
             if is_corresponding_collective_wait(c, wait_snode):
                 comm_time = runtimes[c]
                 overlap_info += f"->C[{c.get_name()}]"
                 break
-            else:
+
+            if not contains_async_collective(c):
+                # Sync Collective
+                comp_time = 0.0
                 continue
+            else:
+                for w in waits_found:
+                    if is_corresponding_collective_wait(c, w):
+                        # Similar to Sync Collective
+                        # If after our Collective exist another Collective-Wait,
+                        # All compute after it will not be overlapping
+                        comp_time = 0.0
+                        continue
 
         comp_time_before = comp_time
 
@@ -223,7 +247,7 @@ def wait_exposed_communication_time(
 
         _temp_group_visit_leaves(c, accumulate_time)
         comp_time_after = comp_time
-        overlap_info += f"+{c.get_name()}[{int(comp_time_after - comp_time_before)}]"
+        overlap_info += f"+{c.get_name()}[{comp_time_after - comp_time_before}]"
 
     return comm_time, comp_time, overlap_info
 
@@ -276,7 +300,7 @@ def coll_exposed_communication_time(
         _temp_group_visit_leaves(snode, accumulate_time)
         comp_time_after = comp_time
         overlap_info += (
-            f"+{snode.get_name()}[{int(comp_time_after - comp_time_before)}]"
+            f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
         )
     return comm_time, comp_time, overlap_info
 
@@ -1212,8 +1236,6 @@ def _sink_waits_iterative_internal(
         snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
         for snode in snodes
     }
-    for snode, ms in runtimes.items():
-        print(f"XXX_RUNTIME {snode.get_name()} -> {ms}")
 
     curr: Optional[BaseSchedulerNode] = snodes[-1]
 
@@ -1286,11 +1308,12 @@ def _sink_waits_iterative_internal(
                 # Conservative sink wait, limiting by space before next collective.
                 # The global strategy is that bucketing should create space.
                 # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
-                if contains_async_collective(candidate):
-                    info.limiting_factor = (
-                        f"candidate contains_async_collective {candidate.get_name()}"
-                    )
-                    break
+                # if contains_async_collective(candidate):
+                #     info.limiting_factor = (
+                #         f"candidate contains_async_collective {candidate.get_name()}"
+                #     )
+                #     break
+
                 # 1. If we have data_dep - we can not swap => trying to group
                 # 2. If swap candidate and current node both contain collectives => trying to group
                 if data_dep is not None or (
@@ -1597,7 +1620,7 @@ def node_summary(snode):
         if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             outs_str = f"outs:{[o.get_name() for o in snode.get_outputs()]}"
             ins_str = f"ins:{[d.name for d in snode.unmet_dependencies]}"
-            detail = f" {snode.get_name()} ({snode.node.python_kernel_name})\n {outs_str}\n ({ins_str})"
+            detail = f" {snode.get_name()} ({snode.node.python_kernel_name})\n {outs_str}({ins_str})"
         layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
         out_tensor_info = ",".join(
             [

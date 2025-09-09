@@ -103,6 +103,7 @@ def bucket_reduce_scatter_all(
         return rs_buckets
     merge_reduce_scatter(gm, rs_buckets, mode)
     return rs_buckets
+>>>>>>> 44454c88332 ([inductor][WIP] Trie bucketing, runtime estimations etc.)
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
@@ -180,7 +181,6 @@ def greedy_bucket_collective_by_mb(
     Reordering can lead to different order on different ranks.
     """
     g = gm.graph
-    log = ""
     found_candidates = False
     for node in g.nodes:
         if filter_node(node):
@@ -1186,7 +1186,6 @@ def get_collectives_trie(
         if path:
             path += "-"
         path += f"{ct.ctype}({ct.group_name})"
-        print(f"XXX CTreeNode[{path}]\n    ns:{list(ct.n_to_parent_n.keys())}")
         for _ct in ct.children_cts.values():
             _dfs(_ct, path)
 
