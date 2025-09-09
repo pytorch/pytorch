@@ -4,6 +4,7 @@ import csv
 import functools
 import json
 import os
+import platform
 import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
@@ -272,10 +273,11 @@ class BenchmarkRunner:
         """
         if self.args.report_aibench:
             return {}
+
         out = {
             "test_name": test_case.test_config.test_name,
             "input_config": test_case.test_config.input_config,
-            "mode": (
+            "runtime": (
                 "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager"
             ),
             "run": "Backward" if test_case.test_config.run_backward else "Forward",
@@ -531,8 +533,9 @@ class BenchmarkRunner:
             run_type = perf_item.get("run")
             latency = perf_item.get("latency", 0)
             peak_memory = perf_item.get("peak memory", 0)
-
-            dtype = "float32"  # default
+            device = perf_item.get("device", "unknown")
+            dtype = perf_item.get("dtype", "torch.float").split(".")[1]
+            runtime = perf_item.get("runtime", None)
 
             # Extract mode based on run_type
             mode = None
@@ -540,6 +543,22 @@ class BenchmarkRunner:
                 mode = "inference"
             elif run_type == "Backward":
                 mode = "training"
+
+            # Extract use_compile from it
+            if runtime == "Compile":
+                use_compile = True
+            elif runtime == "Eager":
+                use_compile = False
+            else:
+                use_compile = None
+
+            device_arch = (
+                torch.cuda.get_device_name(0)
+                if device == "cuda"
+                else platform.processor()
+                if device == "cpu"
+                else "unknown"
+            )
 
             # Create the record
             @dataclass
@@ -574,7 +593,12 @@ class BenchmarkRunner:
                     name=benchmark_name,
                     mode=mode,
                     dtype=dtype,
-                    extra_info={"input_config": input_config},
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "use_compile": use_compile,
+                    },
                 ),
                 model=ModelInfo(
                     name=test_name, type="micro-benchmark", origins=["pytorch"]
