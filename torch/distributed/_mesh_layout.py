@@ -203,7 +203,7 @@ class _Layout:
         # (1) “remove” the first d elements from self. (This will increase the stride.)
         # (2) “keep” the first s of those strided elements. (This does not affect the stride.)
         # For example, if self = (6,2):(2,1), layout = (3:2)
-        # Step 1: remove the first 2 elements from self with strid increase, i.e., (6,2):(2,1) -> (3,2):(4,1)
+        # Step 1: remove the first 2 elements from self with stride increase, i.e., (6,2):(2,1) -> (3,2):(4,1)
         # Step 2: keep the first 3 of those strided elements, i.e., (3,2):(4,1) -> (3,1):(4,1)
         flattened_self = self.coalesce()
         for curr_size, curr_stride in zip(
