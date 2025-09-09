@@ -521,15 +521,14 @@ class CompilePackage:
             module = inspect.getmodule(code)
             if module is None:
                 continue
-            source = inspect.getsource(code)
-            lastlineno = code.co_firstlineno + len(inspect.getsourcelines(code)[0])
-            assert source == "".join(
-                _get_sourcelines(module, code.co_firstlineno, lastlineno)
-            )
+            sourcelines, firstlineno = inspect.getsourcelines(code)
+            lastlineno = firstlineno + len(sourcelines)
+            source = "".join(sourcelines)
+            assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
             self._inlined_sources.add(
                 InlinedSource(
                     module=module.__name__,
-                    firstlineno=code.co_firstlineno,
+                    firstlineno=firstlineno,
                     lastlineno=lastlineno,
                     checksum=_hash_source(source),
                 )
