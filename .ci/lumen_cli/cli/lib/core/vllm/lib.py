@@ -96,14 +96,24 @@ def sample_vllm_test_library():
             "num_gpus": 4,
             "steps": [
                 "pytest -v -s -x lora/test_chatglm3_tp.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "pytest -v -s -x lora/test_llama_tp.py",
-                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
+                "pytest -v -s -x lora/test_llm_with_multi_loras.py",
             ],
         },
-        "vllm_lora_280_failure_test": {
-            "title": "LoRA 280 failure test",
-            "id": "vllm_lora_280_failure_test",
+        "vllm_distributed_test_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest -v -s distributed/test_sequence_parallel.py",
+            ],
+        },
+        "vllm_lora_28_failure_test": {
+            "title": "LoRA pytorch 2.8 failure test",
+            "id": "vllm_lora_28_failure_test",
             "steps": ["pytest -v lora/test_quant_model.py"],
         },
         "vllm_multi_model_processor_test": {
@@ -112,6 +122,15 @@ def sample_vllm_test_library():
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
             "steps": [
                 "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
+            ],
+        },
+        "vllm_multi_model_test_28_failure_test": {
+            "title": "Multi-Model Test (Failed 2.8 release)",
+            "id": "vllm_multi_model_test_28_failure_test",
+            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
+            "steps": [
+                "pytest -v -s models/multimodal/generation/test_voxtral.py",
+                "pytest -v -s models/multimodal/pooling",
             ],
         },
         "vllm_pytorch_compilation_unit_tests": {
@@ -126,6 +145,28 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_async_tp.py",
                 "pytest -v -s compile/test_fusion_all_reduce.py",
                 "pytest -v -s compile/test_decorator.py",
+            ],
+        },
+        "vllm_languagde_model_test_extended_generation_28_failure_test": {
+            "title": "Language Models Test (Extended Generation) 2.8 release failure",
+            "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
+            "package_install": [
+                "--no-build-isolation",
+                "git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8",
+            ],
+            "steps": [
+                "pytest -v -s models/language/generation/test_mistral.py",
+            ],
+        },
+        "vllm_distributed_test_2_gpu_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_2_gpu_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest -v -s distributed/test_sequence_parallel.py",
             ],
         },
         # TODO(elainewy):need to add g6 with 4 gpus to run this test
