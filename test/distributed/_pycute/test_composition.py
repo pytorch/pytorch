@@ -38,16 +38,15 @@ Unit tests for _pycute.composition
 """
 
 import logging
-import unittest
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestComposition(unittest.TestCase):
+class TestComposition(TestCase):
     def helper_test_composition(self, layoutA, layoutB):
         layoutR = composition(layoutA, layoutB)
 

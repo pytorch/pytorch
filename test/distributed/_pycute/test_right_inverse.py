@@ -38,16 +38,15 @@ Unit tests for _pycute.left_inverse
 """
 
 import logging
-import unittest
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestRightInverse(unittest.TestCase):
+class TestRightInverse(TestCase):
     def helper_test_right_inverse(self, layout):
         inv_layout = right_inverse(layout)
 

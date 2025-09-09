@@ -38,16 +38,15 @@ Unit tests for _pycute.coalesce
 """
 
 import logging
-import unittest
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TestCoalesce(unittest.TestCase):
+class TestCoalesce(TestCase):
     def helper_test_coalesce(self, layout):
         layoutR = coalesce(layout)
 
