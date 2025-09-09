@@ -30,12 +30,15 @@
 #
 #################################################################################################
 
+"""
+Definition of CuTe Layouts and functions to manipulate them
+"""
 
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing_extensions import TypeGuard
 from itertools import product
+from typing_extensions import TypeGuard
 
 
 IntTuple = tuple[int, ...]
@@ -62,6 +65,7 @@ class _Layout:
     is using lexicographic. So even though the CuTe documentation can still be referenced, the implementation will be
     different from that of PyCute's.
     """
+
     _sizes: NestedIntTuple
     _strides: NestedIntTuple
 
@@ -184,8 +188,6 @@ class _Layout:
             )
             return _Layout(tuple(zip_res_sizes), tuple(zip_res_strides))
 
-        # res: list[_Layout] = []
-        # sub_res_sizes, sub_res_strides = [], []
         res_sizes: list[int] = []
         res_strides: list[int] = []
         # Since we now only compose with single-size sublayout, we can assume numel_so_far is always from strides[0].
@@ -195,8 +197,6 @@ class _Layout:
         assert isinstance(sub_size, int)
         sub_stride = numel_so_far
         numel_so_far *= sub_size
-        res_sizes: list[int] = []
-        res_strides: list[int] = []
 
         # when self is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
         # for integral s and d means that we want:
@@ -218,7 +218,7 @@ class _Layout:
                 res_sizes.append(new_size)
                 res_strides.append(sub_stride * curr_stride)
             assert sub_size % new_size == 0, (
-                "Layouts do not meet shape divisibility condition"
+                "Layouts do not meet size divisibility condition"
             )
             sub_size = sub_size // new_size
             sub_stride = self.ceil_div(sub_stride, curr_size)
