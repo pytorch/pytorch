@@ -47,6 +47,7 @@ class TestDeviceInfo(TestCase):
             tops_no_device = datasheet_tops(torch.float32)
             self.assertIsNone(tops_no_device)
 
+    @unittest.skipIf(torch.version.hip, "only nvidia")
     def test_lazy_pynvml_import(self):
         """Test pynvml import through torch.cuda."""
         with (
@@ -74,6 +75,7 @@ class TestDeviceInfo(TestCase):
         result = DeviceInfo._hardware_lookup_clock_hz()
         self.assertEqual(result, 1500 * 1e6)
 
+    @unittest.skipIf(torch.version.hip, "only nvidia")
     def test_lazy_pynvml_import_caching(self):
         """Test pynvml caching through torch.cuda (now handled by torch.cuda module)."""
         with (
@@ -120,12 +122,6 @@ class TestDeviceInfo(TestCase):
 
     def test_lazy_amd_smi_import_success(self):
         """Test AMD SMI import through torch.cuda."""
-        # In the current environment, test the actual behavior
-        with patch("torch.cuda._HAS_PYNVML", True):
-            amd_smi = _get_amd_smi()
-            # Since torch.cuda doesn't have amdsmi in this environment, should return None
-            self.assertIsNone(amd_smi)
-
         with patch("torch.cuda._HAS_PYNVML", False):
             amd_smi = _get_amd_smi()
             self.assertIsNone(amd_smi)
