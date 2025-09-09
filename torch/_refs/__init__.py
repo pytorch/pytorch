@@ -3132,7 +3132,10 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    # Unbacked semnatics: if validty of in-place flattening is undecided we copy.
+    new_shape, _new_strides = prims._collapse_view_helper(
+        a, start_dim, end_dim, must_be_valid=None
+    )
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3840,7 +3843,9 @@ def _reshape_view_helper_core_alg(
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(
+                a_, idx, end, must_be_valid=None
+            )
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
