@@ -3538,8 +3538,7 @@ def foreach(triton_meta, filename=None, inductor_meta=None):
 
     # Naive autotuning path for num_warps
     if disable_pointwise_autotuning(inductor_meta) and not (
-        inductor_meta.get("max_autotune") or
-        inductor_meta.get("max_autotune_pointwise")
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
         configs.append(triton.Config({}, num_stages=1, num_warps=8))
     else:
