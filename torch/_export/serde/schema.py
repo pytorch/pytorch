@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 13)
+SCHEMA_VERSION = (8, 14)
 TREESPEC_VERSION = 1
 
 
@@ -449,6 +449,7 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    guards_code: Annotated[list[str], 90] = field(default_factory=list)
 
 
 #########################################################################
