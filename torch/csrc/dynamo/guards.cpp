@@ -1768,7 +1768,12 @@ These guards are at trunk or leaf, and not at the root.
 */
 class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
  public:
-  using LAMBDA_GUARD::LAMBDA_GUARD;
+  LAMBDA_GUARD_NO_FRAMELOCALS(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts)
+      : LAMBDA_GUARD(root_guard_manager, guard_check_fn, verbose_code_parts) {}
+
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return LAMBDA_GUARD::check_nopybind(value);
   }
