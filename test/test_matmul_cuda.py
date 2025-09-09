@@ -21,6 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     SM53OrLater,
+    SM80OrLater,
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
@@ -29,6 +30,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
+    PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     IS_SM90,
 )
 from torch.testing._internal.common_device_type import (
@@ -54,7 +56,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, ceil_div, to_blocked
+from torch.testing._internal.common_quantized import (
+    _f32_to_floatx_unpacked,
+    _floatx_unpacked_to_f32,
+    ceil_div, to_blocked,
+    to_mxfp8,
+    generate_jagged_offs,
+)
 
 _IS_SM8X = False
 if TEST_CUDA:
@@ -310,13 +318,13 @@ class TestMatmulCuda(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
@@ -333,7 +341,7 @@ class TestMatmulCuda(TestCase):
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
         f = torch._grouped_mm
-        out = f(a, b.t(), offs=offs, out_dtype=torch.bfloat16)
+        out = f(a, b.t(), offs=offs, out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
         offs_cpu = offs.cpu()
@@ -349,13 +357,13 @@ class TestMatmulCuda(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -382,12 +390,12 @@ class TestMatmulCuda(TestCase):
 
             a.grad = None
             b.grad = None
-            offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
                 out.backward(gO)
@@ -406,13 +414,13 @@ class TestMatmulCuda(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -434,20 +442,20 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
         f = torch._grouped_mm
-        out = f(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
+        out = f(a, b.transpose(-2, -1), out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
         device = "cuda"
-        dtype = torch.bfloat16
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -471,12 +479,12 @@ class TestMatmulCuda(TestCase):
             if check_zero_size and n_groups <= 1:
                 continue
 
-            offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
                 out.backward(gO)
@@ -494,7 +502,8 @@ class TestMatmulCuda(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    # TODO(future PR): enable compile for torch._grouped_mm fallback path
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -771,6 +780,7 @@ class TestMatmulCuda(TestCase):
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
+mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_FBGEMM_GENAI=1 on SM100+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -900,6 +910,8 @@ def to_fp8_saturated(
         raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
 
     return x.to(fp8_dtype)
+
+
 
 def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Computes the error between two tensors in dB.
@@ -1044,6 +1056,167 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("G", [1, 4, 16])
+    @parametrize("M", [2048, 2049])
+    @parametrize("N", [8192])
+    @parametrize("K", [16640])
+    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K):
+        torch.manual_seed(42)
+        total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
+        input_group_end_offsets = generate_jagged_offs(
+            G, total_K, multiple_of=32, device="cuda"
+        )
+        X = torch.randn((M, total_K), dtype=torch.bfloat16, device="cuda") * 0.1
+        W = torch.randn((N, total_K), dtype=torch.bfloat16, device="cuda") * 0.01
+
+        # Convert scales to blocked format.
+        x_list = []
+        w_list = []
+        x_blocked_scale_list = []
+        w_blocked_scale_list = []
+
+        def round_up(x: int, y: int) -> int:
+            return ((x + y - 1) // y) * y
+
+        for group_idx in range(G):
+            # to_mxfp8 per group
+            prev_group_end_offset = (
+                0 if group_idx == 0 else input_group_end_offsets[group_idx - 1]
+            )
+            curr_group_end_offset = input_group_end_offsets[group_idx]
+            group_size = curr_group_end_offset - prev_group_end_offset
+            if group_size > 0:
+                x_slice = X[
+                    :, prev_group_end_offset:curr_group_end_offset
+                ].contiguous()  # (M, K_group)
+                w_slice = W[
+                    :, prev_group_end_offset:curr_group_end_offset
+                ].contiguous()  # (N, K_group)
+                x_scale_slice, xq_slice = to_mxfp8(
+                    x_slice
+                )  # scale shape -> (M, K_group // 32)
+                w_scale_slice, wq_slice = to_mxfp8(
+                    w_slice
+                )  # scale shape -> (N, K_group // 32)
+                x_list.append(xq_slice)
+                w_list.append(wq_slice)
+
+                # Convert scales to blocked format.
+                x_scale_slice_blocked = to_blocked(
+                    x_scale_slice
+                )  # (round_up(M, 128), round_up(K_group//32, 4))
+                w_scale_slice_blocked = to_blocked(
+                    w_scale_slice
+                )  # (round_up(N, 128), round_up(K_group//32, 4))
+                x_blocked_scale_list.append(x_scale_slice_blocked)
+                w_blocked_scale_list.append(w_scale_slice_blocked)
+
+        # Assemble the full XQ and WQ
+        xq = torch.cat(x_list, dim=1).contiguous()
+        wq = torch.cat(w_list, dim=1).contiguous()
+
+        # Combine all XQ groups blocked scales into one tensor.
+        x_blocked_scales = torch.cat(x_blocked_scale_list, dim=0)
+        M_rounded = round_up(M, 128)
+        x_blocked_scales = x_blocked_scales.reshape(M_rounded, -1)
+
+        # Combine all WQ groups blocked scales into one tensor.
+        w_blocked_scales = torch.cat(w_blocked_scale_list, dim=0)
+        N_rounded = round_up(N, 128)
+        w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
+
+        # Compute mxfp8 grouped mm output
+        y_mxfp8 = torch._scaled_grouped_mm(
+            xq,  # (M, total_K)
+            wq.transpose(-2, -1),  # (total_K, N)
+            x_blocked_scales,  # to_blocked_per_group(M, total_K//32)
+            w_blocked_scales,  # to_blocked_per_group(N, total_K//32)
+            offs=input_group_end_offsets,  # (G,)
+            out_dtype=torch.bfloat16,
+        )
+
+        # bf16 reference output
+        y_bf16 = torch._grouped_mm(
+            X, W.t(), offs=input_group_end_offsets, out_dtype=torch.bfloat16
+        )
+
+        # Assert no NaNs
+        assert not y_mxfp8.isnan().any(), "mxfp8 output contains NaN"
+
+        # Assert outputs are close
+        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("G", [1, 4, 16])
+    @parametrize("M", [16640])
+    @parametrize("N", [8192])
+    @parametrize("K", [4096])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K):
+        torch.manual_seed(42)
+        # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
+        # 2D inputs with groups along M, 3D weights.
+        block_size = 32
+        total_M = M  # Alias for clarity that M dim contains groups.
+        X = torch.randn((total_M, K), dtype=torch.bfloat16, device="cuda") * 0.1
+        W = torch.randn((G, N, K), dtype=torch.bfloat16, device="cuda") * 0.01
+        input_group_end_offsets = generate_jagged_offs(
+            G, total_M, multiple_of=32, device="cuda"
+        )
+
+        # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
+        # as they each used for independent gemm in the grouped gemm.
+        wq_list = []
+        w_scale_list = []
+        for i in range(G):
+            w_scale, wq = to_mxfp8(W[i])
+            w_scale = to_blocked(w_scale)
+            wq_list.append(wq)
+            w_scale_list.append(w_scale)
+        wq = torch.stack(wq_list, dim=0).contiguous()
+        w_scale = torch.stack(w_scale_list, dim=0).contiguous()
+
+        # For each group along `total_M` in the 2D tensor, quantize and convert scale to blocked format separately,
+        # as they each used for independent gemm in the grouped gemm.
+        xq_list = []
+        x_scale_list = []
+        for i in range(G):
+            prev_group_end = 0 if i == 0 else input_group_end_offsets[i - 1]
+            curr_group_end = input_group_end_offsets[i]
+            group_size = curr_group_end - prev_group_end
+            if group_size > 0:
+                x_slice = X[prev_group_end:curr_group_end, :]
+                x_scale, xq = to_mxfp8(x_slice)
+                x_scale = to_blocked(x_scale)
+                xq_list.append(xq)
+                x_scale_list.append(x_scale)
+        xq = torch.cat(xq_list, dim=0).contiguous()
+        x_scale = torch.cat(x_scale_list, dim=0).contiguous()
+        x_scale = x_scale.reshape(-1, K // block_size)
+        xq = xq.view(-1, xq.shape[-1])
+
+        # Compute mxfp8 grouped gemm.
+        y_mxfp8 = torch._scaled_grouped_mm(
+            xq,
+            wq.transpose(-2, -1),
+            x_scale,
+            w_scale,
+            offs=input_group_end_offsets,
+            out_dtype=torch.bfloat16,
+        )
+
+        # Compute reference bf16 grouped gemm.
+        y_bf16 = torch._grouped_mm(
+            X,
+            W.transpose(-2, -1),
+            offs=input_group_end_offsets,
+            out_dtype=torch.bfloat16,
+        )
+
+        # Assert outputs are close.
+        torch.testing.assert_close(y_mxfp8, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -1315,18 +1488,26 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-        ):
-            torch._scaled_mm(
+        def e5m2():
+            out = torch._scaled_mm(
                 x_fp8,
                 y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
+            return out
+
+        if torch.cuda.get_device_capability() == (9, 0) and torch.version.cuda and torch.version.cuda >= "12.9":
+            out = e5m2()
+            self.assertEqual(out, torch.ones_like(out) * 128.)
+        else:
+            # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+            ):
+                e5m2()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
@@ -1736,8 +1917,8 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
             else:  # nvfp4 # mxfp4
                 scale_func = data_to_mx_scale if recipe == "mxfp4" else data_to_nvfp4_scale
-                A_scale = scale_func(A_ref, BLOCK_SIZE, recipe if recipe == "mxfp4" else None)
-                B_scale = scale_func(B_ref, BLOCK_SIZE, recipe if recipe == "mxfp4" else None)
+                A_scale = scale_func(*([A_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
+                B_scale = scale_func(*([B_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
                 max_val = FP4_MAX_VAL
                 min_val = -1 * max_val
 
@@ -1799,10 +1980,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_a size to be {expected_a_size} "
-                f"but got {expected_a_size - 1}"
-            ),
+            f".*For Block[W,w]ise.*scaling.*scale_a should have {expected_a_size} "
+            f"elements.*"
+            ,
         ):
             incorrect_size_a = torch.ones(expected_a_size - 1, device=device, dtype=scale_dtype)
             correct_size_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
@@ -1817,10 +1997,9 @@ class TestFP8Matmul(TestCase):
         # Test wrong scale tensor size for scale_b with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                f"For BlockWise scaling: Expected scale_b size to be {expected_b_size} "
-                f"but got {expected_b_size + 1}"
-            ),
+            f"For Block[W,w]ise.*scaling.*scale_b should have {expected_b_size} "
+            f"elements.*"
+            ,
         ):
             correct_size_a = torch.ones(expected_a_size, device=device, dtype=scale_dtype)
             incorrect_size_b = torch.ones(expected_b_size + 1, device=device, dtype=scale_dtype)
@@ -1835,9 +2014,8 @@ class TestFP8Matmul(TestCase):
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape(
-                "For BlockWise scaling: Both scale_a and scale_b must be contiguous"
-            ),
+            "For Block[W,w]ise.*scaling.*both should be contiguous"
+            ,
         ):
             non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=scale_dtype)[::2]
             contiguous_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
