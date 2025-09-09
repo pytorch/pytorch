@@ -2938,7 +2938,7 @@ def _persistent_reduction_configs(
             rnumel,
         )
     ]
-        
+
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
