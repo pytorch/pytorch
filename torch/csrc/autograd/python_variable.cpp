@@ -660,10 +660,9 @@ static Tensor make_tensor_for_subclass_helper(
   Storage storage{
       Storage::use_byte_size_t{},
       size_bytes,
+      at::DataPtr{nullptr, options.device()},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
-  // TODO: constructor should probably accept data pointer
-  storage.set_data_ptr_noswap(at::DataPtr{nullptr, options.device()});
 
   auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
   if (extra_dispatch_keys.has_value()) {
@@ -808,14 +807,18 @@ static PyObject* THPVariable_make_dtensor(
       "cls must be a type (got ",
       Py_TYPE(cls)->tp_name,
       ")");
-  // See note about the __torch_dispatch__ check in
-  // THPVariable_make_wrapper_subclass above.
+
+#ifndef NDEBUG
+  // This is specifically for making a DTensor, which we know defines
+  // __torch_dispatch__. Check anyway in debug builds in case somebody
+  // removes it.
   py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
   TORCH_CHECK_TYPE(
       attr.ptr() != nullptr &&
           attr.ptr() != torch::disabled_torch_dispatch_impl(),
       ((PyTypeObject*)cls)->tp_name,
       " must define __torch_dispatch__");
+#endif
 
   const auto& local_tensor = r.tensor(3);
   const auto options = TensorOptions()
@@ -895,6 +898,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
 #define FOR_EACH_DTENSOR_INTERNED_STRING(_) \
   _(_comparison_key)                        \
   _(args_schema)                            \
+  _(has_symints)                            \
   _(kwargs_schema)                          \
   _(op)                                     \
   _(schema_info)                            \
@@ -1016,7 +1020,6 @@ static PyObject* DTensor_OpSchema_recompute_comparison_key(
   END_HANDLE_TH_ERRORS
 }
 
-// XXX: need to find a better place for this to live
 static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
   HANDLE_TH_ERRORS
   const py::handle self_handle = py::handle(self);
@@ -1034,6 +1037,7 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
   }
 
   const auto dtensor_spec_class = get_dtensor_spec_class();
+  bool has_symints = false;
   for (const auto& a : args_schema) {
     if (Py_TYPE(a.ptr()) != (PyTypeObject*)(dtensor_spec_class.ptr()) &&
         !py::isinstance(a, dtensor_spec_class)) {
@@ -1062,10 +1066,11 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
     }
     const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
     if (contains_any_symint(shape)) {
-      Py_RETURN_TRUE;
+      has_symints = true;
     }
   }
-  Py_RETURN_FALSE;
+  self_handle.attr(dtensor_interned_strings.has_symints) = has_symints;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 

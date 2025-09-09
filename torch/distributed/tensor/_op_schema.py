@@ -390,7 +390,7 @@ class OpSchema:
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
-        self.has_symints = _DTensor_OpSchema_post_init(self)
+        _DTensor_OpSchema_post_init(self)
 
     def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:
         is_tensor = isinstance(arg, DTensorSpec)
@@ -476,8 +476,7 @@ class OpSchema:
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()
 
-    def _recompute_comparison_key(self):
-        _DTensor_OpSchema_recompute_comparison_key(self)
+    _recompute_comparison_key = _DTensor_OpSchema_recompute_comparison_key
 
     def __hash__(self) -> int:
         return hash(self._comparison_key)
