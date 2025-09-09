@@ -18,7 +18,7 @@ from torch._logging import trace_structured
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
-from . import config, ir
+from . import config, config_comms, ir
 from .dependencies import WeakDep
 
 
@@ -299,9 +299,7 @@ def coll_exposed_communication_time(
 
         _temp_group_visit_leaves(snode, accumulate_time)
         comp_time_after = comp_time
-        overlap_info += (
-            f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
-        )
+        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
     return comm_time, comp_time, overlap_info
 
 
@@ -370,9 +368,9 @@ def _op_runtime_estimate_mult(snode):
     # Apply multipliers for faster experimentation.
     # TODO(ivankobzarev): Remove after confirmation that runtime estimations are correct.
     if contains_collective(snode):
-        return config.reorder_sink_runtime_estimations_comm_mult
+        return config_comms.reorder_sink_runtime_estimations_comm_mult
 
-    return config.reorder_sink_runtime_estimations_non_comm_mult
+    return config_comms.reorder_sink_runtime_estimations_non_comm_mult
 
 
 def is_async_collective(snode):
@@ -564,12 +562,14 @@ def _reorder_communication_preserving_peak_memory_internal(
         )
 
     debug_num_collectives_to_reorder: Optional[int] = (
-        config.reorder_iterative_debug_limit_to_reorder
+        config_comms.reorder_iterative_debug_limit_to_reorder
     )
 
     num_processed_collectives: int = 0
     curr: Optional[BaseSchedulerNode] = _head
-    debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
+    debug_iterative_memory_recompute = (
+        config_comms.reorder_iterative_debug_memory_recompute
+    )
     iterative_recompute_error = False
 
     while curr is not None and _next[curr] is not None:
@@ -600,15 +600,16 @@ def _reorder_communication_preserving_peak_memory_internal(
             group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
 
             while candidate is not None:
-                if config.reorder_iterative_use_runtime_estimations and (
+                if config_comms.reorder_iterative_use_runtime_estimations and (
                     info.final_exposed
-                    < -config.reorder_iterative_extra_comm_comp_overlap * info.comm_time
+                    < -config_comms.reorder_iterative_extra_comm_comp_overlap
+                    * info.comm_time
                 ):
                     info.limiting_factor = "unexposed by runtime estimations"
                     break
 
                 if (
-                    not config.reorder_iterative_unsafe_collectives_reorder
+                    not config_comms.reorder_iterative_unsafe_collectives_reorder
                     and contains_collective(candidate)
                 ):
                     info.limiting_factor = "collective ordering"
@@ -647,7 +648,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                         #         False,
                         #         f"candidate contains_collective {candidate.get_name()}",
                         #     )
-                        if not config.reorder_iterative_use_runtime_estimations:
+                        if not config_comms.reorder_iterative_use_runtime_estimations:
                             if contains_gemm_like(candidate):
                                 return False, "contains_gemm_like"
                         return True, None
@@ -683,7 +684,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                         info.limiting_factor = msg
                         break
 
-                if config.reorder_iterative_use_runtime_estimations:
+                if config_comms.reorder_iterative_use_runtime_estimations:
                     # Check if candidate has sync runtime
                     if not contains_async_collective(candidate):
                         c_runtime = runtimes[candidate]
@@ -781,7 +782,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if (
                     potential_peak - peak_memory
-                    > peak_memory * config.reorder_iterative_peak_memory_budget
+                    > peak_memory * config_comms.reorder_iterative_peak_memory_budget
                 ):
                     info.limiting_factor = (
                         f"peak memory new:{potential_peak} vs base:{peak_memory}"
@@ -1240,9 +1241,11 @@ def _sink_waits_iterative_internal(
     curr: Optional[BaseSchedulerNode] = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
-    debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
+    debug_iterative_memory_recompute = (
+        config_comms.reorder_iterative_debug_memory_recompute
+    )
     debug_num_sink_waits_to_reorder: Optional[int] = (
-        config.sink_waits_iterative_debug_limit_to_sink
+        config_comms.sink_waits_iterative_debug_limit_to_sink
     )
 
     iterative_recompute_error = False
@@ -1276,9 +1279,10 @@ def _sink_waits_iterative_internal(
             group_peak_memory = _curr_memory[curr][0]
 
             while candidate is not None:
-                if config.sink_iterative_use_runtime_estimations and (
+                if config_comms.sink_iterative_use_runtime_estimations and (
                     info.final_exposed
-                    < -config.sink_iterative_extra_comm_comp_overlap * info.comm_time
+                    < -config_comms.sink_iterative_extra_comm_comp_overlap
+                    * info.comm_time
                 ):
                     info.limiting_factor = "unexposed by runtime estimations"
                     break
@@ -1333,7 +1337,7 @@ def _sink_waits_iterative_internal(
                                 f"candidate contains_async_collective {snode.get_name()}",
                             )
 
-                        if not config.sink_iterative_use_runtime_estimations:
+                        if not config_comms.sink_iterative_use_runtime_estimations:
                             # Heuristics pre-use_runtime_estimations:
                             # TODO(ivankobzarev): Remove them after confirming,
                             # that using runtime estimations always give better results.
@@ -1354,7 +1358,7 @@ def _sink_waits_iterative_internal(
                     if _is_groupable:
                         group_tail = candidate
                         if (
-                            config.sink_iterative_use_runtime_estimations
+                            config_comms.sink_iterative_use_runtime_estimations
                             and contains_collective(candidate)
                         ):
                             comm_time, comp_time, _ = coll_exposed_communication_time(
@@ -1373,7 +1377,7 @@ def _sink_waits_iterative_internal(
                         continue
                     elif data_dep is None:
                         if (
-                            not config.sink_waits_iterative_unsafe_collectives_reorder
+                            not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                             and both_contain_comms
                         ):
                             info.limiting_factor = (
@@ -1391,7 +1395,7 @@ def _sink_waits_iterative_internal(
                         )
                         break
 
-                if config.sink_iterative_use_runtime_estimations:
+                if config_comms.sink_iterative_use_runtime_estimations:
                     if is_wait(candidate.node):
                         # Corresponding collective is before the group,
                         # Swap can increase exposed time of corresponding collective
@@ -1485,7 +1489,7 @@ def _sink_waits_iterative_internal(
                 )
                 if (
                     potential_peak - peak_memory
-                    > peak_memory * config.sink_iterative_peak_memory_budget
+                    > peak_memory * config_comms.sink_iterative_peak_memory_budget
                 ):
                     info.limiting_factor = (
                         f"peak memory new:{potential_peak} vs base:{peak_memory}"

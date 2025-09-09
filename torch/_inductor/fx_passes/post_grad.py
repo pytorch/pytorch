@@ -199,7 +199,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
     if config.bucket_fx_collectives_all is not None:
-        from torch._inductor.fx_passes.bucketing import __bucket_collectives_trie
+        from torch._inductor.fx_passes.bucketing_experiment import (
+            __bucket_collectives_trie,
+        )
 
         GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
             lambda graph: __bucket_collectives_trie(
@@ -209,7 +211,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         collectives_bucketing = True
 
     elif config.bucket_fx_collectives_trie is not None:
-        from torch._inductor.fx_passes.bucketing import bucket_collectives_trie
+        from torch._inductor.fx_passes.bucketing_experiment import (
+            bucket_collectives_trie,
+        )
 
         GraphTransformObserver(gm, "bucket_collectives_trie").apply_graph_pass(
             lambda graph: bucket_collectives_trie(
