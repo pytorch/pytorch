@@ -31,7 +31,7 @@
 #################################################################################################
 
 """
-Definition of CuTe Layouts and functions to manipulate them
+Definition of CuTe inspired Layouts for device mesh bookkeeping and functions to manipulate them
 """
 
 import math
