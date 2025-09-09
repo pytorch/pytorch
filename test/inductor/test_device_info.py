@@ -420,12 +420,16 @@ class TestDeviceInfo(TestCase):
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 
             # Test clock frequency retrieval
-            sm_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            sm_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(
+                handle, pynvml.NVML_CLOCK_SM
+            )
             self.assertIsInstance(sm_clock_mhz, int)
             self.assertGreater(sm_clock_mhz, 0)
 
             # Test memory clock frequency retrieval
-            mem_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_MEM)
+            mem_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(
+                handle, pynvml.NVML_CLOCK_MEM
+            )
             self.assertIsInstance(mem_clock_mhz, int)
             self.assertGreater(mem_clock_mhz, 0)
 
