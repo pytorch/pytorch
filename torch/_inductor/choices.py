@@ -111,9 +111,9 @@ class InductorChoices:
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
-    ) -> Generator[ChoiceCaller, None, None]:
+    ) -> list[ChoiceCaller]:
         """
-        Get generator of ChoiceCallers for MM templates using template-specific heuristics.
+        Get list of ChoiceCallers for MM templates using template-specific heuristics.
 
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
@@ -122,8 +122,8 @@ class InductorChoices:
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
             kwarg_overrides: Optional dict of kwargs to override for each template heuristic,
                              indexed by template.uid. These only override the per config kwargs, not the extra kwargs
-        Yields:
-            ChoiceCaller objects from the templates
+        Returns:
+            List of ChoiceCaller objects from the templates
         """
         if kwarg_overrides is None:
             kwarg_overrides = {}
@@ -172,12 +172,15 @@ class InductorChoices:
 
             template_choices[template.uid] = choice_gen
 
-        # Second pass: Iterate through templates in original order and yield choices
+        # Second pass: Iterate through templates in original order and collect choices
+        choices = []
         for template in templates:
             choice_gen = template_choices[template.uid]
             for ktc in choice_gen:
                 if ktc.choice is not None:
-                    yield ktc.choice
+                    choices.append(ktc.choice)
+
+        return choices
 
     def triton_kernel_kwargs(
         self,
