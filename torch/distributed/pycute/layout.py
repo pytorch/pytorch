@@ -1,3 +1,6 @@
+# mypy: ignore-errors
+# flake8: noqa
+# ruff: noqa: PGH004, B011
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -34,73 +37,21 @@
 Definition of CuTe Layouts and functions to manipulate them
 """
 
-from functools import reduce
 from itertools import chain
 
-
-class Integer:
-    @classmethod
-    def __subclasshook__(cls, c):  # type: ignore[no-untyped-def]
-        if c in [bool, float]:
-            return False
-
-        return issubclass(c, int)
+from .int_tuple import *
 
 
 class LayoutBase:
     pass
 
 
-def is_tuple(x):  # type: ignore[no-untyped-def]
-    return isinstance(x, tuple)
-
-
-def is_int(x):  # type: ignore[no-untyped-def]
-    return isinstance(x, Integer)
-
-
-def flatten(t):  # type: ignore[no-untyped-def]
-    if is_tuple(t):
-        if len(t) == 0:
-            return ()
-        else:
-            return tuple(i for a in t for i in flatten(a))
-    else:
-        return (t,)
-
-
-def product(a):  # type: ignore[no-untyped-def]
-    if is_tuple(a):
-        return reduce(lambda val, elem: val * product(elem), a, 1)
-    else:
-        return a
-
-
-# Exclusive prefix product with output congruent to input a
-def prefix_product(a, init=1):  # type: ignore[no-untyped-def]
-    if is_tuple(a):
-        if is_tuple(init):  # tuple tuple
-            assert len(a) == len(init)
-            return tuple(prefix_product(x, i) for x, i in zip(a, init))
-        else:  # tuple "int"
-            r = []
-            for v in a:
-                r.append(prefix_product(v, init))
-                init = init * product(v)
-            return tuple(r)
-    else:
-        if is_tuple(init):  # "int" tuple
-            raise AssertionError  # Error
-        else:  # "int" "int"
-            return init
-
-
-def is_layout(x):  # type: ignore[no-untyped-def]
+def is_layout(x):
     return isinstance(x, LayoutBase)
 
 
-class Layout(LayoutBase):  # type: ignore[no-untyped-def]
-    def __init__(self, _shape, _stride=None):  # type: ignore[no-untyped-def]
+class Layout(LayoutBase):
+    def __init__(self, _shape, _stride=None):
         self.shape = _shape
         if _stride is None:
             self.stride = prefix_product(self.shape)
@@ -108,18 +59,38 @@ class Layout(LayoutBase):  # type: ignore[no-untyped-def]
             self.stride = _stride
 
     # operator ==
-    def __eq__(self, other):  # type: ignore[no-untyped-def]
+    def __eq__(self, other):
         return self.shape == other.shape and self.stride == other.stride
 
     # operator len(L)  (len [rank] like tuples)
-    def __len__(self):  # type: ignore[no-untyped-def]
+    def __len__(self):
         if is_tuple(self.shape):
             return len(self.shape)
         else:
             return 1
 
+    # operator ()    (map coord to idx)
+    def __call__(self, *args):
+        """
+        Map a logical coordinate to a linear index (Coord has no Underscore slice operators)
+        OR
+        Slice the layout and return the sublayout (Coord has an Underscore slice op)
+
+        Follow the same behavior of `Layout::operator(Coord const&)` in cute C++
+        """
+        if has_none(args):
+            if len(args) == 1:
+                return Layout(slice_(args[0], self.shape), slice_(args[0], self.stride))
+            else:
+                return Layout(slice_(args, self.shape), slice_(args, self.stride))
+        else:
+            if len(args) == 1:
+                return crd2idx(args[0], self.shape, self.stride)
+            else:
+                return crd2idx(args, self.shape, self.stride)
+
     # operator []    (get-i like tuples)
-    def __getitem__(self, i):  # type: ignore[no-untyped-def]
+    def __getitem__(self, i):
         if is_tuple(self.shape):
             return Layout(self.shape[i], self.stride[i])
         else:
@@ -127,20 +98,24 @@ class Layout(LayoutBase):  # type: ignore[no-untyped-def]
             return Layout(self.shape, self.stride)
 
     # size(layout)   Size of the domain
-    def size(self):  # type: ignore[no-untyped-def]
+    def size(self):
         return product(self.shape)
 
+    # cosize(layout)   Size of the codomain
+    def cosize(self):
+        return self(self.size() - 1) + 1
+
     # print and str
-    def __str__(self):  # type: ignore[no-untyped-def]
+    def __str__(self):
         return f"{self.shape}:{self.stride}"
 
     # error msgs and representation
-    def __repr__(self):  # type: ignore[no-untyped-def]
+    def __repr__(self):
         return f"Layout({self.shape},{self.stride})"
 
 
 # Make Layout from a list of layouts (each layout it's own mode in the result)
-def make_layout(*layouts):  # type: ignore[no-untyped-def]
+def make_layout(*layouts):
     if len(layouts) == 1 and not is_layout(layouts[0]):
         layouts = layouts[0]
 
@@ -149,14 +124,19 @@ def make_layout(*layouts):  # type: ignore[no-untyped-def]
 
 
 # Size of the domain
-def size(layout):  # type: ignore[no-untyped-def]
+def size(layout):
     if is_layout(layout):
         return layout.size()
     return product(layout)
 
 
+# Size of the codomain
+def cosize(layout):
+    return layout.cosize()
+
+
 # Layout coalesce -- flatten and combine as many modes as possible while preserving the int-to-int function
-def coalesce(layout, profile=None):  # type: ignore[no-untyped-def]
+def coalesce(layout, profile=None):
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
@@ -190,9 +170,34 @@ def coalesce(layout, profile=None):  # type: ignore[no-untyped-def]
         return Layout(tuple(result_shape), tuple(result_stride))
 
 
+# Layout filter -- replace all stride-0 modes with size-1 and then coalesce to remove them
+def filter(layout, profile=None):
+    if is_tuple(profile):
+        assert len(layout) >= len(profile)
+        return make_layout(
+            chain(
+                (filter(layout[i], profile[i]) for i in range(0, len(profile))),
+                (layout[i] for i in range(len(profile), len(layout))),
+            )
+        )
+
+    result_shape = []
+    result_stride = []
+    for shape, stride in zip(flatten(layout.shape), flatten(layout.stride)):
+        # skip their shape-1s and stride-0s
+        if not (shape == 1 or stride == 0):
+            result_shape.append(shape)
+            result_stride.append(stride)
+
+    if len(result_shape) == 0:
+        return Layout(1, 0)
+    else:
+        return coalesce(Layout(tuple(result_shape), tuple(result_stride)))
+
+
 # Layout composition
 # Use tuples-of-layouts to perform this operation by-mode and None as no-op
-def composition(layoutA, layoutB):  # type: ignore[no-untyped-def]
+def composition(layoutA, layoutB):
     if layoutB is None:
         return layoutA
     elif is_int(layoutB):
@@ -242,7 +247,7 @@ def composition(layoutA, layoutB):  # type: ignore[no-untyped-def]
 
 
 # Layout complement
-def complement(layout, max_idx=1):  # type: ignore[no-untyped-def]
+def complement(layout, max_idx=1):
     if is_int(layout):
         return complement(Layout(layout))
 
@@ -267,3 +272,142 @@ def complement(layout, max_idx=1):  # type: ignore[no-untyped-def]
     result_stride.append(current_idx)
 
     return coalesce(Layout(tuple(result_shape), tuple(result_stride)))
+
+
+# Layout right inverse
+def right_inverse(layout):
+    if layout is None:
+        return None
+    elif is_int(layout):
+        return Layout(layout)
+
+    result_shape = []
+    result_stride = []
+    current_idx = 1
+
+    flat_shape = flatten(layout.shape)
+    flat_stride = flatten(layout.stride)
+    sorted_DSA = sorted(zip(flat_stride, flat_shape, prefix_product(flat_shape)))
+    for stride, shape, rstride in sorted_DSA:
+        if shape == 1:
+            continue
+        if current_idx != stride:
+            break
+
+        result_shape.append(shape)
+        result_stride.append(rstride)
+        current_idx = shape * stride
+
+    return coalesce(Layout(tuple(result_shape), tuple(result_stride)))
+
+
+# Layout left inverse
+def left_inverse(layout):
+    if layout is None:
+        return None
+    elif is_int(layout):
+        return Layout(layout)
+    return right_inverse(make_layout(layout, complement(layout)))
+
+
+# Split a layout by the composition of B and the "rest"
+# Use tuples-of-layouts to perform this operation by-mode and None as no-op
+def logical_divide(layoutA, layoutB):
+    if layoutB is None:
+        return layoutA
+    elif is_int(layoutB):
+        return logical_divide(layoutA, Layout(layoutB))
+    elif is_tuple(layoutB):
+        assert len(layoutA) >= len(layoutB)
+        return make_layout(
+            chain(
+                (
+                    logical_divide(layoutA[i], layoutB[i])
+                    for i in range(0, len(layoutB))
+                ),
+                (layoutA[i] for i in range(len(layoutB), len(layoutA))),
+            )
+        )
+
+    return composition(
+        layoutA, make_layout(layoutB, complement(layoutB, size(layoutA)))
+    )
+
+
+# Reproduce a layoutA over a layoutB
+# Use tuples-of-layouts to perform this operation by-mode and None as no-op
+def logical_product(layoutA, layoutB):
+    if layoutB is None:
+        return layoutA
+    elif is_int(layoutB):
+        return logical_divide(layoutA, Layout(layoutB))
+    elif is_tuple(layoutB):
+        assert len(layoutA) >= len(layoutB)
+        return make_layout(
+            chain(
+                (
+                    logical_product(layoutA[i], layoutB[i])
+                    for i in range(0, len(layoutB))
+                ),
+                (layoutA[i] for i in range(len(layoutB), len(layoutA))),
+            )
+        )
+
+    return make_layout(
+        layoutA,
+        composition(complement(layoutA, size(layoutA) * cosize(layoutB)), layoutB),
+    )
+
+
+# Gather the modes from a hierarchical logical_divide or logical_product
+def hier_unzip(splitter, layoutA, layoutB):
+    if layoutB is None:
+        return make_layout(Layout(1, 0), layoutA)
+    elif is_tuple(layoutB):
+        assert len(layoutA) >= len(layoutB)
+        # A layout with shape ((A,a),(B,b),(C,c))
+        split = make_layout(
+            hier_unzip(splitter, layoutA[i], layoutB[i]) for i in range(0, len(layoutB))
+        )
+        # Gather to shape ((A,B,C,...),(a,b,c,...,y,z))
+        return make_layout(
+            make_layout(split[i][0] for i in range(0, len(layoutB))),
+            make_layout(
+                chain(
+                    (split[i][1] for i in range(0, len(layoutB))),
+                    (layoutA[i] for i in range(len(layoutB), len(layoutA))),
+                )
+            ),
+        )
+
+    # splitter must return a rank-2 layout
+    return splitter(layoutA, layoutB)
+
+
+# Apply logical divide hierarchically and gather the split modes into two modes
+def zipped_divide(layoutA, layoutB):
+    return hier_unzip(logical_divide, layoutA, layoutB)
+
+
+# Perform logical divide hierarchically and gather tiles (B-layouts) into a new mode
+def tiled_divide(layoutA, layoutB):
+    result = zipped_divide(layoutA, layoutB)
+    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])
+
+
+# Apply logical product hierarchically and gather the split modes into two modes
+def zipped_product(layoutA, layoutB):
+    return hier_unzip(logical_product, layoutA, layoutB)
+
+
+# Perform logical product hierarchically and gather tiles (B-layouts) into a new mode
+def tiled_product(layoutA, layoutB):
+    result = zipped_product(layoutA, layoutB)
+    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])
+
+
+def slice_and_offset(crd: tuple, layout: Layout):
+    return (
+        Layout(slice_(crd, layout.shape), slice_(crd, layout.stride)),
+        crd2idx(crd, layout.shape, layout.stride),
+    )
