@@ -2627,7 +2627,7 @@ void ProcessGroupNCCL::runHookLoop() {
         auto timeFinished = std::chrono::system_clock::now();
         auto timeStarted =
             timeFinished +
-            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
