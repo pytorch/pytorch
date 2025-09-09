@@ -3200,7 +3200,7 @@ exit(2)
         g = torch.cuda.CUDAGraph()
         with self.assertRaisesRegex(
             RuntimeError,
-            "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",
+            "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
         ):
             with torch.cuda.graph(g):
                 torch.cuda.manual_seed(1)
