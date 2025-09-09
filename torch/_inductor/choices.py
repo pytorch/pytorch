@@ -148,12 +148,12 @@ class InductorChoices:
         """
         Utility to get the KernelTemplateChoice generator for a specific input.
 
-        This is a per template/op call, whereas get_mm_configs is an op wide call (all templates).
+        This is a per template/op call, whereas get_template_configs is an op wide call (all templates).
         Consider when overriding/using at which level you need to make decisions
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
+        assert device_type is not None, "get_ktc requires a valid device type"
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -203,7 +203,7 @@ class InductorChoices:
             if adjusted_choices[0].inputs.device_type == "mps":
                 return True
 
-        # Since the following backends are not using get_mm_configs yet through the singular call,
+        # Since the following backends are not using get_template_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
         # defensively.
         # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
