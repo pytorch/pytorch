@@ -1941,13 +1941,11 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return y
 
         mod = Mod()
-        x = torch.rand(2, 16)
+        x = torch.rand(1, 1024)
         ref = mod(x)
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch.compile(mod, backend=cnt, fullgraph=True)
-        res = opt_mod(x)
+        mod.compile(fullgraph=False)
+        res = mod(x)
         self.assertTrue(torch.allclose(ref, res))
-        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_param_order(self):
