@@ -2876,7 +2876,7 @@ def _persistent_reduction_configs(
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
-            for xblock in (1, 4, 8, 32, 128)
+            for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
         ]
@@ -2905,9 +2905,22 @@ def _persistent_reduction_configs(
         if rnumel > 1024:
             configs = configs[:1]
         elif rnumel <= 512:
-            configs = configs[2:3]
+            configs = [
+                triton_config_reduction(
+                    size_hints,
+                    8,
+                    rnumel,
+                )
+            ]
         else:
-            configs = configs[1:2]
+            configs = [
+                triton_config_reduction(
+                    size_hints,
+                    4,
+                    rnumel,
+                )
+            ]
+            
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
