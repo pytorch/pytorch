@@ -28,12 +28,10 @@ Tensor& set_cuda_(Tensor& result) {
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
-Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
-  checkSetStorage(result, std::move(storage), storage_offset, size, stride);
+Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, at::OptionalIntArrayRef stride_opt) {
+  checkSetStorage(result, std::move(storage), storage_offset, size, stride_opt);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
-                                          at::OptionalIntArrayRef(stride) : std::nullopt;
   at::native::resize_impl_cuda_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }
