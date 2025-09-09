@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -1862,7 +1861,6 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(grads, expected_grads)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2007,7 +2005,6 @@ def forward(self, pred_1, x_1):
     # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -3775,7 +3772,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3859,7 +3855,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3921,7 +3916,6 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3940,7 +3934,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4044,7 +4037,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4230,7 +4222,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4279,7 +4270,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4330,7 +4320,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4526,7 +4515,6 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["device"] == torch.device("cpu")
             or params["compile_mode"] == "compile_dynamic_shape"
-            or torch.version.hip
         ),
     )
     def test_associative_scan_cond_in_combine_fn(
@@ -4653,7 +4641,6 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4672,7 +4659,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4702,7 +4688,6 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else elements,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -7908,6 +7893,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s77, 3]";
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -8056,6 +8043,8 @@ class GraphModule(torch.nn.Module):
         t: "f32[2, 3]";
 
         t, = fx_pytree.tree_flatten_spec(([t], {}), self._in_spec)
+        _guards_fn = self._guards_fn(t);  _guards_fn = None
+
         sum_1: "f32[]" = torch.ops.aten.sum.default(t)
         _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(sum_1, dtype = torch.float32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
         to: "i64[]" = torch.ops.aten.to.dtype(sum_1, torch.int64);  sum_1 = None
@@ -8204,6 +8193,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s77, 3]";
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s77, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8623,6 +8614,8 @@ class GraphModule(torch.nn.Module):
         a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
 
         a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+        _guards_fn = self._guards_fn(a, b1, b2, c);  _guards_fn = None
+
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
         cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, (c, b1, b2));  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
@@ -8705,6 +8698,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[s68, 3]"; y: "f32[s17]"; z: "f32[s68, 3]";
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
+        _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
+
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 
