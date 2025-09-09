@@ -77,7 +77,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -153,7 +153,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -227,7 +227,7 @@ persistent_tma_mm_template = TritonTemplate(
         # early exit due to zero-size input(s)
         return
 
-    start_pid = tl.program_id(0)
+    start_pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
@@ -419,7 +419,7 @@ device_tma = r"""
         stride_a_scale_m = 0
         stride_b_scale_n = 0
 
-    start_pid = tl.program_id(axis=0)
+    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)

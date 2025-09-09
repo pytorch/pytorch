@@ -56,7 +56,7 @@ bmm_template = TritonTemplate(
     stride_bn = {{stride("B", 2)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -82,7 +82,7 @@ bmm_template = TritonTemplate(
 
     rk = tl.arange(0, BLOCK_K)
 
-    idx_q = tl.program_id(1)  # batch dimension for BMM
+    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
 
@@ -101,7 +101,7 @@ bmm_template = TritonTemplate(
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_q = tl.program_id(1)  # batch dimension for BMM
+    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     idx_m = rm[:, None]
     idx_n = rn[None, :]
     mask = (idx_m < M) & (idx_n < N)
