@@ -321,7 +321,7 @@ def bwd_dq_inner(
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+                IS_FULL_BLOCKS,
             )
 
             # Increment pointers.
@@ -369,7 +369,7 @@ def bwd_dq_block_mn(
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
+    IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1)}}
 
@@ -380,10 +380,10 @@ def bwd_dq_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    n = get_bounded_indices(offs_n2[None, :], KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    n = get_bounded_indices(offs_n2[None, :], KV_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
     # that the M reads out of bounds for the PIDS spanning the Q_LEN boundary
-    m = get_bounded_indices(offs_m2[:, None], Q_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+    m = get_bounded_indices(offs_m2[:, None], Q_LEN if not IS_DIVISIBLE else None)
 
     {{ modification(
         subgraph_number=0,
@@ -497,7 +497,7 @@ def bwd_dkdv_inner(
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
+                IS_FULL_BLOCKS,
             )
             # Increment pointers.
             offset = get_offset_for_next_block(
@@ -540,7 +540,7 @@ def bwd_dkdv_block_mn(
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
+    IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
@@ -556,10 +556,10 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    m = get_bounded_indices(offs_m1[None, :], Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    m = get_bounded_indices(offs_m1[None, :], Q_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
     # that the n reads out of bounds for the PIDS spanning the KV_LEN boundary
-    n = get_bounded_indices(offs_n1[:, None], KV_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+    n = get_bounded_indices(offs_n1[:, None], KV_LEN if not IS_DIVISIBLE else None)
 
     pre_mod_scores = qkT
     {{ modification(
