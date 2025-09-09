@@ -153,7 +153,7 @@ at::Tensor& set_source_Storage_storage_offset_(
     at::Storage storage,
     int64_t storage_offset,
     c10::IntArrayRef size,
-    c10::IntArrayRef stride) {
+    at::OptionalIntArrayRef stride) {
   return at::cpu::set_(result, storage, storage_offset, size, stride);
 }
 

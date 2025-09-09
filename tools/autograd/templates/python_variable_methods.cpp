@@ -1211,12 +1211,12 @@ static PyObject* THPVariable_set_(
                               Storage source,
                               c10::SymInt storage_offset,
                               c10::SymIntArrayRef size,
-                              c10::SymIntArrayRef stride) -> Tensor {
+                              at::OptionalSymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
         return self.set__symint(std::move(source), std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlistOptional(3)));
     }
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
@@ -1235,12 +1235,12 @@ static PyObject* THPVariable_set_(
                               const Tensor& source,
                               c10::SymInt storage_offset,
                               c10::SymIntArrayRef size,
-                              c10::SymIntArrayRef stride) -> Tensor {
+                              at::OptionalSymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
         return self.set__symint(source, std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlistOptional(3)));
     }
   }
   Py_RETURN_NONE;
