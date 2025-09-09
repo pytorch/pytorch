@@ -234,7 +234,7 @@ dunder_attrs_assumed_constants = (
 )
 
 
-def get_framelocals_idx(code, var_name):
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
     # NOTE: we need to find the LAST matching index because <= 3.10 contains
