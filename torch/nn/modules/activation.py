@@ -1789,6 +1789,45 @@ class Softmax(Module):
         >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
+        >>> print(output.sum(dim=1))  # Each row sums to 1
+        tensor([1.0000, 1.0000])
+
+        >>> # Classification example - convert logits to probabilities
+        >>> logits = torch.tensor([[2.0, 1.0, 0.1], [0.5, 2.5, 0.3]])
+        >>> m = nn.Softmax(dim=1)
+        >>> probabilities = m(logits)
+        >>> print(probabilities)
+        tensor([[0.6590, 0.2424, 0.0986],
+                [0.1086, 0.8025, 0.0889]])
+
+        >>> # Different dimensions - softmax along last dimension
+        >>> m = nn.Softmax(dim=-1)
+        >>> input = torch.randn(2, 3, 4)
+        >>> output = m(input)
+        >>> print(output.shape)  # Same shape as input
+        torch.Size([2, 3, 4])
+        >>> print(output[0, 0, :].sum())  # Each slice along dim=-1 sums to 1
+        tensor(1.0000)
+
+        >>> # Temperature scaling for controlling softmax sharpness
+        >>> logits = torch.tensor([[1.0, 2.0, 3.0]])
+        >>> m = nn.Softmax(dim=1)
+        >>>
+        >>> # Cold temperature (divide by small number)
+        >>> cold_output = m(logits / 0.5)
+        >>> # Hot temperature (divide by large number)
+        >>> hot_output = m(logits / 2.0)
+        >>> print("Cold (sharp):", cold_output)
+        >>> print("Hot (smooth):", hot_output)
+        Cold (sharp): tensor([[0.0159, 0.1173, 0.8668]])
+        Hot (smooth): tensor([[0.1863, 0.3072, 0.5065]])
+
+        >>> # Handling extreme values
+        >>> extreme_logits = torch.tensor([[100.0, 0.0, -100.0]])
+        >>> m = nn.Softmax(dim=1)
+        >>> output = m(extreme_logits)
+        >>> print("Extreme values:", output)
+        Extreme values: tensor([[1.0000e+00, 3.7835e-44, 0.0000e+00]])
 
     """
 
