@@ -176,7 +176,7 @@ def log_torch_jit_trace_exportability(
     return
 
 
-DISABLE_JUSTKNOBS = True,
+DISABLE_JUSTKNOBS = True
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
