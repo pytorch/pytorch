@@ -660,10 +660,9 @@ static Tensor make_tensor_for_subclass_helper(
   Storage storage{
       Storage::use_byte_size_t{},
       size_bytes,
+      at::DataPtr{nullptr, options.device()},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
-  // TODO: constructor should probably accept data pointer
-  storage.set_data_ptr_noswap(at::DataPtr{nullptr, options.device()});
 
   auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
   if (extra_dispatch_keys.has_value()) {
@@ -808,14 +807,18 @@ static PyObject* THPVariable_make_dtensor(
       "cls must be a type (got ",
       Py_TYPE(cls)->tp_name,
       ")");
-  // See note about the __torch_dispatch__ check in
-  // THPVariable_make_wrapper_subclass above.
+
+#ifndef NDEBUG
+  // This is specifically for making a DTensor, which we know defines
+  // __torch_dispatch__. Check anyway in debug builds in case somebody
+  // removes it.
   py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
   TORCH_CHECK_TYPE(
       attr.ptr() != nullptr &&
           attr.ptr() != torch::disabled_torch_dispatch_impl(),
       ((PyTypeObject*)cls)->tp_name,
       " must define __torch_dispatch__");
+#endif
 
   const auto& local_tensor = r.tensor(3);
   const auto options = TensorOptions()

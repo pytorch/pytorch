@@ -50,13 +50,13 @@ struct C10_API Storage {
   // is non-resizable
   Storage(
       use_byte_size_t /*use_byte_size*/,
-      size_t size_bytes,
+      SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator = nullptr,
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            size_bytes,
+            std::move(size_bytes),
             std::move(data_ptr),
             allocator,
             resizable)) {}
