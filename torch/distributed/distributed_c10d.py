@@ -94,6 +94,7 @@ __all__ = [
     "get_world_size",
     "get_pg_count",
     "group",
+    "init",
     "init_process_group",
     "irecv",
     "is_gloo_available",
