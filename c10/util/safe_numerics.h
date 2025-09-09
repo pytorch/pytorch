@@ -82,7 +82,7 @@ C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
     return true;
   }
 
-  bool positive{((a < 0) && (b < 0)) || ((a >= 0) && (b >= 0))};
+  bool positive{(a >= 0 && b >= 0) || (a <= 0 && b <= 0)};
   if (positive) {
     if (unsigned_result > int64_max) {
       return true;
