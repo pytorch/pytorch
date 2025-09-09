@@ -319,8 +319,10 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
+    build_vars = ""
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
-    build_vars = "MAX_JOBS=5 " if enable_cuda else ""
+    if enable_cuda:
+        build_vars += "MAX_JOBS=5 "
 
         # Handle PyPI NVIDIA libraries vs bundled libraries
         use_nvidia_pypi_libs = os.getenv("USE_NVIDIA_PYPI_LIBS", "0") == "1"
