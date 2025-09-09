@@ -338,7 +338,10 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     out_dtypes: list[torch.dtype],
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    rs_ins = [_rs_in.to(out_dtype) for _rs_in, out_dtype in zip(_rs_ins, out_dtypes)]
+    rs_ins = [
+        _rs_in.to(out_dtype) if _rs_in.dtype != out_dtype else _rs_in
+        for _rs_in, out_dtype in zip(_rs_ins, out_dtypes)
+    ]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     reduce_dtype_size_bytes = _dtype_size_bytes(reduce_dtype)
     numel_mults = [
@@ -452,7 +455,10 @@ def all_gather_merge_fn_to_trace_custom_ops(
     out_dtypes: list[torch.dtype],
     rank: int,
 ) -> list[torch.Tensor]:
-    ag_ins = [_ag_in.to(out_dtype) for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)]
+    ag_ins = [
+        _ag_in.to(out_dtype) if _ag_in.dtype != out_dtype else _ag_in
+        for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)
+    ]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes_bytes = [
         ag_in.numel() * _dtype_size_bytes(out_dtype)
@@ -711,8 +717,11 @@ def merge_reduce_scatter(
 
 def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:
     assert len(dtypes) > 0
-    if len(OrderedSet(dtypes)) == 1:
+    s = OrderedSet(dtypes)
+    if len(s) == 1:
         return dtypes[0]
+    if s == OrderedSet([torch.bfloat16, torch.float]):
+        return torch.bfloat16
 
     return torch.uint8
 
