@@ -93,7 +93,11 @@ def iter_(fn_or_iterable, sentinel=_SENTINEL_MISSING, /):  # type: ignore[no-unt
     if sentinel is _SENTINEL_MISSING:
         iterable = fn_or_iterable
         if hasattr(iterable, "__iter__"):
-            return iterable.__iter__()
+            iterator = iterable.__iter__()
+            if hasattr(iterator, "__next__"):
+                return iterator
+            else:
+                raise TypeError(f"'{type(iterator)}' object is not iterable")
         if hasattr(iterable, "__getitem__"):
             # Needs to be a new function to avoid iter becoming a generator
             def sequence_protocol(iterable):  # type: ignore[no-untyped-def]

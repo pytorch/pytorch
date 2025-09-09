@@ -637,10 +637,15 @@ def create_aot_state(
 
     if fw_metadata.num_intermediate_bases > 0:
         assert not req_subclass_dispatch, f"""\
-torch.compile is currently being used with tensor subclass inputs:
-{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
-that alias one another, which is currently unsupported in the subclass use case. If you run into this,
-please file a github issue"""
+torch.compile is currently being used with tensor subclass inputs.
+We are attempting to a compile a graph with two graph outputs
+that alias one another, specifically output indices:
+
+    {[i for i, x in enumerate(fw_metadata.output_info) if x.output_type == OutputType.alias_of_intermediate]}
+
+ANY output aliasing (even for regular tensors) is currently unsupported if
+there are any subclass outputs. If you run into this, please file a github
+issue"""
 
     if aot_config.is_export:
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
@@ -667,6 +672,7 @@ fw_metadata={str(fw_metadata)}"""
                 ]
             )
             != 0
+            and aot_config.export_trace_joint
         ):
             raise RuntimeError(
                 f"""\
@@ -1131,6 +1137,15 @@ def aot_module_simplified(
     return forward
 
 
+def boxed_nop_preserve_node_meta(fx_g, example_inputs):
+    def run(args):
+        with torch.fx.traceback.preserve_node_meta():
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
 def aot_export_joint_with_descriptors(
     stack: contextlib.ExitStack,
     mod: nn.Module,
@@ -1140,6 +1155,8 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1201,8 +1218,6 @@ def aot_export_joint_with_descriptors(
     of the inputs to determine if inputs are parameters and their FQNs.
     """
 
-    from torch._dynamo.backends.debugging import boxed_nop
-
     (
         functional_call,
         _params_buffers_flat,
@@ -1219,8 +1234,8 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        boxed_nop,
-        boxed_nop,
+        fw_compiler,
+        bw_compiler,
         default_partition,
         decompositions,
         keep_inference_input_mutations,
@@ -1434,6 +1449,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             dynamic_shapes=dynamic_shapes,
+            trace_joint=trace_joint,
             kwargs=kwargs,
         )
 
@@ -1536,6 +1552,7 @@ def aot_export_joint_simple(
             func,
             args,
             decompositions=decompositions,
+            trace_joint=trace_joint,
         )
         in_spec, _kw_in_spec = in_spec.children_specs
     # At this point, we can just directly return the (joint or inference graph) that we traced.
@@ -1617,6 +1634,8 @@ def _aot_export_function(
     # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     keep_input_mutations: bool = False,
+    # Under export, configures whether we are getting inference or training IR
+    trace_joint: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1661,6 +1680,7 @@ def _aot_export_function(
         is_export=True,
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
+        export_trace_joint=trace_joint,
     )
     if fake_mode is None:
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)

@@ -178,6 +178,39 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    def test_assert_tensor_metadata_stack(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3)
+
+            def forward(self, x, y):
+                x = x.to(dtype=torch.int32)
+                y = y.to(dtype=torch.int32)
+                x = x + self.a
+                return x + y
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x, y):
+                x = x * x
+                y = y * y
+                return self.n(x, y)
+
+        m = M()
+        ep = torch.export.export(m, (torch.randn(3), torch.randn(3)))
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten._assert_tensor_metadata.default:
+                self.assertEqual(len(node.meta.get("nn_module_stack")), 2)
+
+        uep = torch.export.unflatten(ep)
+
+        inp = (torch.randn(3), torch.randn(3))
+        self.assertTrue(torch.allclose(uep(*inp), m(*inp)))
+
     @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
@@ -326,9 +359,10 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+            AssertionError,
+            escape("Guard failed: x.size()[0] == 2"),
         ):
+            # expected 2, but got 6
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
@@ -900,7 +934,7 @@ def forward(self, x):
         fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
             torch.ops.aten.sym_size.int
         )
-        self.assertEqual(fn_count_sym_size(unflat.graph), 3)
+        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
