@@ -76,7 +76,6 @@ def sample_vllm_test_library():
                 ),
                 "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
                 "pytest -v -s entrypoints/llm/test_generate.py ",
-                "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
                 "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
             ],
         },

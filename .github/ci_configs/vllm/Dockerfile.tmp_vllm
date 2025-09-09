@@ -12,54 +12,46 @@ ARG BUILD_BASE_IMAGE=torch-nightly-base
 # by default, it uses devel-ubuntu22.04 official image.
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
+# The logic is copied from https://github.com/vllm-project/vllm/blob/main/docker/Dockerfile
+ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
-#################### TORCH NIGHTLY  BASE IMAGE ####################
+
+#################### TORCH NIGHTLY BASE IMAGE ####################
 # A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
-From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
-ARG CUDA_VERSION=12.8.1
-ARG PYTHON_VERSION=3.12
-ARG TARGETPLATFORM
-ENV DEBIAN_FRONTEND=noninteractive
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+ARG GET_PIP_URL
 
-# Install Python and other dependencies if it does not existed
-RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "Installing Python ${PYTHON_VERSION}..." && \
-      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
-      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
-      apt-get update -y && \
-      apt-get install -y ccache software-properties-common git curl sudo && \
-      for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-      done && \
-      apt-get update -y && \
-      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
-      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
-      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
-      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
-      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
-   else \
-      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
-   fi \
-   && python3 --version && python3 -m pip --version
+# Install Python and other dependencies
+RUN apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+    && python3 --version && python3 -m pip --version
 
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 # Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
 RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
-    if [ "$current_gcc_version" -lt 10 ]; then \
-      echo "GCC version is $current_gcc_version, installing gcc-10..."; \
-      apt-get update && \
-      apt-get install -y gcc-10 g++-10 && \
-      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
-      update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
-    else \
-      echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
-    fi && \
-    gcc --version && g++ --version
+    if command -v apt-get >/dev/null; then \
+        if [ "$current_gcc_version" -lt 10 ]; then \
+            echo "GCC version is $current_gcc_version, installing gcc-10..."; \
+            apt-get update \
+            && apt-get install -y gcc-10 g++-10 \
+            && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
+            && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
+        else \
+            echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
+        fi \
+    fi \
+    && gcc --version && g++ --version
 
 # install uv for faster pip installs
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -78,6 +70,21 @@ ENV UV_LINK_MODE=copy
 # prepare basic build environment
 FROM ${BUILD_BASE_IMAGE} AS base
 USER root
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+
+# TODO (huydhn): Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
+
+# Install some system dependencies and double check python version
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
+    else \
+        dnf install -y git curl wget sudo vim; \
+    fi \
+    && python3 --version && python3 -m pip --version
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -118,17 +125,15 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch wheels to build vllm"; \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
-        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
-        uv pip install --system "${vision_whl}"; \
-        uv pip install --system "${audio_whl}"; \
+        vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
-        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     else \
         echo "[INFO] Installing torch nightly with latest one to build vllm"; \
-        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install numba 0.61.2 for cuda environment
@@ -137,12 +142,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Install common dependencies from vllm common.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-uv pip install --system -r requirements/common.txt
-
+    uv pip install --system -r requirements/common.txt
 
 # Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG exformer_cuda_arch_list='7.5;8.0+PTX;9.0a'
-ENV TORCH_CUDA_ARCH_LIST=${exformer_cuda_arch_list}
+ARG xformers_cuda_arch_list='7.5;8.0+PTX;9.0a'
+ENV TORCH_CUDA_ARCH_LIST=${xformers_cuda_arch_list}
 
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
@@ -153,8 +157,8 @@ RUN pip freeze | grep -E 'ninja'
 
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-# sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
-ARG XFORMERS_COMMIT=eb0946a363464da96ea40afd1a7f72a907c25497
+# sha for https://github.com/facebookresearch/xformers/tree/v0.0.32.post2
+ARG XFORMERS_COMMIT=5d4b92a5e5a9c6c6d4878283f47d82e17995b468
 ENV CCACHE_DIR=/root/.cache/ccache
 
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -187,11 +191,6 @@ RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 # Image used to build vllm wheel
 FROM base AS build
 ARG TARGETPLATFORM
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
 
 COPY . .
 
@@ -251,9 +250,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
     fi
 
-RUN echo "[DEBUG] Listing  current directory:" && \
+RUN echo "[INFO] Listing current directory:" && \
     ls -al && \
-    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
 #################### WHEEL BUILD IMAGE ####################
@@ -263,42 +262,40 @@ RUN echo "[DEBUG] Listing  current directory:" && \
 # Setup clean environment for vLLM for test and api server using ubuntu22.04 with AOT flashinfer
 FROM ${FINAL_BASE_IMAGE} AS vllm-base
 USER root
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+ARG GET_PIP_URL
+
+# TODO (huydhn): Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
+
 # prepare for environment starts
 WORKDIR /workspace
 
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-# Install Python and other dependencies if it does not existed
-RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "Installing Python ${PYTHON_VERSION}..." && \
-      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
-      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
-      apt-get update -y && \
-      apt-get install -y ccache software-properties-common git curl sudo && \
-      for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-      done && \
-      apt-get update -y && \
-      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
-      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
-      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
-      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
-      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
-   else \
-      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
-   fi \
-   && python3 --version && python3 -m pip --version
-
+# Install Python and other dependencies
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
+        && add-apt-repository -y ppa:deadsnakes/ppa \
+        && apt-get update -y \
+        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+        && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
+    else \
+        dnf install -y git curl wget sudo vim; \
+    fi \
+    && python3 --version && python3 -m pip --version
 
 # Get the torch versions, and whls used in previous stagtes for consistency
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-RUN echo "[DEBUG] Listing current directory before torch install step:" && \
+RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
-    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
@@ -306,7 +303,6 @@ RUN echo "[DEBUG] Listing current directory before torch install step:" && \
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -327,15 +323,13 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
-        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
-        uv pip install --system "${torch_whl}[opt-einsum]"; \
-        uv pip install --system "${vision_whl}"; \
-        uv pip install --system "${audio_whl}"; \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install the vllm wheel from previous stage
@@ -346,9 +340,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
 
-
 # Build flashinfer from source.
-ARG torch_cuda_arch_list='8.0;8.9;9.0a'
+ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 
@@ -415,11 +408,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/nightly_torch_test.txt
-
-# Workaround for #17068
-# pinned commit for v2.2.4
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@95d8aba8a8c75aedcaa6143713b11e745e7cd0d9#egg=mamba-ssm"
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'

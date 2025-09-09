@@ -24,7 +24,7 @@ from torch.distributed._functional_collectives import (
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_accelerator_dist_backend,
+    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
@@ -59,7 +59,7 @@ if not dist.is_available():
     sys.exit(0)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_nccl()
 class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -75,15 +75,13 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.rank)
+        return torch.device(f"cuda:{self.rank}")
 
     def _init_process_group(self) -> None:
-        torch.accelerator.set_device_idx(self.device.index)
+        torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
-        backend = dist.get_default_backend_for_device(self.device.type)
-
         dist.init_process_group(
-            backend=backend,
+            backend="nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -275,7 +273,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         # check memory leak
         for i in range(1, 10):
-            mem_usage[i] = torch.accelerator.max_memory_allocated()
+            mem_usage[i] = torch.cuda.max_memory_allocated()
             compiled(arg)
 
         assert mem_usage[9] == mem_usage[8]
@@ -372,16 +370,14 @@ class TestWithNCCL(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
         self._init_process_group()
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.device)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
 
         input_split_sizes = send_sz_matrix[self.rank].tolist()
         output_split_sizes = send_sz_matrix[:, self.rank].tolist()
-        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(
-            self.device.type
-        )
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).cuda()
 
         output = torch.ops._c10d_functional.all_to_all_single(
             input,
@@ -392,7 +388,7 @@ class TestWithNCCL(MultiProcessTestCase):
         output = torch.ops._c10d_functional.wait_tensor(output)
         expect = torch.cat(
             [
-                torch.full((sz,), float(rank)).to(self.device.type)
+                torch.full((sz,), float(rank)).cuda()
                 for rank, sz in enumerate(output_split_sizes)
             ]
         )
@@ -468,7 +464,7 @@ class TestWithNCCL(MultiProcessTestCase):
     @fresh_cache()
     def test_threading(self):
         self._init_process_group()
-        device = self.device
+        device = torch.device(f"cuda:{self.rank}")
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -550,9 +546,9 @@ class TestWithNCCL(MultiProcessTestCase):
             return in_grad, w_grad
 
         m, n, k = 128, 256, 64
-        in_ = torch.randn((m, k), device=self.device.type, dtype=torch.bfloat16)
-        w = torch.randn((n, k), device=self.device.type, dtype=torch.bfloat16)
-        out_grad = torch.randn((m, n), device=self.device.type, dtype=torch.bfloat16)
+        in_ = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
+        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device="cuda", dtype=torch.bfloat16)
 
         eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
         compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
@@ -781,8 +777,7 @@ class CompileTest(TestCase):
 
         self.rank = 0
         self.world_size = 2
-        torch.accelerator.set_device_index(0)
-        self.device = torch.accelerator.current_accelerator()
+        torch.cuda.set_device("cuda:0")
 
         store = FakeStore()
         dist.init_process_group(
@@ -808,7 +803,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device=self.device)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -841,7 +836,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -856,7 +851,7 @@ class CompileTest(TestCase):
             ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
-        args = [torch.rand(4, 4, device=self.device.type) for _ in range(2)]
+        args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         buf0, buf1, buf2, buf3 = find_buffer_assignments(code)
@@ -886,7 +881,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -897,7 +892,7 @@ class CompileTest(TestCase):
             ar0 = funcol.wait_tensor(ar0)
             return ar0
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -922,7 +917,7 @@ class CompileTest(TestCase):
             # Expect allocation
             return ar0
 
-        arg = torch.rand(4, 4, device=self.device.type).T
+        arg = torch.rand(4, 4, device="cuda").T
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -953,7 +948,7 @@ class CompileTest(TestCase):
             buf2 = torch.mm(arg, buf1)
             return buf1, buf2
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         buf0, buf1 = find_buffer_assignments(code)
@@ -983,7 +978,7 @@ class CompileTest(TestCase):
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1000,7 +995,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1010,7 +1005,7 @@ class CompileTest(TestCase):
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
-        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
+        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1034,7 +1029,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()
@@ -1044,7 +1039,7 @@ class CompileTest(TestCase):
             return funcol.wait_tensor(t)
 
         # Test aoti
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1056,7 +1051,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1066,7 +1061,7 @@ class CompileTest(TestCase):
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1082,7 +1077,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1094,7 +1089,7 @@ class CompileTest(TestCase):
             rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
-        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
+        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1118,7 +1113,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (args,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1147,9 +1142,7 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(
-            self.device.type
-        )
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).cuda()
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,
@@ -1183,7 +1176,7 @@ class CompileTest(TestCase):
             br1 = funcol.wait_tensor(br1)
             return br0, br1
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -1206,7 +1199,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1221,7 +1214,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device=self.device.type)
+        arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)

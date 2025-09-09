@@ -501,7 +501,9 @@ def prepare_fw_with_masks_all_requires_grad(fn):
         # require_gradness reasoning much easier.
         if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
             fw_out = pytree.tree_map_only(
-                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+                torch.Tensor,
+                lambda x: x.requires_grad_(True) if x.dtype.is_floating_point else x,
+                fw_out,
             )
         return fw_out, pytree.tree_map_only(
             torch.Tensor, lambda x: x.requires_grad, fw_out
