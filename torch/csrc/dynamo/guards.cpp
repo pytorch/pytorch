@@ -2139,14 +2139,13 @@ class SET_CONTAINS : public LeafGuard {
 // Check if the dual level is the same as the one in fx graph
 class DUAL_LEVEL_MATCH : public LeafGuard {
  public:
-   DUAL_LEVEL_MATCH(
+  DUAL_LEVEL_MATCH(
       RootGuardManager* root_guard_manager,
       int64_t level,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
         _level(level) {
-    py::object forward_ad_module = py::module_::import("torch.autograd.forward_ad");
-    current_level = forward_ad_module.attr("_current_level");
+    forward_ad_module = py::module_::import("torch.autograd.forward_ad");
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -2160,15 +2159,26 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
   }
 
   bool _check() {
-    if (!PyLong_CheckExact(current_level.ptr())) {
+    PyObject* current_level = PyObject_GetAttrString(
+        forward_ad_module.ptr(), "_current_level"); // new ref
+    if (current_level == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
       return false;
     }
-    return PyLong_AsLongLong(current_level.ptr()) == _level;
+    if (!PyLong_CheckExact(current_level)) {
+      Py_DECREF(current_level);
+      return false;
+    } else {
+      int64_t current_level_int = PyLong_AsLongLong(current_level);
+      Py_DECREF(current_level);
+      return current_level_int == _level;
+    }
   }
 
  private:
   int64_t _level;
-  py::object current_level;
+  py::object forward_ad_module;
 };
 
 /**
