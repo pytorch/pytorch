@@ -79,14 +79,16 @@ int device_count_impl(bool fail_if_no_driver) {
       break;
 #endif // C10_ASAN_ENABLED
 #if _WIN32 && CUDA_VERSION >= 13000
-    // Weird workaround for CUDA-13.0 error handling change
-    // See https://github.com/pytorch/pytorch/issues/162333#issuecomment-3267929585
+    // Workaround for CUDA-13.0 error handling on Windows, see
+    // https://github.com/pytorch/pytorch/issues/162333#issuecomment-3267929585
     case cudaErrorNotSupported:
-        if (!fail_if_no_driver) { 
-          TORCH_WARN("cudaGetDeviceCount() returned cudaErrorNotSupported, likely running on CPU machine");
-          count = 0;
-          break;
-        }
+      if (!fail_if_no_driver) {
+        TORCH_WARN(
+            "cudaGetDeviceCount() returned cudaErrorNotSupported, "
+            "likely using older driver or on CPU machine");
+        count = 0;
+        break;
+      }
 #endif
     default:
       TORCH_CHECK(
