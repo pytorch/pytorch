@@ -5850,6 +5850,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     @skip_if_gpu_halide  # misaligned address error
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
