@@ -642,11 +642,12 @@ def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
         if not _LOGGED_DYNAMIC_ALLOWLIST:
             torch._utils_internal.add_mlhub_insight(
                 category="dynamic_shapes_analysis",
-                insight="Dynamic shapes detected",
+                insight="Dynamic shape recompilation detected",
                 insight_description="PGO detected a recompilation due to dynamic shapes. \
-                Please follow the instruction from the action link to reduce shape recompilations.",
+                Please follow the instruction from the action link to reduce \
+                recompilation overhead.",
             )
-            # add mlhub insight only once per job
+            # add mlhub insight only once per rank
             _LOGGED_DYNAMIC_ALLOWLIST = True
 
 
@@ -668,6 +669,16 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
     return code_state_str
+
+
+def merge_pgo_entry(src: FrameStateSizeEntry, dst: FrameStateSizeEntry) -> None:
+    def rank(entry: FrameStateSizeEntry) -> int:
+        if not isinstance(entry.size, tuple):  # scalar
+            return -1
+        return len(entry.size)
+
+    if rank(src) == rank(dst):  # both tensors same rank, or both scalars
+        dst |= src
 
 
 @CacheArtifactFactory.register
@@ -824,9 +835,17 @@ def add_extra_remote_code_state(cache_key: str) -> None:
                             # where one entry might be 1-d, the other 2-d.
                             # or if entries are of different types?
                             # with local source naming, could be scalar vs. tensor
-                            _CODE_STATE[code_id].automatic_dynamic[src] |= entry
+                            merge_pgo_entry(
+                                entry, _CODE_STATE[code_id].automatic_dynamic[src]
+                            )
                     else:
                         _CODE_STATE[code_id] = state
+                # log to tlparse
+                trace_structured_artifact(
+                    "add_extra_remote_code_state",
+                    "string",
+                    lambda: render_code_state(code_state),
+                )
 
 
 def get_code_state() -> defaultdict[CodeId, CodeState]:
@@ -967,6 +986,7 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
     _INIT_CODE_STATE = None
+    _LOGGED_DYNAMIC_ALLOWLIST = False
