@@ -1,16 +1,11 @@
-import collections
 import logging
 from collections import defaultdict
 from typing import Any, Callable, Optional
 
 import torch
-import torch.distributed as dist
 import torch.utils._pytree as pytree
-from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -42,7 +37,7 @@ def bucket_all_gather(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx)
+    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx, None, mode)
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets, mode)
@@ -59,7 +54,9 @@ def bucket_reduce_scatter(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    rs_buckets = bucket_reduce_scatter_by_mb(gm, bucket_cap_mb_by_bucket_idx)
+    rs_buckets = bucket_reduce_scatter_by_mb(
+        gm, bucket_cap_mb_by_bucket_idx, None, mode
+    )
     if len(rs_buckets) == 0:
         return
     merge_reduce_scatter(gm, rs_buckets, mode)
@@ -90,17 +87,17 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def collect_node_descendants(
+def collect_node_descendents(
     graph: torch.fx.Graph,
 ) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
-    Collects the descendants of each node in the graph.
+    Collects the descendents of each node in the graph.
     Args:
-        graph (torch.fx.Graph): The graph to collect descendants from.
+        graph (torch.fx.Graph): The graph to collect descendents from.
     Returns:
-        dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendants.
+        dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendents.
     """
-    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
+    node_descendents: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
         collections.defaultdict(OrderedSet)
     )
     outdegree = collections.defaultdict(int)
@@ -116,14 +113,14 @@ def collect_node_descendants(
     while queue:
         node = queue.pop()
         for input_node in node.all_input_nodes:
-            node_descendants[input_node] |= node_descendants[node]
-            node_descendants[input_node].add(node)
+            node_descendents[input_node] |= node_descendents[node]
+            node_descendents[input_node].add(node)
             outdegree[input_node] -= 1
 
             if outdegree[input_node] == 0:
                 queue.append(input_node)
 
-    return node_descendants
+    return node_descendents
 
 
 def greedy_bucket_collective_by_mb(
@@ -149,7 +146,7 @@ def greedy_bucket_collective_by_mb(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
+    node_descendents = collect_node_descendents(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -210,6 +207,7 @@ def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -235,11 +233,20 @@ def bucket_all_gather_by_mb(
         assert isinstance(group_name, str)
         return (group_name, dtype)
 
+    def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+        _, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        return (group_name,)
+
+    group_key_fn = (
+        _ag_group_key if mode and "multidtype" in mode else _ag_group_key_multidtype
+    )
+
     return greedy_bucket_collective_by_mb(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_all_gather_into_tensor,
-        _ag_group_key,
+        group_key_fn,
         filter_wait_node,
     )
 
@@ -248,6 +255,7 @@ def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    mode: Optional[str] = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -272,11 +280,21 @@ def bucket_reduce_scatter_by_mb(
         assert isinstance(reduce_op, str)
         return (group_name, reduce_op, dtype)
 
+    def _rs_group_key_multidtype(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op)
+
+    group_key_fn = (
+        _rs_group_key_multidtype if mode and "multidtype" in mode else _rs_group_key
+    )
+
     return greedy_bucket_collective_by_mb(
         gm,
         bucket_cap_mb_by_bucket_idx,
         is_reduce_scatter_tensor,
-        _rs_group_key,
+        group_key_fn,
         filter_wait_node,
     )
 
@@ -285,8 +303,10 @@ def bucket_reduce_scatter_by_mb(
 def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    dtype: torch.dtype,
+    numel_mults: list[int],
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.view(dtype).view(group_size, -1) for x in rs_ins]
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
@@ -294,26 +314,38 @@ def _pre_bucket_reduce_scatter(
 def _pre_bucket_reduce_scatter_fake(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    dtype: torch.dtype,
+    numel_mults: list[int],
 ) -> torch.Tensor:
-    out_numel = sum(rs_in.numel() for rs_in in rs_ins)
-    return torch.empty((out_numel,), device=rs_ins[0].device, dtype=rs_ins[0].dtype)
+    out_numel = sum(rs_in.numel() * mult for rs_in, mult in zip(rs_ins, numel_mults))
+    return torch.empty((out_numel,), device=rs_ins[0].device, dtype=dtype)
 
 
 _pre_bucket_reduce_scatter.register_fake(_pre_bucket_reduce_scatter_fake)
 
 
 def reduce_scatter_merge_fn_to_trace_custom_ops(
-    rs_ins: list[torch.Tensor],
+    _rs_ins: list[torch.Tensor],
     group_size: int,
     group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    rs_ins = [_rs_in.to(out_dtype) for _rs_in, out_dtype in zip(_rs_ins, out_dtypes)]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
-    new_out_numels = [x.numel() // group_size for x in rs_ins]
+    reduce_dtype_size_bytes = _dtype_size_bytes(reduce_dtype)
+    numel_mults = [
+        _dtype_size_bytes(x.dtype) // reduce_dtype_size_bytes for x in rs_ins
+    ]
+    new_out_split_sizes = [
+        x.numel() * mult // group_size for x, mult in zip(rs_ins, numel_mults)
+    ]
 
-    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size)
+    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(
+        rs_ins, group_size, reduce_dtype, numel_mults
+    )
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
@@ -322,8 +354,11 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
             new_rs_in, reduce_op, group_size, group_name
         )
     )
-    new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_out_flat = new_rs_out.split(new_out_split_sizes, 0)
+    new_outs = [
+        x.view(dtype).view(s)
+        for x, s, dtype in zip(new_out_flat, new_out_sizes, out_dtypes)
+    ]
     return new_outs
 
 
@@ -333,6 +368,7 @@ def reduce_scatter_merge_fn_to_trace(
     group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],  # unused
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
@@ -352,7 +388,7 @@ def reduce_scatter_merge_fn_to_trace(
     return new_outs
 
 
-@torch.library.custom_op("bucketing::_pre_bucket_all_gather", mutates_args={})
+@torch.library.custom_op("_bucketing::_pre_bucket_all_gather", mutates_args={})
 def _pre_bucket_all_gather(
     ag_ins: list[torch.Tensor],
     group_size: int,
@@ -360,13 +396,17 @@ def _pre_bucket_all_gather(
     dtype: torch.dtype,  # type: ignore[name-defined]
     rank: int,
 ) -> torch.Tensor:
-    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
+    ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
+    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    ins_split_sizes = [
+        _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
+    ]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
-    ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
+    ag_ins_flattened = [ag_in.reshape(-1).view(dtype) for ag_in in ag_ins]
     torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
     return new_ag_out
 
@@ -378,7 +418,11 @@ def _pre_bucket_all_gather_fake(
     dtype: torch.dtype,  # type: ignore[name-defined]
     rank: int,
 ) -> torch.Tensor:
-    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
+    ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
+    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    ins_split_sizes = [
+        _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
+    ]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
@@ -388,17 +432,33 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
+def _dtype_size_bytes(dtype: torch.dtype):
+    if dtype.is_floating_point:
+        return torch.finfo(dtype).bits // 8
+
+    return torch.iinfo(dtype).bits // 8
+
+
 def all_gather_merge_fn_to_trace_custom_ops(
-    ag_ins: list[torch.Tensor],
+    _ag_ins: list[torch.Tensor],
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],
     rank: int,
 ) -> list[torch.Tensor]:
+    ag_ins = [_ag_in.to(out_dtype) for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
+    ins_split_sizes_bytes = [
+        ag_in.numel() * _dtype_size_bytes(out_dtype)
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes)
+    ]
+    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    ins_split_sizes = [
+        _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
+    ]
     ag_input_numel = sum(ins_split_sizes)
-    new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
+    new_ag_out = torch.ops._bucketing._pre_bucket_all_gather(
         ag_ins, group_size, group_name, dtype, rank
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
@@ -408,14 +468,14 @@ def all_gather_merge_fn_to_trace_custom_ops(
         )
     )
     new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
-    outs = torch.split_with_sizes(
+    outs_bucket_dtype = torch.split_with_sizes(
         new_ag_out_reshaped,
         ins_split_sizes,
         dim=1,
     )
     outs_reshaped = [
-        o.reshape((shape[0] * group_size,) + shape[1:])
-        for o, shape in zip(outs, ins_sizes)
+        o.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
+        for o, shape, out_dtype in zip(outs_bucket_dtype, ins_sizes, out_dtypes)
     ]
     return outs_reshaped
 
@@ -425,6 +485,7 @@ def all_gather_merge_fn_to_trace(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],  # ignored in this implementation
     rank: int,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
@@ -459,6 +520,7 @@ def all_gather_merge_fn_to_trace_functional(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],  # ignored in this implementation
     rank: int,
     use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
@@ -575,12 +637,12 @@ def merge_reduce_scatter(
         g = gm.graph
         rs_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
         rs_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
+        rs_dtypes: list[list[torch.dtype]] = [[] for _ in range(n_buckets)]
 
         for bucket_idx, rs_nodes in enumerate(rs_buckets):
             rs0 = rs_nodes[0]
             rs0_val = rs0.meta["val"]
             _, reduce_op, group_size, group_name = rs0.args
-            reduce_dtype = rs0_val.dtype
             device = rs0_val.device
             for n in rs_nodes:
                 rs_val = n.meta["val"]
@@ -589,22 +651,23 @@ def merge_reduce_scatter(
                     and n.args[2] == group_size
                     and n.args[3] == group_name
                     and rs_val.device == device
-                    and rs_val.dtype == reduce_dtype
                 )
                 assert len(n.users) == 1
                 wait_n = next(iter(n.users))
                 rs_ins[bucket_idx].append(n.args[0])  # type: ignore[arg-type]
                 rs_waits[bucket_idx].append(wait_n)
+                rs_dtypes[bucket_idx].append(rs_val.dtype)
 
         for bucket_idx in range(n_buckets):
             _rs_ins = rs_ins[bucket_idx]
             _rs_waits = rs_waits[bucket_idx]
             _rs_ns = rs_buckets[bucket_idx]
+            _rs_dtypes = rs_dtypes[bucket_idx]
 
             rs0 = _rs_ns[0]
             rs0_val = rs0.meta["val"]
             _, reduce_op, group_size, group_name = rs0.args
-            reduce_dtype = rs0_val.dtype
+            reduce_dtype = pick_bucket_dtype(_rs_dtypes)
             device = rs0_val.device
 
             replacements = _insert_fn_trace_before_node(
@@ -616,6 +679,7 @@ def merge_reduce_scatter(
                     group_name,
                     reduce_op,
                     reduce_dtype,
+                    _rs_dtypes,
                     device,
                 ),
                 _rs_ns[-1].next,
@@ -638,6 +702,14 @@ def merge_reduce_scatter(
             for rs_n, wait_n in zip(_rs_ns, _rs_waits):
                 g.erase_node(wait_n)
                 g.erase_node(rs_n)
+
+
+def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:
+    assert len(dtypes) > 0
+    if len(OrderedSet(dtypes)) == 1:
+        return dtypes[0]
+
+    return torch.uint8
 
 
 def merge_all_gather(
@@ -669,21 +741,19 @@ def merge_all_gather(
 
         ag_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
         ag_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
+        ag_dtypes: list[list[torch.dtype]] = [[] for _ in range(n_buckets)]
         for bucket_idx, ag_bucket in enumerate(ag_buckets):
             _, group_size, group_name = ag_bucket[0].args
             assert isinstance(group_name, str)
-            dtype = ag_bucket[0].meta["val"].dtype
 
             for ag_node in ag_bucket:
                 assert len(ag_node.users) == 1, (
                     f"Expect only one user for {ag_node}, but got {ag_node.users}"
                 )
                 wait_node = next(iter(ag_node.users))
-                assert (
-                    ag_node.args[1] == group_size
-                    and ag_node.args[2] == group_name
-                    and ag_node.meta["val"].dtype == dtype
-                )
+                assert ag_node.args[1] == group_size and ag_node.args[2] == group_name
+                dtype = ag_node.meta["val"].dtype
+                ag_dtypes[bucket_idx].append(dtype)
                 ag_node_in = ag_node.args[0]
                 if (
                     ag_node_in.op == "call_function"  # type: ignore[union-attr]
@@ -698,16 +768,16 @@ def merge_all_gather(
                 ag_waits[bucket_idx].append(wait_node)
 
         g = gm.graph
-
         for bucket_idx in range(n_buckets):
             _ag_ins = ag_ins[bucket_idx]
             _ag_waits = ag_waits[bucket_idx]
             _ag_ns = ag_buckets[bucket_idx]
+            _ag_dtypes = ag_dtypes[bucket_idx]
+
+            bucket_dtype = pick_bucket_dtype(_ag_dtypes)
 
             ag0 = _ag_ns[0]
-            ag0_val = ag0.meta["val"]
             _, group_size, group_name = ag0.args
-            dtype = ag0_val.dtype
             assert isinstance(group_name, str)
 
             rank: int = dist.get_rank(_resolve_process_group(group_name))
@@ -719,7 +789,8 @@ def merge_all_gather(
                     pytree.tree_map(lambda node: node.meta["val"], _ag_ins),
                     group_size,
                     group_name,
-                    dtype,
+                    bucket_dtype,
+                    _ag_dtypes,
                     rank,
                 ),
                 ag0.next,
