@@ -57,7 +57,7 @@ repackage_wheel() {
   package=$1
   pushd $package
 
-  orig_wheel=$(find . -name *${package}*)
+  orig_wheel=$(find . -name *${package//-/_}*)
   orig_version=$(unzip -p $orig_wheel '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
 
   if [[ "${package}" == vllm ]]; then
@@ -69,7 +69,7 @@ repackage_wheel() {
   nightly_version=$version.$nightly
 
   # Use nightly version
-  change_wheel_version $package $orig_wheel $orig_version $nightly_version
+  change_wheel_version ${package//-/_} $orig_wheel $orig_version $nightly_version
   # Clean up
   rm "${orig_wheel}"
 
