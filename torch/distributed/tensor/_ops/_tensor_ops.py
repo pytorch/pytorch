@@ -1162,7 +1162,6 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
     return OpStrategy(all_strategies)
 
 
-# similar to the strategy for aten.slice.Tensor but simpler
 @register_op_strategy(aten.unbind.int, schema_info=RuntimeSchemaInfo(1))
 def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
     """Forward all shardings except the unbind dimension."""
@@ -1179,43 +1178,25 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
     unbind_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if not is_tensor_dim_sharded(arg_spec, dim=unbind_dim):
-            # only add the strategy if the unbind dim is not sharded
-            output_placements = shift_shard_dims_after_remove(
-                arg_spec.placements, unbind_dim
+        if is_tensor_dim_sharded(arg_spec, dim=unbind_dim):
+            raise RuntimeError(
+                f"Attempted to unbind along the sharded dimension {unbind_dim}. ",
+                "It cannot be performed without redistribution, which is disallowed "
+                "by the current operator.",
             )
-            output_specs = tuple(
-                DTensorSpec(mesh, tuple(output_placements))
-                for _ in range(input_shape[unbind_dim])
+        # only add the strategy if the unbind dim is not sharded
+        output_placements = shift_shard_dims_after_remove(
+            arg_spec.placements, unbind_dim
+        )
+        output_specs = tuple(
+            DTensorSpec(mesh, tuple(output_placements))
+            for _ in range(input_shape[unbind_dim])
+        )
+        unbind_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_specs,
+                input_specs=(arg_spec,),
+                redistribute_cost=[[0.0] * len(input_strategy.strategies)],
             )
-            unbind_strategy.strategies.append(
-                OpSpec(
-                    output_specs=output_specs,
-                    input_specs=(arg_spec,),
-                    redistribute_cost=[[0.0] * len(input_strategy.strategies)],
-                )
-            )
-    if not unbind_strategy.strategies:
-        # if all strategies are filtered out, unsharding all specs on unbind dim
-        # of the input strategy, and use that as the op strategy
-        for arg_strategy in input_strategy.strategies:
-            arg_spec = arg_strategy.output_spec
-            input_placements = unshard_tensor_dim(arg_spec.placements, dim=unbind_dim)
-            input_spec = DTensorSpec(mesh, input_placements, arg_spec.tensor_meta)
-            output_placements = shift_shard_dims_after_remove(
-                input_placements, unbind_dim
-            )
-            unshard_specs = tuple(
-                DTensorSpec(mesh, tuple(output_placements))
-                for _ in range(input_shape[unbind_dim])
-            )
-            unbind_strategy.strategies.append(
-                OpSpec(
-                    output_specs=unshard_specs,
-                    input_specs=(input_spec,),
-                    redistribute_cost=[
-                        generate_redistribute_costs(input_strategy, input_spec)
-                    ],
-                )
-            )
+        )
     return unbind_strategy

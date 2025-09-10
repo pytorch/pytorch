@@ -788,22 +788,25 @@ class DistTensorOpsTest(DTensorTestBase):
             dist_tensor = distribute_tensor(
                 local_tensor, device_mesh, (Shard(shard_dim),)
             )
-            unbinded_tensors = dist_tensor.unbind(dim=unbind_dim)
 
             if shard_dim == unbind_dim:
-                self.assertTrue(
-                    all(elem.placements[0].is_replicate() for elem in unbinded_tensors)
-                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "Sharding propagation failed"
+                ):
+                    dist_tensor.unbind(dim=unbind_dim)
             else:
+                unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
                 new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
                 self.assertTrue(
                     all(
                         elem.placements[0].is_shard(dim=new_shard_dim)
-                        for elem in unbinded_tensors
+                        for elem in unbinded_dist_tensors
                     )
                 )
-            for x, y in zip(unbinded_tensors, local_tensor.unbind(dim=unbind_dim)):
-                self.assertEqual(x.full_tensor(), y)
+                for x, y in zip(
+                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
+                ):
+                    self.assertEqual(x.full_tensor(), y)
 
 
 if __name__ == "__main__":
