@@ -44,8 +44,6 @@ def _device_library_context(
     try:
         getattr(library, init_method)()
         yield library
-    except Exception:
-        raise
     finally:
         try:
             getattr(library, shutdown_method)()
@@ -132,7 +130,9 @@ class DeviceInfo:
         try:
             with _nvml_context() as pynvml:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+                clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(
+                    handle, pynvml.NVML_CLOCK_SM
+                )
                 return clock_mhz * 1e6
         except Exception:
             return None
@@ -177,7 +177,11 @@ class DeviceInfo:
                 mem_clock_info = amd_smi.amdsmi_get_clock_info(
                     device_handle, amd_smi.AmdSmiClkType.MEM
                 )
-                return mem_clock_info["max_clk"] * 1e6 if "max_clk" in mem_clock_info else None
+                return (
+                    mem_clock_info["max_clk"] * 1e6
+                    if "max_clk" in mem_clock_info
+                    else None
+                )
         except Exception as e:
             log.info("Failed to get AMD memory clock frequency: %s", e)
             return None

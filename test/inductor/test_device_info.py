@@ -52,7 +52,7 @@ class TestDeviceInfo(TestCase):
         """Test pynvml import through torch.cuda."""
         with (
             patch("torch.cuda._HAS_PYNVML", True),
-            patch.object(torch.cuda, "pynvml", MagicMock()) as mock_pynvml,
+            patch.object(torch.cuda, "pynvml", MagicMock(), create=True) as mock_pynvml,
         ):
             pynvml = _get_pynvml()
             self.assertEqual(pynvml, mock_pynvml)
@@ -80,7 +80,7 @@ class TestDeviceInfo(TestCase):
         """Test pynvml caching through torch.cuda (now handled by torch.cuda module)."""
         with (
             patch("torch.cuda._HAS_PYNVML", True),
-            patch.object(torch.cuda, "pynvml", MagicMock()) as mock_pynvml,
+            patch.object(torch.cuda, "pynvml", MagicMock(), create=True) as mock_pynvml,
         ):
             pynvml1 = _get_pynvml()
             self.assertEqual(pynvml1, mock_pynvml)
