@@ -140,6 +140,7 @@ void initModule(PyObject* module) {
   m.def("_accelerator_getMemoryInfo", [](c10::DeviceIndex device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
+    py::gil_scoped_release no_gil;
     return at::accelerator::getMemoryInfo(device_index);
   });
 }
