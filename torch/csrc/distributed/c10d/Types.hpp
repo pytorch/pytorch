@@ -110,6 +110,8 @@ ReduceOp makeNCCLPreMulSum(const T& factor) {
   return rop;
 }
 
+TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
+
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
 struct BroadcastOptions {

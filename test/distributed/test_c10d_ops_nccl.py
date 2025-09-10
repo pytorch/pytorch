@@ -25,7 +25,7 @@ import torch.distributed as dist
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
     sm_is_or_higher_than,
@@ -45,7 +45,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class ProcessGroupNCCLOpTest(MultiProcContinousTest):
+class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl"
