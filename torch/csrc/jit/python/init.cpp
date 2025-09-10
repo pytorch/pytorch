@@ -1738,7 +1738,9 @@ void initJITBindings(PyObject* module) {
                         op, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
               return py::make_tuple(
-                  func, func_dk, py::cast(op->getTags().vec()));
+                  std::move(func),
+                  std::move(func_dk),
+                  py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;

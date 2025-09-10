@@ -173,7 +173,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     name = "bmm"
 
     # Create MMKernelInputs for BMM at the top
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]  # Extract batch dimension
@@ -201,10 +201,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [aten_handler],
                 name,
-                {aten_handler.uid: aten_extra_kwargs},
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
             )
         )
 
@@ -212,9 +211,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, [bmm_template], name)
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [bmm_template], name))
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -275,15 +272,12 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # options to tune from
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, [aten_baddbmm], name)
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [aten_baddbmm], name))
 
     if use_triton_template(layout, check_max_autotune=False):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [bmm_template],
                 name,
             )
