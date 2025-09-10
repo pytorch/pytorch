@@ -729,14 +729,35 @@ def _unlift_exported_program_lifted_states(
     graph = unlift_gm.graph
     placeholders = graph.find_nodes(op="placeholder")
     if check_guards and placeholders and ep.example_inputs:
+        sig = inspect.signature(unlift_gm.forward)
         input_paths = _get_input_paths(
             ep.example_inputs,
-            inspect.signature(unlift_gm.forward),
+            sig,
         )
+
+        # TODO (tmanlaibaatar)
+        # This is band-aid solution to export new tracer replacing
+        # shape env sources to flat_args. The real fix should be replacing
+        # shape env sources to original user sources but this is quite
+        # involved because you need to carefully construct new sources using
+        # dynamo and replace all instances of it inside shape env. But it is
+        # lot easier to manipulate after we turn them into strings and only
+        # time we use these guards is during retracing or running exported program,
+        # so it is probably ok to have "not useful" guards on ep for now.
+        name_mapping = {}
+        for idx, path in enumerate(input_paths):
+            name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+        ep_guards = []
+        for guard in ep._guards_code:
+            for old_name, new_name in name_mapping.items():
+                guard = guard.replace(old_name, new_name)
+            ep_guards.append(guard)
+
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
-        guards_code.extend(ep._guards_code)
+        guards_code.extend(ep_guards)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
 
         root_nn_module_stack = torch.fx._utils.first_call_function_nn_module_stack(
