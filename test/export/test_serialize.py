@@ -673,7 +673,7 @@ def forward(self, x):
                     kwargs.append(arg.arg)
 
             self.assertEqual(len(args), 4)
-            self.assertEqual(len(kwargs), 4)
+            self.assertEqual(len(kwargs), 5)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
@@ -686,6 +686,7 @@ def forward(self, x):
             self.assertEqual(
                 kwargs[3].as_int, 8 if isinstance(m, MyModelAutotune) else 4
             )  # num warps
+            self.assertEqual(kwargs[4].as_int, 0)  # shared mem bytes
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
