@@ -2448,7 +2448,7 @@ def pointwise(
     """
     Construct @triton.heuristics() based on size_hints.
     """
-    if torch.version.hip and (triton_meta["device"].cc == "gfx950"):
+    if torch.version.hip: #and (triton_meta["device"].cc == "gfx950"): # lets remove this for now
         # lets try the KernelOracle(tm) for MI350! :D
         KernelOracle.installPkgsIf()
         print("KERNELORACLE: available")
