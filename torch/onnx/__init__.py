@@ -65,15 +65,10 @@ def export(
     f: str | os.PathLike | None = None,
     *,
     kwargs: dict[str, Any] | None = None,
-    export_params: bool = True,
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = None,
-    dynamic_axes: Mapping[str, Mapping[int, str]]
-    | Mapping[str, Sequence[int]]
-    | None = None,
-    keep_initializers_as_inputs: bool = False,
     dynamo: bool = True,
     # Dynamo only options
     external_data: bool = True,
@@ -87,6 +82,12 @@ def export(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = True,
+    # BC options
+    export_params: bool = True,
+    keep_initializers_as_inputs: bool = False,
+    dynamic_axes: Mapping[str, Mapping[int, str]]
+    | Mapping[str, Sequence[int]]
+    | None = None,
     # Deprecated options
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
@@ -99,7 +100,7 @@ def export(
 
     Setting ``dynamo=True`` enables the new ONNX export logic
     which is based on :class:`torch.export.ExportedProgram` and a more modern
-    set of translation logic. This is the recommended way to export models
+    set of translation logic. This is the recommended and default way to export models
     to ONNX.
 
     When ``dynamo=True``:
@@ -109,21 +110,17 @@ def export(
     #. If the model is already an ExportedProgram, it will be used as-is.
     #. Use :func:`torch.export.export` and set ``strict=False``.
     #. Use :func:`torch.export.export` and set ``strict=True``.
-    #. Use ``draft_export`` which removes some soundness guarantees in data-dependent
-       operations to allow export to proceed. You will get a warning if the exporter
-       encounters any unsound data-dependent operation.
-    #. Use :func:`torch.jit.trace` to trace the model then convert to ExportedProgram.
-       This is the most unsound strategy but may be useful for converting TorchScript
-       models to ONNX.
 
     Args:
         model: The model to be exported.
         args: Example positional inputs. Any non-Tensor arguments will be hard-coded into the
             exported model; any Tensor arguments will become inputs of the exported model,
             in the order they occur in the tuple.
-        f: Path to the output ONNX model file. E.g. "model.onnx".
+        f: Path to the output ONNX model file. E.g. "model.onnx". This argument is kept for
+            backward compatibility. It is recommended to leave unspecified (None)
+            and use the returned :class:`torch.onnx.ONNXProgram` to serialize the model
+            to a file instead.
         kwargs: Optional example keyword inputs.
-        export_params: If false, parameters (weights) will not be exported.
         verbose: Whether to enable verbose logging.
         input_names: names to assign to the input nodes of the graph, in order.
         output_names: names to assign to the output nodes of the graph, in order.
@@ -133,7 +130,52 @@ def export(
             of the runtime backend or compiler you want to run the exported model with.
             Leave as default (``None``) to use the recommended version, or refer to
             the ONNX operators documentation for more information.
+        dynamo: Whether to export the model with ``torch.export`` ExportedProgram instead of TorchScript.
+        external_data: Whether to save the model weights as an external data file.
+            This is required for models with large weights that exceed the ONNX file size limit (2GB).
+            When False, the weights are saved in the ONNX file with the model architecture.
+        dynamic_shapes: A dictionary or a tuple of dynamic shapes for the model inputs. Refer to
+            :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
+            Note that dynamic_shapes is designed to be used when the model is exported with dynamo=True, while
+            dynamic_axes is used when dynamo=False.
+        custom_translation_table: A dictionary of custom decompositions for operators in the model.
+            The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
+            and the value should be a function that builds that graph using ONNX Script. This option
+            is only valid when dynamo is True.
+        report: Whether to generate a markdown report for the export process. This option
+            is only valid when dynamo is True.
+        optimize: Whether to optimize the exported model. This option
+            is only valid when dynamo is True. Default is True.
+        verify: Whether to verify the exported model using ONNX Runtime. This option
+            is only valid when dynamo is True.
+        profile: Whether to profile the export process. This option
+            is only valid when dynamo is True.
+        dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
+            This is useful for debugging the exporter. This option is only valid when dynamo is True.
+        artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
+            exported program. This option is only valid when dynamo is True.
+        fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
+            This option is only valid when dynamo is True. When fallback is enabled, It is
+            recommended to set dynamic_axes even when dynamic_shapes is provided.
+        export_params: **When ``f`` is specified**: If false, parameters (weights) will not be exported.
+
+            You can also leave it unspecified and use the returned :class:`torch.onnx.ONNXProgram`
+            to control how initializers are treated when serializing the model.
+        keep_initializers_as_inputs: **When ``f`` is specified**: If True, all the
+            initializers (typically corresponding to model weights) in the
+            exported graph will also be added as inputs to the graph. If False,
+            then initializers are not added as inputs to the graph, and only
+            the user inputs are added as inputs.
+
+            Set this to True if you intend to supply model weights at runtime.
+            Set it to False if the weights are static to allow for better optimizations
+            (e.g. constant folding) by backends/runtimes.
+
+            You can also leave it unspecified and use the returned :class:`torch.onnx.ONNXProgram`
+            to control how initializers are treated when serializing the model.
         dynamic_axes:
+            Prefer specifying ``dynamic_shapes`` when ``dynamo=True`` and when ``fallback``
+            is not enabled.
 
             By default the exported model will have the shapes of all input and output tensors
             set to exactly match those given in ``args``. To specify axes of tensors as
@@ -215,84 +257,12 @@ def export(
                           dim_param: "sum_dynamic_axes_1"  # axis 0
                 ...
 
-        keep_initializers_as_inputs: If True, all the
-            initializers (typically corresponding to model weights) in the
-            exported graph will also be added as inputs to the graph. If False,
-            then initializers are not added as inputs to the graph, and only
-            the user inputs are added as inputs.
-
-            Set this to True if you intend to supply model weights at runtime.
-            Set it to False if the weights are static to allow for better optimizations
-            (e.g. constant folding) by backends/runtimes.
-
-        dynamo: Whether to export the model with ``torch.export`` ExportedProgram instead of TorchScript.
-        external_data: Whether to save the model weights as an external data file.
-            This is required for models with large weights that exceed the ONNX file size limit (2GB).
-            When False, the weights are saved in the ONNX file with the model architecture.
-        dynamic_shapes: A dictionary or a tuple of dynamic shapes for the model inputs. Refer to
-            :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
-            Note that dynamic_shapes is designed to be used when the model is exported with dynamo=True, while
-            dynamic_axes is used when dynamo=False.
-        custom_translation_table: A dictionary of custom decompositions for operators in the model.
-            The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
-            and the value should be a function that builds that graph using ONNX Script. This option
-            is only valid when dynamo is True.
-        report: Whether to generate a markdown report for the export process. This option
-            is only valid when dynamo is True.
-        optimize: Whether to optimize the exported model. This option
-            is only valid when dynamo is True. Default is True.
-        verify: Whether to verify the exported model using ONNX Runtime. This option
-            is only valid when dynamo is True.
-        profile: Whether to profile the export process. This option
-            is only valid when dynamo is True.
-        dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
-            This is useful for debugging the exporter. This option is only valid when dynamo is True.
-        artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
-            exported program. This option is only valid when dynamo is True.
-        fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
-            This option is only valid when dynamo is True. When fallback is enabled, It is
-            recommended to set dynamic_axes even when dynamic_shapes is provided.
-
         training: Deprecated option. Instead, set the training mode of the model before exporting.
         operator_export_type: Deprecated option. Only ONNX is supported.
         do_constant_folding: Deprecated option.
-        custom_opsets: Deprecated.
-            A dictionary:
-
-            * KEY (str): opset domain name
-            * VALUE (int): opset version
-
-            If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
-            the opset version is set to 1. Only custom opset domain name and version should be
-            indicated through this argument.
+        custom_opsets: Deprecated option.
         export_modules_as_functions: Deprecated option.
-
-            Flag to enable
-            exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
-            particular types of modules to export as local functions in ONNX.
-            This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
-            ``opset_version`` < 15 implies IR version < 8, which means no local function support.
-            Module variables will be exported as function attributes. There are two categories of function
-            attributes.
-
-            1. Annotated attributes: class variables that have type annotations via
-            `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_
-            will be exported as attributes.
-            Annotated attributes are not used inside the subgraph of ONNX local function because
-            they are not created by PyTorch JIT tracing, but they may be used by consumers
-            to determine whether or not to replace the function with a particular fused kernel.
-
-            2. Inferred attributes: variables that are used by operators inside the module. Attribute names
-            will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
-            python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
-
-            * ``False`` (default): export ``nn.Module`` forward calls as fine grained nodes.
-            * ``True``: export all ``nn.Module`` forward calls as local function nodes.
-            * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
-                only if the type of the ``nn.Module`` is found in the set.
-        autograd_inlining: Deprecated.
-            Flag used to control whether to inline autograd functions.
-            Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+        autograd_inlining: Deprecated option.
 
     Returns:
         :class:`torch.onnx.ONNXProgram` if dynamo is True, otherwise None.
@@ -305,6 +275,8 @@ def export(
         *autograd_inlining* is now deprecated.
     .. versionchanged:: 2.7
         *optimize* is now True by default.
+    .. versionchanged:: 2.9
+        *dynamo* is now True by default.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
