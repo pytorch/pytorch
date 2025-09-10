@@ -817,15 +817,16 @@ class TestLRScheduler(TestCase):
         # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
         # For more context, see https://github.com/pytorch/pytorch/issues/162359
         old_opt = self.opt
-        lr = torch.as_tensor(2.0)
+        lr = torch.tensor(2.0)
         self.opt = SGD(self.net.parameters(), lr=lr)
         milestone = 4
         epochs = 8
         start, end = 0.1, 0.8
 
-        schedulers = [None] * 2
-        schedulers[0] = LinearLR(self.opt, start, end, total_iters=milestone)
-        schedulers[1] = LinearLR(self.opt, end, start, total_iters=epochs - milestone)
+        schedulers = [
+            LinearLR(self.opt, start, end, total_iters=milestone),
+            LinearLR(self.opt, end, start, total_iters=epochs - milestone),
+        ]
         targets = [[0.2, 0.55, 0.9, 1.25, 1.6, 1.25, 0.9, 0.55]]
 
         scheduler = SequentialLR(self.opt, schedulers, milestones=[milestone])
