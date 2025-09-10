@@ -67,6 +67,20 @@ struct static_cast_with_inter_type {
       src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
+
+    // Handle infinity and NaN for float-to-integer conversions
+    if constexpr (
+        std::is_integral_v<dest_t> && std::is_floating_point_v<src_t>) {
+      if (std::isinf(r)) {
+        // Saturation arithmetic: infinity maps to max/min representable value
+        return r > 0 ? std::numeric_limits<dest_t>::max()
+                     : std::numeric_limits<dest_t>::min();
+      }
+      if (std::isnan(r)) {
+        // NaN maps to 0 (consistent with many numerical libraries)
+        return static_cast<dest_t>(0);
+      }
+    }
     return static_cast<dest_t>(r);
   }
 };
@@ -96,8 +110,26 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(
       src_t src) {
     constexpr bool real = needs_real<uint8_t, src_t>::value;
-    return static_cast<uint8_t>(
-        static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    auto r = maybe_real<real, src_t>::apply(src);
+
+    // Align uint8 casting with generic float->int semantics:
+    // - +inf saturates to max (255)
+    // - -inf saturates to min (0)
+    // - NaN maps to 0
+    if constexpr (std::is_floating_point_v<decltype(r)>) {
+      if (std::isinf(r)) {
+        return r > 0 ? std::numeric_limits<uint8_t>::max()
+                     : std::numeric_limits<uint8_t>::min();
+      }
+      if (std::isnan(r)) {
+        return static_cast<uint8_t>(0);
+      }
+      // Avoid UB for negative floats to unsigned by casting via signed type
+      return static_cast<uint8_t>(static_cast<int64_t>(r));
+    } else {
+      // Preserve existing behavior for non-floating inputs
+      return static_cast<uint8_t>(static_cast<int64_t>(r));
+    }
   }
 };
 
