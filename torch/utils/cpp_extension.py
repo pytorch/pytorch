@@ -577,10 +577,17 @@ def _append_sycl_std_if_no_std_present(cflags) -> None:
 
 def _wrap_sycl_host_flags(cflags):
     host_cxx = get_cxx_compiler()
-    host_cflags = [
-        f'-fsycl-host-compiler={host_cxx}',
-        shlex.quote(f'-fsycl-host-compiler-options={cflags}'),
-    ]
+    if IS_WINDOWS:
+        host_cflags = [
+            "-fsycl",
+            f"-fsycl-host-compiler={host_cxx}",
+            f'-fsycl-host-compiler-options="/std:c++17 {cflags}"',
+        ]
+    else:
+        host_cflags = [
+            f"-fsycl-host-compiler={host_cxx}",
+            shlex.quote(f"-fsycl-host-compiler-options={cflags}"),
+        ]
     return host_cflags
 
 
@@ -1015,6 +1022,7 @@ class BuildExtension(build_ext):
             else:
                 common_cflags.extend(COMMON_MSVC_FLAGS)
             with_cuda = any(map(_is_cuda_file, sources))
+            with_sycl = any(map(_is_sycl_file, sources))
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
@@ -1058,6 +1066,40 @@ class BuildExtension(build_ext):
             else:
                 cuda_dlink_post_cflags = None
 
+            sycl_cflags = None
+            sycl_post_cflags = None
+            sycl_dlink_post_cflags = None
+            if with_sycl:
+                sycl_cflags = common_cflags + pp_opts + _COMMON_SYCL_FLAGS
+                if isinstance(extra_postargs, dict):
+                    sycl_post_cflags = extra_postargs['sycl']
+                else:
+                    sycl_post_cflags = list(extra_postargs)
+                _append_sycl_targets_if_missing(sycl_post_cflags)
+                append_std17_if_no_std_present(sycl_cflags)
+                _append_sycl_std_if_no_std_present(sycl_cflags)
+                host_cflags = common_cflags + pp_opts + post_cflags
+                append_std17_if_no_std_present(host_cflags)
+
+                sycl_cflags = _nt_quote_args(sycl_cflags)
+                host_cflags = _nt_quote_args(host_cflags)
+
+                for i, flag in enumerate(host_cflags):
+                    if "-I" in flag:
+                        flag = flag.replace("\\", "\\\\").replace("-I", "/I")
+                    else:
+                        flag = flag.replace("-D", "/D")
+                    flag = flag.replace('"', '\\"')
+
+                    host_cflags[i] = flag
+
+                host_cflags = ' '.join(host_cflags)
+                sycl_cflags += _wrap_sycl_host_flags(host_cflags)
+                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
+                sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_post_cflags)
+                sycl_post_cflags = _nt_quote_args(sycl_post_cflags)
+
+
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
@@ -1066,13 +1108,13 @@ class BuildExtension(build_ext):
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 cuda_dlink_post_cflags=cuda_dlink_post_cflags,
-                sycl_cflags=None,
-                sycl_post_cflags=None,
-                sycl_dlink_post_cflags=None,
+                sycl_cflags=sycl_cflags,
+                sycl_post_cflags=sycl_post_cflags,
+                sycl_dlink_post_cflags=sycl_dlink_post_cflags,
                 build_directory=output_dir,
                 verbose=True,
                 with_cuda=with_cuda,
-                with_sycl=False)
+                with_sycl=with_sycl)
 
             # Return *all* object filenames, not just the ones we just built.
             return objects
@@ -1492,6 +1534,7 @@ def SyclExtension(name, sources, *args, **kwargs):
     libraries.append("c10_xpu")
     libraries.append("torch")
     libraries.append("torch_cpu")
+    libraries.append("sycl")
     if not kwargs.get('py_limited_api', False):
         # torch_python uses more than the python limited api
         libraries.append("torch_python")
@@ -2273,6 +2316,7 @@ def _write_ninja_file_and_build_library(
     extra_ldflags = _prepare_ldflags(
         extra_ldflags or [],
         with_cuda,
+        with_sycl,
         verbose,
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
@@ -2325,7 +2369,7 @@ def verify_ninja_availability() -> None:
         raise RuntimeError("Ninja is required to load C++ extensions (pip install ninja to get it)")
 
 
-def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
+def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone):
     if IS_WINDOWS:
         python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
@@ -2385,6 +2429,12 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             else:
                 extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
                 extra_ldflags.append('-lamdhip64')
+    if with_sycl:
+        if IS_WINDOWS:
+            extra_ldflags.append('c10_xpu.lib')
+            extra_ldflags.append('torch_xpu.lib')
+            extra_ldflags.append(f'/LIBPATH:{_join_sycl_home("lib")}')
+            extra_ldflags.append('sycl.lib')
     return extra_ldflags
 
 
@@ -2757,8 +2807,17 @@ def _write_ninja_file_to_build_library(path,
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
         icpx_version = _get_icpx_version()
-        if int(icpx_version) < 20250200:
+        if IS_WINDOWS:
+            for i, flag in enumerate(host_cflags):
+                if "-I" in flag:
+                    flag = flag.replace("\\", "\\\\").replace("-I", "/I")
+                else:
+                    flag = flag.replace("-D", "/D")
+                flag = flag.replace('"', '\\"')
+                host_cflags[i] = flag
+        elif int(icpx_version) < 20250200:
             host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
+
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
@@ -2969,11 +3028,23 @@ e.
         cuda_devlink_rule, cuda_devlink = [], []
 
     if sycl_dlink_post_cflags:
-        sycl_devlink_out = os.path.join(os.path.dirname(objects[0]), 'sycl_dlink.o')
-        sycl_devlink_rule = ['rule sycl_devlink']
-        sycl_devlink_rule.append('  command = $sycl $in -o $out $sycl_dlink_post_cflags')
-        sycl_devlink = [f'build {sycl_devlink_out}: sycl_devlink {" ".join(objects)}']
-        objects += [sycl_devlink_out]
+        sycl_devlink_out = os.path.join(os.path.dirname(objects[0]), "sycl_dlink.o")
+        if IS_WINDOWS:
+            sycl_devlink_objects = list(
+                map(lambda obj: obj.replace(":", "$:"), objects)
+            )
+            objects += [sycl_devlink_out]
+            sycl_devlink_out = sycl_devlink_out.replace(":", "$:")
+        else:
+            sycl_devlink_objects = list(objects)
+            objects += [sycl_devlink_out]
+        sycl_devlink_rule = ["rule sycl_devlink"]
+        sycl_devlink_rule.append(
+            "  command = $sycl $in -o $out $sycl_dlink_post_cflags"
+        )
+        sycl_devlink = [
+            f"build {sycl_devlink_out}: sycl_devlink {' '.join(sycl_devlink_objects)}"
+        ]
     else:
         sycl_devlink_rule, sycl_devlink = [], []
 
