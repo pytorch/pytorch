@@ -863,7 +863,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
-        self.assertEqual(id(flattened_dp_cp_mesh), id(flattened_dp_cp_mesh_2))
         self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims

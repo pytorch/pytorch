@@ -389,6 +389,15 @@ AOTITorchError aoti_torch_get_device_index(
   });
 }
 
+AOTITorchError aoti_torch_get_layout(
+    AtenTensorHandle tensor,
+    int32_t* ret_layout) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_layout = static_cast<int32_t>(t->layout());
+  });
+}
+
 AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset) {

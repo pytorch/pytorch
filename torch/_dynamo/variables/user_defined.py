@@ -72,7 +72,6 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -82,7 +81,6 @@ from ..utils import (
     is_frozen_dataclass,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
-    is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
@@ -94,12 +92,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    AttributeMutationExisting,
-    AttributeMutationNew,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -164,6 +157,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+        # Used when we materialize class.__dict__ to a MappingProxyObject. In
+        # this case, we don't want to allow mutation in the class because there
+        # is no way to reflect it in the created MappingProxyVariable.
+        self.ban_mutation = False
 
     def as_python_constant(self):
         return self.value
@@ -422,6 +419,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
@@ -450,6 +449,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 args[1:],
+            )
+        elif name == "__setattr__" and self.ban_mutation:
+            unimplemented_v2(
+                gb_type="Class attribute mutation when the __dict__ was already materialized",
+                context=str(self.value),
+                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                hints=graph_break_hints.SUPPORTABLE,
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -596,6 +602,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
+            from . import TorchCtxManagerClassVariable
             from .functions import (
                 BaseUserFunctionVariable,
                 FunctionDecoratedByContextlibContextManagerVariable,
@@ -627,7 +634,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
-                args[0], BaseUserFunctionVariable
+                args[0], (BaseUserFunctionVariable, TorchCtxManagerClassVariable)
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented_v2(
@@ -638,6 +645,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "Set torch._dynamo.config.enable_trace_contextlib = True",
                         ],
                     )
+
+                # Special treatments for certain context managers created via
+                # contextlib, because
+                # 1. we (pytorch) own their impls
+                # 2. it's tedious to trace through them, so we effectively
+                #    "allow in graph" them without sacrificing soundness.
+                #
+                # We would typically reach here via either
+                # 1. the instance construction in `with ctx_manager(...):`:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L301
+                # 2. calling a function decorated with a context manager:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L122
+                #
+                # So we basically trace through the surface part of the
+                # contextlib code, and then special case the shared remaining
+                # logic (the actual context manager instance construction and
+                # usage later on).
+                if isinstance(args[0], TorchCtxManagerClassVariable):
+                    fn_var = args[0]
+                    args_list = args[1].items
+                    kwargs_dict = args[2].keys_as_python_constant()
+                    return fn_var.call_function(tx, args_list, kwargs_dict)
+
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
@@ -1309,7 +1339,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from .. import trace_rules
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
@@ -1413,6 +1442,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj_from_class is subobj
             and self.cls_source is not None
             and self.source is not None
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
         )
 
         if isinstance(subobj, property):
@@ -1555,14 +1586,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func, self, source_fn=source_fn, source=source
                 )
             elif inspect.isfunction(dynamic_subobj):
-                if is_utils_checkpoint(func):
-                    return build_checkpoint_variable(source=source)
-                elif source is not None:
-                    return trace_rules.lookup(func).create_with_source(
-                        func, source=source
-                    )
-                else:
-                    return trace_rules.lookup(func)(func)
+                return VariableTracker.build(tx, func, source)
 
         if (
             # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
@@ -1723,6 +1747,21 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         # Either of the above could end up mutating external state.
         ctor = self.python_type()
         return ctor(*args, **kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Handle specific pytree classes
+        import torch.utils._pytree as pytree
+
+        if self.value_type is pytree.LeafSpec:
+            # Create a new LeafSpec instance by calling the constructor
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
+            )
+            codegen.extend_output(create_call_function(0, False))
+            return
+
+        # For other frozen dataclasses, fall back to the base class behavior
+        super().reconstruct(codegen)
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
@@ -1901,7 +1940,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 "dict_vt must be constructed by builder.py when source is present"
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
@@ -1940,6 +1979,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
 
     @property
     def items(self):
@@ -2095,7 +2138,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
-            elems = init_args[0].unpack_var_sequence(tx)
+            elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
@@ -2126,9 +2169,6 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = (
-            AttributeMutationExisting() if self.source else AttributeMutationNew()
-        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to

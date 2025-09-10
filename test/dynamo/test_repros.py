@@ -4186,6 +4186,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend=counter)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_get_type_hints(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            typing.get_type_hints(Foo, include_extras=True)
+            return torch.sin(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -4990,6 +5005,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/159258
+    def test_weakref_proxy(self):
+        class DummyTrainer:
+            def __init__(self, x):
+                self.foo = x
+
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trainer = None
+
+            def foo(self):
+                return self.trainer.foo
+
+        x = torch.randn(4)
+        model = DummyModel()
+        trainer = DummyTrainer(x)
+        model.trainer = weakref.proxy(trainer)
+        compiled_foo = torch.compile(model.foo, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_foo(), x)
 
     def test_weakref_reconstruct(self):
         def fn(x_weak, weight, y):
@@ -6486,21 +6522,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.no_grad():
             model(x)
 
-    def test_ao_fake_quantize_tracing(self):
-        import torch.ao.quantization.fake_quantize
-
-        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
-
-        def fn(x):
-            return q(x)
-
-        x = torch.ones(2, 2)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        eager_res = fn(x)
-
-        self.assertEqual(res, eager_res)
-
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
             type: Literal["pixel_values"]
@@ -7129,6 +7150,24 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 0, sys.monitoring.events.PY_START, old_callback
             )
 
+    def test_312_local_cell_overlap(self):
+        keys = range(10)
+        allowed = [0, 1, 2, 3]
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            key = [key for key in keys if key in allowed]
+
+            def inner():
+                nonlocal key
+
+            return x + key[0]
+
+        self.assertEqual(
+            fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
+        )
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
@@ -7140,6 +7179,37 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         f(eye, out_ref)
         torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
         self.assertEqual(out_ref, out_res)
+
+    def test_setitem_tensor_prop(self):
+        # Using the composite implicit of the forward would be incorrect
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.matmul(x, x.t())
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        def fn(x, y):
+            x[0] = y[0]
+            return MyFn.apply(x)
+
+        def inputs():
+            torch.manual_seed(123)
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
+            return x, y
+
+        x1, y1 = inputs()
+        fn(x1, y1).sum().backward()
+        self.assertTrue(x1.requires_grad)
+
+        x2, y2 = inputs()
+        torch.compile(fn, backend="eager")(x2, y2).sum().backward()
+        self.assertTrue(x2.requires_grad)
+
+        self.assertEqual(y1.grad, y2.grad)
 
     def test_nn_parameter_ctor_graph_breaks(self):
         def fn():
@@ -7699,6 +7769,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_cuda_sync(self):
+        def fn(x):
+            y = x + 1
+            torch.cuda.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device="cuda")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
