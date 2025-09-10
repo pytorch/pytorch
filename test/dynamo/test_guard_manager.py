@@ -117,7 +117,7 @@ num_guards_executed=0)
             root,
             functools.partial(equals_match, expected=5),
             {},
-            True,
+            False,
             equals_match_verbose_code_parts(5),
         )
         self.assertTrue(const_guard(5))
