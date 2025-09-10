@@ -7,7 +7,11 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.distributed.device_mesh import init_device_mesh
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -37,8 +41,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # NOTE: required for nvshmem allocation
-        torch.empty(1, device=self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
@@ -66,6 +68,19 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_alloc_without_device_context(self) -> None:
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
     def test_mempool_tensor_factory(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -88,7 +103,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
-        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     @skipIfRocm
@@ -113,7 +128,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
-        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 
@@ -139,6 +154,35 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         hdl1 = symm_mem.rendezvous(x1, group=group_name)
         self.assertEqual(hdl0.offset, 0)
         self.assertEqual(hdl1.offset, x0.untyped_storage().nbytes())
+
+    def test_get_remote_tensor(self) -> None:
+        """
+        Get a remote tensor and use regular aten ops to write to it.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            # src data stores my rank
+            x = torch.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+            y = torch.empty_like(x)
+
+        hdl_y = symm_mem.rendezvous(y, group=group_name)
+        peer = (self.rank + 1) % self.world_size  # Shifting pattern
+        y_remote = hdl_y.get_remote_tensor(peer, y.size(), y.dtype)
+        y_remote.copy_(x)
+        dist.barrier()
+        # Expecting data from -1 rank
+        expected = torch.empty(numel, dtype=dtype, device=self.device).fill_(
+            (self.rank - 1) % self.world_size
+        )
+        self.assertEqual(y, expected)
 
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
@@ -504,17 +548,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
-    @skipIfRocm
-    @parametrize("align", [1, 8, 16])  # `major_align` of output
-    def test_shuffle_combine(self, align: int) -> None:
+    def helper_test_dispatch_combine(self, align: int, group_name) -> None:
         """
         Shuffle the tokens, then combine them, and check if the combined data is
         exactly the same as the original input data
         """
-        torch.manual_seed(42 + self.rank)
-        self._init_device()
-
-        group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
@@ -587,6 +625,36 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             [torch.zeros(1, device=self.device), inp_offsets[:-1]]
         ).to(torch.int64)
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
+
+    @skipIfRocm
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_dispatch_combine(self, align: int) -> None:
+        """
+        Test dispatch-and-combine over World group
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
+
+    @skipIfRocm
+    # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
+    # failure
+    @skip_if_lt_x_gpu(4)
+    def test_dispatch_combine_subgroup(self) -> None:
+        """
+        Test dispatch-and-combine over concurrent subgroups
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        # Test on two concurrent subgroups
+        ngroups = 2
+        subgroup_size = self.world_size // ngroups
+        dm = init_device_mesh(
+            device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
+        )
+        subgroup = dm.get_group("ep")
+        self.helper_test_dispatch_combine(align=8, group_name=subgroup.group_name)
 
 
 if __name__ == "__main__":
