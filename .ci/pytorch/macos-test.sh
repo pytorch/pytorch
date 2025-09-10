@@ -13,12 +13,8 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-python -mpip install -r requirements.txt
-
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
-
-python -mpip install --no-input -r requirements.txt
 
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
@@ -181,9 +177,6 @@ checkout_install_torchbench() {
   popd
 
   pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
-  # https://github.com/pytorch/pytorch/issues/160689 to remove torchao because
-  # its current version 0.12.0 doesn't work with transformers 4.54.0
-  pip uninstall -y torchao
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
@@ -199,7 +192,7 @@ torchbench_setup_macos() {
   git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
   python setup.py clean
-  python setup.py develop
+  python -m pip install -e . -v --no-build-isolation
   popd
 
   pushd torchaudio
@@ -208,7 +201,7 @@ torchbench_setup_macos() {
   git submodule update --init --recursive
   python setup.py clean
   #TODO: Remove me, when figure out how to make TorchAudio find brew installed openmp
-  USE_OPENMP=0 python setup.py develop
+  USE_OPENMP=0 python -m pip install -e . -v --no-build-isolation
   popd
 
   checkout_install_torchbench
@@ -393,10 +386,10 @@ elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
   test_hf_perf
 elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
-elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
-  test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
   test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
+  test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

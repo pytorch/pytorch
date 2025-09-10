@@ -4,7 +4,7 @@ import copy
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch.distributed._distributed_c10d import ProcessGroup
+from torch._C._distributed_c10d import ProcessGroup
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharding_spec._internals import (
     get_chunked_dim_size,
