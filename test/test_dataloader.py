@@ -3479,7 +3479,8 @@ class TestIndividualWorkerQueue(TestCase):
                 current_worker_idx = 0
 
     @unittest.skipIf(
-        IS_WINDOWS or IS_MACOS, "https://github.com/pytorch/pytorch/issues/68643"
+        IS_WINDOWS or IS_MACOS,
+        "Flaky on Windows and MacOS https://github.com/pytorch/pytorch/issues/68643",
     )
     def test_ind_worker_queue(self):
         max_num_workers = None
