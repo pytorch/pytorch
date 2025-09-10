@@ -114,11 +114,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
 
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
@@ -190,11 +192,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
