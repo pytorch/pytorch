@@ -129,6 +129,8 @@ def copy_and_patch_library(
         lib_name = os.path.basename(src_path)
         shutil.copy2(src_path, f"{folder}/tmp/torch/lib/{lib_name}")
         patch_library_rpath(folder, lib_name, use_nvidia_pypi_libs, desired_cuda)
+    else:
+        raise FileNotFoundError(f"file {src_path} does not exist!")
 
 
 def package_cuda_wheel(wheel_path, desired_cuda) -> None:
