@@ -47,7 +47,6 @@ def _get_nvrtc_compatible_flags() -> list[str]:
     """
     from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
 
-    # Flags that are not supported by NVRTC
     nvrtc_unsupported_flags = {
         "--expt-relaxed-constexpr",
     }
@@ -215,7 +214,7 @@ class _CudaKernel:
     def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
-        self._max_shared_mem_configured = False
+        self._max_shared_mem_bytes = 0
 
     def __call__(
         self,
@@ -284,10 +283,10 @@ class _CudaKernel:
             stream = torch.cuda.current_stream()
 
         # Check if kernel requires large shared memory but hasn't been configured
-        if shared_mem >= 48 * 1024 and not self._max_shared_mem_configured:
+        if shared_mem >= 48 * 1024 and shared_mem > self._max_shared_mem_bytes:
             raise RuntimeError(
                 f"Kernel requires {shared_mem} bytes of shared memory (>= 48KB), "
-                "but shared memory configuration has not been set. "
+                f"but only {self._max_shared_mem_bytes} bytes configured. "
                 "Call kernel.set_shared_memory_config(shared_mem) after compilation "
                 "and before launching the kernel."
             )
@@ -322,8 +321,8 @@ class _CudaKernel:
             RuntimeError: If the requested shared memory exceeds device limits
         """
         if shared_mem_bytes < 48 * 1024:
-            # No configuration needed for <= 48KB
-            self._max_shared_mem_configured = True
+            # No configuration needed for <= 48KB, just update the value
+            self._max_shared_mem_bytes = shared_mem_bytes
             return
 
         import torch
@@ -352,7 +351,7 @@ class _CudaKernel:
             )
         )
 
-        self._max_shared_mem_configured = True
+        self._max_shared_mem_bytes = shared_mem_bytes
 
 
 def _cuda_load_module(
