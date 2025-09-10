@@ -10676,9 +10676,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_not_triton
-    # @unittest.skipIf(
-    #     not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
-    # )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch({"force_disable_caches": True})
     def test_mark_unbacked_with_hint_override(self):
         @torch.compile
@@ -10688,6 +10688,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         @torch.compile
         def override(x):
             return x.sum(dim=0)
+
+        @torch.compile(fullgraph=True)
+        def branching(x):
+            if x.shape[0] > 4096:
+                return 1
+            return 2
 
         x_small = torch.randn(4096, 512, device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x_small, 0)
@@ -10700,6 +10706,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertNotEqual(code1, code2)
 
         self.assertEqual(no_override(x_small), override(x_small))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Could not guard on data-dependent expression"
+        ):
+            branching(x_small)
 
     @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
