@@ -417,6 +417,10 @@ def write_text(text: str) -> str:
     return write(text, "txt")[1]
 
 
+# IF YOU CHANGE THE .tmp EXTENSION, PLEASE ALIGN WITH standalone_compile
+TMP_EXTENSION = ".tmp"
+
+
 def write_atomic(
     path_: str,
     content: Union[str, bytes],
@@ -431,7 +435,7 @@ def write_atomic(
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
+    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}{TMP_EXTENSION}"
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
