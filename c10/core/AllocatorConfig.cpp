@@ -1,7 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/env.h>
-#include <c10/util/irange.h>
 
 namespace c10::CachingAllocator {
 
@@ -225,7 +224,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       // check if the key is unrecognized.
       if (device_config_parser_hook_) {
         TORCH_CHECK(
-            keys_.find(key) != keys_.end(),
+            getKeys().find(key) != getKeys().end(),
             "Unrecognized key '",
             key,
             "' in Accelerator allocator config.");

@@ -213,7 +213,15 @@ skip:
       - llava
       - moco
 
-    cuda: []
+    # Skip these additional models when running on aarch64
+    cpu_aarch64:
+      # timeout on aarch64
+      - timm_regnet
+      - timm_nfnet
+
+    cuda:
+      # Temporary until https://github.com/pytorch/pytorch/issues/162282 is fixed
+      - sam_fast
 
   test:
     training:

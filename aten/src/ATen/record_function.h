@@ -666,7 +666,7 @@ void record_function_with_scope_and_debug_handle(
         guard, fn, debug_handle, inputs, ##__VA_ARGS__);       \
   }
 
-// Helper macros to record LITE INTERPETER scope events with debug handles
+// Helper macros to record LITE INTERPRETER scope events with debug handles
 #define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS( \
     fn, debug_handle, inputs)                           \
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \

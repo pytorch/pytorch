@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Utilities for reproducing and debugging issues in PyTorch's Dynamo AOT compilation.
 
@@ -19,6 +17,8 @@ This is primarily used by PyTorch developers and researchers to debug issues in
 the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 """
 
+from __future__ import annotations
+
 import argparse
 import copy
 import functools
@@ -30,11 +30,26 @@ import subprocess
 import sys
 import textwrap
 import uuid
-from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, TYPE_CHECKING, Union
+from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
+
+
+try:
+    from triton.runtime.autotuner import Autotuner, Heuristics
+    from triton.runtime.jit import JITFunction
+except ImportError:
+
+    class Autotuner:  # type: ignore[no-redef]
+        pass
+
+    class JITFunction:  # type: ignore[no-redef]
+        pass
+
+    class Heuristics:  # type: ignore[no-redef]
+        pass
+
 
 import torch
 import torch.fx as fx
@@ -60,7 +75,8 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
-from torch._inductor.output_code import OutputCode
+from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -74,7 +90,10 @@ from .. import config
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
 
@@ -90,9 +109,9 @@ use_buck = is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallable",
+    unconfigured_compiler_fn: _CompileFxCallable,
     compiler_name: str,
-) -> "_CompileFxCallable":
+) -> _CompileFxCallable:
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -104,8 +123,8 @@ def wrap_compiler_debug(
     @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargs"],
+        example_inputs: Sequence[InputType],
+        **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
@@ -145,7 +164,7 @@ def wrap_compiler_debug(
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
         def deferred_for_real_inputs(
-            real_inputs: Sequence["InputType"], **_kwargs: object
+            real_inputs: Sequence[InputType], **_kwargs: object
         ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
@@ -157,7 +176,7 @@ def wrap_compiler_debug(
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
 
-        def inner_debug_fn(real_inputs):
+        def inner_debug_fn(real_inputs: Sequence[InputType]) -> Any:
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -186,7 +205,7 @@ def wrap_compiler_debug(
                     )
                 failed = not same_two_models(
                     gm,
-                    inner_compiled_fn,
+                    inner_compiled_fn,  # type: ignore[arg-type]
                     real_inputs,
                     only_fwd=True,
                     ignore_non_fp=config.repro_ignore_non_fp,
@@ -250,7 +269,7 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def maybe_fbcode_instructions():
+def maybe_fbcode_instructions() -> str:
     if is_fbcode():
         extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
         if len(extra_deps_formatted) > 0:
@@ -283,14 +302,16 @@ python_binary(
 
 
 def generate_compiler_repro_string(
-    gm,
-    args,
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
     *,
-    stable_output=False,
-    save_dir=None,
-    stable_hash=False,
-    has_distributed_ops=False,
-):
+    stable_output: bool = False,
+    save_dir: Optional[str] = None,
+    stable_hash: bool = False,
+    has_distributed_ops: bool = False,
+) -> str:
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
     # Add distributed imports if needed
     distributed_imports = ""
     if has_distributed_ops:
@@ -298,6 +319,16 @@ def generate_compiler_repro_string(
             """
 import torch.distributed as dist
 from torch.testing._internal.distributed.fake_pg import FakeStore
+        """
+        ).strip()
+
+    triton_imports = ""
+
+    if len(kernel_side_table.id_to_kernel) > 0:
+        triton_imports = textwrap.dedent(
+            """
+import triton
+import triton.language as tl
         """
         ).strip()
 
@@ -311,6 +342,7 @@ from torch._dynamo.testing import rand_strided
 from math import inf
 import torch._inductor.inductor_prims
 {distributed_imports}
+{triton_imports}
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -328,6 +360,57 @@ isolate_fails_code_str = None
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
+
+    kernel_side_table_prefix = (
+        "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
+    )
+    # Track which grid entry corresponds to the best config
+    for id in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(id)
+
+        try:
+            if isinstance(kernel, Autotuner):
+                if isinstance(kernel.fn, Heuristics):
+                    model_str += "ERROR: Repro will not work as intended, "
+                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+                    break
+
+                config_strs = []
+                for kernel_config in kernel.configs:
+                    config_strs.append(f"""triton.Config(
+                            {str(kernel_config.kwargs)},
+                            num_warps={kernel_config.num_warps},
+                            num_stages={kernel_config.num_stages},
+                        )""")
+
+                config_str = ",".join(config_strs)
+                model_str += textwrap.dedent(f"""
+                @triton.autotune(
+                    configs=[
+                        {config_str}
+                    ],
+                    key=[]
+                )
+                """).strip()
+
+            model_str += "\n@triton.jit\n"
+            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+            fn_name = (
+                kernel._fn_name
+                if isinstance(kernel, JITFunction)
+                else kernel.fn._fn_name
+            )
+            fn_name = fn_name.split(".")[-1]
+
+            model_str += src_code
+            model_str += "\n"
+            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+        except AttributeError as e:
+            model_str += "ERROR: Repro will not work as intended, "
+            model_str += f"User defined triton kernel exception: {e}\n"
+
+    if len(kernel_side_table.constant_args) > 0:
+        model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
 
@@ -377,19 +460,19 @@ isolate_fails_code_str = None
 
 
 def save_graph_repro(
-    fd,
-    gm,
-    args,
-    compiler_name,
+    fd: IO[Any],
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: str,
     *,
-    stable_output=False,
-    save_dir=None,
-    command="run",
-    accuracy=None,
-    tracing_mode=None,
-    check_str=None,
-    stable_hash=False,
-):
+    stable_output: bool = False,
+    save_dir: Optional[str] = None,
+    command: str = "run",
+    accuracy: Optional[Union[str, bool]] = None,
+    tracing_mode: Optional[str] = None,
+    check_str: Optional[str] = None,
+    stable_hash: bool = False,
+) -> None:
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
         for arg in args
@@ -398,6 +481,9 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
 
     # Check if the graph contains distributed operations
     has_distributed_ops = any(
@@ -456,7 +542,13 @@ def save_graph_repro(
         fd.write("\n    dist.destroy_process_group()\n")
 
 
-def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
+def dump_compiler_graph_state(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: str,
+    *,
+    accuracy: Optional[Union[str, bool]] = None,
+) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -484,7 +576,9 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def dump_to_minify(gm, args, compiler_name: str):
+def dump_to_minify(
+    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: str
+) -> None:
     out = io.StringIO()
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -495,15 +589,15 @@ def dump_to_minify(gm, args, compiler_name: str):
 
 
 def isolate_fails(
-    fx_g,
-    args,
+    fx_g: torch.fx.GraphModule,
+    args: Sequence[Any],
     compiler_name: str,
-    env=None,
-    save_dir=None,
-    accuracy=None,
-    tracing_mode=None,
-    check_str=None,
-):
+    env: Optional[dict[str, Any]] = None,
+    save_dir: Optional[str] = None,
+    accuracy: Optional[Union[bool, str]] = None,
+    tracing_mode: Optional[str] = None,
+    check_str: Optional[str] = None,
+) -> bool:
     if env is None:
         env = {}
     subdir = os.path.join(os.getcwd(), "isolate")
@@ -559,14 +653,16 @@ def isolate_fails(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def inductor_fails(fx_g, args, check_str=None):
+def inductor_fails(
+    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: Optional[str] = None
+) -> bool:
     has_cuda = False
     for arg in args:
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
             has_cuda = True
             break
 
-    def sync():
+    def sync() -> None:
         if has_cuda:
             # Ensures that segfaults are surfaced
             torch.cuda.synchronize()
@@ -596,14 +692,19 @@ def inductor_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(
-    fx_g, args, check_str=None, *, require_fp64=False, ignore_non_fp=False
-):
+    fx_g: torch.fx.GraphModule,
+    args: Sequence[Any],
+    check_str: Optional[str] = None,
+    *,
+    require_fp64: bool = False,
+    ignore_non_fp: bool = False,
+) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(
         fx_g,
-        args,
-        compile_fx_inner,
+        args,  # type: ignore[arg-type]
+        compile_fx_inner,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -617,7 +718,9 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def repro_common(options, mod, load_args):
+def repro_common(
+    options: Any, mod: nn.Module, load_args: Any
+) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
@@ -660,7 +763,7 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
+ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more
@@ -673,7 +776,7 @@ ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
 }
 
 
-def repro_minifier_query(options, mod, load_args):
+def repro_minifier_query(options: Any, mod: nn.Module, load_args: Any) -> None:
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy],
@@ -685,7 +788,7 @@ def repro_minifier_query(options, mod, load_args):
         sys.exit(0)
 
 
-def repro_minify(options, mod, load_args):
+def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
     from functorch.compile import minifier
 
     mod, args = repro_common(options, mod, load_args)
@@ -722,7 +825,7 @@ def repro_minify(options, mod, load_args):
     )
 
 
-def repro_analyze(options, mod, load_args):
+def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
     from torch._inductor.hooks import intermediate_hook
 
@@ -740,7 +843,7 @@ def repro_analyze(options, mod, load_args):
 
     known_names = set()
 
-    def save_hook(name, val):
+    def save_hook(name: str, val: Any) -> None:
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
@@ -757,10 +860,10 @@ def repro_analyze(options, mod, load_args):
         tqdm(desc="Saving inductor intermediates", total=total) as pbar,
     ):
         assert not isinstance(compiled, str)
-        compiled(new_args)
+        compiled(new_args)  # type: ignore[arg-type]
         assert not new_args
 
-    def compare_tuples(tuple1, tuple2):
+    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> Optional[str]:
         diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
         diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
 
@@ -769,7 +872,7 @@ def repro_analyze(options, mod, load_args):
         else:
             return " and ".join(f"{a} != {b}" for a, b in diff_values)
 
-    def check_hook(name, val):
+    def check_hook(name: str, val: Any) -> None:
         meta = writer.compute_tensor_metadata(val)
         meta2 = reader.read_tensor_metadata(os.path.join("inductor", name))
         reason = compare_tuples(meta, meta2)
@@ -783,15 +886,15 @@ def repro_analyze(options, mod, load_args):
             intermediate_hook(check_hook),
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
-            compiled(new_args)
+            compiled(new_args)  # type: ignore[arg-type]
             assert not new_args
 
     class WriterInterp(fx.Interpreter):
-        def __init__(self, mod, subdir) -> None:
+        def __init__(self, mod: torch.nn.Module, subdir: str) -> None:
             super().__init__(mod)
             self.subdir = subdir
 
-        def run_node(self, n):
+        def run_node(self, n: torch.fx.Node) -> Any:
             r = super().run_node(n)
             name = n.name
             if name in known_names:
@@ -802,13 +905,13 @@ def repro_analyze(options, mod, load_args):
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         assert not new_args
 
     class ExactReaderInterp(fx.Interpreter):
-        def run_node(self, n):
+        def run_node(self, n: torch.fx.Node) -> Any:
             r = super().run_node(n)
             name = n.name
             if name in known_names:
@@ -823,7 +926,7 @@ def repro_analyze(options, mod, load_args):
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args
@@ -831,7 +934,7 @@ def repro_analyze(options, mod, load_args):
     # Now that we've saved everything, interp through the eager graph
     # and do comparisons
     class ReaderInterp(fx.Interpreter):
-        def run_node(self, n):
+        def run_node(self, n: torch.fx.Node) -> Any:
             r = super().run_node(n)
             name = n.name
             if name in known_names:
@@ -839,7 +942,7 @@ def repro_analyze(options, mod, load_args):
                 float64 = reader.read_tensor(os.path.join("float64", name))
                 logged = False
 
-                def log_error(msg, *args):
+                def log_error(msg: str, *args: Any) -> None:
                     nonlocal logged
                     logged = True
                     pbar.write(f"DIVERGED at {name}: {msg % args}")
@@ -861,12 +964,14 @@ def repro_analyze(options, mod, load_args):
     assert not args
 
 
-def repro_get_args(options, mod, load_args):
+def repro_get_args(
+    options: Any, mod: nn.Module, load_args: Any
+) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args
+    return mod, args  # type: ignore[return-value]
 
 
-def repro_run(options, mod, load_args):
+def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
 
     mod, args = repro_common(options, mod, load_args)
@@ -881,7 +986,7 @@ def repro_run(options, mod, load_args):
         # seems counterintuitive
         if not same_two_models(
             mod,
-            compiled,
+            compiled,  # type: ignore[arg-type]
             args,
             only_fwd=True,
             ignore_non_fp=config.repro_ignore_non_fp,
@@ -903,17 +1008,17 @@ def repro_run(options, mod, load_args):
 
 # TODO: lazily load the inputs or something, rather than cloning them
 def run_repro(
-    mod,
-    load_args,
+    mod: nn.Module,
+    load_args: Any,
     *,
-    command="run",
+    command: str = "run",
     accuracy: Union[bool, str] = "",
-    save_dir=None,
-    tracing_mode=None,
-    patch_code=None,
-    check_str=None,
-    **kwargs,
-):
+    save_dir: Optional[str] = None,
+    tracing_mode: Optional[str] = None,
+    patch_code: Optional[str] = None,
+    check_str: Optional[str] = None,
+    **kwargs: Any,
+) -> Any:
     for k in kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
@@ -946,7 +1051,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser: argparse.ArgumentParser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

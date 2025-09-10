@@ -58,6 +58,33 @@ def aten_group_norm(
     )
 
 
+@onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
+def aten_rms_norm(
+    input: TFloat,
+    normalized_shape: list[int],
+    weight: Optional[TFloat] = None,
+    eps: Optional[float] = None,
+) -> TFloat:
+    """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
+
+    # Default eps value if not provided
+    if eps is None:
+        eps = torch.finfo(torch.float).eps  # Observed from decomp
+
+    # Calculate axis: the first normalization dimension
+    # For normalized_shape with D dimensions, normalize over last D dimensions
+    # Since ONNX RMSNormalization supports negative axis values, we use -len(normalized_shape)
+    # which correctly maps to the first axis of the normalized dimensions
+    normalized_dims = len(normalized_shape)
+    axis = -normalized_dims
+
+    # Create weight tensor if not provided
+    if weight is None:
+        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+
+    return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
+
+
 @onnx_impl(
     aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
 )

@@ -68,23 +68,6 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   );
 }
 
-bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
-  switch (reduceOp) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case ReduceOp::SUM:
-      return true;
-    case ReduceOp::AVG:
-      return true;
-    case ReduceOp::PREMUL_SUM:
-      return true;
-    case ReduceOp::UNUSED:
-      return true;
-    default:
-      return false;
-  }
-  return false;
-}
-
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
@@ -291,8 +274,12 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
 // - This map has also to be maintained as global variable since the register
 //   hooks are called outside the scope of any PG, thus we need traverse
 //   communicators in all PGs.
-using MemPoolSet = std::
-    unordered_set<c10::cuda::MempoolId_t, c10::hash<c10::cuda::MempoolId_t>>;
+
+// MemPoolSet has ids of mempools used with this communicator, and whether they
+// were registered with window APIs or not
+using MemPoolSet = std::unordered_set<
+    std::tuple<c10::cuda::MempoolId_t, bool>,
+    c10::hash<std::tuple<c10::cuda::MempoolId_t, bool>>>;
 static std::unordered_map<std::shared_ptr<NCCLComm>, MemPoolSet>
     ncclCommMemPoolMap;
 static std::mutex ncclCommMemPoolMapMutex;
@@ -310,10 +297,23 @@ static void cacheAllocatorRegisterHook(
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
   for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors() ||
-          memPools.find(te.mempool_) != memPools.end()) {
+      bool symm = false;
+      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
+      auto it =
+          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
+            return std::get<0>(tup) == te.mempool_;
+          });
+      if (it != memPools.end()) {
+        should_register = true;
+        symm = std::get<1>(*it);
+      }
+      if (should_register) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+        ncclComm->registerSegment(
+            reinterpret_cast<void*>(te.addr_),
+            te.size_,
+            /*errorOnRereg*/ false,
+            /*window*/ symm);
       }
     }
   }
@@ -330,10 +330,19 @@ static void cacheAllocatorDeregisterHook(
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
   for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
     if (te.device_ == ncclComm->getDeviceIndex()) {
-      if (shouldAllCommunicatorsRegisterAllTensors() ||
-          memPools.find(te.mempool_) != memPools.end()) {
+      bool symm = false;
+      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
+      auto it =
+          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
+            return std::get<0>(tup) == te.mempool_;
+          });
+      if (it != memPools.end()) {
+        should_register = true;
+        symm = std::get<1>(*it);
+      }
+      if (should_register) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_), symm);
       }
     }
   }
@@ -519,11 +528,9 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
-        ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
-              ->create(enableTiming)
+        ? CUDAEventCache::get(device.index())->create(enableTiming)
         : nullptr;
-    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
-                        ->create(enableTiming);
+    ncclEndEvent_ = CUDAEventCache::get(device.index())->create(enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -860,61 +867,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   }
 }
 
-ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
-
-// CUDA event is used to record the start/end of one Work.
-// Instead of let the CUDA event gets destroyed, we now reuse it after the Work
-// has been erased from workMetaList_.
-// This is to avoid the potential deadlock caused by CudaEventDestroy.
-std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
-    bool timing) {
-  // Register the deleter as a callback when the WorkNCCL object is destroyed.
-  // Each deleter keeps a ref count to the cache object, so that even when
-  // the thread that creates the cache is gone, the cache object won't be
-  // destroyed until all the events in the cache are destroyed (ref number drops
-  // to zero).
-  auto deleter = [cache = shared_from_this(),
-                  timing](at::cuda::CUDAEvent* event) {
-    std::lock_guard<std::mutex> lock(cache->cacheMutex_);
-    // We put the event back to the cache deque once the WorkNCCL object is
-    // destroyed.
-    cache->eventsArray_[timing ? 1 : 0].push_back(event);
-  };
-  at::cuda::CUDAEvent* event = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto& events = eventsArray_[timing ? 1 : 0];
-    // If we still have events in the cache, we reuse it. Otherwise, we create a
-    // new one.
-    if (!events.empty()) {
-      event = events.front();
-      events.pop_front();
-    } else {
-      event = new at::cuda::CUDAEvent(
-          timing ? cudaEventDefault : cudaEventDisableTiming);
-    }
-  }
-  return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
-}
-
-std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> ProcessGroupNCCL::
-    CUDAEventCache::get(at::DeviceIndex device) {
-  // A per-thread singleton of device-to-CUDAEventCache map.
-  // Map is needed because events cannot be reused across devices.
-  // Per-thread ownership is needed to support multi-threaded case (instead of
-  // multi-process case).
-  static thread_local std::
-      map<at::DeviceIndex, std::shared_ptr<ProcessGroupNCCL::CUDAEventCache>>
-          cacheDeviceMap;
-  // Check if device has already been in the map, if not, add a new entry
-  auto it = cacheDeviceMap.find(device);
-  if (it == cacheDeviceMap.end()) {
-    cacheDeviceMap.emplace(
-        device, std::make_shared<ProcessGroupNCCL::CUDAEventCache>());
-  }
-  return cacheDeviceMap[device];
-}
-
 static std::atomic<size_t> process_group_id = 0;
 
 constexpr const char* MULTI_DEVICE_ERROR_MSG =
@@ -1025,8 +977,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "size: " << size << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix()
+            << "ProcessGroupNCCL initialization options: " << "size: " << size
+            << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -1146,39 +1099,27 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
-void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
+void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
   const auto key = std::to_string(pool->device());
-  auto device = at::Device(at::DeviceType::CUDA, pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
-    // HACK: currently we are using this function for NVLS
-    // reductions, and that's why using OpType::ALLREDUCE.
-    // If we end up using this API for zero-copy P2P, we might
-    // need to refactor and account for different OpType.
-    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+    C10_THROW_ERROR(
+        DistBackendError,
+        "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
-  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
   {
     std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     auto iter = ncclCommMemPoolMap.find(ncclComm);
-    iter->second.insert(pool->id());
+    iter->second.insert(std::make_tuple(pool->id(), symm));
   }
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
-  // TODO:
-  // if(pool->is_symmetric()) {
-  //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
-  //   Allgather to verify mempool.alloc_request_counter matches across GPUs
-  //   add alloc_request_counter per mempool (How many allocations a mempool has
-  //   served during its lifetime) this should guarantee pool is used in a
-  //   symmetric/SPMD manner
-  // }
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1188,31 +1129,35 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
         /*errorOnRereg=*/false, // ignores reregistration error
-        /*window=*/pool->is_symmetric()); // whether to use NCCL symmetric
-                                          // memory
+        /*window*/ symm); // whether to use NCCL symmetric memory
   }
 }
 
 void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
-  auto device = at::Device(at::DeviceType::CUDA, pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer deregistration for all buffers in "
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
-    // HACK: currently we are using this function for NVLS
-    // reductions, and that's why using OpType::ALLREDUCE.
-    // If we end up using this API for zero-copy P2P, we might
-    // need to refactor and account for different OpType.
-    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+    C10_THROW_ERROR(
+        DistBackendError,
+        "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
-  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  bool symm;
   {
     std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     auto iter = ncclCommMemPoolMap.find(ncclComm);
-    iter->second.erase(pool->id());
+    auto mempool_it = std::find_if(
+        iter->second.begin(), iter->second.end(), [&](const auto& tup) {
+          return std::get<0>(tup) == pool->id();
+        });
+    TORCH_CHECK(
+        mempool_it != iter->second.end(),
+        "Trying to unregister not previously registered pool");
+    symm = std::get<1>(*mempool_it);
+    iter->second.erase(mempool_it);
   }
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
@@ -1221,7 +1166,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     ncclComm->deregisterSegment(
-        reinterpret_cast<void*>(segmentInfo.address), pool->is_symmetric());
+        reinterpret_cast<void*>(segmentInfo.address), symm);
   }
 }
 
@@ -1309,6 +1254,58 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 
 void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
+    const c10::intrusive_ptr<Store>& store,
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Backend::Options>& opts) {
+  auto deviceIdx = guessDeviceId();
+  TORCH_CHECK(
+      deviceIdx >= 0,
+      "ProcessGroupNCCL::split: rank ",
+      rank_,
+      " has no device is bound to this rank.");
+  auto device = at::Device(at::DeviceType::CUDA, deviceIdx);
+  auto it = std::find(ranks.begin(), ranks.end(), rank_);
+  int groupRank;
+  if (it == ranks.end()) {
+    // This rank is not in the new group, so no_color split should be called
+    performNocolorSplit(device);
+    return nullptr;
+  } else {
+    groupRank = std::distance(ranks.begin(), it);
+  }
+
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+
+  // TODO: we need to get rid of globalRanksInGroup eventually.
+  std::vector<uint64_t> globalRanksInGroup;
+  for (auto rank : ranks) {
+    globalRanksInGroup.emplace_back(groupRanks()[rank]);
+  }
+  ncclOpts->split_from =
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
+  auto color = genNcclSplitColor(ranks);
+  ncclOpts->split_color = color;
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(
+      store->clone(), groupRank, ranks.size(), ncclOpts);
+  pg->eagerConnectSingleDevice(device);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Backend::Options>& opts,
+    const int& rank,
+    const int& size) {
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(
+      store->clone(), rank, size, ncclOpts);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
 bool ProcessGroupNCCL::waitForFutureOrTimeout(
@@ -2289,6 +2286,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // Work status logging for desync debug
       desyncDebugger_.logWorkStart(work);
 
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
       // multiple times after the start
@@ -2299,10 +2300,6 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastStartedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
-
-      // allow watchdog to do an event query on a side thread
-      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
 
       // Clean up completed work
       if (work.isCompleted()) {
@@ -4389,7 +4386,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
     TORCH_CHECK(
-        complexViewAsRealAllowed(opts.reduceOp),
+        c10d::isComplexViewAsRealAllowed(opts.reduceOp),
         "all_reduce does not support",
         opts.reduceOp,
         "on complex tensors");
@@ -4583,7 +4580,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
     TORCH_CHECK(
-        complexViewAsRealAllowed(opts.reduceOp),
+        c10d::isComplexViewAsRealAllowed(opts.reduceOp),
         "reduce does not support",
         opts.reduceOp,
         "on complex tensors");
@@ -5061,14 +5058,12 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
   // offset wrt the device id if intra-node GPUs are sharded into multiple
   // dimensions.
   int devIdx = globalRank() % localDeviceCount_;
-  LOG(WARNING)
-      << logPrefix()
-      << c10::str(
-             " using GPU ",
-             devIdx,
-             " as device used by this process is currently unknown. ",
-             "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-             "You can specify device_id in init_process_group() to force use of a particular device.");
+  if (devIdx == 0) { // only log on first rank of each node
+    LOG(WARNING) << c10::str(
+        "Guessing device ID based on global rank. ",
+        "This can cause a hang if rank to GPU mapping is heterogeneous. ",
+        "You can specify device_id in init_process_group()");
+  }
   return static_cast<c10::DeviceIndex>(devIdx);
 }
 
@@ -5435,6 +5430,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
 
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto inputTensor = inputTensors.back();
+  check_gpu_single_tensor(inputTensor);
 
   std::vector<at::Tensor> outputs;
 
@@ -5756,7 +5752,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
     // Pool is created
     memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
     // Register so that we call ncclCommRegister on all new allocations
-    registerMemPool(memPool_.get());
+    registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 

@@ -170,10 +170,13 @@ class RemoteCache(Generic[_T]):
             try:
                 result = self._get(key, sample)
                 cache_stats.get(type(self).__name__, result)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
             return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
@@ -186,10 +189,13 @@ class RemoteCache(Generic[_T]):
             try:
                 self._put(key, value, sample)
                 cache_stats.put(type(self).__name__)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]

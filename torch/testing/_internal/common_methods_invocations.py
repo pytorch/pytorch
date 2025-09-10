@@ -1161,8 +1161,8 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
-    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
+    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6 if dtype.is_floating_point else 2)
+    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2 if dtype.is_floating_point else 3)
     tests_list = [
         ((2, 3), (2, 2), (2, 3), False),
         ((3, 3), (3, 3), (3, 3), False),
@@ -2456,7 +2456,7 @@ def error_inputs_cat(op_info, device, **kwargs):
 
     # error inputs for empty tensors
     yield ErrorInput(SampleInput([], kwargs={'dim': 1}),
-                     error_regex='non-empty list of Tensors')
+                     error_regex='non-empty list of Tensors', error_type=ValueError)
 
     # error inputs for different sizes
     yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
@@ -2509,7 +2509,7 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex='zero-dimensional.*cannot be concatenated')
 
     # error inputs for different dtype of out tensors
-    d = make_tensor((2, 3), device=device, dtype=torch.double)
+    d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
                      error_regex='invalid combination of arguments')
@@ -6004,6 +6004,7 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_input((2, 3, 4)), repeats=2)
     yield SampleInput(make_input((2, 3, 4)), repeats=2, dim=1)
     yield SampleInput(make_input((2, 3, 4)), repeats=torch.arange(3, device=device), dim=1)
+    yield SampleInput(make_input((4, 1)), repeats=torch.arange(4, device=device), dim=0, output_size=6)
 
 
 def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
@@ -6525,6 +6526,8 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+    other_dtype = torch.float16 if device.startswith("mps") else torch.float64
+    other_dtype_name = "Half" if device.startswith("mps") else "Double"
 
     if is_ref:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
@@ -6532,16 +6535,16 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
         error_out = "Expected out tensor to have dtype torch.complex128 but got torch.complex64 instead"
     else:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got Float and Int"
-        error_dtype = "Expected object of scalar type Float but got scalar type Double for second argument"
-        error_out = "Expected object of scalar type ComplexDouble but got scalar type ComplexFloat for argument 'out'"
+        error_dtype = f"Expected object of scalar type Float but got scalar type {other_dtype_name} for second argument"
+        error_out = f"Expected object of scalar type Complex{other_dtype_name} but got scalar type ComplexFloat for argument 'out'"
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
                      error_type=RuntimeError, error_regex=error_float)
 
-    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.float64)),
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=other_dtype)),
                      error_type=RuntimeError, error_regex=error_dtype)
 
-    yield ErrorInput(SampleInput(make_arg(M, S, dtype=torch.float64), make_arg(M, S, dtype=torch.float64),
+    yield ErrorInput(SampleInput(make_arg(M, S, dtype=other_dtype), make_arg(M, S, dtype=other_dtype),
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
@@ -8351,6 +8354,36 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
         yield SampleInput(
             _make_tensor((batch_size, num_channels, S, L)),
             _make_tensor((batch_size, M + 3, M, 2)),
+            mode,
+            padding_mode,
+            align_corners,
+        )
+
+def sample_inputs_grid_sampler_3d(op_info, device, dtype, requires_grad, **kwargs):
+    _make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                          low=-1, high=1)
+    # Test both out-of-range and in-range grid values
+    _make_grid = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                         low=-4, high=4)
+
+    modes = (0,)
+    padding_modes = (0, 1, 2)
+    align_cornerss = (False, True)
+    shape_pairs = [
+        # [input_shape, grid_shape]
+        [(1, 1, 2, 2, 2), (1, 1, 1, 1, 3)],
+        [(2, 3, S, L, L), (2, M + 2, M + 1, M, 3)],
+        [(L, L + 1, L + 2, L + 3, L + 4), (L, M + 2, M + 1, M, 3)],
+        [(M, M + 1, M + 2, M + 3, M + 4), (M, L + 3, L + 2, L + 1, 3)],
+        [(L, M + 1, M + 2, M + 3, M + 4), (L, L + 3, L + 2, L + 1, 3)],
+    ]
+
+    params_prod = itertools.product(modes, padding_modes, align_cornerss, shape_pairs)
+
+    for mode, padding_mode, align_corners, (input_shape, grid_shape) in params_prod:
+        yield SampleInput(
+            _make_input(input_shape),
+            _make_grid(grid_shape),
             mode,
             padding_mode,
             align_corners,
@@ -11595,6 +11628,26 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
+    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
+
+    dtype = tensor.dtype
+    if dtype.kind == 'f':
+        tensor = tensor.astype(np.float64).view(np.uint64)
+    else:
+        tensor = tensor.astype(np.uint64)
+
+
+    if dim == ():
+        result = np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
+    else:
+        if isinstance(dim, list):
+            dim = tuple(dim)
+        result = np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
+
+    return result
+
+
 def loss_reference_reduction_wrapper(fn):
     def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
         if size_average is not None or reduce is not None:
@@ -11827,8 +11880,11 @@ op_db: list[OpInfo] = [
                        safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-                    ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-                    else np.add(input, np.multiply(alpha, other)),
+                    ref=lambda input, other, *, alpha=1: (
+                        np.add(input, other)
+                        if alpha == 1
+                        else np.add(input, np.multiply(alpha, other))
+                    ),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                      torch.float16, torch.chalf),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -12306,6 +12362,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               # Higher differences starting with Zen3 or Alder Lake
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=4e-06)}),
+                   'TestDecomp', 'test_quick', device_type='cpu'),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
@@ -20478,8 +20538,11 @@ op_db: list[OpInfo] = [
         'jiterator_binary',
         op=torch.cuda.jiterator._create_jit_fn(
             "template <typename T> T binary(T x, T y, T alpha) { return x + alpha * y; }", alpha=1),
-        ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-            else np.add(input, np.multiply(alpha, other)),
+        ref=lambda input, other, *, alpha=1: (
+            np.add(input, other)
+            if alpha == 1
+            else np.add(input, np.multiply(alpha, other))
+        ),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-3.14),
         supports_out=False,
@@ -21006,6 +21069,22 @@ op_db: list[OpInfo] = [
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
         ),),
+    # TODO: Remove grid_sampler_3d tests once `nn.functional.grid_sample` has
+    # MPS support for all cases.
+    OpInfo(
+        "grid_sampler_3d",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sampler_3d,
+        supports_gradgrad=False,
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            # NOTE: Only run on MPS
+            DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='cuda'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='xpu'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='meta'),
+        ),),
     OpInfo(
         "argwhere",
         ref=np.argwhere,
@@ -21361,6 +21440,26 @@ op_db: list[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
+    ),
+    ReductionOpInfo(
+        'hash_tensor',
+        result_dtype=torch.uint64,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        ref=reference_hash_tensor,
+        skips=(
+            # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # aten::hash_tensor hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+            # Sharding strategy NYI
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+        )
     ),
     OpInfo(
         "nn.functional.ctc_loss",

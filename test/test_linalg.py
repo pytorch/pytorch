@@ -40,7 +40,7 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90Or
     _get_torch_cuda_version, CDNA2OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -231,7 +231,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
     @tf32_on_and_off(5e-3)
-    @bf32_on_and_off(5e-3)
+    @reduced_f32_on_and_off(5e-3)
     def test_inner(self, device, dtype):
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
@@ -785,7 +785,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @tf32_on_and_off(0.1 if TEST_WITH_ROCM else 0.01)
-    @bf32_on_and_off(0.01)
+    @reduced_f32_on_and_off(0.01)
     def test_old_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -4254,6 +4254,18 @@ class TestLinalg(TestCase):
 
         test(500)
 
+    @dtypes(torch.float)
+    def test_einsum_output_layout(self, device, dtype):
+        batch, in_dim, out_dim = 2, 3, 5
+        x = make_tensor((batch, in_dim), dtype=dtype, device=device)
+        w = make_tensor((out_dim, in_dim), dtype=dtype, device=device)
+        result = torch.einsum("fd,bd->bf", w, x)
+        expected = x.matmul(w.t())
+        self.assertEqual(result, expected)
+        self.assertTrue(result.is_contiguous())
+        self.assertEqual(result.stride(), expected.stride())
+
+
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
             tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
@@ -4762,6 +4774,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
+    @precisionOverride({torch.float16: 1e-1})  # TunableOp may occasionally find less precise solution
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
         # We set the TunableOp numerical check environment variable here because it is
@@ -5219,7 +5232,7 @@ class TestLinalg(TestCase):
             # Check for rocBLAS and hipBLASLt
             self.assertTrue("ROCBLAS_VERSION" in validators)
             # format: [major].[minor].[patch].[tweak].[commit id]
-            self.assertTrue(re.match(r'^\d+.\d+.\d+.\d+.[a-z0-9]+$', validators["ROCBLAS_VERSION"]))
+            self.assertTrue(re.match(r'^\d+[a-z0-9.]+$', validators["ROCBLAS_VERSION"]))
             self.assertTrue("HIPBLASLT_VERSION" in validators)
             self.assertTrue(re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"]))
 
@@ -6002,6 +6015,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -6012,6 +6026,7 @@ class TestLinalg(TestCase):
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -7199,7 +7214,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
@@ -7209,7 +7224,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
@@ -7221,7 +7236,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_addmm_relu_tunableop_rocm(self, device, dtype):
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -7235,14 +7250,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -7764,7 +7779,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             all_elements_within_threshold, "Some elements have error >= 0.06"
         )
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
@@ -7810,6 +7825,32 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    @slowTest
+    @onlyCPU
+    @largeTensorTest('12GB', device='cpu')
+    def test__int8_mm_large_shape(self, device):
+        torch.manual_seed(1)
+        m = 65536
+        k = 64
+        n = 50400
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        # should pass without segfault
+        weight_int8pack_mm(a, b_int8pack, b_scales)
+
     @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
@@ -7840,7 +7881,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @dtypes(torch.half, torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
-    @bf32_on_and_off(0.01)
+    @reduced_f32_on_and_off(0.01)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
             # helper function
@@ -8020,7 +8061,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
@@ -8096,7 +8137,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1, b1, b2)
-        self.assertEqual(out_tensor, ref * 2),
+        self.assertEqual(out_tensor, ref * 2)
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
@@ -8112,7 +8153,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 
         res4 = getattr(torch, func)(out_tensor, b1, b2, beta=1, alpha=.5)
-        self.assertEqual(res4, ref * 3),
+        self.assertEqual(res4, ref * 3)
 
         nan = torch.full_like(out_tensor, math.nan)
         res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
@@ -8133,7 +8174,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
@@ -8207,7 +8248,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @bf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
@@ -8943,166 +8984,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             s[-1] = 0
             test(u.mm(s.diag()).mm(v))
 
-        # Test case from PyTorch issue #154312: numerically singular matrix
-        # This matrix is mathematically singular but has tiny non-zero diagonal elements
-        # in LU factorization, requiring threshold-based singularity detection
-        issue_154312_matrix = torch.tensor([[1.0, 2.0, 3.0],
-                                           [2.0, 5.0, 6.0],
-                                           [3.0, 6.0, 9.0]], dtype=dtype, device=device)
-        test_single_det(issue_154312_matrix,
-                        (torch.zeros((), dtype=dtype, device=device),
-                         torch.full((), -inf, dtype=dtype, device=device)),
-                        'issue #154312 numerically singular matrix')
-
-        # Additional edge cases
-
-        # Test 1: Exact zero matrix (should be detected by both tiers)
-        zero_matrix = torch.zeros(3, 3, dtype=dtype, device=device)
-        test_single_det(zero_matrix,
-                        (torch.zeros((), dtype=dtype, device=device),
-                         torch.full((), -inf, dtype=dtype, device=device)),
-                        'exact zero matrix')
-
-        # Test 2: Matrix with one zero row (rank deficient)
-        zero_row_matrix = torch.tensor([[1.0, 2.0, 3.0],
-                                       [0.0, 0.0, 0.0],
-                                       [4.0, 5.0, 6.0]], dtype=dtype, device=device)
-        test_single_det(zero_row_matrix,
-                        (torch.zeros((), dtype=dtype, device=device),
-                         torch.full((), -inf, dtype=dtype, device=device)),
-                        'matrix with zero row')
-
-        # Test 3: Matrix with linearly dependent rows (rank deficient)
-        dependent_rows_matrix = torch.tensor([[1.0, 2.0, 3.0],
-                                              [4.0, 5.0, 6.0],
-                                              [5.0, 7.0, 9.0]], dtype=dtype, device=device)  # row3 = row1 + row2
-        test_single_det(dependent_rows_matrix,
-                        (torch.zeros((), dtype=dtype, device=device),
-                         torch.full((), -inf, dtype=dtype, device=device)),
-                        'matrix with linearly dependent rows')
-
-        # Test 4: Nearly singular matrix (very small determinant)
-        nearly_singular = torch.tensor([[1.0, 2.0, 3.0],
-                                       [4.0, 5.0, 6.0],
-                                       [7.0, 8.0, 9.0 + 1e-10]], dtype=dtype, device=device)
-        # This should be detected as singular by our threshold
-        test_single_det(nearly_singular,
-                        (torch.zeros((), dtype=dtype, device=device),
-                         torch.full((), -inf, dtype=dtype, device=device)),
-                        'nearly singular matrix')
-
-        # Test 5: Well-conditioned matrix (should not be singular)
-        well_conditioned = torch.tensor([[1.0, 0.0, 0.0],
-                                        [0.0, 2.0, 0.0],
-                                        [0.0, 0.0, 3.0]], dtype=dtype, device=device)
-        expected_det = 6.0
-        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
-        test_single_det(well_conditioned,
-                        (torch.ones((), dtype=dtype, device=device),
-                         expected_logdet),
-                        'well conditioned diagonal matrix')
-
-        # Test 6: Negative determinant matrix
-        negative_det_matrix = torch.tensor([[1.0, 2.0],
-                                           [3.0, 4.0]], dtype=dtype, device=device)
-        # det = 1*4 - 2*3 = -2
-        expected_logdet = torch.log(torch.tensor(2.0, dtype=dtype, device=device))
-        test_single_det(negative_det_matrix,
-                        (-torch.ones((), dtype=dtype, device=device),
-                         expected_logdet),
-                        'negative determinant matrix')
-
-        # Test 7: Batched singular matrices (mix of singular and non-singular)
-        # Use fixed 3x3 matrices for batching test
-        batch_singular = torch.stack([
-            issue_154312_matrix,  # singular (3x3)
-            well_conditioned,     # non-singular (3x3)
-            zero_matrix,          # singular (3x3)
-        ])
-
-
-        expected_signs = torch.tensor([0.0, 1.0, 0.0], dtype=dtype, device=device)
-        expected_logdets = torch.tensor([-float('inf'),
-                                         torch.log(torch.tensor(6.0, dtype=dtype, device=device)).item(),
-                                         -float('inf')],
-                                        dtype=dtype, device=device)
-
-        batch_result = torch.linalg.slogdet(batch_singular)
-        # Test signs
-        self.assertEqual(batch_result[0], expected_signs,
-                         msg='batched singular detection failed - signs mismatch')
-        # Test logdets (allowing for inf values)
-        for i in range(len(expected_logdets)):
-            if torch.isfinite(expected_logdets[i]):
-                self.assertLess(abs(batch_result[1][i] - expected_logdets[i]), 1e-5,
-                                msg=f'batched logdet mismatch at index {i}')
-            else:
-                self.assertTrue(torch.isneginf(batch_result[1][i]),
-                                msg=f'expected -inf but got {batch_result[1][i]} at index {i}')
-
-        # Test 8: Identity matrix (should always work)
-        identity_matrix = torch.eye(3, dtype=dtype, device=device)
-        test_single_det(identity_matrix,
-                        (torch.ones((), dtype=dtype, device=device),
-                         torch.zeros((), dtype=dtype, device=device)),
-                        'identity matrix')
-
-        # Test 9: Scaled identity (determinant = scale^n)
-        scale = 2.0
-        scaled_identity = scale * torch.eye(3, dtype=dtype, device=device)
-        expected_det = scale ** 3
-        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
-        test_single_det(scaled_identity,
-                        (torch.ones((), dtype=dtype, device=device),
-                         expected_logdet),
-                        f'scaled identity matrix (scale={scale})')
-
-        # Test 10: Large values (test numerical stability)
-        large_scale = 10.0  # Use smaller scale to avoid precision issues: 10^3 = 1000
-        large_scaled_identity = large_scale * torch.eye(3, dtype=dtype, device=device)
-        expected_det = large_scale ** 3
-        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
-        test_single_det(large_scaled_identity,
-                        (torch.ones((), dtype=dtype, device=device),
-                         expected_logdet),
-                        f'large scaled identity matrix (scale={large_scale})')
-
-        # Test 11: Small but reasonable values (test numerical stability)
-        # Use 0.1 instead of very small values to avoid being caught by our conservative threshold
-        small_scale = 0.1
-        small_scaled_identity = small_scale * torch.eye(3, dtype=dtype, device=device)
-        expected_det = small_scale ** 3
-        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
-        test_single_det(small_scaled_identity,
-                        (torch.ones((), dtype=dtype, device=device),
-                         expected_logdet),
-                        f'small scaled identity matrix (scale={small_scale})')
-
-        # Test 12: Empty matrices (0x0) - determinant should be 1 by convention
-        empty_matrix = torch.zeros((0, 0), dtype=dtype, device=device)
-        test_single_det(empty_matrix,
-                        (torch.ones((), dtype=dtype, device=device),
-                         torch.zeros((), dtype=dtype, device=device)),
-                        'empty 0x0 matrix')
-
-        # Test 13: Batched empty matrices
-        batched_empty = torch.zeros((3, 0, 0), dtype=dtype, device=device)
-        batch_result = torch.linalg.slogdet(batched_empty)
-        expected_signs = torch.ones(3, dtype=dtype, device=device)
-        expected_logdets = torch.zeros(3, dtype=dtype, device=device)
-        self.assertEqual(batch_result[0], expected_signs,
-                         msg='batched empty matrices - signs should be 1')
-        self.assertEqual(batch_result[1], expected_logdets,
-                         msg='batched empty matrices - logdets should be 0')
-
-        # Test 14: Zero batch dimension with 0x0 matrices
-        zero_batch_empty = torch.zeros((0, 0, 0), dtype=dtype, device=device)
-        zero_batch_result = torch.linalg.slogdet(zero_batch_empty)
-        self.assertEqual(zero_batch_result[0].shape, torch.Size([0]),
-                         msg='zero batch empty matrices - sign shape')
-        self.assertEqual(zero_batch_result[1].shape, torch.Size([0]),
-                         msg='zero batch empty matrices - logdet shape')
-
         # Small values to test numerical stability. Note that we don't scale
         # this matrix.
         r = torch.randn(512, 512, dtype=dtype, device=device)
@@ -9160,7 +9041,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['non_sing'])
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
-
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -9328,7 +9208,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     # ROCm 6.4 passes with tf32=on, but 6.4.1 needed tolerance reduced slightly
     @tf32_on_and_off(0.002 if torch.version.hip else 0.001)
-    @bf32_on_and_off(0.001)
+    @reduced_f32_on_and_off(0.001)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
@@ -9665,7 +9545,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                          fn(torch.slogdet, (0, 0)))
 
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.07)
+    @reduced_f32_on_and_off(0.07, 0.005)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)

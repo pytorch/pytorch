@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import sys
 from typing import Callable, Optional, Union
 
 import torch
@@ -32,8 +33,16 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+if sys.version_info < (3, 12):
+    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+else:
+    from typing import TypeAliasType
+
+    ObserverOrFakeQuantize = TypeAliasType(
+        "ObserverOrFakeQuantize", Union[ObserverBase, FakeQuantizeBase]
+    )
+
 for _f in [
     compare_results,
     extract_results_from_loggers,

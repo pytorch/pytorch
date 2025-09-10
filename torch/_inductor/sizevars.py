@@ -59,6 +59,15 @@ def statically_known_true(
 # lifting and in some cases we should be directly passing through to ShapeEnv,
 # but there is some extra inductor logic that needs to be handled here
 class SizeVarAllocator:
+    """
+    A class that manages symbolic size variables and their relationships.
+
+    This class works with the ShapeEnv to handle symbolic shape expressions,
+    simplify them, and provide utilities for guarding, checking, and evaluating
+    symbolic expressions. It also manages precomputed replacements and stride
+    calculations for tensor operations.
+    """
+
     def __init__(self, shape_env=None) -> None:
         super().__init__()
         if shape_env is None:
@@ -467,6 +476,13 @@ class SizeVarAllocator:
             fallback_value=fallback_value,
         )
 
+    def is_size_one_or_false(self, size: Expr) -> bool:
+        """Return True if size equals 1.
+
+        Unbacked symbolic sizes return False without introducing a guard.
+        """
+        return self.guard_or_false(sympy.Eq(size, 1))
+
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         if isinstance(left, Expr):
@@ -527,7 +543,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
+    def symbolic_hint(
+        self, expr: Union[Expr, int], hint_override: Optional[int] = None
+    ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
@@ -541,13 +559,21 @@ class SizeVarAllocator:
                 return int(expr)  # type: ignore[return-value]
             except TypeError:
                 return expr  # inf/nan/I
+
+        if hint_override:
+            return hint_override
+
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+        self,
+        expr: Union[Expr, int],
+        *,
+        fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> int:
-        out = self.symbolic_hint(expr)
+        out = self.symbolic_hint(expr, hint_override=hint_override)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
@@ -581,8 +607,12 @@ class SizeVarAllocator:
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        return tuple(
+            self.size_hint(x, fallback=fallback, hint_override=hint_override)
+            for x in exprs
+        )
 
     def size_hints_or_throw(
         self,

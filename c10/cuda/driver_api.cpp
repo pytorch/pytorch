@@ -17,11 +17,19 @@ DriverAPI create_driver_api() {
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
-#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION(name, version)                     \
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED(name, version)            \
   r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version)); \
-  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name)
-  C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION)
-#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name);
+  C10_LIBCUDA_DRIVER_API_REQUIRED(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED)
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED
+
+// Users running drivers between 12.0 and 12.3 will not have these symbols,
+// they would be resolved into nullptr, but we guard their usage at runtime
+// to ensure safe fallback behavior.
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL(name, version) \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version));
+  C10_LIBCUDA_DRIVER_API_OPTIONAL(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL)
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL
 
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
@@ -29,6 +37,13 @@ DriverAPI create_driver_api() {
   TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
     C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
 #undef LOOKUP_NVML_ENTRY
+  }
+
+  if (handle_1) {
+#define LOOKUP_NVML_ENTRY_OPTIONAL(name) \
+  r.name##_ = ((decltype(&name))dlsym(handle_1, #name));
+    C10_NVML_DRIVER_API_OPTIONAL(LOOKUP_NVML_ENTRY_OPTIONAL)
+#undef LOOKUP_NVML_ENTRY_OPTIONAL
   }
   return r;
 }
@@ -46,11 +61,14 @@ void* get_symbol(const char* name, int version) {
   }
 #endif
 
+  // As of CUDA 13, this API is deprecated.
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
   // This fallback to the old API to try getting the symbol again.
   if (auto st = cudaGetDriverEntryPoint(name, &out, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
     return out;
   }
+#endif
 
   // If the symbol cannot be resolved, report and return nullptr;
   // the caller is responsible for checking the pointer.

@@ -30,6 +30,7 @@ from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import lru_cache, partial
 from pathlib import Path
+from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import (
@@ -52,6 +53,7 @@ from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
     custom_backend_passes,
     init_backend_registration,
 )
@@ -74,12 +76,15 @@ from torch._inductor.cpp_builder import (
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
+    run_asm_build_object,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
     CustomGraphPassType,
+    CustomPartitionerFn,
+    CustomPartitionerFnType,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -141,6 +146,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 
@@ -265,6 +271,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -277,6 +284,7 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
+        cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
 
@@ -285,9 +293,11 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -300,9 +310,9 @@ class PersistentCache(CacheBase):
             timings = benchmark(choices)
             assert all(choice in timings for choice in choices)
             local_cache.setdefault(op, {})
-            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
             for choice, timing in timings.items():
-                local_cache[op][inputs][precision][choice.hash_key()] = timing
+                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
             self.update_local_cache(local_cache)
 
@@ -351,6 +361,36 @@ def get_hash(
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
+
+
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> _TemporaryFileWrapper[Any]:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        os.unlink(self.temp_file.name)
 
 
 def write(
@@ -813,7 +853,7 @@ class FxGraphHashDetails:
 
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
-            torch.backends.cuda.matmul.allow_tf32,
+            torch.backends.cuda.matmul.fp32_precision,
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
@@ -850,6 +890,18 @@ class FxGraphHashDetails:
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
 
+        # Save custom inductor codegen configs
+        self.custom_backend_codegen_configs = {
+            device: custom_config.save_config_portable(ignore_private_configs=False)
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if custom_config is not None
+        }
+
+        # Register the custom partitioner function
+        self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
+            config.custom_partitioner_fn
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -881,6 +933,14 @@ class FxGraphHashDetails:
             return None
         assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
+
+    def _get_custom_partitioner_fn_detail(
+        self, custom_partitioner_fn: CustomPartitionerFnType
+    ) -> Optional[Any]:
+        if not custom_partitioner_fn:
+            return None
+        assert isinstance(custom_partitioner_fn, CustomPartitionerFn)
+        return custom_partitioner_fn.uuid()
 
 
 def compiled_fx_graph_hash(
@@ -1053,7 +1113,7 @@ class GuardedCache(Generic[T]):
         Helper to get the shape env from the tracing context.
         """
         ctx = torch._guards.TracingContext.try_get()
-        if not ctx:
+        if not ctx or not ctx.fake_mode:
             return None
         return ctx.fake_mode.shape_env
 
@@ -1187,6 +1247,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             "inductor_output_code",
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
         return graph, cache_info
 
@@ -1526,8 +1602,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
 @functools.cache
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
+    def get_module_ext_type() -> str:
+        if _IS_WINDOWS:
+            return ".pyd"
+        else:
+            return ".so"
+
     """Returns the path where the AOT Inductor compiled kernels are stored."""
-    if path.endswith(".so"):
+    if path.endswith(get_module_ext_type()):
         return os.path.split(path)
     elif path.endswith(".pt2"):
         return os.path.split(path)
@@ -1631,9 +1713,6 @@ class AotCodeCompiler:
         """
         generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
-        if sys.platform == "win32":
-            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
-
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
@@ -1670,12 +1749,6 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
-        from .utils import aoti_model_name_from_config
-
-        model_class_name = ""
-        if config.aot_inductor.compile_standalone:
-            model_class_name = aoti_model_name_from_config()
-
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1708,6 +1781,8 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
+                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
+                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1722,11 +1797,21 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
+                    key=model_class_name,
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
-        with tempfile.NamedTemporaryFile("w+") as t:
+        with WritableTempFile("w+") as t:
+            """
+            Avoid "Permission denied error" on Windows:
+            with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+                # Not writable on Windows:
+                # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+            Example:
+                with WritableTempFile("w", suffix=".gv") as temp_file:
+                    tree.to_dotfile(temp_file.name)
+            """
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
             t.flush()
             V.debug.output_code(t.name, extension="cpp")
@@ -1781,6 +1866,9 @@ class AotCodeCompiler:
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
+            # Load from aot_inductor, and update the value on demand.
+            use_asm_build: bool = config.aot_inductor.use_consts_asm_build
+
             if platform == "linux":
                 if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
@@ -1797,36 +1885,139 @@ class AotCodeCompiler:
             elif platform == "darwin":
                 section_attr = "__DATA,__data"
                 symbol_prefix = "_"
+            elif platform == "win32":
+                symbol_prefix = ""
+                # ASM build is not supported on Windows, force use CPP build.
+                use_asm_build = False
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
+            # Intel compiler failed to compile this manually constructed assembly file.
+            # Switch XPU to use consts cpp build.
+            if device_type == "xpu":
+                use_asm_build = False
+
             is_large_consts = len(consts) > 1024
-            consts_asm = f"\t.section\t{section_attr}\n"
-            consts_asm += f"\t.balign {ALIGN_BYTES}\n"
-            consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
-            if not is_large_consts:
+            is_zero_size_consts = len(consts) == 0
+
+            def format_consts_to_gnu_asm(
+                consts: bytes,
+                align_bytes: int,
+                symbol_prefix: str,
+                is_large_consts: bool,
+            ) -> tuple[str, str]:
+                consts_asm = f"\t.section\t{section_attr}\n"
+                consts_asm += f"\t.balign {align_bytes}\n"
+                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                if not is_large_consts:
+                    for c in consts:
+                        consts_asm += f"\t.byte {c}\n"
+                    # Add one element even if constants are empty
+                    # Otherwise assembler will not put them in data section
+                    if not consts:
+                        consts_asm += "\t.space 1\n"
+                else:
+                    consts_asm += "\t.quad 0x1234567899abcdef\n"
+                    consts_asm += f"\t.space {len(consts) - 8}\n"
+                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                return consts_asm, "weights.S"
+
+            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
+            def format_consts_to_cpp(
+                consts: bytes, align_bytes: int, symbol_prefix: str
+            ) -> tuple[str, str]:
+                consts_size = len(consts)
+                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+                const_cpp = asan_attr
+                const_cpp += f"alignas({align_bytes}) extern "
+                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                count_bytes = 0
                 for c in consts:
-                    consts_asm += f"\t.byte {c}\n"
-                # Add one element even if constants are empty
-                # Otherwise assembler will not put them in data section
-                if not consts:
-                    consts_asm += "\t.space 1\n"
+                    const_cpp += f"{c}, "
+                    count_bytes = count_bytes + 1
+                    if count_bytes % 16 == 0:
+                        const_cpp += "\t\n"
+                const_cpp += "};\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                return const_cpp, "weights.cpp"
+
+            def get_zero_consts_asm_code(
+                align_bytes: int,
+                symbol_prefix: str,
+            ) -> tuple[str, str]:
+                """
+                This function handles zero-sized constants because the C++ standard prohibits zero-length arrays:
+                https://stackoverflow.com/questions/9722632/what-happens-if-i-define-a-0-size-array-in-c-c
+
+                On Windows (MSVC):
+                    The compiler reports error C2466 for zero-sized arrays:
+                    https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2466
+                    Solution: Use assembly compilation to handle this case.
+
+                Why not use Win32 assembly for all paths?
+                    ml64 only supports alignment up to 16 bytes, which isn't optimal for performance.
+
+                Cross-platform implementation:
+                    Linux: Added '-pedantic' to disable zero-sized arrays in C++ compiler
+                    Windows: MSVC naturally rejects zero-sized arrays by default
+                """
+                if _IS_WINDOWS:
+                    # Windows ml64 is max support align to 16, but it is no effect to zero size data.
+                    asm_code = """
+option casemap:none
+.data
+?_binary_constants_bin_start@@3PAEA:
+align 16
+?_binary_constants_bin_end@@3PAEA:
+align 16
+public ?_binary_constants_bin_start@@3PAEA
+public ?_binary_constants_bin_end@@3PAEA
+end
+"""
+                    asm_ext = "asm"
+                else:
+                    asm_code = f"\t.section\t{section_attr}\n"
+                    asm_code += f"\t.balign {align_bytes}\n"
+                    asm_code += (
+                        f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                    )
+                    asm_code += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                    asm_code += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                    asm_code += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                    asm_ext = "S"
+                return asm_code, asm_ext
+
+            if use_asm_build:
+                consts_code, code_ext = format_consts_to_gnu_asm(
+                    consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+                )
             else:
-                consts_asm += "\t.quad 0x1234567899abcdef\n"
-                consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                if is_zero_size_consts:
+                    consts_code, code_ext = get_zero_consts_asm_code(
+                        ALIGN_BYTES, symbol_prefix
+                    )
+                else:
+                    consts_code, code_ext = format_consts_to_cpp(
+                        consts, ALIGN_BYTES, symbol_prefix
+                    )
+
             _, consts_s = write(
-                consts_asm,
-                "S",
+                consts_code,
+                code_ext,
                 specified_dir=str(specified_sub_dir),
+                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manually constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
-                device_type=device_type if device_type != "xpu" else "cpu",
+                device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_relative_path=use_relative_path,
@@ -1838,14 +2029,21 @@ class AotCodeCompiler:
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            object_builder.build()
+            if use_asm_build is False and is_zero_size_consts:
+                run_asm_build_object(str(consts_s), consts_o, str(consts_s.parent))
+            else:
+                object_builder.build()
 
-            if is_large_consts:
+            if is_large_consts and use_asm_build:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
                     hdr = f.read(1024)
                     # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                    start_idx = (
+                        hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                        if sys.byteorder == "little"
+                        else hdr.find(b"\x12\x34\x56\x78\x99\xab\xcd\xef")
+                    )
                     assert start_idx != -1
                     f.seek(start_idx)
                     pos = 0
@@ -2114,40 +2312,50 @@ class AotCodeCompiler:
 
             cubins_o = []
             asm_files = []
-            ld, objcopy = get_ld_and_objcopy(use_relative_path)
-            for kernel_name, value in CudaKernelParamCache.cache.items():
-                if asm_file := value["asm"]:
-                    asm_files.append(asm_file)
+            if not _IS_WINDOWS:
+                ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
+                for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if kernel_name not in kernels:
+                        # It is possible that CudaKernelParamCache contains more Triton kernels
+                        # than what the current graph uses
+                        continue
 
-                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
-                    current_arch = _nvcc_arch_as_compile_option()
-                    cmd = (
-                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Triton only allows generating PTX version as same as the current arch
-                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                        # Include SASS for the current specific arch
-                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                    )
-                    try:
-                        subprocess.run(
-                            cmd.split(),
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                        )
-                    except subprocess.CalledProcessError as e:
-                        print(
-                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                            file=sys.stderr,
-                        )
-                        raise
+                    if asm_file := value["asm"]:
+                        asm_files.append(asm_file)
 
-                if config.aot_inductor.embed_kernel_binary:
-                    # Embed cubin files into model.so using objcopy
-                    cubins_o.append(
-                        convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
-                    )
+                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    if (
+                        config.aot_inductor.emit_multi_arch_kernel
+                        and device_type == "cuda"
+                    ):
+                        current_arch = _nvcc_arch_as_compile_option()
+                        cmd = (
+                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                            # Triton only allows generating PTX version as same as the current arch
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            # Include SASS for the current specific arch
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
+                        )
+                        try:
+                            subprocess.run(
+                                cmd.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
+
+                    if config.aot_inductor.embed_kernel_binary:
+                        # Embed cubin files into model.so using objcopy
+                        cubins_o.append(
+                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -2227,9 +2435,44 @@ class AotCodeCompiler:
                     os.remove(o_file)
 
                 if use_mmap_weights:
-                    import resource
 
-                    page_size_ = resource.getpagesize()
+                    def get_page_size() -> int:
+                        # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
+                        # as seen in https://docs.python.org/2/library/resource.html
+                        if _IS_WINDOWS:
+                            from ctypes import (  # type: ignore[attr-defined]
+                                byref,
+                                Structure,
+                                windll,
+                            )
+                            from ctypes.wintypes import DWORD, LPVOID, WORD
+
+                            class SYSTEM_INFO(Structure):
+                                _fields_ = [
+                                    ("wProcessorArchitecture", WORD),
+                                    ("wReserved", WORD),
+                                    ("dwPageSize", DWORD),
+                                    ("lpMinimumApplicationAddress", LPVOID),
+                                    ("lpMaximumApplicationAddress", LPVOID),
+                                    ("dwActiveProcessorMask", DWORD),
+                                    ("dwNumberOfProcessors", DWORD),
+                                    ("dwProcessorType", DWORD),
+                                    ("dwAllocationGranularity", DWORD),
+                                    ("wProcessorLevel", WORD),
+                                    ("wProcessorRevision", WORD),
+                                ]
+
+                            si = SYSTEM_INFO()
+                            windll.kernel32.GetSystemInfo(byref(si))
+                            sys_page_size = si.dwPageSize
+                        else:
+                            import resource
+
+                            sys_page_size = resource.getpagesize()
+
+                        return sys_page_size
+
+                    page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
                     with open(output_so, "a+b") as f_so:
@@ -2243,6 +2486,15 @@ class AotCodeCompiler:
                     generated_files.append(output_so)
 
         if config.aot_inductor.package:
+            if config.trace.provenance_tracking_level != 0:
+                kernel_info = torch._inductor.debug.create_kernel_information_json()
+                kernel_info_json = os.path.join(
+                    wrapper_path_operator.parent, "kernel_information.json"
+                )
+                with open(kernel_info_json, "w") as f:
+                    f.write(json.dumps(kernel_info, indent=4))
+                generated_files.append(kernel_info_json)
+
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -2382,7 +2634,7 @@ def _get_cpp_prefix_header(device: str) -> Optional[str]:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
+    base_device = device.split(":", maxsplit=1)[0]
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
@@ -3452,9 +3704,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -3563,7 +3818,10 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
 
 
@@ -3708,6 +3966,7 @@ class CUDACodeCache:
             return None
 
     @classmethod
+    @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.

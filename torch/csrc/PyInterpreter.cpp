@@ -82,6 +82,8 @@ struct ConcretePyInterpreterVTable final
 
   bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
       const override;
+  c10::SymBool sym_is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
+      const override;
   bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
       const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
@@ -476,6 +478,33 @@ bool ConcretePyInterpreterVTable::is_contiguous(
   return PyObject_IsTrue(out.ptr());
 }
 
+c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  out = torchDispatchFromTensorImpl(
+      self,
+      "sym_is_contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_is_contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is_none()) {
+    return self->sym_is_contiguous_default(memory_format);
+  }
+
+  return torch::is_symbool(out) ? out.cast<c10::SymBool>()
+                                : c10::SymBool{py::cast<bool>(out)};
+}
+
 bool ConcretePyInterpreterVTable::is_strides_like(
     const c10::TensorImpl* self,
     at::MemoryFormat memory_format) const {
@@ -586,7 +615,7 @@ static void set_tensor_attr_with_capsule(
     py::capsule& capsule,
     const char* attr_name) {
   std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+      /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto obj = mb_obj.value();
@@ -986,8 +1015,4 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
-}
-
-bool isMainPyInterpreter() {
-  return torch::detail::self_interpreter.is_main_interpreter();
 }
