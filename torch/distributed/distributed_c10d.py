@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+# TODO: added `ignore-errors` to ignore type checking on _world. Clean them up
+# and remove.
+# mypy: ignore-errors
+
 """Distributed Collective Communication (c10d)."""
 
 import collections.abc
@@ -1557,6 +1561,7 @@ def init(
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
+    **kwargs,
 ) -> None:
     """
     Initialize a distributed environment for current job. Once this API is
@@ -1585,8 +1590,8 @@ def init(
             Rank of the current process (a number between 0 and
             ``world_size``-1).  Required if ``store`` is specified.
         store(Store, optional):
-            Key/value store accessible to all workers, used to exchange
-            connection/address information.  Mutually exclusive with environment
+            Key/value store accessible by all processes, used to exchange
+            connection information.  Mutually exclusive with environment
             variable based initialization.
     """
 
@@ -1612,8 +1617,9 @@ def init(
 
     if store is None:
         # Create one from environment variables
+        init_method = kwargs.get("init_method", "env://")
         rendezvous_iterator = rendezvous(
-            "env://",
+            init_method,
             rank,
             world_size,
             # TODO: should we support configurable timeout for rendezvous?
@@ -1728,10 +1734,10 @@ def init_process_group(
     """
     # Initialize distributed environment if user didn't call it
     # (backward compatible purpose)
-    if _world is None:
-        init(world_size, rank, store)
+    if _World.maybe_get() is None:
+        init(world_size, rank, store, init_method=init_method)
 
-    assert _world is not None
+    world = _World.get()
 
     # Get the compile-time accelerator type.
     # None indicates no accelerator support.
@@ -1821,7 +1827,7 @@ def init_process_group(
             store_from = FakeStore()
         else:
             # `dist.init()` must have created a store
-            store_from = _world.store
+            store_from = world.store
 
         # Use a PrefixStore to avoid accidental overrides of keys used by
         # different systems (e.g. RPC) in case the store is multi-tenant.
@@ -1842,11 +1848,11 @@ def init_process_group(
         )
         _update_default_pg(default_pg)
 
-    _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
+    world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
         for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]
     }
-    _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
+    _backend = world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook

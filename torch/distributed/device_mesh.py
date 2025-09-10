@@ -586,7 +586,12 @@ if True:  # just to temporarily avoid reindentation
                 dim_group = None
                 has_split_group = False
                 if (
-                    (bound_device_id := getattr(default_group, "bound_device_id", None))
+                    default_group is not None
+                    and (
+                        bound_device_id := getattr(
+                            default_group, "bound_device_id", None
+                        )
+                    )
                     is not None
                     and torch.cuda.is_available()
                     and (
