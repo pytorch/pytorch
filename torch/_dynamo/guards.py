@@ -31,6 +31,7 @@ import math
 import pickle
 import sys
 import textwrap
+import traceback
 import types
 import warnings
 import weakref
@@ -38,6 +39,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
 from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -224,6 +232,20 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
+    # Refer to index in the frame's localsplus directly.
+    # NOTE: name order for a code object doesn't change.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
+    framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    framelocals_idx = (
+        len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
+    )
+    return framelocals_idx
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -1334,20 +1356,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # Refer to index in the frame's localsplus directly.
-            # NOTE: name order for a code object doesn't change.
-            # NOTE: we need to find the LAST matching index because <= 3.10 contains
-            # duplicate names in the case of cells: a name can be both local and cell
-            # and will take up 2 slots of the frame's localsplus. The correct behavior
-            # is to refer to the cell, which has a higher index.
-            framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                self.f_code
-            )
-            framelocals_idx = (
-                len(framelocals_names_reversed)
-                - framelocals_names_reversed.index(source.local_name)
-                - 1
-            )
+            framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -1545,6 +1554,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
+            assert base_source_name
             assert callable(base_example_value)
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
@@ -2175,7 +2185,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],
+                _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2188,7 +2198,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],
+                _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2796,14 +2806,14 @@ class GuardBuilder(GuardBuilderBase):
                         size,
                         stride,
                         pytype,
-                        dispatch_keys,  # type: ignore[arg-type]
+                        dispatch_keys,
                     ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
                     value,
-                    size,
-                    stride,
+                    size,  # type: ignore[arg-type]
+                    stride,  # type: ignore[arg-type]
                     tensor_name,
                     verbose_code_parts,
                     pytype,
@@ -2910,7 +2920,9 @@ class GuardBuilder(GuardBuilderBase):
             getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
         )
         # See D64140537 for why we are checking for tuple.
-        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
+        if supports_weakref and not isinstance(
+            guarded_object, (enum.Enum, tuple, weakref.ProxyTypes)
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
@@ -3270,6 +3282,7 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
+        strict_error: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3438,9 +3451,17 @@ class CheckFunctionManager:
             from torch._dynamo.output_graph import OutputGraph
 
             assert isinstance(self.output_graph, OutputGraph)
-            self.guards_state = self.serialize_guards(
-                builder, sorted_guards, self.output_graph
-            )
+            try:
+                self.guards_state = self.serialize_guards(
+                    builder, sorted_guards, self.output_graph
+                )
+            except exc.PackageError as e:
+                if torch._dynamo.config.strict_precompile or strict_error:
+                    raise e
+                self.output_graph.bypass_package(
+                    f"Guard evaluation failed: {str(e)}",
+                    traceback=traceback.format_exc().split("\n"),
+                )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -3458,20 +3479,21 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "DICT_VERSION",
+        "NN_MODULE",
+        "ID_MATCH",
+        "FUNCTION_MATCH",
+        "CLOSURE_MATCH",
+        "WEAKREF_ALIVE",
+    )
+
     def serialize_guards(
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
-        UNSUPPORTED_GUARD_TYPES = (
-            "DICT_VERSION",
-            "NN_MODULE",
-            "ID_MATCH",
-            "FUNCTION_MATCH",
-            "CLOSURE_MATCH",
-            "WEAKREF_ALIVE",
-        )
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
@@ -3483,12 +3505,19 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard.name)
                     raise_local_type_error(obj)
-            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+            elif (
+                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
                 )
             elif failed := next(
-                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+                (
+                    i
+                    for i in derived_guard_types
+                    if i in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                ),
+                None,
             ):
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(
