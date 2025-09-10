@@ -7,17 +7,18 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Callable, ClassVar, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
+    AuxOutput,
     BlockMask,
     create_block_mask,
     flex_attention,
@@ -59,7 +60,7 @@ class _ContextParallelOptions:
     # errors. It is likely this is always True but we currently keep this variable
     # for the experimental purpose.
     convert_to_f32: bool = True
-    enable_load_balance = True
+    enable_load_balance: bool = True
     rotate_method: _RotateMethod = _RotateMethod.ALL_GATHER
 
 
@@ -1091,17 +1092,24 @@ def create_cp_block_mask(
 
 
 class _FlexAttentionModule(nn.Module):
+    _flex_attn: ClassVar[Callable] = torch.compile(
+        flex_attention, mode="max-autotune-no-cudagraphs"
+    )
+    _global_cp_enable_dispatcher: ClassVar[bool] = False
+
     def __init__(self) -> None:
         super().__init__()
-        self._attention = torch.compile(
-            flex_attention, fullgraph=True, mode="max-autotune"
-        )
-        self.enable_cp_dispatcher = False
-        self.cp_mesh = None
+        # This is not used currently, but we add it here to show that
+        # this variable allow us to control whether to perform CP upon
+        # each FlexAttention call.
+        self.disable_cp_dispatcher = False
+        self.cp_mesh: Optional[DeviceMesh] = None
         self.seq_dim = 2
 
     @staticmethod
-    def flex_call(fn, mesh, seq_dim, *args, **kwargs) -> torch.Tensor:
+    def _flex_call(
+        fn: Callable, mesh: DeviceMesh, seq_dim: int, *args: Any, **kwargs: Any
+    ) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
         assert mesh is not None
         args_list = list(args)
         for idx, name in enumerate(
@@ -1116,6 +1124,8 @@ class _FlexAttentionModule(nn.Module):
         assert isinstance(value, torch.Tensor)
         assert isinstance(block_mask, (BlockMask, tuple))
 
+        key = key.contiguous()
+        value = value.contiguous()
         global_key = ft_c.all_gather_tensor_autograd(key, seq_dim, mesh)
         global_value = ft_c.all_gather_tensor_autograd(value, seq_dim, mesh)
         args_list[1] = global_key
@@ -1144,19 +1154,27 @@ class _FlexAttentionModule(nn.Module):
 
         return ret
 
-    def forward(self, *args, **kwargs) -> torch.Tensor:
-        if self.enable_cp_dispatcher:
-            return self.flex_call(
-                self._attention, self.cp_mesh, self.seq_dim, *args, **kwargs
+    def forward(
+        self, *args: Any, **kwargs: Any
+    ) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
+        if self._global_cp_enable_dispatcher and not self.disable_cp_dispatcher:
+            return self._flex_call(
+                _FlexAttentionModule._flex_attn,
+                self.cp_mesh,
+                self.seq_dim,
+                *args,
+                **kwargs,
             )
         else:
-            return self._attention(*args, **kwargs)
+            return _FlexAttentionModule._flex_attn(*args, **kwargs)
 
 
-_flex_attention_module = None
+_flex_attention_module: Optional[nn.Module] = None
 
 
-def _flex_attention_wrapper(*args, **kwargs) -> torch.Tensor:
+def _flex_attention_wrapper(
+    *args: Any, **kwargs: Any
+) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
     global _flex_attention_module
     if _flex_attention_module is None:
         _flex_attention_module = _FlexAttentionModule()
@@ -1218,7 +1236,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
             # special handler for flex_attention
             if func == torch._higher_order_ops.flex_attention:
-                return _FlexAttentionModule.flex_call(
+                return _FlexAttentionModule._flex_call(
                     func, self._device_mesh, seq_dim, *args, **kwargs
                 )
 
@@ -1263,12 +1281,12 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         if _flex_attention_module is None:
             _flex_attention_module = _FlexAttentionModule()
 
-        _flex_attention_module.enable_cp_dispatcher = True
+        _flex_attention_module._global_cp_enable_dispatcher = True
         _flex_attention_module.cp_mesh = mesh
         _flex_attention_module.seq_dim = seq_dim
         yield
         _flex_attention_module.cp_mesh = None
-        _flex_attention_module.enable_cp_dispatcher = False
+        _flex_attention_module._global_cp_enable_dispatcher = False
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
