@@ -7035,25 +7035,27 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         from torch.cuda import _compile_kernel
+
         compiled_kernel = _compile_kernel(kernel_source, "test_double_precision")
-        
+
         # Test with high precision value that would lose precision if cast to float32
         high_precision_value = 1.23456789012345
         n = 10
-        
+
         output = torch.zeros(n, device="cuda", dtype=torch.float64)
         compiled_kernel(
             grid=(1, 1, 1),
             block=(256, 1, 1),
             args=[output, high_precision_value, n],
         )
-        
-        # Verify high precision is preserved (would fail with old float32 casting)
-        expected = torch.full((n,), high_precision_value, device="cuda", dtype=torch.float64)
-        torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
 
+        # Verify high precision is preserved (would fail with old float32 casting)
+        expected = torch.full(
+            (n,), high_precision_value, device="cuda", dtype=torch.float64
+        )
+        torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
