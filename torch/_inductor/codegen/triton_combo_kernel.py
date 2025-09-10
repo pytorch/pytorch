@@ -814,6 +814,16 @@ class ComboKernel(Kernel):
         return code.getvalue()
 
     def codegen_kernel_benchmark(self, num_gb: float) -> IndentedBuffer:
+        """
+        Generates Python code for benchmarking this combo kernel.
+        - Creates example inputs (random tensors, constants, sizes).
+        - Runs the kernel on the current GPU/stream.
+        - Prints runtime (ms) and throughput (GB/s) using `num_gb`.
+        Args:
+            num_gb (float): The number of gigabytes to use for throughput calculation.
+        Returns:
+            IndentedBuffer: A buffer containing the generated Python benchmark code.
+        """
         result = IndentedBuffer()
         _argdefs, call_args, signature, _ = self.args.python_argdefs()
         result.writelines(["", "", "def get_args():"])
