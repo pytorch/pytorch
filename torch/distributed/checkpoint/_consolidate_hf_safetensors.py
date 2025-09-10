@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import torch
+from torch import distributed as dist
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
@@ -130,8 +131,8 @@ def _parse_input_metadata(
         tensor_size = tensor_info[0]
         dtype_str = tensor_info[1]
         for output_data in output_files_data.values():
-            # Add this tensor to the output file if it's already assigned there or if we're using a single output file
-            if fqn in output_data.fqn_data or len(output_files_data) == 1:
+            # Add this tensor to the output file if it's already assigned there
+            if fqn in output_data.fqn_data:
                 output_data.fqn_data[fqn] = _FqnData(
                     shape_in_file=tensor_size,
                     dtype_size=torch.finfo(_getdtype(dtype_str)).bits
@@ -239,47 +240,59 @@ def _process_output_file(
         output_data: Metadata for the output file
         input_files_data: Dictionary mapping input file paths to their metadata
     """
-    # Process each input safetensors file
-    for safetensors_file in input_files_data.keys():
-        file_metadata = input_files_data[safetensors_file].metadata
-        input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-        for fqn, metadata in file_metadata.items():
-            if fqn == DEFAULT_EXTRA_METADATA_KEY:
-                continue
+    sorted_tensors = sorted(
+        output_data.fqn_data.items(), key=lambda x: x[1].offset_in_file
+    )
 
-            # Skip if this tensor doesn't belong in this output file
-            if fqn not in output_data.fqn_data:
-                continue
-
-            data_offsets = metadata[DATA_OFFSETS_KEY]
-
-            # Use memory mapping to read tensor data efficiently
-            data_to_write = _read_tensor_data_mmap(
-                safetensors_file,
-                data_offsets[0],
-                data_offsets[1],
-                input_metadata_size,
+    with open(output_file, "r+b") as output_stream:
+        output_stream.seek(0, os.SEEK_END)
+        # Process each tensor in sequential output order
+        for tensor_fqn, tensor_fqn_data in sorted_tensors:
+            full_tensor_mv = memoryview(
+                bytearray(
+                    math.prod(tensor_fqn_data.shape_in_file)
+                    * tensor_fqn_data.dtype_size
+                )
             )
 
-            # Get the offsets of this tensor shard within the full tensor
-            custom_metadata = _get_dcp_custom_metadata(file_metadata)
-            offsets_of_tensor_being_read = custom_metadata[fqn][SAVED_OFFSETS_KEY]  # type: ignore[index]
+            # Process each input safetensors file
+            for safetensors_file in input_files_data.keys():
+                file_metadata = input_files_data[safetensors_file].metadata
+                input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-            # Get metadata for this tensor in the output file
-            fqn_data = output_data.fqn_data[fqn]
+                if tensor_fqn not in file_metadata.keys():
+                    continue
 
-            # Write this tensor shard to the appropriate position in the output file
-            _write_sub_tensor_to_file_optimized(
-                data_to_write,
-                fqn_data.dtype_size,  # Size of each element in bytes
-                fqn_data.shape_in_file,  # Full tensor shape
-                offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
-                metadata[SHAPE_KEY],  # Shape of this shard
-                output_file,
-                # Calculate the exact byte position where this tensor data should start
-                output_data.metadata_size + fqn_data.offset_in_file,
-            )
+                metadata = file_metadata[tensor_fqn]
+
+                data_offsets = metadata[DATA_OFFSETS_KEY]
+
+                # Use memory mapping to read tensor data efficiently
+                data_to_write = _read_tensor_data_mmap(
+                    safetensors_file,
+                    data_offsets[0],
+                    data_offsets[1],
+                    input_metadata_size,
+                )
+
+                # Get the offsets of this tensor shard within the full tensor
+                fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
+                    tensor_fqn
+                ]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]  # type: ignore[index]
+
+                # Write this tensor shard to the appropriate position in the output file
+                _write_sub_tensor_to_file_optimized(
+                    full_tensor_mv,
+                    data_to_write,
+                    tensor_fqn_data.dtype_size,  # Size of each element in bytes
+                    tensor_fqn_data.shape_in_file,  # Full tensor shape
+                    offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
+                    metadata[SHAPE_KEY],  # Shape of this shard
+                )
+
+            output_stream.write(full_tensor_mv)
 
 
 def _write_data(
@@ -330,13 +343,12 @@ def _write_data(
 
 
 def _write_sub_tensor_to_file_optimized(
+    full_tensor_mv: memoryview,
     sub_tensor_bytes: bytes,
     element_size: int,
     tensor_shape: list[int],
     sub_tensor_offsets: list[int],
     sub_tensor_shape: list[int],
-    output_file_path: str,
-    output_start_byte: int,
 ) -> None:
     """
     Optimized version that writes the maximum number of contiguous bytes possible.
@@ -349,13 +361,12 @@ def _write_sub_tensor_to_file_optimized(
     - Optimized chunks for other patterns
 
     Args:
+        full_tensor_mv: Buffer to write the full tensor to
         sub_tensor_bytes: Raw tensor data as bytes
         element_size: Size of each element in bytes
         tensor_shape: Shape of the full tensor
         sub_tensor_offsets: Starting offsets of the sub-tensor within the full tensor
         sub_tensor_shape: Shape of the sub-tensor
-        output_file_path: Path to the output file
-        output_start_byte: Starting byte position of the tensor in the file
     """
     # Handle empty tensors
     if not tensor_shape or not sub_tensor_shape:
@@ -372,47 +383,44 @@ def _write_sub_tensor_to_file_optimized(
 
     total_elements = math.prod(sub_tensor_shape)
 
-    with open(output_file_path, "r+b") as out_f:
-        elements_written = 0
+    elements_written = 0
+    while elements_written < total_elements:
+        # Convert linear index to multi-dimensional indices
+        temp_idx = elements_written
+        indices = []
+        for dim_size in reversed(sub_tensor_shape):
+            indices.append(temp_idx % dim_size)
+            temp_idx //= dim_size
+        indices.reverse()
 
-        while elements_written < total_elements:
-            # Convert linear index to multi-dimensional indices
-            temp_idx = elements_written
-            indices = []
-            for dim_size in reversed(sub_tensor_shape):
-                indices.append(temp_idx % dim_size)
-                temp_idx //= dim_size
-            indices.reverse()
+        # Calculate maximum contiguous elements we can write from this position
+        max_contiguous = _calculate_max_contiguous_elements(
+            indices, sub_tensor_shape, tensor_shape
+        )
 
-            # Calculate maximum contiguous elements we can write from this position
-            max_contiguous = _calculate_max_contiguous_elements(
-                indices, sub_tensor_shape, tensor_shape
-            )
+        # Calculate source position in bytes
+        src_pos = sum(idx * stride for idx, stride in zip(indices, sub_tensor_strides))
+        src_byte_offset = src_pos * element_size
 
-            # Calculate source position in bytes
-            src_pos = sum(
-                idx * stride for idx, stride in zip(indices, sub_tensor_strides)
-            )
-            src_byte_offset = src_pos * element_size
+        # Calculate destination position in bytes
+        dest_indices = [
+            idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
+        ]
+        dest_pos = sum(
+            idx * stride for idx, stride in zip(dest_indices, tensor_strides)
+        )
+        dest_byte_offset = dest_pos * element_size
 
-            # Calculate destination position in bytes
-            dest_indices = [
-                idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
-            ]
-            dest_pos = sum(
-                idx * stride for idx, stride in zip(dest_indices, tensor_strides)
-            )
-            dest_byte_offset = output_start_byte + dest_pos * element_size
+        # Write the contiguous chunk
+        bytes_to_write = max_contiguous * element_size
+        chunk_data = sub_tensor_bytes[
+            src_byte_offset : src_byte_offset + bytes_to_write
+        ]
+        full_tensor_mv[dest_byte_offset : dest_byte_offset + bytes_to_write] = (
+            chunk_data
+        )
 
-            # Write the contiguous chunk
-            bytes_to_write = max_contiguous * element_size
-            out_f.seek(dest_byte_offset)
-            chunk_data = sub_tensor_bytes[
-                src_byte_offset : src_byte_offset + bytes_to_write
-            ]
-            out_f.write(chunk_data)
-
-            elements_written += max_contiguous
+        elements_written += max_contiguous
 
 
 def _calculate_max_contiguous_elements(
@@ -522,10 +530,48 @@ def _write_overall_metadata_file(
         json.dump(metadata_to_write, metadata_file, indent=2)
 
 
+def _consolidate_safetensors_files(
+    input_dir: str,
+    output_dir: str,
+    fqn_to_file_mapping: dict[str, str],
+    num_threads: int,
+) -> dict[str, _OutputFileData]:
+    output_files_data: dict[str, _OutputFileData] = {}
+    # Create multiple output files based on the provided mapping
+    for fqn, filename in fqn_to_file_mapping.items():
+        output_path = os.path.join(output_dir, filename)
+
+        if output_path not in output_files_data:
+            output_files_data[output_path] = _OutputFileData(fqn_data={fqn: _FqnData()})
+        else:
+            output_files_data[output_path].fqn_data[fqn] = _FqnData()
+
+    # Find all safetensors files in the input directory
+    safetensors_files = glob.glob(os.path.join(input_dir, f"*{SUFFIX}"))
+
+    # Read metadata from all input files
+    input_files_data: dict[str, _InputFileData] = {}
+    for safetensor_file in safetensors_files:
+        with open(safetensor_file, "rb") as f:
+            metadata, size = _get_safetensors_file_metadata(f)
+            input_files_data[safetensor_file] = _InputFileData(
+                metadata_size=size, metadata=metadata
+            )
+    # Step 1: Parse metadata to determine tensor shapes and types
+    _parse_input_metadata(input_files_data, output_files_data)
+
+    # Step 2: Write metadata headers to output files
+    _write_metadata(output_files_data)
+    # Step 3: Write actual tensor data from input files to output files
+    _write_data(input_files_data, output_files_data, num_threads)
+
+    return output_files_data
+
+
 def consolidate_safetensors_files(
     input_dir: str,
     output_dir: str,
-    fqn_to_index_mapping: Optional[dict[str, int]] = None,
+    fqn_to_index_mapping: dict[str, int],
     num_threads: int = 1,
 ) -> None:
     """
@@ -554,49 +600,117 @@ def consolidate_safetensors_files(
         start_time,
     )
 
-    # Initialize the output file structure
-    output_files_data: dict[str, _OutputFileData] = {}
-    if fqn_to_index_mapping is not None:
-        # Create multiple output files based on the provided mapping
-        for fqn, index in fqn_to_index_mapping.items():
-            # Generate names like "model-00001-of-00005.safetensors"
-            file_name = _gen_file_name(index, max(fqn_to_index_mapping.values()))
-            output_path = os.path.join(output_dir, file_name)
+    max_index = max(fqn_to_index_mapping.values())
+    fqn_to_file_mapping = {
+        fqn: _gen_file_name(idx, max_index) for fqn, idx in fqn_to_index_mapping.items()
+    }
 
-            if output_path not in output_files_data:
-                output_files_data[output_path] = _OutputFileData(
-                    fqn_data={fqn: _FqnData()}
-                )
-            else:
-                output_files_data[output_path].fqn_data[fqn] = _FqnData()
-    else:
-        # If no mapping is provided, create a single output file
-        file_name = _gen_file_name(1, 1)
-        output_path = os.path.join(output_dir, file_name)
-        output_files_data[output_path] = _OutputFileData()
-
-    # Find all safetensors files in the input directory
-    safetensors_files = glob.glob(os.path.join(input_dir, f"*{SUFFIX}"))
-
-    # Read metadata from all input files
-    input_files_data: dict[str, _InputFileData] = {}
-    for safetensor_file in safetensors_files:
-        with open(safetensor_file, "rb") as f:
-            metadata, size = _get_safetensors_file_metadata(f)
-            input_files_data[safetensor_file] = _InputFileData(
-                metadata_size=size, metadata=metadata
-            )
-
-    # Step 1: Parse metadata to determine tensor shapes and types
-    _parse_input_metadata(input_files_data, output_files_data)
-
-    # Step 2: Write metadata headers to output files
-    _write_metadata(output_files_data)
-
-    # Step 3: Write actual tensor data from input files to output files
-    _write_data(input_files_data, output_files_data, num_threads)
+    output_files_data = _consolidate_safetensors_files(
+        input_dir, output_dir, fqn_to_file_mapping, num_threads
+    )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(output_dir, output_files_data)
 
     logger.info("Done consolidating. Took %.2f secs.", time.time() - start_time)
+
+
+def consolidate_safetensors_files_on_every_rank(
+    input_dir: str,
+    output_dir: str,
+    fqn_to_index_mapping: dict[str, int],
+    num_threads: int = 1,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> None:
+    """
+    Consolidate sharded safetensors files across multiple ranks, with each rank handling a subset of output files.
+
+    This function distributes the consolidation work by assigning output files to different ranks.
+    All tensors with the same index in fqn_to_index_mapping are processed by the same rank,
+    as they belong to the same output file.
+
+    If process_group is provided, rank and world_size will be derived from it. Otherwise,
+    they will be automatically detected from the distributed environment if available.
+
+    Args:
+        input_dir: Directory containing sharded safetensors files
+        output_dir: Directory where consolidated files will be written
+        fqn_to_index_mapping: Mapping of tensor names to output file indices
+        num_threads: Number of threads to use for parallel processing on each rank
+        process_group: PyTorch distributed process group (default: None, will use default group)
+    """
+
+    start_time = time.time()
+    # Derive rank and world_size from process_group or default distributed environment
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank(group=process_group)
+        world_size = dist.get_world_size(group=process_group)
+    else:
+        # Default to single process mode if distributed is not initialized
+        rank = 0
+        world_size = 1
+        logger.warning(
+            "Distributed environment not initialized. Running in single process mode."
+        )
+    logger.info(
+        "Rank %d/%d: Consolidating safetensors files from %s to %s",
+        rank,
+        world_size,
+        input_dir,
+        output_dir,
+    )
+
+    # Find all unique indices in the mapping
+    unique_indices = set(fqn_to_index_mapping.values())
+
+    # Distribute indices across ranks
+    indices_for_this_rank = []
+    for idx in unique_indices:
+        # Simple distribution: index % world_size == rank
+        if idx % world_size == rank:
+            indices_for_this_rank.append(idx)
+
+    logger.info(
+        "Rank %d: Assigned %d output files out of %d total files",
+        rank,
+        len(indices_for_this_rank),
+        len(unique_indices),
+    )
+
+    # Filter the fqn_to_index_mapping to only include tensors for this rank
+    filtered_mapping = {
+        fqn: idx
+        for fqn, idx in fqn_to_index_mapping.items()
+        if idx in indices_for_this_rank
+    }
+
+    if filtered_mapping:
+        # Convert index mapping to filename mapping
+        max_index = max(unique_indices)
+        filtered_filename_mapping = {}
+        for fqn, idx in filtered_mapping.items():
+            filename = _gen_file_name(idx, max_index)
+            filtered_filename_mapping[fqn] = filename
+
+        # Call the existing consolidation function with the filtered mapping
+        _consolidate_safetensors_files(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            fqn_to_file_mapping=filtered_filename_mapping,
+            num_threads=num_threads,
+        )
+
+    logger.info(
+        "Rank %d: Done consolidating. Processed %d unique indices in %.2f secs.",
+        rank,
+        len(indices_for_this_rank),
+        time.time() - start_time,
+    )
+
+    # Wait for all ranks to complete
+    if dist.is_available() and dist.is_initialized():
+        logger.info("Rank %d: Waiting for all ranks to complete...", rank)
+        dist.barrier()
+        logger.info("Rank %d: All ranks have completed.", rank)
+        if rank == 0:
+            logger.info("Total time taken: %.2f secs.", time.time() - start_time)

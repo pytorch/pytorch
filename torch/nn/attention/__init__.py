@@ -39,6 +39,7 @@ r"""An enum-like class that contains the different backends for scaled dot produ
         - FLASH_ATTENTION: The flash attention backend for scaled dot product attention.
         - EFFICIENT_ATTENTION: The efficient attention backend for scaled dot product attention.
         - CUDNN_ATTENTION: The cuDNN backend for scaled dot product attention.
+        - OVERRIDEABLE: The overridable backend for extension.
 
     See :func:`torch.nn.attention.sdpa_kernel` for more details.
 
