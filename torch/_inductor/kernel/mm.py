@@ -78,7 +78,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -154,7 +154,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -228,7 +228,7 @@ persistent_tma_mm_template = TritonTemplate(
         # early exit due to zero-size input(s)
         return
 
-    start_pid = tl.program_id(0)
+    start_pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
@@ -420,7 +420,7 @@ device_tma = r"""
         stride_a_scale_m = 0
         stride_b_scale_n = 0
 
-    start_pid = tl.program_id(axis=0)
+    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
@@ -919,11 +919,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        # NOTE: due to slight differences between inp and inp_expanded, we pass
-        # the unexpanded inp here, and the heuristics that need an expanded inp
-        # can use AddMMBiasExpansionConfigMixin to achieve that
-        [inp, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
+        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
     choices: list[ChoiceCaller] = []
 
@@ -965,7 +961,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
-            [mat1, mat2, inp_expanded],
+            # reorder here because CUTLASS expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
             alpha=alpha,
             beta=beta,
         )
@@ -974,7 +972,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
-            [mat1, mat2, inp_expanded],
+            # reorder here because CK expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
@@ -984,13 +984,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CppGemmTemplate.add_choices(
             choices,
             layout,
-            [inp_expanded, mat1, mat2],
+            kernel_inputs.nodes(),
             alpha=alpha,
             beta=beta,
             has_bias=True,
         )
 
-    return autotune_select_algorithm(name, choices, [inp_expanded, mat1, mat2], layout)
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
