@@ -8,14 +8,11 @@ from dataclasses import dataclass
 from itertools import product
 from typing import TypeAlias
 
-from torch.distributed._pycute import (
-    # coalesce,
-    # complement,
-    # composition,
+from torch.distributed._pycute import (  # complement,; composition,
+    coalesce,
     flatten,
     is_tuple,
     Layout,
-    IntTuple,
 )
 
 
@@ -78,7 +75,7 @@ class _Layout(Layout):
             return _Layout((size,), (stride,))
         else:
             raise ValueError("size and stride must be either int or tuple")
-    
+
     @staticmethod
     def ceil_div(n: int, m: int) -> int:
         return (n + m - 1) // m
@@ -100,6 +97,26 @@ class _Layout(Layout):
         - outer dimension: stride=4, mismatch (≠ 2)
         → cannot merge; result stays (3,2):(4,1)
         """
+        # Option 1: leverage pycute's coalesce
+        print(self.shape)
+        layout = coalesce(
+            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride)))
+        )
+        return _Layout(
+            tuple(
+                reversed(
+                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
+                )
+            ),
+            tuple(
+                reversed(
+                    (layout.stride,)
+                    if isinstance(layout.stride, int)
+                    else layout.stride
+                )
+            ),
+        )  # type: ignore[arg-type]
+        # Option 2: have our own implementation
         sizes: list[int] = []
         strides: list[int] = []
         for size, stride in self.sizes_and_strides:
@@ -140,7 +157,7 @@ class _Layout(Layout):
         # When layout is injective (aka one-to-one), composition is left-distributive with concatenation.
         # We return a flattened list of list of self compose with each sublayout.
         if len(layout.sizes) > 1:
-            layouts = (self.composition(layout_i) for layout_i in layout) # type: ignore[attr-defined]
+            layouts = (self.composition(layout_i) for layout_i in layout)  # type: ignore[attr-defined]
             zip_res_sizes, zip_res_strides = zip(
                 *((a.sizes, a.strides) for a in layouts)
             )
