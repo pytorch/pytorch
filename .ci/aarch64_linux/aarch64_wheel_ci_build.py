@@ -140,7 +140,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
     # Delete original wheel since it will be repackaged
     os.system(f"rm {wheel_path}")
-    
+
     # Check if we should use PyPI NVIDIA libraries or bundle system libraries
     use_nvidia_pypi_libs = os.getenv("USE_NVIDIA_PYPI_LIBS", "0") == "1"
 
