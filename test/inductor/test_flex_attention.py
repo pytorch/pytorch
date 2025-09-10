@@ -5343,7 +5343,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @skip_on_cpu
     def test_flex_attention_poison_mod_bwd(self, device):
-        """Div by score should cause our edge case handiling to NaN"""
+        """log score should cause our edge case handiling for NaN in grad score"""
         B = 1
         H = 1
         S = 257
