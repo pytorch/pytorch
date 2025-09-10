@@ -246,14 +246,16 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_init_backend(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+        mesh = DeviceMesh(
+            self.device_type, torch.arange(10), _init_backend=False, _rank=5
+        )
 
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
         # coordinates should always been populated when init_backend is False, as whenever
         # we call init_backend we should make sure the default pg already created
-        mesh.get_coordinate()
+        self.assertEqual(mesh.get_coordinate(), [5])
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
