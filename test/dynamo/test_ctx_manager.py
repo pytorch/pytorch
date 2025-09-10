@@ -215,12 +215,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_stream_context_manager1(self):
         def fn(x):
-            s = torch.accelerator.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
             current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
-            with torch.accelerator.stream(s):
+            with s:
                 x = torch.relu(x)
             current_stream.wait_stream(s)
             x = torch.add(x, 1)
@@ -240,13 +240,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_stream_across_graph_break(self):
         def fn(x):
-            s = torch.accelerator.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
             print("foo")
 
-            tcs = torch.accelerator.stream(s)
+            tcs = s
             current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
@@ -277,16 +277,16 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
-            with torch.accelerator.stream(s):
+            with s:
                 x = torch.relu(x)
 
             current_stream.wait_stream(s)
-            with torch.accelerator.stream(current_stream):
+            with current_stream:
                 x = torch.relu(x)
 
-            s2 = torch.accelerator.Stream()
+            s2 = torch.Stream()
             s2.wait_stream(current_stream)
-            with torch.accelerator.stream(s2):
+            with s2:
                 x = torch.relu(x)
 
             current_stream.wait_stream(s2)
@@ -295,7 +295,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x
 
         x = torch.randn((2, 2), device=device_type)
-        s = torch.accelerator.Stream()
+        s = torch.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -310,11 +310,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            new_stream = torch.accelerator.Stream()
+            new_stream = torch.Stream()
             cur_stream = torch.accelerator.current_stream()
             new_stream.wait_stream(cur_stream)
 
-            with torch.accelerator.stream(new_stream):
+            with new_stream:
                 x = torch.sin(x)
                 x = torch.add(x, 3)
 
@@ -324,7 +324,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.query()
             cur_stream.synchronize()
 
-            with torch.accelerator.stream(new_stream):
+            with new_stream:
                 x = torch.add(x, 5)
             new_stream.synchronize()
 
@@ -379,8 +379,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             else:
                 return x - 1
 
-        s0 = torch.accelerator.Stream()
-        s1 = torch.accelerator.Stream()
+        s0 = torch.Stream()
+        s1 = torch.Stream()
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -414,7 +414,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_event_reconstruct(self):
         def fn(x):
-            e = torch.accelerator.Event()
+            e = torch.Event()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
             return x, e
@@ -431,7 +431,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_event_across_graph_break(self):
         def fn(x):
-            e = torch.accelerator.Event()
+            e = torch.Event()
             e.record()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
@@ -454,8 +454,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_event_created_outside_of_graph(self):
-        user_stream = torch.accelerator.Stream()
-        event = torch.accelerator.Event()
+        user_stream = torch.Stream()
+        event = torch.Event()
         foo = torch.empty((2, 2), device=device_type)
 
         def func(foo):
@@ -469,7 +469,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             if compile:
                 fn = torch.compile(fn, backend=cnts)
             for _ in range(10):
-                with torch.accelerator.stream(user_stream):
+                with user_stream:
                     torch.mm(x, x, out=foo)
                     event.record()
                 out = fn(foo)
@@ -496,10 +496,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             event.query()
 
             new_stream.wait_event(event)
-            with torch.accelerator.stream(new_stream):
+            with new_stream:
                 x = torch.add(x, 4)
 
-            new_event = torch.accelerator.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
@@ -514,7 +514,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device=device_type)
         cur_stream = torch.accelerator.current_stream()
-        new_stream = torch.accelerator.Stream()
+        new_stream = torch.Stream()
         ref = fn(x, cur_stream, new_stream)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -530,7 +530,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 2)
 
             cur_stream = torch.accelerator.current_stream()
-            new_stream = torch.accelerator.Stream()
+            new_stream = torch.Stream()
 
             x = torch.add(x, 3)
 
@@ -538,10 +538,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             event.query()
 
             new_stream.wait_event(event)
-            with torch.accelerator.stream(new_stream):
+            with new_stream:
                 x = torch.add(x, 4)
 
-            new_event = torch.accelerator.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
@@ -566,7 +566,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_device(self):
         def fn(x):
-            with torch.accelerator.device(x.device.index - 1):
+            with torch.accelerator.device_index(x.device.index - 1):
                 x = torch.sin(x + 1)
             return x
 
@@ -602,7 +602,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_autocast(self):
-        if not torch.accelerator.is_bf16_supported():
+        if not torch.get_device_module(device_type).is_bf16_supported():
             raise unittest.SkipTest("requires bf16")
 
         class MyModule(torch.nn.Module):
@@ -1245,7 +1245,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_inlining_autocast(self):
         for device in ["cuda", "cpu", "xpu"]:
             if device == "cuda" and not (
-                torch.accelerator.is_available() and torch.accelerator.is_bf16_supported()
+                torch.accelerator.is_available() and torch.get_device_module(device_type).is_bf16_supported()
             ):
                 continue
             elif device == "xpu" and not (
