@@ -94,6 +94,7 @@ __all__ = [
     "get_world_size",
     "get_pg_count",
     "group",
+    "init",
     "init_process_group",
     "irecv",
     "is_gloo_available",
@@ -577,9 +578,27 @@ class _World:
        of c10d and is subject to change..
     """
 
-    def __init__(self) -> None:
+    def __init__(self, rank: int, world_size: int, store: Store) -> None:
+        self.rank = rank
+        self.world_size = world_size
+        # A store accessible by all ranks in current job.
+        self.store = store
         self._default_pg = None
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
+
+    @staticmethod
+    def get():
+        if _world is None:
+            raise RuntimeError(
+                "Distributed environment is not initialized. "
+                "Please use `torch.distributed.init` to initialize it. "
+            )
+
+        return _world
+
+    @staticmethod
+    def maybe_get():
+        return _world
 
     @property
     def default_pg(self) -> Optional[ProcessGroup]:
@@ -694,7 +713,7 @@ class _World:
         return config_info
 
 
-_world = _World()
+_world: Optional[_World] = None
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
 
 
@@ -708,11 +727,17 @@ class _WorldMeta(type):
     # Points to the default PG once initialized.
     @property
     def WORLD(cls) -> Optional[ProcessGroup]:
-        return _world.default_pg
+        if world := _World.maybe_get():
+            # Has been initialized
+            return world.default_pg
+        else:
+            return None
 
     @WORLD.setter
     def WORLD(cls, pg: Optional[ProcessGroup]):
-        _world.default_pg = pg
+        if world := _World.maybe_get():
+            # Has been initialized
+            world.default_pg = pg
 
 
 class group(metaclass=_WorldMeta):
@@ -1528,6 +1553,83 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
 
 @_exception_logger
 @_time_logger
+def init(
+    world_size: int = -1,
+    rank: int = -1,
+    store: Optional[Store] = None,
+) -> None:
+    """
+    Initialize a distributed environment for current job. Once this API is
+    called, `get_world_size()` is guaranteed to return the number of processes
+    in current job, and `get_rank()` is guaranteed to return the rank of current
+    process in the job.
+
+    There are two main ways to initialize the distributed environment:
+        1. Specify ``store``, ``rank``, and ``world_size`` explicitly.
+        2. Infer from environment variables set by the launcher of the job (e.g.
+        torchrun, SLURM).
+
+    If using method 2, the launcher must specify the following environment variables:
+        - `RANK`: the rank of current process in the job;
+        - `WORLD_SIZE`: the number of processes in the job;
+        - `MASTER_ADDRESS`: an IP address accessible by all processes as rendezvous point;
+        - `MASTER_PORT`: a port of the above IP address over which the rendezvous happens.
+    `RANK` must be unique per process, while `WORLD_SIZE`, `MASTER_ADDRESS` and
+    `MASTER_PORT` must be the same across all processes.
+
+    Args:
+        world_size (int, optional):
+            Number of processes participating in the job. Required if ``store``
+            is specified.
+        rank (int, optional):
+            Rank of the current process (a number between 0 and
+            ``world_size``-1).  Required if ``store`` is specified.
+        store(Store, optional):
+            Key/value store accessible to all workers, used to exchange
+            connection/address information.  Mutually exclusive with environment
+            variable based initialization.
+    """
+
+    global _world
+    if _world is not None:
+        warnings.warn(
+            "dist.init() has already been called. "
+            "Re-initializing the world is currently experimental."
+        )
+
+    set_pytorch_distributed_envs_from_justknobs()
+
+    # Depending on the import order, some trace_rules functions may be evaluated
+    # during the import phase. In such a case, these functions may not correctly
+    # add the distributed related rules due to import circular dependency.
+    # We need to clear the lru_cache during the runtime to ensure the correctness
+    # of these trace_rules.
+    #
+    # Since this API must be called before all distributed code being compiled,
+    # clearing the cache here should be safe.
+    if "torch._dynamo" in sys.modules:
+        torch._dynamo.trace_rules.clear_lru_cache()
+
+    if store is None:
+        # Create one from environment variables
+        rendezvous_iterator = rendezvous(
+            "env://",
+            rank,
+            world_size,
+            # TODO: should we support configurable timeout for rendezvous?
+        )
+        store, rank, world_size = next(rendezvous_iterator)
+
+    # At this point, values should be valid
+    assert world_size > 0, "world_size must be positive"
+    assert 0 <= rank < world_size, "rank must be between [0, world_size)"
+
+    # Safe to create the _world now
+    _world = _World(rank, world_size, store)
+
+
+@_exception_logger
+@_time_logger
 def init_process_group(
     backend: Optional[str] = None,
     init_method: Optional[str] = None,
@@ -1624,37 +1726,12 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
+    # Initialize distributed environment if user didn't call it
+    # (backward compatible purpose)
+    if _world is None:
+        init(world_size, rank, store)
 
-    global _world
-
-    global _backend
-    global _default_pg_init_method
-
-    if GroupMember.WORLD is not None:
-        raise ValueError("trying to initialize the default process group twice!")
-
-    set_pytorch_distributed_envs_from_justknobs()
-
-    # Depending on the import order, some trace_rules functions may be evaluated
-    # during the import phase. In such a case, these functions may not correctly
-    # add the distributed related rules due to import circular dependency.
-    # We need to clear the lru_cache during the runtime to ensure the correctness
-    # of these trace_rules.
-    #
-    # Since this API must be called before all distributed code being compiled,
-    # clearing the cache here should be safe.
-    if "torch._dynamo" in sys.modules:
-        torch._dynamo.trace_rules.clear_lru_cache()
-
-    assert (store is None) or (init_method is None), (
-        "Cannot specify both init_method and store."
-    )
-
-    if store is not None:
-        assert world_size > 0, "world_size must be positive if using store"
-        assert rank >= 0, "rank must be non-negative if using store"
-    elif init_method is None:
-        init_method = "env://"
+    assert _world is not None
 
     # Get the compile-time accelerator type.
     # None indicates no accelerator support.
@@ -1738,21 +1815,18 @@ def init_process_group(
         _update_default_pg(default_pg)
     else:
         # backward compatible API
-        if store is None:
-            if backend == "fake":
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+        if backend == "fake":
+            from torch.testing._internal.distributed.fake_pg import FakeStore
 
-                store = FakeStore()
-            else:
-                rendezvous_iterator = rendezvous(
-                    not_none(init_method), rank, world_size, timeout=timeout
-                )
-                store, rank, world_size = next(rendezvous_iterator)
-                store.set_timeout(timeout)
+            store_from = FakeStore()
+        else:
+            # `dist.init()` must have created a store
+            store_from = _world.store
 
-            # Use a PrefixStore to avoid accidental overrides of keys used by
-            # different systems (e.g. RPC) in case the store is multi-tenant.
-            store = PrefixStore("default_pg", store)
+        # Use a PrefixStore to avoid accidental overrides of keys used by
+        # different systems (e.g. RPC) in case the store is multi-tenant.
+        store = PrefixStore("default_pg", store_from)
+        store.set_timeout(timeout)
 
         default_pg, _ = _new_process_group_helper(
             world_size,
@@ -1860,9 +1934,9 @@ def _new_process_group_helper(
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
     """
-    global _world
+    world = _World.get()
 
-    if group_name in _world.pg_names.values():
+    if group_name in world.pg_names.values():
         raise ValueError(
             "The specified group name has already been "
             "created, please use a different group name"
@@ -1880,7 +1954,7 @@ def _new_process_group_helper(
         # creating with the same tag and rank set results in the same underlying PG
         existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
         if existing_group:
-            _, prefix_store = _world.pg_map[existing_group]
+            _, prefix_store = world.pg_map[existing_group]
             return existing_group, prefix_store
 
     group_desc = "undefined" if group_desc is None else group_desc
@@ -1902,7 +1976,7 @@ def _new_process_group_helper(
     # If this is a subgroup (which means group_ranks is specified),
     # we check if the current process is a member of the new group.
     if not is_default_group:
-        global_rank = _get_default_group().rank()
+        global_rank = world.rank
         if global_rank not in global_ranks_in_group:
             # If we are using `ncclCommSplit` (or similar split from
             # other APIs) to create the communicator, we will need to
@@ -2122,20 +2196,20 @@ def _new_process_group_helper(
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    _world.pg_map[pg] = (backend, prefix_store)
-    _world.pg_names[pg] = group_name
+    world.pg_map[pg] = (backend, prefix_store)
+    world.pg_names[pg] = group_name
     _register_process_group(group_name, pg)
 
-    _world.pg_backend_config[pg] = str(backend_config)
+    world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
-        _world.tags_to_pg.setdefault("", []).append(pg)
+        world.tags_to_pg.setdefault("", []).append(pg)
     else:
         pg_tag = f"user:{pg_tag}"
 
-    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
-    _world.pg_to_tag[pg] = pg_tag
+    world.tags_to_pg.setdefault(pg_tag, []).append(pg)
+    world.pg_to_tag[pg] = pg_tag
     return pg, prefix_store
 
 
@@ -2333,14 +2407,14 @@ def get_rank(group: Optional[ProcessGroup] = None) -> int:
         -1, if not part of the group
 
     """
+    world = _World.get()
+    if group is None or group is GroupMember.WORLD:
+        return world.rank
+
     if _rank_not_in_group(group):
         return -1
 
-    default_pg = _get_default_group()
-    if group is None or group is GroupMember.WORLD:
-        return default_pg.rank()
-
-    return get_group_rank(group, default_pg.rank())
+    return get_group_rank(group, world.rank)
 
 
 def get_world_size(group: Optional[ProcessGroup] = None) -> int:
@@ -2356,6 +2430,10 @@ def get_world_size(group: Optional[ProcessGroup] = None) -> int:
         -1, if not part of the group
 
     """
+    world = _World.get()
+    if group is None or group is GroupMember.WORLD:
+        return world.world_size
+
     if _rank_not_in_group(group):
         return -1
 
@@ -5293,23 +5371,36 @@ def _new_group_with_tag(
     :: N.B. The mechanism is experimental and tied to the functional collectives effort, see
     ``torch.distributed._functional_collectives`` for reference on how to use it.
     """
-    global _world
+    world = _World.get()
 
-    default_pg = _get_default_group()
+    try:
+        default_pg = _get_default_group()
+    except ValueError:
+        default_pg = None
+
+    # Infer device_id from parent group if not specified.
     if device_id is None:
-        device_id = default_pg.bound_device_id
-    elif default_pg.bound_device_id is not None:
-        assert device_id == default_pg.bound_device_id, (
-            "Mismatched bound device between new pg and the default pg."
-        )
-    default_backend, default_store = _world.pg_map[default_pg]
-    global_rank = default_pg.rank()
-    global_world_size = default_pg.size()
+        if default_pg is not None:
+            device_id = default_pg.bound_device_id
 
-    # Default to the same backend as the global process group
-    # if the backend is not specified.
-    if not backend:
-        backend = default_backend
+    global_rank = world.rank
+    global_world_size = world.world_size
+    default_store = world.store
+
+    # Infer backend if not specified.
+    if backend is None:
+        # Default to the same backend as the global process group
+        # if the backend is not specified.
+        if default_pg is not None:
+            backend, _ = world.pg_map[default_pg]
+        elif device_id is not None:
+            # Get it from our default map
+            backend = get_default_backend_for_device(device_id)
+        else:
+            raise ValueError(
+                "A device id or a backend must be specified when creating a new group, got neither"
+            )
+
     backend = Backend(backend)
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
@@ -5370,7 +5461,7 @@ def _new_group_with_tag(
     )
 
     # Create the global rank to group rank mapping
-    _world.pg_group_ranks[pg] = {
+    world.pg_group_ranks[pg] = {
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
