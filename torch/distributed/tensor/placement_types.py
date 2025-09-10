@@ -32,19 +32,13 @@ class Placement:
 
     # convenient utils to check for placement types
     def is_shard(self, dim: Optional[int] = None) -> bool:
-        is_shard_instance = isinstance(self, Shard)
-        if dim is not None and is_shard_instance:
-            return cast(Shard, self).dim == dim
-        else:
-            return is_shard_instance
+        return False
 
     def is_replicate(self) -> bool:
-        return isinstance(self, Replicate)
+        return False
 
     def is_partial(self, reduce_op: Optional[str] = None) -> bool:
-        if reduce_op is None:
-            return isinstance(self, Partial)
-        return isinstance(self, Partial) and self.reduce_op == reduce_op
+        return False
 
 
 @dataclass(frozen=True)
@@ -67,6 +61,12 @@ class Shard(Placement):
     """
 
     dim: int
+
+    def is_shard(self, dim: Optional[int] = None) -> bool:
+        if dim is not None:
+            return self.dim == dim
+        else:
+            return True
 
     def _split_tensor(
         self,
@@ -650,6 +650,9 @@ class Replicate(Placement):
             mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
         return tensor
 
+    def is_replicate(self) -> bool:
+        return True
+
 
 @dataclass(frozen=True)
 class Partial(Placement):
@@ -728,6 +731,11 @@ class Partial(Placement):
         human readable representation of the Partial placement
         """
         return "P"
+
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        if reduce_op is None:
+            return True
+        return self.reduce_op == reduce_op
 
 
 # We keep the old _Partial name for a while for BC reason
