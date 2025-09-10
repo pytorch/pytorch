@@ -1268,14 +1268,10 @@ class InitWithoutGroup(DTensorTestBase):
             self.device_type, torch.arange(self.world_size), _init_backend=init_backend
         )
 
-    @parametrize(
-        "init_backend", [False, True]
-    )  # Whether DeviceMesh init dim groups during creation
-    def test_mesh_without_dist_init(self, init_backend: bool):
+    def test_mesh_without_dist_init(self):
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        DeviceMesh(
-            self.device_type, torch.arange(self.world_size), _init_backend=init_backend
-        )
+        # Must be `init_device_mesh` instead of `DeviceMesh` due to implicit dist init
+        init_device_mesh(self.device_type, (self.world_size,))
 
 
 if __name__ == "__main__":
