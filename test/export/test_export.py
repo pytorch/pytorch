@@ -228,6 +228,10 @@ def is_non_strict_test(test_name):
     )
 
 
+def is_strict_v2_test(test_name):
+    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
+
+
 def is_inline_and_install_strict_test(test_name: str) -> bool:
     return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
 
@@ -14539,6 +14543,14 @@ graph():
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+        # This is fine since both of these will be deprecated soon.
+        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
+            self.assertEqual(
+                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
+            )
+            self.assertEqual(
+                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
+            )
         else:
             self.assertEqual(
                 filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
