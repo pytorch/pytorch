@@ -91,7 +91,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> Optional[torch.device]:
+def current_accelerator(check_available: bool = False) -> Optional[torch.Device]:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
