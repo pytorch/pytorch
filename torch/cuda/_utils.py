@@ -41,23 +41,22 @@ def _get_nvrtc_library() -> ctypes.CDLL:
 def _get_nvrtc_compatible_flags() -> list[str]:
     """
     Get NVCC flags that are compatible with NVRTC compilation.
-    
+
     Returns:
         List of NVCC flags that can be safely used with NVRTC.
     """
     from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
-    
+
     # Flags that are not supported by NVRTC
     nvrtc_unsupported_flags = {
-        "--expt-relaxed-constexpr",  # NVRTC doesn't support this flag
+        "--expt-relaxed-constexpr",
     }
-    
+
     # Filter out unsupported flags
     compatible_flags = [
-        flag for flag in COMMON_NVCC_FLAGS 
-        if flag not in nvrtc_unsupported_flags
+        flag for flag in COMMON_NVCC_FLAGS if flag not in nvrtc_unsupported_flags
     ]
-    
+
     return compatible_flags
 
 
@@ -137,7 +136,6 @@ def _nvrtc_compile(
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
 
-    # Add NVRTC-compatible NVCC flags
     nvrtc_compatible_flags = _get_nvrtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
 
@@ -313,13 +311,13 @@ class _CudaKernel:
     def set_shared_memory_config(self, shared_mem_bytes: int) -> None:
         """
         Configure the maximum dynamic shared memory for this kernel.
-        
+
         This must be called once after kernel compilation and before launching
         kernels that require more than 48KB of shared memory.
-        
+
         Args:
             shared_mem_bytes (int): Maximum shared memory size in bytes
-            
+
         Raises:
             RuntimeError: If the requested shared memory exceeds device limits
         """
@@ -327,21 +325,22 @@ class _CudaKernel:
             # No configuration needed for <= 48KB
             self._max_shared_mem_configured = True
             return
-            
+
         import torch
+
         libcuda = torch.cuda._utils._get_cuda_library()
-        
+
         # Get device properties to validate against limits
         device_props = torch.cuda.get_device_properties()
         max_shared_mem = device_props.shared_memory_per_block_optin
-        
+
         if shared_mem_bytes > max_shared_mem:
             raise RuntimeError(
                 f"Requested shared memory ({shared_mem_bytes} bytes) exceeds "
                 f"device limit ({max_shared_mem} bytes). "
                 "Consider reducing block size or shared memory usage."
             )
-        
+
         # Set the function attribute once
         # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
         cudaFuncAttributeMaxDynamicSharedMemorySize = 8
@@ -352,7 +351,7 @@ class _CudaKernel:
                 shared_mem_bytes,
             )
         )
-        
+
         self._max_shared_mem_configured = True
 
 
