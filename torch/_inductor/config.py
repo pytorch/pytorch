@@ -460,6 +460,11 @@ graph_partition: bool = (
     == "1"
 )
 
+# force fallback of aten.repeat_interleave.Tensor
+force_fallback_repeat_interleave: bool = (
+    os.environ.get("TORCHINDUCTOR_FORCE_FALLBACK_REPEAT_INTERLEAVE", "0") == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
