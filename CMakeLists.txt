@@ -892,7 +892,7 @@ endif()
 
 # Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
 if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-  message(WARNING "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
   set(USE_FBGEMM_GENAI ON)
 endif()
 
