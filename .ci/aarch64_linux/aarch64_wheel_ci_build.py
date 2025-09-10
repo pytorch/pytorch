@@ -138,6 +138,8 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     folder = os.path.dirname(wheel_path)
     os.mkdir(f"{folder}/tmp")
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
+    # Delete original wheel since it will be repackaged
+    os.system(f"rm {wheel_path}")
 
     # Check if we should use PyPI NVIDIA libraries or bundle system libraries
     use_nvidia_pypi_libs = os.getenv("USE_NVIDIA_PYPI_LIBS", "0") == "1"
@@ -275,14 +277,7 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/dist/{repaired_wheel_name}",
         )
     else:
-        repaired_wheel_name = wheel_name.replace(
-            "linux_aarch64", "manylinux_2_28_aarch64"
-        )
-        print(f"Renaming {wheel_name} wheel to {repaired_wheel_name}")
-        os.rename(
-            f"/{folder}/dist/{wheel_name}",
-            f"/{folder}/dist/{repaired_wheel_name}",
-        )
+        repaired_wheel_name = list_dir(f"/{folder}/dist")[0]
 
     print(f"Copying {repaired_wheel_name} to artifacts")
     shutil.copy2(
