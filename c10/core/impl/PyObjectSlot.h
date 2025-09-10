@@ -65,7 +65,9 @@ struct C10_API PyObjectSlot {
     if (interpreter == nullptr) {
       return std::nullopt;
     }
-
+    if (c10::impl::HermeticPyObjectTLS::get_state()) {
+      return std::nullopt;
+    }
     return _unchecked_untagged_pyobj();
   }
 

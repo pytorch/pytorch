@@ -10,6 +10,7 @@ PyObjectSlot::~PyObjectSlot() {
 
 void PyObjectSlot::maybe_destroy_pyobj() {
   if (owns_pyobj()) {
+    TORCH_INTERNAL_ASSERT(getGlobalPyInterpreter() != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     (*getGlobalPyInterpreter())
         ->decref(_unchecked_untagged_pyobj(), /*has_pyobj_slot*/ true);
