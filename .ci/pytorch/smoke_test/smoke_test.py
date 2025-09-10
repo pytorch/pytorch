@@ -386,8 +386,8 @@ def smoke_test_compile(device: str = "cpu") -> None:
 
 
 def smoke_test_nvshmem() -> None:
-    if not torch.cuda.is_available():
-        print("CUDA is not available, skipping NVSHMEM test")
+    if not torch.cuda.is_available() or target_os == "windows":
+        print("Windows platform or CUDA is not available, skipping NVSHMEM test")
         return
 
     # Check if NVSHMEM is compiled in current build
