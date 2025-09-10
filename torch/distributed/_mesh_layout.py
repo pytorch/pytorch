@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from itertools import product
 from typing import TypeAlias
 
-from torch.distributed._pycute import (  # complement,; composition,
+from torch.distributed._pycute import (
     coalesce,
+    complement,
+    composition,
     flatten,
     is_tuple,
     Layout,
@@ -98,7 +100,6 @@ class _Layout(Layout):
         → cannot merge; result stays (3,2):(4,1)
         """
         # Option 1: leverage pycute's coalesce
-        print(self.shape)
         layout = coalesce(
             Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride)))
         )
@@ -152,6 +153,27 @@ class _Layout(Layout):
         Returns:
           A list of composed layouts.
         """
+        # Option 1: leverage pycute's composition
+        layout = composition(
+            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride))),
+            Layout(tuple(reversed(layout.shape)), tuple(reversed(layout.stride))),
+        )
+        return _Layout(
+            tuple(
+                reversed(
+                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
+                )
+            ),
+            tuple(
+                reversed(
+                    (layout.stride,)
+                    if isinstance(layout.stride, int)
+                    else layout.stride
+                )
+            ),
+        )  # type: ignore[arg-type]
+
+        # Option 2: have our own implementation
         assert len(self.sizes) >= 1, "Layout for composition cannot be empty"
         # A layout can be expressed as the concatenation of its sublayouts.
         # When layout is injective (aka one-to-one), composition is left-distributive with concatenation.
@@ -231,6 +253,26 @@ class _Layout(Layout):
 
         For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
+        # Option 1: leverage pycute's complement
+        layout = complement(
+            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride))),
+            world_size,
+        )
+        return _Layout(
+            tuple(
+                reversed(
+                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
+                )
+            ),
+            tuple(
+                reversed(
+                    (layout.stride,)
+                    if isinstance(layout.stride, int)
+                    else layout.stride
+                )
+            ),
+        )
+        # Option 2: have our own implementation
         res_sizes: list[int] = []
         res_strides: list[int] = []
         current_idx = 1
