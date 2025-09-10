@@ -116,11 +116,12 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id
         )
         order.clear()
 
+        if not HAS_CUDA_AND_TRITON:
+            return
+
         compiled_model.zero_grad()
         loss = compiled_model(x).sum()
         loss.backward()
-        if not HAS_CUDA_AND_TRITON:
-            return
 
         self.assertExpectedInline(
             "\n".join(order),
