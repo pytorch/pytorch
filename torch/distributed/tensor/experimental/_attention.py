@@ -1126,6 +1126,19 @@ class _FlexAttentionModule(nn.Module):
 
         key = key.contiguous()
         value = value.contiguous()
+        """
+        These collectives may not work well with full AC.
+        We will get the warning:
+
+        UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
+        registered to the Autograd key(s) but we are trying to backprop through it.
+        This may lead to silently incorrect behavior. This behavior is deprecated and
+        will be removed in a future version of PyTorch. If your operator is differentiable,
+        please ensure you have registered an autograd kernel to the correct Autograd key
+        (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
+        operator is not differentiable, or to squash this warning and use the previous
+        behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.
+        """
         global_key = ft_c.all_gather_tensor_autograd(key, seq_dim, mesh)
         global_value = ft_c.all_gather_tensor_autograd(value, seq_dim, mesh)
         args_list[1] = global_key
