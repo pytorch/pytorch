@@ -1,4 +1,6 @@
 import torch
 
+GreenContext = None
+
 if hasattr(torch._C, "GreenContext"):
-    from torch._C import GreenContext
+    GreenContext = torch._C.GreenContext
