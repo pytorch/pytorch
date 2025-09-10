@@ -234,7 +234,7 @@ dunder_attrs_assumed_constants = (
 )
 
 
-def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> Optional[int]:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
     # NOTE: we need to find the LAST matching index because <= 3.10 contains
@@ -242,6 +242,8 @@ def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # and will take up 2 slots of the frame's localsplus. The correct behavior
     # is to refer to the cell, which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    if var_name not in framelocals_names_reversed:
+        return None
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
     )
@@ -1357,6 +1359,7 @@ class GuardBuilder(GuardBuilderBase):
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
             framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
+            assert framelocals_idx is not None
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -1744,15 +1747,34 @@ class GuardBuilder(GuardBuilderBase):
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+
+        required_locals = {}
+        all_locals = self.scope["L"].keys()
+        for var_name in guard_fn.__code__.co_consts:
+            if isinstance(var_name, str) and var_name in all_locals:
+                index = get_framelocals_idx(self.f_code, var_name)
+                if index is not None:
+                    required_locals[var_name] = index
+
+        construct_partial_framelocals_dict = config.construct_partial_framelocals_dict
+
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
+            )
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
