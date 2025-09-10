@@ -134,7 +134,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
         if (torch.version.hip is None) or triton_version >= "3.3.0"
         # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
@@ -209,7 +209,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
     ),
     cache_codegen_enabled_for_template=True,
@@ -344,7 +344,7 @@ persistent_tma_mm_template = TritonTemplate(
             mask = (idx_m < M) & (idx_n < N)
 
             # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 """,
@@ -535,7 +535,7 @@ device_tma = r"""
             idx_n = offs_cn[None, :]
             mask = (idx_m < M) & (idx_n < N)
             # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 """
 

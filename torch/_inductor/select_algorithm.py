@@ -366,7 +366,7 @@ class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
         kernel_name,
-        input_nodes,
+        input_nodes: tuple[ir.IRNode],
         output_node,
         defines,
         num_stages,
@@ -1079,7 +1079,13 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                epilogue_args.append(input_node.make_loader()(index_symbols))
+                epilogue_arg = V.kernel.cse.generate(
+                    self.compute,
+                    input_node.make_loader()(index_symbols),
+                    dtype=acc_dtype,
+                    shape=input_node.get_size(),
+                )
+                epilogue_args.append(epilogue_arg)
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 

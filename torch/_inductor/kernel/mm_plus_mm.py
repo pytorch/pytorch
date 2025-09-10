@@ -118,7 +118,7 @@ mm_plus_mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
     cache_codegen_enabled_for_template=True,
 )
