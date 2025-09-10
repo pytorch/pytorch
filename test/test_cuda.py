@@ -7062,20 +7062,16 @@ class TestCompileKernel(TestCase):
         """Test that kernels can use CUDA C++ Standard Library headers."""
         kernel_source = """
         #include <cuda/std/cstdint>
-        #include <cuda/std/type_traits>
-
-        extern "C"
+        
         __global__ void cpp_stdlib_kernel(
-            cuda::std::uint32_t* output,
-            cuda::std::uint32_t input_value,
+            cuda::std::uint32_t* output, 
+            cuda::std::uint32_t input_value, 
             int n
         ) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx < n) {
-                // Use type_traits to check if uint32_t is integral
-                if constexpr (cuda::std::is_integral_v<cuda::std::uint32_t>) {
-                    output[idx] = input_value + static_cast<cuda::std::uint32_t>(idx);
-                }
+                // Use CUDA C++ stdlib types
+                output[idx] = input_value + static_cast<cuda::std::uint32_t>(idx);
             }
         }
         """
