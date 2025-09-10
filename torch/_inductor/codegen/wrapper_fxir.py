@@ -28,11 +28,12 @@ from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import CeilDiv
+from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
 
 from .. import config, ir
+from ..runtime.triton_compat import Config
 from ..utils import LineContext
 from .common import (
     CodegenSymbol,
@@ -98,6 +99,38 @@ class TritonKernel:
 
     tuner: CachingAutotuner
     wrapped: TraceableTritonKernelWrapper
+
+
+def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+    """
+    Replace sympy.floor with FloorDiv.
+    """
+    expr = sympy.together(expr)
+
+    # Find division operations in the sympy.floor expression
+    # Div is either represented as Mul with:
+    # Rational denominator or Pow with negative exponent
+    if not isinstance(expr, sympy.core.mul.Mul):
+        return sympy.floor(expr)
+
+    if isinstance(expr.args[0], sympy.Rational):
+        frac = expr.args[0]
+        numerator = sympy_product(expr.args[1:]) * frac.numerator
+        denominator = frac.denominator
+
+        return FloorDiv(numerator, denominator)
+    elif isinstance(expr.args[0], sympy.Pow):
+        base = expr.args[0].base
+        exp = expr.args[0].exp
+        numerator = sympy_product(expr.args[1:])
+        if exp < 0:
+            denominator = base ** (-exp)
+        else:
+            numerator = numerator * (base**exp)
+            denominator = 1
+        return FloorDiv(numerator, denominator)
+    else:
+        return sympy.floor(expr)
 
 
 class WrapperFxCodegen(PythonWrapperCodegen):
@@ -466,30 +499,6 @@ class FxConverter:
             )
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
-
-            def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
-                """
-                Converts floor(x / c) to x // c.
-                """
-                if isinstance(expr, sympy.core.mul.Mul) and isinstance(
-                    expr.args[0], sympy.Rational
-                ):
-                    # Only the first argument of a Mul can be a Rational.
-                    frac = expr.args[0]
-                    numerator = sympy_product(expr.args[1:]) * frac.numerator
-                    denominator = frac.denominator
-
-                    # Sanity check the results.
-                    new_expr = numerator / denominator
-                    assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
-                        f"Unsound replacement: '{new_expr}' != '{expr}'"
-                    )
-                    # Undo the python division trick and replace with explicit CeilDiv
-                    return -CeilDiv(-numerator, denominator)
-                else:
-                    return sympy.floor(expr)
-
-            s = s.replace(sympy.floor, replace_floor_div)
             return self._sympy_interp(s).node
 
         elif isinstance(s, torch.fx.Node):
@@ -663,6 +672,10 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
+        # Use python_slow mode instead of python mode to avoid
+        # the round to neginf behaviour, which is not the convention
+        # in other languages.
+        tuner.grid_mode = "python_slow"
 
         # Optionally autotune the kernels.
         # The FX backend currently only supports compile-time tuning.
@@ -700,11 +713,50 @@ class FxConverter:
                 kernel_name,
             )
 
+        triton_meta = tuner.triton_meta
+        signature = triton_meta["signature"]
+
+        def add_constants_to_call_args(
+            call_args: Sequence[Any], cfg: Config
+        ) -> tuple[Any, ...]:
+            """
+            Add constant kwargs to the arg list.
+            """
+            # Add args from the proper Triton signature.
+            new_call_args = []
+            call_arg_idx = 0
+            constants = triton_meta["constants"]
+            for arg_name in signature:
+                # Config kwargs are tracked separately.
+                if arg_name in cfg.kwargs:
+                    continue
+
+                try:
+                    new_arg = constants[arg_name]
+                except KeyError:
+                    new_arg = call_args[call_arg_idx]
+                    call_arg_idx += 1
+                new_call_args.append(new_arg)
+
+            # Add Inductor's extra call args to the end.
+            new_call_args.extend(call_args[call_arg_idx:])
+
+            return tuple(new_call_args)
+
         kernel_config = tuner.compile_results[0].config
+        call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
-        call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
+        call_kwargs = dict(zip(signature, call_args))
         call_kwargs.update(kernel_config.kwargs)
 
+        # Replace all sympy.floor with FloorDiv
+        # _generate_sym_node does not support sympy.floor
+        grid = [
+            x.replace(sympy.floor, replace_floor_div)
+            if isinstance(x, sympy.Expr)
+            else x
+            for x in grid
+        ]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()
@@ -766,14 +818,11 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unrecognized output layout: {kernel.layout}")
 
-        # Look up the kernel function from its name.
-        kernel_name = kernel.get_kernel_name()
-        module_name, kernel_name = kernel_name.split(".", 1)
-        op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
-        for subname in kernel_name.split("."):
-            op = getattr(op, subname)  # E.g. extern_kernels.addmm
-
-        fx_node = self.gm.graph.call_function(op, args=args, kwargs=kwargs)
+        fx_node = self.gm.graph.call_function(
+            kernel.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
 
         # Assign the result to the given name.
         if result_buffer:

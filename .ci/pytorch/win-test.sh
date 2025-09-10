@@ -44,7 +44,7 @@ python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==
 python -m pip install z3-solver==4.15.1.0
 
 # Install tlparse for test\dynamo\test_structured_trace.py UTs.
-python -m pip install tlparse==0.3.30
+python -m pip install tlparse==0.4.0
 
 # Install parameterized
 python -m pip install parameterized==0.8.1
@@ -54,9 +54,6 @@ python -m pip install pulp==2.9.0
 
 # Install expecttest to merge https://github.com/pytorch/pytorch/pull/155308
 python -m pip install expecttest==0.3.0
-
-# Install intel-openmp
-python -m pip install intel-openmp==2025.1.1
 
 run_tests() {
     # Run nvidia-smi if available
