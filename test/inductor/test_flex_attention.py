@@ -5308,6 +5308,66 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @skip_on_cpu
+    def test_flex_attention_poison_mod_fwd(self, device):
+        """Div by score should cause our edge case handiling to NaN"""
+        B = 1
+        H = 1
+        S = 256
+        D = 16
+        q, k, v = [
+            torch.randn(B, H, S, D, requires_grad=True, device=device) for _ in range(3)
+        ]
+
+        def score_mod(score, b, h, q, kv):
+            return 1 / score
+
+        def causal(
+            b: torch.Tensor, h: torch.Tensor, q: torch.Tensor, kv: torch.Tensor
+        ) -> torch.Tensor:
+            return q >= kv
+
+        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        out = torch.compile(flex_attention)(
+            q, k, v, score_mod=score_mod, block_mask=block_mask
+        )
+        out.sum().backward()
+        assert out.isfinite().all().item()
+        assert q.grad.isfinite().all().item()
+        assert k.grad.isfinite().all().item()
+        assert v.grad.isfinite().all().item()
+
+    @supported_platform
+    @skip_on_cpu
+    def test_flex_attention_poison_mod_bwd(self, device):
+        """Div by score should cause our edge case handiling to NaN"""
+        B = 1
+        H = 1
+        S = 256
+        D = 16
+        q, k, v = [
+            torch.randn(B, H, S, D, requires_grad=True, device=device) for _ in range(3)
+        ]
+
+        def score_mod(score, b, h, q, kv):
+            return torch.log(score) * 22.0
+
+        def causal(
+            b: torch.Tensor, h: torch.Tensor, q: torch.Tensor, kv: torch.Tensor
+        ) -> torch.Tensor:
+            return q >= kv
+
+        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        out = torch.compile(flex_attention)(
+            q, k, v, score_mod=score_mod, block_mask=block_mask
+        )
+        out.sum().backward()
+        assert out.isfinite().all().item()
+        assert q.grad.isfinite().all().item()
+        assert k.grad.isfinite().all().item()
+        assert v.grad.isfinite().all().item()
+
+    @supported_platform
+    @skip_on_cpu
     def test_forward_pass_with_none_q_indices(self, device):
         N_BLOCKS = 4
         B, H, S, D = 1, 1, 128, 64
