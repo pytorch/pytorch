@@ -16511,13 +16511,13 @@ def forward(self, x):
         example_args_forward = (original_input,)
 
         # Export the model
-        exported_model = torch.export.export(model, example_args_forward, strict=True)
+        exported_model = export(model, example_args_forward)
 
         # Run both models and compare results
         reordered_input = {"a2": a2, "a1": a1}
         original_output = exported_model.module()(reordered_input)
         loaded_output = model(original_input)
-        
+
         # Verify outputs are close (allowing for floating point differences)
         torch.testing.assert_close(original_output, loaded_output)
 
