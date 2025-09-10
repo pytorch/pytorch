@@ -380,7 +380,7 @@ def bwd_dq_block_mn(
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DQ #}
     if not IS_DIVISIBLE:
-        post_mod_scores = tl.where(offs_n2[:, None] < KV_LEN, post_mod_scores, float("-inf"))
+        post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
 
     if not IS_FULL_BLOCKS:
         {{ modification(
