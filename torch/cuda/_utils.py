@@ -309,18 +309,6 @@ class _CudaKernel:
         )
 
     def set_shared_memory_config(self, shared_mem_bytes: int) -> None:
-        """
-        Configure the maximum dynamic shared memory for this kernel.
-
-        This must be called once after kernel compilation and before launching
-        kernels that require more than 48KB of shared memory.
-
-        Args:
-            shared_mem_bytes (int): Maximum shared memory size in bytes
-
-        Raises:
-            RuntimeError: If the requested shared memory exceeds device limits
-        """
         if shared_mem_bytes < 48 * 1024:
             # No configuration needed for <= 48KB
             self._max_shared_mem_configured = True

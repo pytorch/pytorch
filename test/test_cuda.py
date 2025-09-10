@@ -6847,7 +6847,6 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_large_shared_memory(self):
-        # Kernel that actually uses large shared memory for reduction
         kernel_source = """
         __global__ void large_shared_memory_kernel(const float* input, float* output, int n) {
             extern __shared__ float shared_data[];
@@ -6882,19 +6881,15 @@ class TestCompileKernel(TestCase):
 
         kernel = _compile_kernel(kernel_source, "large_shared_memory_kernel")
 
-        # Test with 64KB shared memory (requires >48KB)
         threads_per_block = 1024  # 1024 threads * 4 bytes = 4KB, but we'll request 64KB
         shared_mem_size = 64 * 1024  # 64KB
 
-        # Configure shared memory for this kernel
         kernel.set_shared_memory_config(shared_mem_size)
 
-        # Prepare test data
         N = 4096
         input_data = torch.ones(N, device="cuda", dtype=torch.float32)
         output_data = torch.zeros(4, device="cuda", dtype=torch.float32)  # 4 blocks
 
-        # Launch kernel with large shared memory
         kernel(
             grid=(4, 1, 1),
             block=(threads_per_block, 1, 1),
@@ -6902,7 +6897,7 @@ class TestCompileKernel(TestCase):
             shared_mem=shared_mem_size,
         )
 
-        # Verify results (each block should sum 1024 ones = 1024)
+        # Each block should sum 1024 ones = 1024
         expected = torch.full((4,), 1024.0, dtype=torch.float32)
         self.assertEqual(output_data.cpu(), expected)
 
