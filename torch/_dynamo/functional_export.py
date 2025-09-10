@@ -419,10 +419,7 @@ def _dynamo_graph_capture_for_export(
                 module_to_trace.forward.__code__
             ).guard_manager
             check_fn.check(f_locals)
-        except (
-            ConstraintViolationError,
-            torch.utils._sympy.value_ranges.ValueRangeError,
-        ) as e:
+        except ConstraintViolationError as e:
             constraint_violation_error = e
 
         if (
