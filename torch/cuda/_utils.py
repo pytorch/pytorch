@@ -214,7 +214,7 @@ class _CudaKernel:
     def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
-        self._max_shared_mem_bytes = 0
+        self._max_shared_mem_bytes = None
 
     def __call__(
         self,
@@ -283,10 +283,11 @@ class _CudaKernel:
             stream = torch.cuda.current_stream()
 
         # Check if kernel requires large shared memory but hasn't been configured
-        if shared_mem >= 48 * 1024 and shared_mem > self._max_shared_mem_bytes:
+        if shared_mem >= 48 * 1024 and (self._max_shared_mem_bytes is None or shared_mem > self._max_shared_mem_bytes):
+            configured_msg = "not configured" if self._max_shared_mem_bytes is None else f"only {self._max_shared_mem_bytes} bytes configured"
             raise RuntimeError(
                 f"Kernel requires {shared_mem} bytes of shared memory (>= 48KB), "
-                f"but only {self._max_shared_mem_bytes} bytes configured. "
+                f"but {configured_msg}. "
                 "Call kernel.set_shared_memory_config(shared_mem) after compilation "
                 "and before launching the kernel."
             )
