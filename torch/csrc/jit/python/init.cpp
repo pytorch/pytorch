@@ -78,6 +78,7 @@
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/opaque_obj.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -1863,6 +1864,44 @@ void initJITBindings(PyObject* module) {
       &parseSchema,
       py::arg("schema"),
       py::arg("allow_typevars") = true);
+  py::class_<OpaqueObject, c10::intrusive_ptr<OpaqueObject>>(m, "OpaqueObject")
+      .def(
+          py::init<py::handle>(),
+          R"doc(Creates an opaque object which stores the given Python object.)doc")
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<OpaqueObject> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          },
+          R"doc(Returns the custom class object which can be used for dispatcher operations.)doc")
+      .def_static(
+          "unbox",
+          [](py::object obj) {
+            auto typePtr = torch::getCustomClass(
+                "__torch__.torch.classes.aten.OpaqueObject");
+            auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+            return ivalue.toCustomClass<OpaqueObject>();
+          },
+          R"doc(Converts the custom class object back into an OpaqueObject instance)doc")
+      .def_static(
+          "get_payload",
+          [](py::object obj) -> py::handle {
+            auto typePtr = torch::getCustomClass(
+                "__torch__.torch.classes.aten.OpaqueObject");
+            auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+            auto customObj = ivalue.toCustomClass<OpaqueObject>();
+            return customObj->getPayload();
+          },
+          R"doc(Given a custom class object, directly retursn the Python object stored inside the OpaqueObject)doc")
+      .def_property(
+          "payload",
+          [](c10::intrusive_ptr<OpaqueObject>& self) -> py::handle {
+            return self->getPayload();
+          },
+          [](c10::intrusive_ptr<OpaqueObject>& self, py::handle payload) {
+            self->setPayload(payload);
+          },
+          R"doc(The Python object stored on the OpaqueObject)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
