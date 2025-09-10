@@ -7036,17 +7036,18 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         from torch.cuda import _compile_kernel
+
         compiled_kernel = _compile_kernel(kernel_source, "test_double_precision")
-        
+
         # Test with high precision double value that would lose precision if cast to float
         high_precision_value = 1.23456789012345  # This has more precision than float32
         n = 100
-        
+
         # Create output tensor (use float64 to maintain precision)
         output = torch.zeros(n, device="cuda", dtype=torch.float64)
-        
+
         # Launch kernel with Python float argument
         threads_per_block = 256
         blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
@@ -7055,11 +7056,13 @@ class TestCompileKernel(TestCase):
             block=(threads_per_block, 1, 1),
             args=[output, high_precision_value, n],
         )
-        
+
         # Verify that the high precision value was preserved
-        expected = torch.full((n,), high_precision_value, device="cuda", dtype=torch.float64)
+        expected = torch.full(
+            (n,), high_precision_value, device="cuda", dtype=torch.float64
+        )
         torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
-        
+
         # Additional test: verify the value has full double precision
         # If it were cast to float32, we'd lose precision
         output_cpu = output.cpu().numpy()
@@ -7078,7 +7081,7 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         double_kernel_source = """
         __global__ void test_double_precision(double* output, double value, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -7087,27 +7090,32 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         from torch.cuda import _compile_kernel
+
         float_kernel = _compile_kernel(float_kernel_source, "test_float_precision")
         double_kernel = _compile_kernel(double_kernel_source, "test_double_precision")
-        
+
         # Use a value that has more precision than float32 can represent
         high_precision_value = 1.23456789012345
         n = 10
-        
+
         # Test with float32 tensor and kernel - should lose precision
         output_float = torch.zeros(n, device="cuda", dtype=torch.float32)
         threads_per_block = 256
         blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
-        
+
         # This will cast the double to float32, losing precision
         float_kernel(
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
-            args=[output_float, float(high_precision_value), n],  # Explicit float32 cast
+            args=[
+                output_float,
+                float(high_precision_value),
+                n,
+            ],  # Explicit float32 cast
         )
-        
+
         # Test with double tensor and kernel - should preserve precision
         output_double = torch.zeros(n, device="cuda", dtype=torch.float64)
         double_kernel(
@@ -7115,25 +7123,25 @@ class TestCompileKernel(TestCase):
             block=(threads_per_block, 1, 1),
             args=[output_double, high_precision_value, n],  # Python float (double)
         )
-        
+
         # Verify the difference in precision
         float_result = output_float.cpu().numpy()[0]
         double_result = output_double.cpu().numpy()[0]
-        
+
         # Float32 should have lost precision
         self.assertNotAlmostEqual(float_result, high_precision_value, places=8)
         # Double should preserve precision
         self.assertAlmostEqual(double_result, high_precision_value, places=14)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")  
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_mixed_argument_types(self):
         """Test kernel with mixed argument types including doubles."""
         kernel_source = """
         __global__ void mixed_args_kernel(
-            const float* input, 
-            double* output, 
-            int n, 
+            const float* input,
+            double* output,
+            int n,
             double scale_factor,
             float offset
         ) {
@@ -7143,18 +7151,19 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         from torch.cuda import _compile_kernel
+
         compiled_kernel = _compile_kernel(kernel_source, "mixed_args_kernel")
-        
+
         n = 100
         scale_factor = 3.141592653589793  # High precision double
         offset = 2.5  # Will be handled as double now
-        
+
         # Create input and output tensors
         input_tensor = torch.randn(n, device="cuda", dtype=torch.float32)
         output_tensor = torch.zeros(n, device="cuda", dtype=torch.float64)
-        
+
         # Launch kernel
         threads_per_block = 256
         blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
@@ -7163,7 +7172,7 @@ class TestCompileKernel(TestCase):
             block=(threads_per_block, 1, 1),
             args=[input_tensor, output_tensor, n, scale_factor, offset],
         )
-        
+
         # Verify results with high precision
         expected = input_tensor.double() * scale_factor + offset
         torch.testing.assert_close(output_tensor, expected, rtol=1e-14, atol=1e-14)
@@ -7174,7 +7183,7 @@ class TestCompileKernel(TestCase):
         """
         Regression test: This test would FAIL with the old behavior where Python floats
         were cast to C float instead of double. It should PASS with the new behavior.
-        
+
         This documents the exact behavior change made to fix the float/double mismatch.
         """
         # Kernel that requires high precision double input
@@ -7187,18 +7196,19 @@ class TestCompileKernel(TestCase):
             }
         }
         """
-        
+
         from torch.cuda import _compile_kernel
+
         compiled_kernel = _compile_kernel(kernel_source, "precision_sensitive_kernel")
-        
+
         # Use a value that would lose significant precision if cast to float32
         # This specific value was chosen to demonstrate the precision loss
         precise_value = 1.2345678901234567890  # ~17 decimal digits (double precision)
         n = 10
-        
+
         # Create output tensor
         result = torch.zeros(n, device="cuda", dtype=torch.float64)
-        
+
         # Launch kernel - this would fail precision test with old float casting
         threads_per_block = 256
         blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
@@ -7207,34 +7217,34 @@ class TestCompileKernel(TestCase):
             block=(threads_per_block, 1, 1),
             args=[result, precise_value, n],
         )
-        
+
         # Expected computation with full double precision
-        expected_value = precise_value ** 3 * 1000000.0
+        expected_value = precise_value**3 * 1000000.0
         expected = torch.full((n,), expected_value, device="cuda", dtype=torch.float64)
-        
+
         # This assertion would FAIL with old behavior (casting to float32)
         # but PASSES with new behavior (keeping as double)
         torch.testing.assert_close(result, expected, rtol=1e-12, atol=1e-12)
-        
+
         # Demonstrate what the old behavior would have produced
         # (simulate casting to float32 and back to double)
         float32_casted_value = float(precise_value)  # Simulates old behavior
-        old_behavior_expected = float32_casted_value ** 3 * 1000000.0
-        
+        old_behavior_expected = float32_casted_value**3 * 1000000.0
+
         # Verify that old and new behaviors produce different results
         self.assertNotAlmostEqual(
-            result.cpu().numpy()[0], 
-            old_behavior_expected, 
+            result.cpu().numpy()[0],
+            old_behavior_expected,
             places=8,
-            msg="Old and new behaviors should produce different results for high precision values"
+            msg="Old and new behaviors should produce different results for high precision values",
         )
-        
+
         # But new behavior should match the high precision computation
         self.assertAlmostEqual(
-            result.cpu().numpy()[0], 
-            expected_value, 
+            result.cpu().numpy()[0],
+            expected_value,
             places=12,
-            msg="New behavior should preserve double precision"
+            msg="New behavior should preserve double precision",
         )
 
 
