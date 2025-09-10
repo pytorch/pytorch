@@ -1698,76 +1698,10 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
-            @contextmanager
-            def _temp_register_custom_call_function_hop_to_predispatch():
-                """
-                This context manager temporarily adds pre-dispatch implementation
-                to custom_function_call HOP which is used to deal with vmap + custom
-                autograd function. This can show up in following scenario:
-                1. Using TransformGetItemToIndex tf mode will redirect slicing to mod_index custom
-                   autograd function
-                2. If the body under tf mode is in vmap region, we trigger special HOP called custom_function_call
-                3. In pre-dispatch export, we don't know how to deal with this HOP, so we just desugar it
-                   and call the underlying custom autograd function. This will do the right thing when we lower to
-                   inference because exported graph contains enough info to turn on vmap.
-
-                We do this only for export because in other cases, we should never get into predispatch mode.
-                """
-                from torch._functorch.autograd_function import custom_function_call
-                from torch._subclasses.fake_impls import _deregister_op_impl
-                from torch.export.custom_ops import (
-                    _call_custom_autograd_function_in_pre_dispatch,
-                )
-                from torch.fx.experimental.proxy_tensor import (
-                    ProxyTorchDispatchMode,
-                    track_tensor_tree,
-                )
-
-                saved_py_table = custom_function_call.python_key_table.copy()
-
-                def trace_custom_function_call(mode, function_cls, *args, **kwargs):
-                    if mode.pre_dispatch:
-                        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
-                        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-
-                        function_cls_name = (
-                            f"{function_cls.__module__}.{function_cls.__qualname__}"
-                        )
-
-                        out_proxy = mode.tracer.create_proxy(
-                            "call_function",
-                            _call_custom_autograd_function_in_pre_dispatch,
-                            (function_cls_name,)
-                            + tuple(proxy_args),  # String name as first arg
-                            proxy_kwargs,
-                        )
-
-                        out = function_cls.apply(*args, **kwargs)
-                        return track_tensor_tree(
-                            out, out_proxy, constant=None, tracer=mode.tracer
-                        )
-                    raise AssertionError(
-                        "We should never trace into custom_function_call at python key"
-                    )
-
-                custom_function_call.python_key_table[ProxyTorchDispatchMode] = (
-                    trace_custom_function_call
-                )
-
-                try:
-                    yield
-
-                finally:
-                    custom_function_call.python_key_table.clear()
-                    custom_function_call.python_key_table.update(saved_py_table)
-                    custom_function_call._dispatch_cache.clear()
-                    _deregister_op_impl(custom_function_call)
-
             with (
                 ctx,
                 override_getattribute_for_subclasses(flat_args),
                 _maybe_restore_grad_state(),
-                _temp_register_custom_call_function_hop_to_predispatch(),
             ):
                 gm = make_fx(
                     wrapped_fn,

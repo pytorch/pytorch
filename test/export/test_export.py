@@ -13521,8 +13521,10 @@ graph():
     %lazy_load_decompositions : [num_users=0] = call_function[target=torch._functorch.predispatch.lazy_load_decompositions](args = (), kwargs = {})
     %_vmap_increment_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_increment_nesting](args = (4, error), kwargs = {})
     %_add_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%indices, 0, 1), kwargs = {})
-    %_call_custom_autograd_function_in_pre_dispatch : [num_users=1] = call_function[target=torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch](args = (torch._dynamo._trace_wrapped_higher_order_op.ModIndex, %b_base, [%_add_batch_dim]), kwargs = {})
-    %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%_call_custom_autograd_function_in_pre_dispatch, 1, 4, 0), kwargs = {})
+    %torch__dynamo__trace_wrapped_higher_order_op_mod_index0 : [num_users=1] = get_attr[target=torch__dynamo__trace_wrapped_higher_order_op_ModIndex0]
+    %function_const_func_spec0 : [num_users=1] = get_attr[target=function_const_func_spec0]
+    %flat_apply : [num_users=1] = call_function[target=torch.ops.higher_order.flat_apply](args = (%function_const_func_spec0, %torch__dynamo__trace_wrapped_higher_order_op_mod_index0, torch._dynamo._trace_wrapped_higher_order_op.ModIndex, %b_base, %_add_batch_dim), kwargs = {})
+    %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%flat_apply, 1, 4, 0), kwargs = {})
     %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
     return (_remove_batch_dim,)""",
         )

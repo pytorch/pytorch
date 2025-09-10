@@ -118,6 +118,8 @@ def impl(func, in_spec, *flat_args):
             return all(map(is_valid_output, x))
         return is_graphable(x)
 
+    if not is_valid_output(out):
+        breakpoint()
     assert is_valid_output(out)
     return out
 
