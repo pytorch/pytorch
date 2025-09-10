@@ -23,7 +23,7 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, FlexibleLayout, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
@@ -745,16 +745,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         layout,
     )
 
-    aten_layout = layout
-    if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
-        aten_layout = FlexibleLayout(
-            device=layout.device, dtype=layout.dtype, size=layout.size
-        )
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, [aten_mm], "mm", aten_layout)
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [aten_mm], "mm"))
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
@@ -942,18 +935,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
-    aten_layout = layout
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
-        # Use a FlexibleLayout if we are not autotuning.
-        # This allows padding strides for the output.
-        from torch._inductor.ir import FixedLayout, FlexibleLayout
-
-        if isinstance(layout, FixedLayout):
-            aten_layout = FlexibleLayout(
-                device=layout.device, dtype=layout.dtype, size=layout.size
-            )
         # TODO(coconutruben): combine this with the main flow of addmm through
         # a subgraph or something as inp vs inp_expanded causes some slight numeric
         # differences
@@ -965,7 +949,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 kernel_inputs,
                 [aten_addmm],
                 name,
-                aten_layout,
             )
         )
         return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
