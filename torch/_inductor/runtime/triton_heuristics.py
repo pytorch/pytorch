@@ -2923,6 +2923,12 @@ def _persistent_reduction_configs(
                 )
             ]
 
+        # Blackwell likes less num_warps
+        if configs[0].num_warps >= 4:
+            less_warps_cfg = copy.deepcopy(configs[0])
+            less_warps_cfg.num_warps = less_warps_cfg.num_warps // 4
+            configs.append(less_warps_cfg)
+
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
