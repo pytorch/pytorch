@@ -234,6 +234,20 @@ dunder_attrs_assumed_constants = (
 )
 
 
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
+    # Refer to index in the frame's localsplus directly.
+    # NOTE: name order for a code object doesn't change.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
+    framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    framelocals_idx = (
+        len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
+    )
+    return framelocals_idx
+
+
 class IndentedBufferWithPrefix(IndentedBuffer):
     def prefix(self) -> str:
         return "| " * (self._indent * self.tabwidth)
@@ -1342,20 +1356,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # Refer to index in the frame's localsplus directly.
-            # NOTE: name order for a code object doesn't change.
-            # NOTE: we need to find the LAST matching index because <= 3.10 contains
-            # duplicate names in the case of cells: a name can be both local and cell
-            # and will take up 2 slots of the frame's localsplus. The correct behavior
-            # is to refer to the cell, which has a higher index.
-            framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                self.f_code
-            )
-            framelocals_idx = (
-                len(framelocals_names_reversed)
-                - framelocals_names_reversed.index(source.local_name)
-                - 1
-            )
+            framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
