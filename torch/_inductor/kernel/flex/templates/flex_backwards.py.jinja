@@ -396,6 +396,15 @@ def bwd_dq_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
+
+    {# Note: Selective masking DQ
+    We load elements beyond KV_LEN w/ zero, some score mods may convert this elements to NaN
+    Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
+    We only need to do this on the m1 dim since these elements take part in the final reduction
+    for DQ #}
+    if not IS_DIVISIBLE:
+        post_mod_scores = tl.where(offs_n2[:, None] < KV_LEN, post_mod_scores, float("-inf"))
+
     if not IS_FULL_BLOCKS:
         {{ modification(
             subgraph_number=2,
@@ -430,6 +439,9 @@ def bwd_dq_block_mn(
         n="n",
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
+    {# See Note Selective masking DQ #}
+    if not IS_DIVISIBLE:
+        grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if WRITE_DQ:
@@ -573,11 +585,18 @@ def bwd_dkdv_block_mn(
         out="qkT"
     ) | indent_except_first(1) }}
 
+    {# Note: Selective masking DK/DV
+    We load elements beyond Q_LEN w/ zero, some score mods may convert this elements to NaN
+    Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
+    We only need to do this on the m1 dim since these elements take part in the final reduction
+    for DK/DV #}
+    if not IS_DIVISIBLE:
+        post_mod_scores = tl.where(offs_m1[:, None] < Q_LEN, post_mod_scores, float("-inf"))
+
     if not IS_FULL_BLOCKS:
         {{ modification(
             subgraph_number=2,
             output_name="mask_mod_output",
-            score="qkT",
             b="off_z",
             h="off_hq",
             m="m",
@@ -611,6 +630,10 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
+
+    {# See Note: Selective masking DK/DV#}
+    if not IS_DIVISIBLE:
+        grad_scores = tl.where(offs_m1[:, None] < Q_LEN, grad_scores, 0.0)
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if not WRITE_DQ:
