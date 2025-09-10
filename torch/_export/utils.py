@@ -488,6 +488,7 @@ def register_dataclass_as_pytree_node(
         f"Only dataclasses can be registered with this function: {cls}"
     )
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
@@ -501,10 +502,12 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, [flat_names, none_names]
 
+    @torch._dynamo.dont_skip_tracing
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
