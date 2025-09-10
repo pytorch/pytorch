@@ -6851,10 +6851,10 @@ class TestCompileKernel(TestCase):
         kernel_source = """
         __global__ void large_shared_memory_kernel(const float* input, float* output, int n) {
             extern __shared__ float shared_data[];
-            
+
             int tid = threadIdx.x;
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
-            
+
             // Load data into shared memory
             if (idx < n) {
                 shared_data[tid] = input[idx];
@@ -6862,7 +6862,7 @@ class TestCompileKernel(TestCase):
                 shared_data[tid] = 0.0f;
             }
             __syncthreads();
-            
+
             // Perform reduction in shared memory
             for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
                 if (tid < stride) {
@@ -6870,7 +6870,7 @@ class TestCompileKernel(TestCase):
                 }
                 __syncthreads();
             }
-            
+
             // Write result
             if (tid == 0) {
                 output[blockIdx.x] = shared_data[0];
@@ -6885,7 +6885,7 @@ class TestCompileKernel(TestCase):
         # Test with 64KB shared memory (requires >48KB)
         threads_per_block = 1024  # 1024 threads * 4 bytes = 4KB, but we'll request 64KB
         shared_mem_size = 64 * 1024  # 64KB
-        
+
         # Configure shared memory for this kernel
         kernel.set_shared_memory_config(shared_mem_size)
 
@@ -7091,58 +7091,6 @@ class TestCompileKernel(TestCase):
         result = add_scalar_op(input_data, scalar_val)
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
-    @unittest.skipIf(not TEST_CUDA, "No CUDA")
-    def test_compile_kernel_large_shared_memory(self):
-        """Test that kernels can use >48KB shared memory with proper configuration."""
-        # Kernel that uses 64KB of shared memory (more than the 48KB default limit)
-        kernel_source = """
-        extern "C"
-        __global__ void large_shared_memory_kernel(float* output, int n) {
-            // Use 64KB of shared memory (16K floats * 4 bytes = 64KB)
-            extern __shared__ float shared_data[];
-            
-            int idx = blockIdx.x * blockDim.x + threadIdx.x;
-            int tid = threadIdx.x;
-            
-            // Initialize shared memory
-            if (tid < 16384) {  // 16K floats
-                shared_data[tid] = (float)tid;
-            }
-            __syncthreads();
-            
-            // Use shared memory data
-            if (idx < n && tid < 16384) {
-                output[idx] = shared_data[tid % 1024];  // Use some of the shared data
-            }
-        }
-        """
-        
-        from torch.cuda import _compile_kernel
-        
-        compiled_kernel = _compile_kernel(kernel_source, "large_shared_memory_kernel")
-        
-        # Configure for 64KB shared memory (this is the key feature being tested)
-        shared_mem_size = 64 * 1024  # 64KB
-        compiled_kernel.set_shared_memory_config(shared_mem_size)
-        
-        # Test the kernel works
-        n = 1024
-        output = torch.zeros(n, device="cuda", dtype=torch.float32)
-        
-        compiled_kernel(
-            grid=(1, 1, 1),
-            block=(1024, 1, 1),
-            args=[output, n],
-            shared_mem=shared_mem_size,  # Request the large shared memory
-        )
-        
-        # Verify the results (should contain values from shared memory)
-        output_cpu = output.cpu()
-        # Check that we get expected pattern (tid % 1024)
-        expected = torch.arange(1024, dtype=torch.float32)
-        torch.testing.assert_close(output_cpu, expected)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
