@@ -328,7 +328,7 @@ def select_int_strategy(op_schema: OpSchema) -> StrategyType:
         output_specs = input_specs
         if input_specs.is_sharded():
             # handle cases with sharded_dim != selected_dim
-            output_placements = shift_shard_dims_after_insert(
+            output_placements = shift_shard_dims_after_remove(
                 input_specs.placements, selected_dim
             )
             output_specs = DTensorSpec(
