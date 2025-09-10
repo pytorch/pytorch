@@ -507,18 +507,17 @@ class TestDTensorOps(DTensorOpTestBase):
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
 
-    # only allow float dytpe for now, we can relax this constraint
-    # when feel necessary later (i.e when adding quantization support).
-    @suppress_warnings
-    @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
-    def test_dtensor_op_db(self, dtype, op):
+    def run_opinfo_test(
+        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
+    ):
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 
         # test each op with dist tensor inputs and normal inputs
         def test():
-            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=True)
+            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
             for sample_input in samples:
+                if not sample_inputs_filter(sample_input):
+                    continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
@@ -530,6 +529,14 @@ class TestDTensorOps(DTensorOpTestBase):
                 #     func(*args, **kwargs, out=expected)
 
         self.check_dtensor_func(test, op)
+
+    # only allow float dytpe for now, we can relax this constraint
+    # when feel necessary later (i.e when adding quantization support).
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
+    def test_dtensor_op_db(self, dtype, op):
+        self.run_opinfo_test(dtype, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
         flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
@@ -643,6 +650,18 @@ class TestDTensorOps(DTensorOpTestBase):
                     print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
                 else:
                     print(f"xfail('{opinfo.name}'),")
+
+    def test_one_hot(self):
+        ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
+        assert len(ops) == 1
+        op = ops[0]
+        # num_classes = -1 appears to have a bug with dtensor.max().item()
+        self.run_opinfo_test(
+            torch.int64,
+            op,
+            requires_grad=False,
+            sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
+        )
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)

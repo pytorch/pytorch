@@ -135,7 +135,7 @@ triton_grouped_mm_source = r"""
 {{def_kernel("a_ptr", "b_ptr")}}
 {%- endif %}
 {%- endif %}
-    tidx = tl.program_id(0)
+    tidx = tl.program_id(0).to(INDEX_DTYPE)
 
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D %}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D %}

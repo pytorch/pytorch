@@ -3937,6 +3937,17 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
+        @torch._inductor.config.patch("triton.cudagraph_or_error", True)
+        def test_cudagraph_or_error(self):
+            def f(x):
+                x.add_(1)
+                return x
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            with self.assertRaises(RuntimeError):
+                f(torch.tensor(1, device="cuda"))
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):

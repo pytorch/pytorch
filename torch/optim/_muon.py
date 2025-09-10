@@ -61,8 +61,10 @@ def _zeropower_via_newtonschulz(
     # Perform the NS iterations
     for _ in range(ns_steps):
         gram_matrix = ortho_grad @ ortho_grad.T
-        gram_update = b * gram_matrix + c * gram_matrix @ gram_matrix
-        ortho_grad = a * ortho_grad + gram_update @ ortho_grad
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
 
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T

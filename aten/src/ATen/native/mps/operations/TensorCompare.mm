@@ -335,6 +335,9 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 }
 
 static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  if (iter.numel() == 0) {
+    return;
+  }
   const auto& self = iter.input(0);
   auto& out = iter.output(0);
   @autoreleasepool {

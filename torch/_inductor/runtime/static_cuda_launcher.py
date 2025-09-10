@@ -54,7 +54,19 @@ class StaticallyLaunchedCudaKernel:
             launch_enter = triton_knobs.runtime.launch_enter_hook
             launch_exit = triton_knobs.runtime.launch_exit_hook
 
-        if launch_enter is not None or launch_exit is not None:
+        def hook_is_empty(hook: Any) -> bool:
+            if hook is None:
+                return True
+            if (
+                triton_knobs
+                and (HookChain := getattr(triton_knobs, "HookChain", None)) is not None
+                and isinstance(hook, HookChain)
+            ):
+                # Support hooks after https://github.com/triton-lang/triton/pull/7866
+                return len(hook.calls) == 0
+            return False
+
+        if not hook_is_empty(launch_enter) or not hook_is_empty(launch_exit):
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )

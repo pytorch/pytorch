@@ -117,19 +117,19 @@ conv2d_template = TritonTemplate(
     stride_wh = {{stride("W", 2)}}
     stride_ww = {{stride("W", 3)}}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = nhw % OUT_W
     nh = nhw // OUT_W
     idx_y_h = nh % OUT_H
     idx_n = nh // OUT_H
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -245,21 +245,21 @@ conv3d_template = TritonTemplate(
     stride_wh = {{stride("W", 3)}}
     stride_ww = {{stride("W", 4)}}
 
-    ndhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    ndhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = ndhw % OUT_W
     ndh = ndhw // OUT_W
     idx_y_h = ndh % OUT_H
     nd = ndh // OUT_H
     idx_y_d = nd % OUT_D
     idx_n = nd // OUT_D
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}

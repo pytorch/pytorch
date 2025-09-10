@@ -282,6 +282,13 @@ class Verifier(metaclass=_VerifierMeta):
                         if type(attr).__name__ == "LoweredBackendModule":
                             if (
                                 _is_type("backend_id", str)
+                                and hasattr(attr, "original_module")
+                                and hasattr(attr, "module_name")
+                                and getattr(attr, "backend_id", None) == "aoti"
+                            ):
+                                continue
+                            if (
+                                _is_type("backend_id", str)
                                 and _is_type("processed_bytes", bytes)
                                 and _is_type("compile_specs", list)
                                 and hasattr(attr, "original_module")

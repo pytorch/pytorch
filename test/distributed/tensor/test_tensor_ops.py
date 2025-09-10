@@ -93,6 +93,19 @@ class DistTensorOpsTest(DTensorTestBase):
             dst_tensor.copy_(src_tensor)
             self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
 
+        # as a pointwise op, need to keep Partial placements without redistribute
+        src_tensor = torch.randn((64, 1))
+        dst_tensor = torch.zeros(16, 32, 64, 128)
+        src_specs = [[Partial()]]
+        dst_specs = [[Partial()]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = DTensor.from_local(src_tensor, device_mesh, src_spec)
+            dst_dtensor = DTensor.from_local(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (Partial(),))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
+
     @with_comms
     def test_contiguous(self):
         device_mesh = self.build_device_mesh()

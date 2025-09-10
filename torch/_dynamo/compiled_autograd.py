@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
@@ -343,6 +344,10 @@ class AutogradCompilerInstance:
 
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
+
+        # Turn on PythonDispatcher during initial trace to make it identifiable
+        # that tracing is happening, which is needed to prevent hashing symints
+        self.stack.enter_context(enable_python_dispatcher())
 
         # tensor inputs to fake tensors
         x = inputs[0]  # mypy will complain about unbound x
@@ -1507,7 +1512,8 @@ def _enable(
         else:
             # we need to import this, because user might not have imported it if they directly use this context manager
             # we need to lazily import it, because of circular dependencies
-            import torch._inductor.cudagraph_trees
+            if torch.cuda.is_available():
+                from torch._inductor import cudagraph_trees  # noqa: F401
 
             (
                 prior_compiler,

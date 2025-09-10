@@ -151,7 +151,7 @@ at::Tensor async_input_mm_impl(
           reinterpret_cast<ElementB*>(b.data_ptr<at::BFloat16>()),
           stride_B,
       },
-      {{1, 1},
+      {{},
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C,
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),

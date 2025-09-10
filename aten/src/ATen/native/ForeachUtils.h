@@ -103,15 +103,13 @@ inline bool _check_tensors_share_device_and_dtype(
         tensor.is_non_overlapping_and_dense();
   };
 
-  for (const auto& tensorList : tensorLists) {
-    for (const auto& tensor : tensorList) {
-      if (!is_tensor_okay(tensor)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return std::all_of(
+      tensorLists.cbegin(),
+      tensorLists.cend(),
+      [&](const TensorList& tensorList) {
+        return std::all_of(
+            tensorList.cbegin(), tensorList.cend(), is_tensor_okay);
+      });
 }
 
 // Helper function called in check_fast_path_restrictions to check if
@@ -157,11 +155,9 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
     bool does_op_promote_integer_inputs_to_float = false) {
   for (const auto i : c10::irange(tensorList.size())) {
     // For division, integer inputs will result in float.
-    if (does_op_promote_integer_inputs_to_float) {
-      if (at::isIntegralType(
-              tensorList[i].scalar_type(), /*includeBool*/ true)) {
-        return false;
-      }
+    if (does_op_promote_integer_inputs_to_float &&
+        at::isIntegralType(tensorList[i].scalar_type(), /*includeBool*/ true)) {
+      return false;
     }
     if (!scalarList.empty()) {
       const auto& scalar =

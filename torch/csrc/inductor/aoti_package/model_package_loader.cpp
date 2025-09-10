@@ -445,7 +445,8 @@ class RAIIMinizArchive {
  public:
   RAIIMinizArchive(const std::string& zip_path) {
     mz_zip_zero_struct(&_zip_archive);
-    if (!mz_zip_reader_init_file(&_zip_archive, zip_path.c_str(), 0)) {
+    if (!mz_zip_reader_init_file(
+            &_zip_archive, normalize_path_separator(zip_path).c_str(), 0)) {
       throw std::runtime_error(fmt::format(
           "Failed to initialize zip archive: {}",
           mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
@@ -720,8 +721,15 @@ void AOTIModelPackageLoader::load_constants(
   for (const auto& it : constants_map) {
     if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
       updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
-    } else {
-      throw std::runtime_error("Constant not found: " + it.first);
+    } else if (check_full_update) {
+      std::string constant_fqns = "";
+      for (const auto& it2 : fqn_to_constant_name) {
+        constant_fqns += it2.first + ", ";
+      }
+      throw std::runtime_error(
+          "The constant with FQN " + it.first +
+          " was not found in the model. The available constants are: " +
+          constant_fqns);
     }
   }
 

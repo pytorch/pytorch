@@ -331,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -419,7 +419,7 @@ def _check_symint(
         # this means we deferred a guard from export analysis to runtime, let this pass
         # we'll add a runtime assert checking equality to this replacement expression
         pass
-    elif arg != symint:
+    elif arg != int(symint):
         path = get_keystr(keypath)
         if i is not None:
             path += f".shape[{i}]"

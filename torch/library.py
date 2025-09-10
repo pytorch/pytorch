@@ -104,7 +104,7 @@ class Library:
                 " is a reserved namespace. Please try creating a library with another name.",
             )
 
-        frame = traceback.extract_stack(limit=3)[0]
+        frame = traceback.extract_stack(limit=2)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno

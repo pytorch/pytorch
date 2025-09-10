@@ -1,13 +1,15 @@
 # flake8: noqa: B950
 import math
-import typing
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch.onnx.ops import _dtype_mappings
 
 
-_T = typing.TypeVar("_T", bound=Callable)
+# Use ParamSpec for better type preservation instead of bound Callable TypeVar
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 # ONNX to ATen decomp table
 ONNX_ATEN_DECOMP_TABLE: dict[torch._ops.OpOverload, Callable] = {}
@@ -21,10 +23,12 @@ _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
 )
 
 
-def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
+def _onnx_op(
+    op_type: str, opset_version: int
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator to register an ONNX operator with a custom implementation."""
 
-    def decorator(func: _T) -> _T:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         overload = f"opset{opset_version}"
         torch_op = torch.library.custom_op(
             f"onnx::{op_type}.{overload}", mutates_args=()

@@ -44,7 +44,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         shard_spec = [Shard(0)]
         input_size = (8, 4)
 
-        # NOTE: currently random initialization on cuda device has different
+        # NOTE: currently random initialization on gpu device has different
         # behavior from other devices. Unify the test once the behavior is unified.
         if not is_rng_supported_mesh(device_mesh):
             input_tensor = torch.randn(*input_size, device=self.device_type)
@@ -97,7 +97,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
     def test_init_with_user_generator(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
-        rng = torch.Generator(device="cuda").manual_seed(42)
+        rng = torch.Generator(device=self.device_type).manual_seed(42)
         t1 = torch.distributed.tensor.empty(
             (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
         )
@@ -126,7 +126,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # The DTensor random ops will use the same generator as the default one on the device.
 
         # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
-        torch.cuda.manual_seed(0)
+        torch.get_device_module(self.device_type).manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -592,8 +592,8 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @with_comms
     @skip_if_lt_x_gpu(8)
+    @with_comms
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh
         global_mesh = init_device_mesh(
