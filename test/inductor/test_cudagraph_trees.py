@@ -2349,7 +2349,7 @@ if HAS_CUDA_AND_TRITON:
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times(self):
+        def test_error_if_recompiling_too_many_times(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -2358,7 +2358,7 @@ if HAS_CUDA_AND_TRITON:
                 def forward(self, x):
                     return x * self.param
 
-            with capture_stderr() as captured_output:
+            with self.assertRaises(RuntimeError) as exc:
                 # We have 3 graphs here
                 #             None
                 #       /                           \
@@ -2376,62 +2376,23 @@ if HAS_CUDA_AND_TRITON:
                 fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
                 self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
-            FileCheck().check(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
+            error_msg1 = (
+                "function 0 exceeds max re-recording limit (=0) "
                 "on cudagraph node None due to static input data pointer changed."
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            )
+            error_msg2 = (
+                "If these re-recordings are expected, please set "
+                "torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit to "
+                "a larger number to allow more re-recording, or set to None to avoid "
+                "this check. Otherwise, please disable cudagraph for better performance."
+            )
 
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
-
-                def forward(self, x):
-                    return x * self.param
-
-            with capture_stderr() as captured_output:
-                with torch.device("cuda"):
-                    # We have 3 graphs here
-                    #             None
-                    #       /                           \
-                    # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
-                    # (bwd w/ p1, Graph 1)
-                    # All other graphs are skipped because we hit the max recording limit
-                    # (=0 for each node and function pair)
-                    fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
-                    for _ in range(3):
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-                    for _ in range(5):
-                        # Change static tensor address
-                        fn_compiled.param.data = torch.rand([2, 2], device="cuda")
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-            FileCheck().check_count(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
+            FileCheck().check(error_msg1).check(error_msg2).run(repr(exc.exception))
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
+        def test_error_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
             self,
         ):
             # By setting triton.cudagraph_support_input_mutation=True, we force re-record
@@ -2450,34 +2411,31 @@ if HAS_CUDA_AND_TRITON:
                 y = foo(inp)
                 z = goo(y)
 
-            with capture_stderr() as captured_output:
+            with self.assertRaises(RuntimeError) as exc:
                 torch.compiler.cudagraph_mark_step_begin()
                 x = torch.rand(2, 3, device="cuda")
                 y = foo(x)
                 y_clone = y.clone()
                 z = goo(y_clone)
 
-            # eager function should run successfully
-            for _ in range(5):
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.rand(2, 3, device="cuda")
-                y = foo(x)
-                y_clone = y.clone()
-                z = goo(y_clone)
+            error_msg1 = (
+                "function 1 exceeds max re-recording limit (=0) "
+                "on cudagraph node 0 due to cudagraph managed tensor data pointer changed."
+            )
+            error_msg2 = (
+                "If these re-recordings are expected, please set "
+                "torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit to "
+                "a larger number to allow more re-recording, or set to None to avoid "
+                "this check. Otherwise, please disable cudagraph for better performance."
+            )
 
-            FileCheck().check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node 0 due to cudagraph managed tensor data pointer changed",
-                1,
-                exactly=True,
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            FileCheck().check(error_msg1).check(error_msg2).run(repr(exc.exception))
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
-        def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
+        def test_not_error_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
 
@@ -2591,7 +2549,7 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
-        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_error_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached1(self):
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
@@ -2608,22 +2566,26 @@ if HAS_CUDA_AND_TRITON:
 
             mod = torch.compile(Mod(), mode="reduce-overhead")
 
-            with capture_stderr() as captured_output:
+            with self.assertRaises(RuntimeError) as exc:
                 for batch_size in range(10, 40, 10):
                     iter(batch_size, mod)
 
-            FileCheck().check(
+            error_msg = (
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
                 "extra overhead. We have observed 2 distinct sizes. "
                 "Please consider the following options for better performance: "
                 "a) padding inputs to a few fixed number of shapes; or b) set "
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
-                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
-                "to silence this warning."
-            ).run("\n".join(captured_output))
+                "If re-recording for many input sizes are expected, please set "
+                "torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit "
+                "to a larger number (e.g., 128) to allow more CUDAGraph re-recording, "
+                "or set it to be None to skip this error check."
+            )
 
-        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+            FileCheck().check(error_msg).run(repr(exc.exception))
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_error_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached2(self):
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
@@ -2646,58 +2608,25 @@ if HAS_CUDA_AND_TRITON:
                 for _ in range(3):
                     mod(q, k, v)
 
-            with capture_stderr() as captured_output:
+            with self.assertRaises(RuntimeError) as exc:
                 for batch_size in range(10, 40, 10):
                     for length in range(10, 30, 10):
                         iter(batch_size, length)
 
-            print(captured_output)
-            FileCheck().check(
+            error_msg = (
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
                 "extra overhead. We have observed 2 distinct sizes. "
                 "Please consider the following options for better performance: "
                 "a) padding inputs to a few fixed number of shapes; or b) set "
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
-                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
-                "to silence this warning."
-            ).run(captured_output[0])
+                "If re-recording for many input sizes are expected, please set "
+                "torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit "
+                "to a larger number (e.g., 128) to allow more CUDAGraph re-recording, "
+                "or set it to be None to skip this error check."
+            )
 
-        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
-        def test_warn_once_if_dynamic_shape_limit_reached(self):
-            class Mod(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.linear = torch.nn.Linear(3, 3, device="cuda")
-
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    return self.linear(x)
-
-            def iter(batch_size: int, mod: torch.nn.Module):
-                x = torch.rand((batch_size, 3), device="cuda")
-                for _ in range(3):
-                    mod(x)
-
-            mod = torch.compile(Mod(), mode="reduce-overhead")
-
-            with capture_stderr() as captured_output:
-                for batch_size in range(10, 200, 10):
-                    iter(batch_size, mod)
-
-            print(captured_output)
-
-            FileCheck().check_count(
-                "CUDAGraph supports dynamic shapes by recording a new graph for each "
-                "distinct input size. Recording too many CUDAGraphs may lead to "
-                "extra overhead. We have observed 2 distinct sizes. "
-                "Please consider the following options for better performance: "
-                "a) padding inputs to a few fixed number of shapes; or b) set "
-                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
-                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
-                "to silence this warning.",
-                1,
-                exactly=True,
-            ).run("\n".join(captured_output))
+            FileCheck().check(error_msg).run(repr(exc.exception))
 
         @torch._inductor.config.patch("cpp_wrapper", 1)
         def test_cpp_wrapper(self):

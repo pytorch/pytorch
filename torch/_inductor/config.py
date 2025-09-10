@@ -1241,11 +1241,11 @@ class triton:
     # cudagraph managed tensor data pointer changed.
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
-    cudagraph_unexpected_rerecord_limit = 128
+    cudagraph_unexpected_rerecord_limit: Optional[int] = 128
 
-    # Warn loudly when the number of cudagraphs due to dynamic shape
+    # Error when the number of cudagraphs due to dynamic shape
     # exceeds this limit
-    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
+    cudagraph_dynamic_shape_error_limit: Optional[int] = 8
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

@@ -72,7 +72,7 @@ from torch._inductor.cudagraph_utils import (
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
-    maybe_warning_due_to_dynamic_shape,
+    maybe_error_due_to_dynamic_shape,
     ModelType,
     OutputType,
     PlaceholderInfo,
@@ -371,13 +371,9 @@ def cudagraphify_impl(
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
     get_ints: Any = operator.itemgetter(*int_key) if int_key else lambda _: None
 
-    has_warn = False
-
     del inputs
 
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
-        nonlocal has_warn
-
         int_key = get_ints(inputs)
 
         if not is_cudagraph_capture_sizes(int_key):
@@ -392,8 +388,7 @@ def cudagraphify_impl(
         else:
             log.info("recording cudagraph tree for symint key %s", int_key)
 
-        if not has_warn:
-            has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
+        maybe_error_due_to_dynamic_shape(fn_cache, int_key)
 
         # first get indices we need to check to align, then update our static inputs,
         # and finally copy
@@ -2062,7 +2057,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: Optional[GraphID], function_id: FunctionID
     ) -> bool:
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
+        if (
+            torch._dynamo.config.inline_inbuilt_nn_modules
+            or torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit is None
+        ):
             return False
 
         return (
@@ -2163,13 +2161,19 @@ class CUDAGraphTreeManager:
                 self.num_rerecord[curr_node_id][function_id] += 1
                 if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraph due to function {function_id.id} exceeding max "
-                        f"re-recording limit "
-                        f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
-                        f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}."
-                    )
-                    return self.ids_to_funcs[function_id].model(new_inputs)
+
+                    def error_msg() -> str:
+                        return (
+                            f"function {function_id.id} exceeds max re-recording limit "
+                            f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
+                            f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}. "
+                            "If these re-recordings are expected, please set "
+                            "torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit to "
+                            "a larger number to allow more re-recording, or set to None to avoid "
+                            "this check. Otherwise, please disable cudagraph for better performance."
+                        )
+
+                    raise RuntimeError(error_msg())
 
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1

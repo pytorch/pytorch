@@ -315,13 +315,13 @@ def log_data_ptr_mismatch(
     return error_msg
 
 
-def maybe_warning_due_to_dynamic_shape(
+def maybe_error_due_to_dynamic_shape(  # TODO
     fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
-) -> bool:
+) -> None:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
-    def warn_msg() -> str:
+    def error_msg() -> str:
         return (
             "CUDAGraph supports dynamic shapes by recording a new graph for each "
             "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -329,19 +329,18 @@ def maybe_warning_due_to_dynamic_shape(
             "Please consider the following options for better performance: "
             "a) padding inputs to a few fixed number of shapes; or b) set "
             "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
-            "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
-            "to silence this warning."
+            "If re-recording for many input sizes are expected, please set "
+            "torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit "
+            "to a larger number (e.g., 128) to allow more CUDAGraph re-recording, "
+            "or set it to be None to skip this error check."
         )
 
     if (
-        torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+        torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit
         and num_cudagraphs
-        > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+        > torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit
     ):
-        perf_hint_log.warning(warn_msg())
-        return True
-
-    return False
+        raise RuntimeError(error_msg())
 
 
 @dataclasses.dataclass(frozen=True)
