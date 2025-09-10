@@ -137,7 +137,6 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
-      # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
@@ -154,7 +153,6 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 1440
-      # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
@@ -173,7 +171,6 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
-      # disable monitor in perf tests for more investigation
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
