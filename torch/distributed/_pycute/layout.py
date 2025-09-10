@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -36,21 +35,35 @@ Definition of CuTe Layouts and functions to manipulate them
 """
 
 from itertools import chain
-from typing import Any, Optional, Union
+from typing import Optional, TypeAlias, TypeGuard, Union
 
-from .int_tuple import *  # noqa: F403
+from .int_tuple import (
+    crd2idx,
+    flatten,
+    has_none,
+    IntTuple,
+    is_int,
+    is_tuple,
+    prefix_product,
+    product,
+    slice_,
+)
 
 
 # Type aliases
-LayoutOrIntTuple = Union["Layout", IntTuple]
-LayoutProfile = Optional[Union[tuple[Any, ...], "Layout"]]
+LayoutOrIntTuple: TypeAlias = Union["Layout", IntTuple]
+LayoutProfile: TypeAlias = Optional[Union[tuple[object, ...], "Layout"]]
+LayoutInput: TypeAlias = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
+CoordinateType: TypeAlias = Optional[
+    Union[int, IntTuple, tuple[object, ...]]
+]  # Input for slice_ and crd2idx functions
 
 
 class LayoutBase:
     pass
 
 
-def is_layout(x: Any) -> bool:
+def is_layout(x: object) -> TypeGuard["Layout"]:
     return isinstance(x, LayoutBase)
 
 
@@ -76,7 +89,7 @@ class Layout(LayoutBase):
             return 1
 
     # operator ()    (map coord to idx)
-    def __call__(self, *args: Any) -> Union["Layout", int]:
+    def __call__(self, *args: CoordinateType) -> Union["Layout", int]:
         """
         Map a logical coordinate to a linear index (Coord has no Underscore slice operators)
         OR
@@ -86,19 +99,19 @@ class Layout(LayoutBase):
         """
         if has_none(args):
             if len(args) == 1:
-                return Layout(slice_(args[0], self.shape), slice_(args[0], self.stride))
+                return Layout(slice_(args[0], self.shape), slice_(args[0], self.stride))  # type: ignore[arg-type]
             else:
-                return Layout(slice_(args, self.shape), slice_(args, self.stride))
+                return Layout(slice_(args, self.shape), slice_(args, self.stride))  # type: ignore[arg-type]
         else:
             if len(args) == 1:
-                return crd2idx(args[0], self.shape, self.stride)
+                return crd2idx(args[0], self.shape, self.stride)  # type: ignore[arg-type]
             else:
-                return crd2idx(args, self.shape, self.stride)
+                return crd2idx(args, self.shape, self.stride)  # type: ignore[arg-type]
 
     # operator []    (get-i like tuples)
     def __getitem__(self, i: int) -> "Layout":
         if is_tuple(self.shape):
-            return Layout(self.shape[i], self.stride[i])
+            return Layout(self.shape[i], self.stride[i])  # type: ignore[index]
         else:
             assert i == 0
             return Layout(self.shape, self.stride)
@@ -109,7 +122,7 @@ class Layout(LayoutBase):
 
     # cosize(layout)   Size of the codomain
     def cosize(self) -> int:
-        return self(self.size() - 1) + 1
+        return self(self.size() - 1) + 1  # type: ignore[operator]
 
     # print and str
     def __str__(self) -> str:
@@ -123,9 +136,9 @@ class Layout(LayoutBase):
 # Make Layout from a list of layouts (each layout it's own mode in the result)
 def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
-        layouts = layouts[0]
+        layouts = layouts[0]  # type: ignore[assignment]
 
-    shape, stride = zip(*((a.shape, a.stride) for a in layouts))
+    shape, stride = zip(*((a.shape, a.stride) for a in layouts))  # type: ignore[union-attr]
     return Layout(shape, stride)
 
 
@@ -133,7 +146,7 @@ def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
 def size(layout: LayoutOrIntTuple) -> int:
     if is_layout(layout):
         return layout.size()
-    return product(layout)
+    return product(layout)  # type: ignore[arg-type]
 
 
 # Size of the codomain
@@ -146,7 +159,7 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
-            chain(
+            chain(  # type: ignore[arg-type]
                 (coalesce(layout[i], profile[i]) for i in range(0, len(profile))),
                 (layout[i] for i in range(len(profile), len(layout))),
             )
@@ -181,7 +194,7 @@ def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
-            chain(
+            chain(  # type: ignore[arg-type]
                 (filter(layout[i], profile[i]) for i in range(0, len(profile))),
                 (layout[i] for i in range(len(profile), len(layout))),
             )
@@ -203,9 +216,7 @@ def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
 
 # Layout composition
 # Use tuples-of-layouts to perform this operation by-mode and None as no-op
-def composition(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     if layoutB is None:
         return layoutA
     elif is_int(layoutB):
@@ -213,35 +224,35 @@ def composition(
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(
+            chain(  # type: ignore[arg-type]
                 (composition(layoutA[i], layoutB[i]) for i in range(0, len(layoutB))),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
-    elif is_tuple(layoutB.shape):
-        return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)
+    elif is_tuple(layoutB.shape):  # type: ignore[union-attr]
+        return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)  # type: ignore[arg-type,union-attr]
 
-    if layoutB.stride == 0:
-        return Layout(layoutB.shape, 0)
+    if layoutB.stride == 0:  # type: ignore[union-attr]
+        return Layout(layoutB.shape, 0)  # type: ignore[union-attr]
     else:
         result_shape = []
         result_stride = []
-        rest_shape = layoutB.shape
-        rest_stride = layoutB.stride
+        rest_shape = layoutB.shape  # type: ignore[union-attr]
+        rest_stride = layoutB.stride  # type: ignore[union-attr]
         flat_A = coalesce(layoutA)
         for curr_shape, curr_stride in zip(
             flatten(flat_A.shape)[:-1], flatten(flat_A.stride)[:-1]
         ):
-            assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0
-            new_shape = min(max(1, curr_shape // rest_stride), rest_shape)
+            assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0  # type: ignore[operator]
+            new_shape = min(max(1, curr_shape // rest_stride), rest_shape)  # type: ignore[operator]
 
             if new_shape != 1:
                 result_shape.append(new_shape)
                 result_stride.append(rest_stride * curr_stride)
 
-            rest_shape = rest_shape // new_shape
+            rest_shape = rest_shape // new_shape  # type: ignore[operator]
             rest_stride = -(
-                -rest_stride // curr_shape
+                -rest_stride // curr_shape  # type: ignore[operator]
             )  # Python exclusive impl: "//" is always floor div so == ceil_div(abs(rest_stride), curr_shape) * signum(rest_stride)
 
         if rest_shape != 1 or len(result_shape) == 0:
@@ -249,9 +260,9 @@ def composition(
             result_stride.append(rest_stride * flatten(flat_A.stride)[-1])
 
         if len(result_shape) == 1:
-            return Layout(result_shape[0], result_stride[0])
+            return Layout(result_shape[0], result_stride[0])  # type: ignore[arg-type]
         else:
-            return Layout(tuple(result_shape), tuple(result_stride))
+            return Layout(tuple(result_shape), tuple(result_stride))  # type: ignore[arg-type]
 
 
 # Layout complement
@@ -263,7 +274,7 @@ def complement(layout: LayoutOrIntTuple, max_idx: int = 1) -> Layout:
     result_stride = []
     current_idx = 1
 
-    sorted_DS = sorted(zip(flatten(layout.stride), flatten(layout.shape)))
+    sorted_DS = sorted(zip(flatten(layout.stride), flatten(layout.shape)))  # type: ignore[union-attr]
     for stride, shape in sorted_DS:
         if stride == 0 or shape == 1:
             continue
@@ -293,9 +304,9 @@ def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
     result_stride = []
     current_idx = 1
 
-    flat_shape = flatten(layout.shape)
-    flat_stride = flatten(layout.stride)
-    sorted_DSA = sorted(zip(flat_stride, flat_shape, prefix_product(flat_shape)))
+    flat_shape = flatten(layout.shape)  # type: ignore[union-attr]
+    flat_stride = flatten(layout.stride)  # type: ignore[union-attr]
+    sorted_DSA = sorted(zip(flat_stride, flat_shape, prefix_product(flat_shape)))  # type: ignore[arg-type]
     for stride, shape, rstride in sorted_DSA:
         if shape == 1:
             continue
@@ -315,14 +326,12 @@ def left_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
         return None
     elif is_int(layout):
         return Layout(layout)
-    return right_inverse(make_layout(layout, complement(layout)))
+    return right_inverse(make_layout(layout, complement(layout)))  # type: ignore[arg-type]
 
 
 # Split a layout by the composition of B and the "rest"
 # Use tuples-of-layouts to perform this operation by-mode and None as no-op
-def logical_divide(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     if layoutB is None:
         return layoutA
     elif is_int(layoutB):
@@ -330,7 +339,7 @@ def logical_divide(
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(
+            chain(  # type: ignore[arg-type]
                 (
                     logical_divide(layoutA[i], layoutB[i])
                     for i in range(0, len(layoutB))
@@ -340,15 +349,14 @@ def logical_divide(
         )
 
     return composition(
-        layoutA, make_layout(layoutB, complement(layoutB, size(layoutA)))
+        layoutA,
+        make_layout(layoutB, complement(layoutB, size(layoutA))),  # type: ignore[arg-type]
     )
 
 
 # Reproduce a layoutA over a layoutB
 # Use tuples-of-layouts to perform this operation by-mode and None as no-op
-def logical_product(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     if layoutB is None:
         return layoutA
     elif is_int(layoutB):
@@ -356,7 +364,7 @@ def logical_product(
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(
+            chain(  # type: ignore[arg-type]
                 (
                     logical_product(layoutA[i], layoutB[i])
                     for i in range(0, len(layoutB))
@@ -367,29 +375,29 @@ def logical_product(
 
     return make_layout(
         layoutA,
-        composition(complement(layoutA, size(layoutA) * cosize(layoutB)), layoutB),
+        composition(complement(layoutA, size(layoutA) * cosize(layoutB)), layoutB),  # type: ignore[arg-type]
     )
 
 
 # Gather the modes from a hierarchical logical_divide or logical_product
 def hier_unzip(
-    splitter: Any,
+    splitter: object,
     layoutA: Layout,
-    layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]],
+    layoutB: LayoutInput,
 ) -> Layout:
     if layoutB is None:
         return make_layout(Layout(1, 0), layoutA)
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         # A layout with shape ((A,a),(B,b),(C,c))
-        split = make_layout(
+        split = make_layout(  # type: ignore[arg-type]
             hier_unzip(splitter, layoutA[i], layoutB[i]) for i in range(0, len(layoutB))
         )
         # Gather to shape ((A,B,C,...),(a,b,c,...,y,z))
         return make_layout(
-            make_layout(split[i][0] for i in range(0, len(layoutB))),
+            make_layout(split[i][0] for i in range(0, len(layoutB))),  # type: ignore[arg-type]
             make_layout(
-                chain(
+                chain(  # type: ignore[arg-type]
                     (split[i][1] for i in range(0, len(layoutB))),
                     (layoutA[i] for i in range(len(layoutB), len(layoutA))),
                 )
@@ -397,41 +405,33 @@ def hier_unzip(
         )
 
     # splitter must return a rank-2 layout
-    return splitter(layoutA, layoutB)
+    return splitter(layoutA, layoutB)  # type: ignore[operator]
 
 
 # Apply logical divide hierarchically and gather the split modes into two modes
-def zipped_divide(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def zipped_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     return hier_unzip(logical_divide, layoutA, layoutB)
 
 
 # Perform logical divide hierarchically and gather tiles (B-layouts) into a new mode
-def tiled_divide(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def tiled_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     result = zipped_divide(layoutA, layoutB)
-    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])
+    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])  # type: ignore[arg-type]
 
 
 # Apply logical product hierarchically and gather the split modes into two modes
-def zipped_product(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def zipped_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     return hier_unzip(logical_product, layoutA, layoutB)
 
 
 # Perform logical product hierarchically and gather tiles (B-layouts) into a new mode
-def tiled_product(
-    layoutA: Layout, layoutB: Optional[Union[Layout, IntTuple, tuple[Any, ...]]]
-) -> Layout:
+def tiled_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     result = zipped_product(layoutA, layoutB)
-    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])
+    return make_layout([result[0]] + [result[1][i] for i in range(len(result[1]))])  # type: ignore[arg-type]
 
 
-def slice_and_offset(crd: tuple[Any, ...], layout: Layout) -> tuple[Layout, int]:
+def slice_and_offset(crd: tuple[object, ...], layout: Layout) -> tuple[Layout, int]:
     return (
         Layout(slice_(crd, layout.shape), slice_(crd, layout.stride)),
-        crd2idx(crd, layout.shape, layout.stride),
+        crd2idx(crd, layout.shape, layout.stride),  # type: ignore[arg-type]
     )
