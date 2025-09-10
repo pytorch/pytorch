@@ -7041,6 +7041,7 @@ class TestCompileKernel(TestCase):
         compiled_kernel = _compile_kernel(kernel_source, "test_double_precision")
 
         # Test with high precision value that would lose precision if cast to float32
+        # float32 has 7 digits of precision, so we use a value with 15 digits
         high_precision_value = 1.23456789012345
         n = 10
 
