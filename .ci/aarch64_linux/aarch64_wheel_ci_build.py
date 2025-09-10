@@ -276,6 +276,8 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/wheelhouse/{repaired_wheel_name}",
             f"/{folder}/dist/{repaired_wheel_name}",
         )
+    else:
+        repaired_wheel_name = list_dir(f"/{folder}/dist")[0]
 
     print(f"Copying {repaired_wheel_name} to artifacts")
     shutil.copy2(
