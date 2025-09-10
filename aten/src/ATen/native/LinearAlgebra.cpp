@@ -1770,7 +1770,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 #if (defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()) || !defined(__aarch64__)
-  //For AArch64, disable ACL in bmm_out_or_baddbmm_ and prefer ArmPL; 
+  //For AArch64, disable ACL in bmm_out_or_baddbmm_ and prefer ArmPL;
   //for other devices, fall back to the mkldnn_matmul heuristic.
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
