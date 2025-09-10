@@ -107,24 +107,18 @@ CustomOutParamAnnotation = "__custom_out_param__"
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
         if allow_rhs_unbacked:
-            # TODO: We should check that the symbols are consistent
-            # with each other
             if isinstance(y, torch.SymInt):
                 continue
-        # NB: Naively, you would not expect to have to do an oblivious guard
-        # here because there is seemingly no broadcasting here, but in fact we
-        # use this in some situations to determine if we need to do an expand
-        # on the tensor because they don't line up, so you can definitely end
-        # up trying to prove u0 != 1 in this situation.  See
-        # python test/test_proxy_tensor.py -k test_cumsum_unbacked
-        if guard_size_oblivious(x != y):
+
+        # if we do not know, then they are not the same.
+        if guard_or_true(x != y):
             return False
 
     return True
@@ -265,12 +259,14 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
-        guard_size_oblivious,
         is_nested_int,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
     expected_stride_max = 1
@@ -325,14 +321,13 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 4:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
@@ -354,14 +349,13 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 5:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
@@ -426,7 +420,7 @@ def is_channels_last_contiguous_or_false_3d(a: Tensor) -> bool:
 
 
 # similar to is_contiguous_for_memory_format but return false on data dependency.
-def contiguous_for_memory_format_or_false(  # type: ignore[return]
+def is_contiguous_for_memory_format_or_false(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
     return is_contiguous_for_memory_format(
@@ -542,7 +536,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -576,11 +573,14 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and contiguous_for_memory_format_or_false(
+        is_contiguous = is_contiguous and is_contiguous_for_memory_format_or_false(
             t, memory_format=torch.contiguous_format
         )
-        is_channels_last = is_channels_last and contiguous_for_memory_format_or_false(
-            t, memory_format=torch.channels_last
+        is_channels_last = (
+            is_channels_last
+            and is_contiguous_for_memory_format_or_false(
+                t, memory_format=torch.channels_last
+            )
         )
 
     if is_contiguous and not is_channels_last:
@@ -595,11 +595,22 @@ def compute_elementwise_output_logical_to_physical_perm(
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
-
             if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
                 stride_b == 0
             ):
                 continue
+
+            if guard_or_false(stride_a == stride_b):
+                if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+                    return 1
+
+            # when stride_a = 1, we want stride_a < stride_b to be TRUE
+            # when stride_b = 1, we want stride_a < stride_b to be FALSE
+            elif guard_or_false(stride_a == 1):
+                return -1
+
+            elif guard_or_false(stride_b == 1):
+                return 1
 
             if guard_size_oblivious(stride_a < stride_b):
                 return -1
