@@ -7,10 +7,10 @@ import functools
 import operator
 import types
 import warnings
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _build_cache,
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
@@ -325,7 +326,7 @@ def default_decompositions() -> "CustomDecompTable":
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
-    ep,
+    ep: "ExportedProgram",
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
@@ -384,9 +385,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
+        assert isinstance(mod.graph._codegen, _PyTreeCodeGen)
         orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
+        assert out_spec is not None
         if out_spec.type not in (list, tuple):
             out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
@@ -570,8 +573,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         delattr(ep.graph_module, name)
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
-    fake_mode = detect_fake_mode(fake_args)
-    fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode  # type: ignore[assignment]
+    fake_mode_det = detect_fake_mode(fake_args)
+    fake_mode_ctx = contextlib.nullcontext() if fake_mode_det is None else fake_mode_det  # type: ignore[assignment]
     custom_triton_ops_decomposition_ctx = (
         contextlib.nullcontext
         if decompose_custom_triton_ops
@@ -579,7 +582,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     with (
         _ignore_backend_decomps(),
-        fake_mode,
+        fake_mode_ctx,
         _override_composite_implicit_decomp(cia_to_decomp),
         custom_triton_ops_decomposition_ctx(),
     ):
@@ -610,7 +613,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    new_outputs = list(gm.graph.nodes)[-1].args[0]
+    new_outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
 
     # rename the placeholders
     assert len(new_placeholders) == len(old_placeholders)
@@ -618,11 +621,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
         new_ph.name = new_ph.target = old_ph.name
 
     # handle name collisions with newly decomposed graph nodes
-    name_map = {ph.name: ph.name for ph in new_placeholders}
+    name_map = {}
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
+    for ph in new_placeholders:
+        name_map[ph.name] = ph.name
+        _build_cache(ph.name, find_available, used_names)
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             continue
-        node.name = _rename_without_collisions(name_map, node.name, node.name)
+        node.name = _rename_without_collisions(
+            name_map, find_available, used_names, node.name, node.name
+        )
 
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)
@@ -643,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
@@ -654,9 +667,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # update output specs
     gm.recompile()
-    for i, name in enumerate(_graph_output_names(gm)):
-        if isinstance(new_outputs[i], torch.fx.Node):
-            new_outputs[i].name = name
+    for output, name in zip(new_outputs, _graph_output_names(gm)):
+        if name is not None:
+            output.name = name
 
     # To match the output target with correct input for input mutations
     # need to find the old to new placeholder map
@@ -727,7 +740,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             for i, spec in enumerate(ep.graph_signature.input_specs)
             if isinstance(spec.arg, TensorArgument)
         }
-        for i, node in enumerate(new_outputs[len(output_specs) :]):
+        for node in new_outputs[len(output_specs) :]:
             source = gradients[node.name]
             spec = specs[source]  # type: ignore[index]
             if spec.kind == InputKind.PARAMETER:
@@ -779,9 +792,9 @@ def _remove_unneccessary_copy_op_pass(
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
-                    if (
-                        isinstance(out, torch.fx.Node)
-                        and out.name in new_graph_signature.buffers_to_mutate
+                    if isinstance(out, torch.fx.Node) and (
+                        out.name in new_graph_signature.buffers_to_mutate
+                        or out.name in new_graph_signature.parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -1034,6 +1047,8 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _guards_code: list[str]
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
@@ -1070,6 +1085,8 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+
+        self._guards_code = _convert_guards_to_code(_get_shape_env(self._graph_module))
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1208,7 +1225,9 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
+        class CallSpec(NamedTuple):
+            in_spec: Optional[pytree.TreeSpec]
+            out_spec: Optional[pytree.TreeSpec]
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -1364,13 +1383,20 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.nn.Module:
+    def module(self, check_guards=True) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
+
+        - When `check_guards=True` (default), a `_guards_fn` submodule is generated
+          and a call to a `_guards_fn` submodule is inserted right after placeholders
+          in the graph. This module checks guards on inputs.
+        - When `check_guards=False`, a subset of these checks are performed by a
+          forward pre-hook on the graph module. No `_guards_fn` submodule is generated.
+
         """
         from ._unlift import _unlift_exported_program_lifted_states
 
-        module = _unlift_exported_program_lifted_states(self)
+        module = _unlift_exported_program_lifted_states(self, check_guards=check_guards)
 
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
@@ -1662,3 +1688,25 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
+
+
+def _convert_guards_to_code(shape_env):
+    if shape_env is None:
+        return []
+
+    local_vars = {
+        var
+        for var, sources in shape_env.var_to_sources.items()
+        if all(
+            not isinstance(source, torch._dynamo.source.ConstantSource)
+            for source in sources
+        )
+    }
+    py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
+        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+    )
+    return [
+        py_printer.doprint(guard.expr)
+        for guard in shape_env.guards
+        if guard.expr.free_symbols.issubset(local_vars)
+    ]

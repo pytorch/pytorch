@@ -13,6 +13,7 @@ extern "C" {
 #define IS_PYTHON_3_12_PLUS PY_VERSION_HEX >= 0x030C0000
 #define IS_PYTHON_3_13_PLUS PY_VERSION_HEX >= 0x030D0000
 #define IS_PYTHON_3_14_PLUS PY_VERSION_HEX >= 0x030E0000
+#define IS_PYTHON_3_15_PLUS PY_VERSION_HEX >= 0x030F0000
 
 static inline int PyCode_GetNCellvars(PyCodeObject* code) {
 // gh-26364 added co_ncellvars to Python 3.11.0rc1

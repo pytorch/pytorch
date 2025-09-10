@@ -166,7 +166,7 @@ hf_Longformer,pass,4
 
 
 
-hf_Reformer,pass,5
+hf_Reformer,pass,8
 
 
 
@@ -181,7 +181,7 @@ hf_T5_base,pass,0
 
 
 
-hf_T5_generate,pass,5
+hf_T5_generate,pass,11
 
 
 

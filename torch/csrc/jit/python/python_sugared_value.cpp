@@ -1222,8 +1222,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
     return SpecialFormValue::create(prim::isinstance);
+  } else if (obj.ptr() == py::module::import("torch").attr("_check").ptr()) {
+    return std::make_shared<TorchCheckValue>();
 #ifdef USE_RPC
-    // RPC module is only available when build flag "USE_DISTRIBUTED" is on.
+    // This is not defined on WINDOWS
   } else if (
       isRpcAvailable &&
       obj.ptr() ==
@@ -1236,7 +1238,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::rpc_sync);
   } else if (
       isRpcAvailable &&
-      // RPC module is only available  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
     return SpecialFormValue::create(prim::rpc_remote);

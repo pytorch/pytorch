@@ -43,14 +43,14 @@ FORMAT_VALUE = "pt"
 
 NUM_BYTES_FOR_HEADER_LEN = 8
 
+SHARDED_DIR_NAME = "sharded"
+
 
 @dataclass
 class _HFStorageInfo:
     """This is the per entry storage info."""
 
     relative_path: str
-    offset: int
-    length: int
     shape: torch.Size
     dtype: torch.dtype
 

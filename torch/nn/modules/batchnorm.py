@@ -193,9 +193,11 @@ class _BatchNorm(_NormBase):
         return F.batch_norm(
             input,
             # If buffers are not to be tracked, ensure that they won't be updated
-            self.running_mean
-            if not self.training or self.track_running_stats
-            else None,
+            (
+                self.running_mean
+                if not self.training or self.track_running_stats
+                else None
+            ),
             self.running_var if not self.training or self.track_running_stats else None,
             self.weight,
             self.bias,
@@ -728,6 +730,9 @@ class SyncBatchNorm(_BatchNorm):
             )
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         self._check_input_dim(input)
         self._check_non_zero_input_channels(input)
 

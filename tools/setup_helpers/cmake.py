@@ -92,24 +92,26 @@ class CMake:
         if IS_WINDOWS:
             return "cmake"
 
-        cmake_versions: dict[str, Version] = {}
+        cmake_versions: list[str] = []
+        valid_cmake_versions: dict[str, Version] = {}
         for cmd in ("cmake", "cmake3"):
             command = shutil.which(cmd)
             ver = CMake._get_version(command)
             if ver is not None:
                 eprint(f"Found {cmd} ({command}) version: {ver}", end="")
+                cmake_versions.append(f"{cmd}=={ver}")
                 if ver >= CMAKE_MINIMUM_VERSION:
                     eprint(f" (>={CMAKE_MINIMUM_VERSION})")
-                    cmake_versions[cmd] = ver
+                    valid_cmake_versions[cmd] = ver
                 else:
                     eprint(f" (<{CMAKE_MINIMUM_VERSION})")
 
-        if not cmake_versions:
+        if not valid_cmake_versions:
             raise RuntimeError(
                 f"no cmake or cmake3 with version >= {CMAKE_MINIMUM_VERSION}, "
-                f"found: {list(cmake_versions.values())}"
+                f"found: {cmake_versions}"
             )
-        return max(cmake_versions, key=cmake_versions.get)  # type: ignore[arg-type]
+        return max(valid_cmake_versions, key=valid_cmake_versions.get)  # type: ignore[arg-type]
 
     @staticmethod
     def _get_version(cmd: str | None) -> Version | None:
@@ -336,6 +338,7 @@ class CMake:
         # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake
         # integration is completed. They appear here not in the CMake.defines call below because they start with either
         # "BUILD_" or "USE_" and must be overwritten here.
+        use_numpy = not check_negative_env_flag("USE_NUMPY")
         build_options.update(
             {
                 # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
@@ -345,7 +348,7 @@ class CMake:
                 "BUILD_TEST": build_test,
                 # Most library detection should go to CMake script, except this one, which Python can do a much better job
                 # due to NumPy's inherent Pythonic nature.
-                "USE_NUMPY": not check_negative_env_flag("USE_NUMPY"),
+                "USE_NUMPY": use_numpy,
             }
         )
 
@@ -370,6 +373,20 @@ class CMake:
             )
             sys.exit(1)
         build_options.update(cmake__options)
+
+        if use_numpy:
+            try:
+                # This helps CMake find the correct include directory for NumPy
+                # This is especially useful in cross compiled environments
+                import numpy
+
+                Python_NumPy_INCLUDE_DIR = numpy.get_include()
+                build_options.update(
+                    dict(Python_NumPy_INCLUDE_DIR=Python_NumPy_INCLUDE_DIR)
+                )
+            except ImportError:
+                # use_numpy is just a hint.... so we can fail silently here
+                pass
 
         CMake.defines(
             args,

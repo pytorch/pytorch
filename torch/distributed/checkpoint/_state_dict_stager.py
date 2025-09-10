@@ -1,19 +1,14 @@
 # mypy: allow-untyped-defs
-import logging
 import types
+import warnings
 import weakref
 from copyreg import dispatch_table
-from logging import getLogger
 from typing import Any
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
 from torch.storage import UntypedStorage
 from torch.utils.weak import WeakIdKeyDictionary
-
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 class StateDictStager:
@@ -33,9 +28,10 @@ class StateDictStager:
 
     def __init__(self, pin_memory: bool = False, share_memory: bool = False):
         if pin_memory and not torch.cuda.is_available():
-            logger.warning(
+            warnings.warn(
                 "Ignoring pin_memory flag for checkpoint staging as pinning memory"
-                "requires CUDA, but CUDA is not available. "
+                "requires CUDA, but CUDA is not available. ",
+                stacklevel=2,
             )
             self.pin_memory = False
         else:

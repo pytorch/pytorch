@@ -15,12 +15,19 @@ from typing import Callable
 from parameterized import parameterized_class
 
 import torch
+import torch._inductor.config
 from torch._inductor.codecache import get_kernel_bin_format
-from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
+from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
-from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.export.experimental import _ExportPackage
+from torch.export.pt2_archive._package import (
+    AOTICompiledModel,
+    load_pt2,
+    load_weights_to_pt2_contents,
+)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
@@ -28,20 +35,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
-
-try:
-    from test_static_linkage_utils import (
-        get_static_linkage_main_cpp_file,
-        get_static_linkage_makelist_file_cpu,
-        get_static_linkage_makelist_file_cuda,
-    )
-except ImportError:
-    from .test_static_linkage_utils import (
-        get_static_linkage_main_cpp_file,
-        get_static_linkage_makelist_file_cpu,
-        get_static_linkage_makelist_file_cuda,
-    )
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -152,6 +145,32 @@ class TestAOTInductorPackage(TestCase):
         if shutil.which("make") is None:
             raise unittest.SkipTest("make is not available")
 
+    def cmake_compile_and_run(self, base_dir):
+        custom_env = os.environ.copy()
+        custom_env["CMAKE_PREFIX_PATH"] = ":".join(
+            [str(Path(torch.__file__).parent)]
+            + os.environ.get("CMAKE_PREFIX_PATH", "").split(":")
+        )
+        build_path = Path(base_dir) / "build"
+        build_path.mkdir()
+        subprocess.run(
+            ["cmake", ".."],
+            cwd=build_path,
+            env=custom_env,
+            check=True,
+        )
+        subprocess.run(["make"], cwd=build_path, check=True)
+
+        result = subprocess.run(
+            ["./build/main"],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        return result
+
     def cmake_compile(self, model, example_inputs, options, tmp_dir):
         """
         Exports model, compiles it using AOTInductor, extracts the
@@ -178,7 +197,10 @@ class TestAOTInductorPackage(TestCase):
             self.assertTrue(not build_path.exists())
             build_path.mkdir()
             custom_env = os.environ.copy()
-            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+            custom_env["CMAKE_PREFIX_PATH"] = ":".join(
+                [str(Path(torch.__file__).parent)]
+                + os.environ.get("CMAKE_PREFIX_PATH", "").split(":")
+            )
             subprocess.run(
                 ["cmake", ".."],
                 cwd=build_path,
@@ -249,6 +271,9 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
@@ -294,6 +319,9 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
@@ -338,8 +366,12 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
         self.check_package_cpp_only()
@@ -397,9 +429,46 @@ class TestAOTInductorPackage(TestCase):
                 self.cmake_compile(model, example_inputs, options, "")
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfXpu  # build system may be different
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
+    def test_compile_standalone_cos(self):
+        # compile_standalone will set package_cpp_only=True
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cos(x)
+
+        with torch.no_grad():
+            example_inputs = (torch.randn(8, 32, device=self.device),)
+            model = Model().to(device=self.device)
+
+            # Test compilation when model name is passed in
+            options = {
+                "aot_inductor.compile_standalone": True,
+                "aot_inductor.model_name_for_generated_files": "cos",
+            }
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                build_path, _ = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
+                )
+                # Check if the .a file was build successfully
+                a_path = build_path / "libcos.a"
+                self.assertTrue(a_path.exists())
+
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
-    def test_run_static_linkage_model(self):
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
+    def test_compile_with_exporter(self):
         self.check_package_cpp_only()
 
         class Model1(torch.nn.Module):
@@ -410,64 +479,91 @@ class TestAOTInductorPackage(TestCase):
             def forward(self, x, y):
                 return x - y
 
+        def default(*args, **kwargs):
+            return None
+
         example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
+            torch.ones(3, 3).to(self.device),
+            torch.ones(3, 3).to(self.device),
         )
 
-        model1 = Model1().to(self.device)
-        model2 = Model2().to(self.device)
+        package = _ExportPackage()
+        m1 = Model1()
+        m2 = Model2()
+        exporter1 = package._exporter("Plus", m1)._define_overload("default", default)
+        exporter2 = package._exporter("Minus", m2)._define_overload("default", default)
+        exporter1(*example_inputs)
+        exporter2(*example_inputs)
 
-        models = [model1, model2]
+        for package_example_inputs in [True, False]:
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                package._compiled_and_package(
+                    tmp_dir + "/package.pt2", True, package_example_inputs
+                )
 
-        i = 0
-        model_names = ["Plus", "Minus"]
+                # Test compiling generated files
+                result = self.cmake_compile_and_run(tmp_dir)
+                if package_example_inputs:
+                    if self.device == GPU_TYPE:
+                        self.assertEqual(
+                            result.stdout,
+                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
+                            " 0  0  0\n 0  0  0\n[ CUDAFloatType{3,3} ]\n",
+                        )
+                    else:
+                        self.assertEqual(
+                            result.stdout,
+                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
+                            " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
+                        )
+
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
+    def test_compile_with_exporter_weights(self):
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        def default(*args, **kwargs):
+            return None
+
+        example_inputs = (torch.ones(3, 3).to(self.device),)
+
+        package = _ExportPackage()
+        m1 = Model().to(self.device)
+        exporter1 = package._exporter("Model", m1)._define_overload("default", default)
+        exporter1(*example_inputs)
+        expected_res = m1(*example_inputs)
+
+        package_example_inputs = True
         with (
             tempfile.TemporaryDirectory() as tmp_dir,
         ):
-            for i in range(2):
-                model = models[i]
-                # TODO: should be done through _ExportPackage
-                ep = torch.export.export(model, example_inputs)
-
-                package_path = torch._inductor.aoti_compile_and_package(
-                    ep,
-                    inductor_configs={
-                        "aot_inductor.compile_standalone": True,
-                        "always_keep_tensor_constants": True,
-                        "aot_inductor.model_name_for_generated_files": model_names[i],
-                    },
-                )
-                with (
-                    zipfile.ZipFile(package_path, "r") as zip_ref,
-                ):
-                    zip_ref.extractall(tmp_dir)
-
-            file_str = get_static_linkage_main_cpp_file()
-            with open(Path(tmp_dir) / "main.cpp", "w") as f:
-                f.write(file_str)
-
-            if self.device == GPU_TYPE:
-                cmake_file_str = get_static_linkage_makelist_file_cuda()
-            else:
-                cmake_file_str = get_static_linkage_makelist_file_cpu()
-            with open(Path(tmp_dir) / "CMakeLists.txt", "w") as f:
-                f.write(cmake_file_str)
-
-            build_path = Path(tmp_dir) / "build"
-            build_path.mkdir()
-            custom_env = os.environ.copy()
-            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
-            subprocess.run(
-                ["cmake", ".."],
-                cwd=build_path,
-                env=custom_env,
+            package._compiled_and_package(
+                tmp_dir + "/package.pt2", True, package_example_inputs
             )
 
-            subprocess.run(["make"], cwd=build_path, check=True)
-            subprocess.run(
-                ["./main", f"{tmp_dir}/", self.device], cwd=build_path, check=True
+            # Test compiling generated files
+            self.cmake_compile_and_run(tmp_dir)
+            tensor_model = torch.load(
+                tmp_dir + "/output_tensor1.pt", weights_only=False
             )
+            true_res = next(iter(tensor_model.parameters()))
+            self.assertEqual(expected_res, true_res)
 
     def test_metadata(self):
         class Model(torch.nn.Module):

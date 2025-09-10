@@ -17,7 +17,7 @@ struct ExtendedAllocatorConfig {
   }
 
   static const std::unordered_set<std::string>& getKeys() {
-    return instance().keys_;
+    return keys_;
   }
 
   void parseArgs(const std::string& env) {
@@ -41,7 +41,8 @@ struct ExtendedAllocatorConfig {
  private:
   // Device-specific option, e.g., memory limit for a specific device.
   std::atomic<size_t> device_specific_option_{0};
-  std::unordered_set<std::string> keys_{"device_specific_option_mb"};
+  inline static std::unordered_set<std::string> keys_{
+      "device_specific_option_mb"};
 };
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(ExtendedAllocatorConfig)
