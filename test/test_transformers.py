@@ -1249,31 +1249,43 @@ class TestTransformers(NNTestCase):
 
             self.assertRaises(RuntimeError, func)
 
-    @sdpa_kernel(backends=[SDPBackend.MATH])
-    def test_scaled_dot_product_attention_matmul_inconsistent_dtypes(self, device):
-        dtypes = [torch.bfloat16, torch.float16]
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_scaled_dot_product_attention_matmul_inconsistent_dtypes(self, device, kernel):
         orig_status = torch._C._get_math_sdp_allow_fp16_bf16_reduction()
-        # set math_sdp to allow lower precision q/k/v
+        # Set math_sdp to allow lower precision q/k/v
         torch._C._set_math_sdp_allow_fp16_bf16_reduction(True)
 
+        dtypes = [torch.bfloat16, torch.float16]
+
         def fn(query, key, value, mask):
-            return torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, mask, 0.0, False)
+            with sdpa_kernel(backends=[kernel]):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, mask, 0.0, False
+                )
 
         for dtype in dtypes:
 
             def rand_tensor(*shape):
                 return torch.rand(shape, device=device, dtype=dtype)
 
-            size = (1, 4, 2)
+            size = (1, 4, 2, 8)
             query = rand_tensor(*size)
             key = rand_tensor(*size)
             value = rand_tensor(*size)
-            # create float mask to generate mixed dtype inputs for matmul
-            mask = torch.rand((1, 4, 4), device=device, dtype=torch.float)
-            # There should be no inconsistent dtypes error
+            # Create float mask to generate mixed dtype inputs for matmul
+            mask = torch.rand((1, 4, 2, 2), device=device, dtype=torch.float)
             compiled_fn = torch.compile(fn)
-            compiled_fn(query, key, value, mask)
+            if kernel == SDPBackend.EFFICIENT_ATTENTION and "cuda" in str(device):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "invalid dtype for bias - should match query's dtype",
+                ):
+                    compiled_fn(query, key, value, mask)
+            # EFFICIENT_ATTENTION and CUDNN_ATTENTION are not supported on CPU
+            elif kernel == SDPBackend.MATH or str(device) != "cpu":
+                # There should be no inconsistent dtypes error
+                compiled_fn(query, key, value, mask)
+
         torch._C._set_math_sdp_allow_fp16_bf16_reduction(orig_status)
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
