@@ -1882,6 +1882,10 @@ class ExternKernelChoice:
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
+        # match the API for KernelTemplate as they can be treated the same
+        # There is no src hash for ExternKernelChoice in the traditional sense
+        # so we indicate this by returning None
+        self.hash = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -1919,13 +1923,6 @@ class ExternKernelChoice:
     def uid(self) -> str:
         # unique by prefixing with aten
         return f"aten::{self.name}"
-
-    @property
-    def hash(self) -> Union[str, None]:
-        # match the API for KernelTemplate as they can be treated the same
-        # There is no src hash for ExternKernelChoice in the traditional sense
-        # so we indicate this by returning None
-        return None
 
     def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
         """
