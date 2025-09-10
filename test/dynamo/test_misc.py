@@ -7162,7 +7162,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
         guard_manager.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, False, []
+            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
         )
 
         def injected(x):
@@ -7189,7 +7189,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), {"x": 0}, False, []
+            lambda L: isinstance(L["x"], bool), {"x": 0}, True, []
         )
 
         def injected_bool(x: bool):
@@ -7197,7 +7197,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
         guard_manager_int.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, False, []
+            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
         )
 
         def injected_int(x: int):
@@ -7205,7 +7205,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), {"x": 0}, False, []
+            lambda L: isinstance(L["x"], torch.Tensor), {"x": 0}, True, []
         )
 
         def injected_tensor(x: torch.Tensor):
@@ -7213,7 +7213,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
         guard_manager_str.add_lambda_guard(
-            lambda L: isinstance(L["x"], str), {"x": 0}, False, []
+            lambda L: isinstance(L["x"], str), {"x": 0}, True, []
         )
 
         def injected_str(x: str):
@@ -7293,7 +7293,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         guard_manager_bool.add_lambda_guard(
             lambda L: isinstance(L["x"], bool),
             {"x": 0},
-            False,
+            True,
             ["isinstance(L['x'], bool)"],
         )
 

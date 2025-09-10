@@ -1749,13 +1749,14 @@ class GuardBuilder(GuardBuilderBase):
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
 
         required_locals = {}
+        all_locals = self.scope["L"].keys()
         for var_name in guard_fn.__code__.co_consts:
-            if isinstance(var_name, str):
+            if isinstance(var_name, str) and var_name in all_locals:
                 index = get_framelocals_idx(self.f_code, var_name)
                 if index is not None:
                     required_locals[var_name] = index
 
-        construct_full_framelocals_dict = config.construct_full_framelocals_dict
+        construct_partial_framelocals_dict = config.construct_partial_framelocals_dict
 
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
@@ -1764,14 +1765,14 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_manager.root.add_epilogue_lambda_guard(
                 guard_fn,
                 required_locals,
-                construct_full_framelocals_dict,
+                construct_partial_framelocals_dict,
                 verbose_code_parts,
             )
         else:
             self.guard_manager.root.add_lambda_guard(
                 guard_fn,
                 required_locals,
-                construct_full_framelocals_dict,
+                construct_partial_framelocals_dict,
                 verbose_code_parts,
             )
 

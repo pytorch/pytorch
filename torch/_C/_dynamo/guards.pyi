@@ -1,8 +1,8 @@
 import enum
 from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
 
 import torch
+from typing_extensions import TypeAlias
 
 # TODO: We should move the `GuardManagerType`
 # defined in `guards.py` here and update other
@@ -225,7 +225,7 @@ class GuardManager:
         self,
         user_lambda: Callable[..., Any],
         required_locals: dict[str, int],
-        construct_full_framelocals_dict: bool,
+        construct_partial_framelocals_dict: bool,
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_lambda_guard_no_args(
@@ -347,7 +347,7 @@ class RootGuardManager(GuardManager):
         self,
         guard: LeafGuard,
         required_locals: dict[str, int],
-        construct_full_framelocals_dict: bool,
+        construct_partial_framelocals_dict: bool,
         verbose_code_parts: list[str],
     ) -> None: ...
     def clone_manager(

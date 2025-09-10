@@ -408,13 +408,13 @@ num_guards_executed=0)
         guard_manager.add_lambda_guard(
             functools.partial(ge_match, expected=5),
             {},
-            True,
+            False,
             ge_match_verbose_code_parts(expected=5),
         )
         guard_manager.add_lambda_guard(
             functools.partial(less_match, expected=10),
             {},
-            True,
+            False,
             less_match_verbose_code_parts(expected=10),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 3)
@@ -435,13 +435,13 @@ num_guards_executed=0)
         guard_manager.getattr_manager("x", "x", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
             {},
-            True,
+            False,
             equals_match_verbose_code_parts(foo.x),
         )
         guard_manager.getattr_manager("y", "y", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
             {},
-            True,
+            False,
             equals_match_verbose_code_parts(foo.y),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
@@ -485,13 +485,13 @@ num_guards_executed=0)
         guard_manager.getitem_manager(0, "", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[0]),
             {},
-            True,
+            False,
             equals_match_verbose_code_parts(foo[0]),
         )
         guard_manager.getitem_manager(1, "", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[1]),
             {},
-            True,
+            False,
             equals_match_verbose_code_parts(foo[1]),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
@@ -600,7 +600,7 @@ num_guards_executed=0)
             and isinstance(x.x, torch.Tensor)
             and isinstance(x.y, int),
             {},
-            True,
+            False,
             "global guard fail",
         )
 
@@ -652,7 +652,7 @@ num_guards_executed=0)
         attr_manager.add_lambda_guard(
             lambda x: x == 4,
             {},
-            True,
+            False,
             "Expected value 4",
         )
 
@@ -694,7 +694,7 @@ num_guards_executed=0)
         weakref_manager.add_lambda_guard(
             lambda x: isinstance(x, torch.Tensor),
             {},
-            True,
+            False,
             "global weakref fail",
         )
 
@@ -715,7 +715,7 @@ num_guards_executed=0)
         foo_mgr.add_lambda_guard(
             lambda x: x == 3,
             {},
-            True,
+            False,
             "Expected value 3",
         )
         self.assertTrue(guard_manager.check(a))
@@ -801,7 +801,7 @@ num_guards_executed=0)
         # Add key-value manager (nothing : {"z" : 3})
         self.assertTrue(root.check(f_locals))
         dict_mgr.get_key_manager(1, "", nothing, default_mgr_enum).add_lambda_guard(
-            lambda x: x is nothing, {}, True, ["x is nothing"]
+            lambda x: x is nothing, {}, False, ["x is nothing"]
         )
         self.assertTrue(root.check(f_locals))
         value_mgr = dict_mgr.get_value_manager(

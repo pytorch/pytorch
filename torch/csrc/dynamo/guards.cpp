@@ -1657,11 +1657,12 @@ class LAMBDA_GUARD : public LeafGuard {
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
       py::object required_locals,
-      bool construct_full_framelocals_dict,
+      bool construct_partial_framelocals_dict,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
         _required_locals(py::cast<py::dict>(required_locals)),
-        _construct_full_framelocals_dict(construct_full_framelocals_dict) {
+        _construct_partial_framelocals_dict(
+            construct_partial_framelocals_dict) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -1699,18 +1700,18 @@ class LAMBDA_GUARD : public LeafGuard {
   }
 
   bool check_nopybind(FrameLocalsMapping* map) override {
-    // TODO (anijain2305) - Get rid of the _construct_full_framelocals_dict once
-    // its stable.
-    if (_construct_full_framelocals_dict) {
-      return check_nopybind((PyObject*)map->to_dict());
-    }
-    py::dict partial_dict;
+    // TODO (anijain2305) - Get rid of the _construct_partial_framelocals_dict
+    // once its stable.
+    if (_construct_partial_framelocals_dict) {
+      py::dict partial_dict;
 
-    for (auto item : _required_locals) {
-      partial_dict[item.first] = map->get(item.second.cast<int>());
-    }
+      for (auto item : _required_locals) {
+        partial_dict[item.first] = map->get(item.second.cast<int>());
+      }
 
-    return check_nopybind(partial_dict.ptr());
+      return check_nopybind(partial_dict.ptr());
+    }
+    return check_nopybind((PyObject*)map->to_dict());
   }
 
  private:
@@ -1720,7 +1721,7 @@ class LAMBDA_GUARD : public LeafGuard {
 
   // Temporary flag to allow a fallback behavior. With stability, we can remove
   // this member.
-  bool _construct_full_framelocals_dict;
+  bool _construct_partial_framelocals_dict;
 
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
@@ -7033,13 +7034,13 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object lambda,
              py::object required_locals,
-             bool construct_full_framelocals_dict,
+             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
                 self.get_root(),
                 std::move(lambda),
                 std::move(required_locals),
-                construct_full_framelocals_dict,
+                construct_partial_framelocals_dict,
                 std::move(verbose_code_parts)));
           })
       .def(
@@ -7703,13 +7704,13 @@ PyObject* torch_c_dynamo_guards_init() {
           [](RootGuardManager& self,
              py::object lambda,
              py::object required_locals,
-             bool construct_full_framelocals_dict,
+             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_epilogue_lambda_guard(std::make_unique<LAMBDA_GUARD>(
                 &self,
                 std::move(lambda),
                 std::move(required_locals),
-                construct_full_framelocals_dict,
+                construct_partial_framelocals_dict,
                 std::move(verbose_code_parts)));
           });
 
