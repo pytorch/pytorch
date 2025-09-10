@@ -955,7 +955,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 cached_lazy_backward,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
-                serialize=None,  # We add serialize separately
+                try_save_cache_entry=None,
             )
 
         else:

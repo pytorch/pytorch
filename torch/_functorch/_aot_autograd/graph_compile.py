@@ -1318,7 +1318,8 @@ def maybe_inline_graph_saved_tensors_hooks(
 
 
 def aot_stage2_autograd(
-    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
@@ -1916,7 +1917,7 @@ def aot_stage2_autograd(
         lazy_backward_info,
         aot_config,
         fw_metadata=fw_metadata,
-        serialize=try_save_cache_entry,
+        try_save_cache_entry=try_save_cache_entry,
     )
 
     if entry is not None:
