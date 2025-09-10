@@ -13,8 +13,6 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-python -mpip install -r requirements.txt
-
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
