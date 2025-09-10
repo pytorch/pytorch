@@ -1,8 +1,7 @@
+# Owner(s): ["module: custom-operators"]
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-
-
-libname = "_TestOpaqueObject"
 
 
 class OpaqueQueue:
@@ -23,38 +22,43 @@ class OpaqueQueue:
         return len(self.queue)
 
 
-lib = torch.library.Library(libname, "FRAGMENT")
-
-torch.library.define(
-    f"{libname}::queue_push",
-    "(__torch__.torch.classes.aten.OpaqueObject a, Tensor b) -> ()",
-    tags=torch.Tag.pt2_compliant_tag,
-    lib=lib,
-)
-
-
-@torch.library.impl(f"{libname}::queue_push", "CompositeExplicitAutograd", lib=lib)
-def push_impl(q, b: torch.Tensor) -> None:
-    queue = torch._C.OpaqueObject.get_payload(q)
-    assert isinstance(queue, OpaqueQueue)
-    queue.push(b)
-
-
-lib.define(
-    "queue_pop(__torch__.torch.classes.aten.OpaqueObject a) -> Tensor",
-)
-
-
-def pop_impl(q: OpaqueQueue) -> torch.Tensor:
-    queue = torch._C.OpaqueObject.get_payload(q)
-    assert isinstance(queue, OpaqueQueue)
-    return queue.pop()
-
-
-lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
-
-
 class TestOpaqueObject(TestCase):
+    def setUp(self):
+        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")
+
+        torch.library.define(
+            "_TestOpaqueObject::queue_push",
+            "(__torch__.torch.classes.aten.OpaqueObject a, Tensor b) -> ()",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::queue_push", "CompositeExplicitAutograd", lib=self.lib
+        )
+        def push_impl(q: torch._C.ScriptObject, b: torch.Tensor) -> None:
+            queue = torch._C.OpaqueObject.get_payload(q)
+            assert isinstance(queue, OpaqueQueue)
+            queue.push(b)
+
+        self.lib.define(
+            "queue_pop(__torch__.torch.classes.aten.OpaqueObject a) -> Tensor",
+        )
+
+        def pop_impl(q: torch._C.ScriptObject) -> torch.Tensor:
+            queue = torch._C.OpaqueObject.get_payload(q)
+            assert isinstance(queue, OpaqueQueue)
+            return queue.pop()
+
+        self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
+
+        super().setUp()
+
+    def tearDown(self):
+        self.lib._destroy()
+
+        super().tearDown()
+
     def test_creation(self):
         queue = OpaqueQueue([], torch.zeros(3))
         obj = torch._C.OpaqueObject(queue)
