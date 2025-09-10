@@ -6979,7 +6979,7 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
         kernel_source = """
-        __global__ void add_scalar(const float* input, float* output, float scalar, int n) {
+        __global__ void add_scalar(const float* input, float* output, double scalar, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx < n) {
                 output[idx] = input[idx] + scalar;
