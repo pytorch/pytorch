@@ -4019,6 +4019,7 @@ class TestSparse(TestSparseBase):
 
             # Case 1: sparse broadcasts over dense
             s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            s = torch._sparse_broadcast_to(s, shape)
             d = make_tensor(shape, dtype=dtype, device=device)
             check(self, s, d)
             check_empty(sub_shape, nnz, shape, coalesced)
