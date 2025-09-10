@@ -40,13 +40,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
-
-T = TypeVar("T")
-
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+T = TypeVar("T"
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
@@ -1136,11 +1138,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_get_device_properties_tensor_device(a):
-        x = a.to("cuda")
-        prop = torch.cuda.get_device_properties(x.device)
+        x = a.to(device_type)
+        prop = torch.get_device_module(device_type).get_device_properties(x.device)
         if prop.major == 8:
             return x + prop.multi_processor_count
         return x + prop.max_threads_per_multi_processor
@@ -1150,10 +1152,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.to(torch.float16)
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type2(a, b):
-        m = a.to("cuda")
+        m = a.to(device_type)
         return m + b.type(m.type())
 
     @make_test
@@ -1166,10 +1168,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipGPUIf(not torch.cuda.is_available() and "HalfTensor" in dir(torch.get_device_module(device_type)),
+                        "requires cuda or support HalfTensor" )
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
+        m = a.type(torch.get_device_module(device_type).HalfTensor)
         return b.type(m.type())
 
     @make_test
@@ -4040,7 +4044,7 @@ class GraphModule(torch.nn.Module):
         def f1():
             mod1 = torch.get_device_module()
             mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device("cuda"))
+            mod3 = torch.get_device_module(torch.device(device_type))
             return mod1, mod2, mod3
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
@@ -4073,7 +4077,7 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+            "cpu" if torch._C._get_accelerator() == torch.device(device_type) else device_type
         )
         old_get_device_module = torch.get_device_module
 
@@ -4721,10 +4725,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, ys, zs[:1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_cuda_current_device(self):
+    def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3), dtype=torch.float32, device=torch.cuda.current_device()
+                (2, 3), dtype=torch.float32, device=torch.accelerator.current_device()
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
@@ -4732,11 +4736,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
 
-        with torch.cuda.device(0):
+        with torch.accelerator.device(0):
             x = torch.randn(2, 3)
             self.assertEqual(opt_fn(x), fn(x))
             self.assertEqual(counter.frame_count, 1)
-            with torch.cuda.device(1):
+            with torch.accelerator.device(1):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 

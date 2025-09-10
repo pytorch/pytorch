@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_xpu_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -133,6 +133,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @requires_cuda_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
+
+    @requires_xpu_and_triton
+    def test_aot_xpugraphs(self, device):
+        self._check_backend_works("xpu", device)
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
@@ -386,7 +390,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
 
 if __name__ == "__main__":

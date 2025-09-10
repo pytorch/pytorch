@@ -2,8 +2,9 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from typing import Optional, Any, TypeVar, ContextManager
 from typing_extensions import deprecated
+from abc import ABC, abstractmethod
 
 import torch
 
@@ -18,7 +19,8 @@ from .memory import (
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
 )
-
+Stream = torch.get_device_module.Stream
+StreamContext = TypeVar("StreamContext", bound=ContextManager)
 
 __all__ = [
     "current_accelerator",
@@ -26,6 +28,7 @@ __all__ = [
     "current_device_index",
     "current_stream",
     "empty_cache",
+    "device",
     "device_count",
     "device_index",
     "is_available",
@@ -40,8 +43,25 @@ __all__ = [
     "set_device_index",
     "set_stream",
     "synchronize",
+    "Stream",
+    "Event",
+    "is_bf16_supported",
 ]
 
+
+def device(*args, **kwargs):
+    r"""Context-manager that changes the selected device.
+
+    Args:
+        device (torch.device or int): device index to select. It's a no-op if
+            this argument is a negative integer or ``None``.
+    """
+    acc = current_accelerator()
+    if acc is None:
+        raise RuntimeError("Cannot find accelerator.")
+
+    mod = torch.get_device_module(acc)
+    return mod.device(*args, **kwargs)
 
 def device_count() -> int:
     r"""Return the number of current :ref:`accelerator<accelerators>` available.
@@ -61,6 +81,34 @@ def device_count() -> int:
     mod = torch.get_device_module(acc)
     return mod.device_count()
 
+
+def is_bf16_supported() -> bool:
+    r"""Check if the current accelerator is available at runtime: it was build, all the
+        required drivers are available and at least one device is visible.
+        See :ref:`accelerator<accelerators>` for details.
+
+        Returns:
+            bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
+
+        .. note:: This API delegates to the device-specific version of `is_available`.
+            On CUDA, when the environment variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set,
+            this function will NOT poison fork. Otherwise, it will. For more details, see
+            :ref:`multiprocessing-poison-fork-note`.
+
+        Example::
+
+            >>> assert torch.accelerator.is_bf16_supported() "No available accelerators detected."
+        """
+    # Why not just check "device_count() > 0" like other is_available call?
+    # Because device like CUDA have a python implementation of is_available that is
+    # non-poisoning and some features like Dataloader rely on it.
+    # So we are careful to delegate to the Python version of the accelerator here
+    acc = current_accelerator()
+    if acc is None:
+        return False
+
+    mod = torch.get_device_module(acc)
+    return mod.is_bf16_supported()
 
 def is_available() -> bool:
     r"""Check if the current accelerator is available at runtime: it was build, all the
@@ -206,6 +254,54 @@ def set_stream(stream: torch.Stream) -> None:
     .. note:: This function will set the current device index to the device index of the given stream.
     """
     torch._C._accelerator_setStream(stream)
+
+
+def stream(stream: Optional["torch.Stream"]) -> StreamContext:
+    r"""Wrap around the Context-manager StreamContext that selects a given stream.
+
+    Arguments:
+        stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    .. note::
+        In eager mode stream is of type Stream class while in JIT it is
+        an object of the custom class ``torch.classes.cuda.Stream``.
+    """
+    acc = current_accelerator()
+    if acc is None:
+        raise RuntimeError("Cannot find an accelerator.")
+
+    mod = torch.get_device_module(acc)
+    return mod.stream(stream)
+
+
+def Stream(*args, **kwargs):
+    r"""Wrap around the device Stream
+
+    Arguments:
+        stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    .. note::
+        In eager mode stream is of type Stream class while in JIT it is
+        an object of the custom class ``torch.classes.cuda.Stream``.
+
+    Wrapper around a CUDA stream
+    """
+    acc = current_accelerator()
+    if acc is None:
+        raise RuntimeError("Cannot find an accelerator.")
+
+    mod = torch.get_device_module(acc)
+    return mod.Stream(*args, **kwargs)
+
+
+def Event(*args, **kwargs):
+    r"""Wrap around the device Event"""
+    acc = current_accelerator()
+    if acc is None:
+        raise RuntimeError("Cannot find an accelerator.")
+
+    mod = torch.get_device_module(acc)
+    return mod.Event(*args, **kwargs)
 
 
 def synchronize(device: _device_t = None, /) -> None:

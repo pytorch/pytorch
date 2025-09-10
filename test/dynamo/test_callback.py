@@ -8,7 +8,12 @@ from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigg
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu, HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class CallbackTests(TestCase):
@@ -61,7 +66,7 @@ class CallbackTests(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "ROCm outputs a different number of autotuning logs"
     )
-    @requires_cuda_and_triton
+    @requires_gpu
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_triggers(self) -> None:
         torch._dynamo.reset()
@@ -91,9 +96,9 @@ class CallbackTests(TestCase):
                 torch._dynamo.graph_break()
                 return self.fc2(temp)
 
-        model = TinyModel().to("cuda")
+        model = TinyModel().to(device_type)
         compiled_model = torch.compile(model, mode="max-autotune")
-        x = torch.randn(10, 10, device="cuda")
+        x = torch.randn(10, 10, device=device_type)
 
         loss = compiled_model(x).sum()
         loss.backward()
@@ -114,18 +119,32 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id
         compiled_model.zero_grad()
         loss = compiled_model(x).sum()
         loss.backward()
-        self.assertExpectedInline(
-            "\n".join(order),
-            """\
-start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",  # noqa: B950
-        )
+        if HAS_CUDA_AND_TRITON:
+            self.assertExpectedInline(
+                "\n".join(order),
+                """\
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",  # noqa: B950
+            )
+        elif HAS_XPU_AND_TRITON:
+            self.assertExpectedInline(
+                "\n".join(order),
+                """\
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+    start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+    end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",  # noqa: B950
+            )
         order.clear()
 
         compiled_model.zero_grad()

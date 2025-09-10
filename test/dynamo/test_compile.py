@@ -246,6 +246,7 @@ class PublicTorchCompilerTests(TestCase):
         private_sig = inspect.signature(private_fn)
 
         matching = public_sig == private_sig
+
         matching |= len(public_sig.parameters) < len(private_sig.parameters) and all(
             public == private
             for public, private in zip(
