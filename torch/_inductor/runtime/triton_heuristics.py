@@ -81,6 +81,7 @@ from .triton_compat import (
     triton,
 )
 
+from .kernel_oracle import KernelOracle
 
 class InductorConfig(Config):
     """Inductor-specific Triton config with additional control flags"""
@@ -2447,6 +2448,39 @@ def pointwise(
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    if torch.version.hip and (triton_meta["device"].cc == "gfx950"):
+        # lets try the KernelOracle(tm) for MI350! :D
+        KernelOracle.installPkgsIf()
+        print("KERNELORACLE: available")
+        if (KernelOracle.canDo(size_hints, inductor_meta["kernel_name"])):
+            print("KERNELORACLE: can do")
+            configs = []
+            # TODO: canDo could perform the hip and device checks..?
+            KernelOracle.configClass = Config
+            oracle = KernelOracle(size_hints, inductor_meta["kernel_name"])
+            # TODO: KernelOracle should check the device & load correct model
+            oracle_configs = oracle.rankConfigs(5) # take 5 best configs
+            for oc in oracle_configs:
+                print("KERNELORACLE:", oc)
+            if len(oracle_configs) > 0:
+                if disable_pointwise_autotuning(inductor_meta) and not (
+                    inductor_meta.get("max_autotune")
+                    or inductor_meta.get("max_autotune_pointwise")
+                ):
+                    configs = [oracle_configs[0]]
+                else:
+                    configs = oracle_configs
+                return cached_autotune(
+                    size_hints,
+                    configs,
+                    triton_meta=triton_meta,
+                    inductor_meta=inductor_meta,
+                    heuristic_type=HeuristicType.POINTWISE,
+                    filename=filename,
+                )
+            else:
+                print("KERNELORACLE: no configs")
+
     inductor_meta = {} if inductor_meta is None else inductor_meta
     assert not inductor_meta.get("no_x_dim")
 
