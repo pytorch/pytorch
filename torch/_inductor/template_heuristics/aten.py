@@ -84,10 +84,26 @@ class ATenAddMMConfigHeuristics(
         if not max_autotune:
             nodes = kernel_inputs.nodes()
             bias = nodes[0]
-            from ..ir import as_storage_and_layout
+            from ..ir import as_storage_and_layout, ReinterpretView
 
             # remove the expansion from the bias
-            bias, _ = as_storage_and_layout(bias)
+            bias, old_layout = as_storage_and_layout(bias)
+            filtered_data = [
+                (old_layout.size[idx], old_layout.stride[idx])
+                for idx, s in enumerate(old_layout.stride)
+                if s != 0
+            ]
+            new_size, new_stride = zip(*filtered_data) if filtered_data else ([], [])
+            new_size, new_stride = list(new_size), list(new_stride)
+            layout = type(old_layout)(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                new_stride,
+                old_layout.offset,
+                old_layout.is_pinned,
+            )
+            bias = ReinterpretView(data=bias, layout=layout)
             return MMKernelInputs(
                 [bias, *nodes[1:]],
                 scalars=kernel_inputs.scalars(),
