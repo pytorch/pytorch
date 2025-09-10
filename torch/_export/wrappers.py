@@ -211,17 +211,18 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         )
 
     def wrapper(*args, **kwargs):
-        if not is_traceable_wrapper_subclass_type(type(args[0])):
-            assert constructor_subclass.__qualname__.endswith("__init__")
-            obj_name = constructor_subclass.__qualname__[: -len("__init__")]
-            raise RuntimeError(
-                f"Applying mark_constructor_exportable_experimental on {obj_name} is not valid as it is not a traceable "
-                f"tensor subclass. Please look at DTensor.__init__ implementation as an example of proper usage of this API."
-            )
         constructor_subclass(*args, **kwargs)
 
         if not torch.compiler.is_exporting():
             return
+
+        if not is_traceable_wrapper_subclass_type(type(args[0])):
+            assert constructor_subclass.__qualname__.endswith("__init__")
+            obj_name = constructor_subclass.__qualname__[: -len("__init__")]
+            raise RuntimeError(
+                f"Can't intercept {obj_name} in export because this object is not a traceable "
+                f"tensor subclass. Please look at DTensor.__init__ implementation as an example of proper usage of this API."
+            )
 
         mode = _maybe_find_pre_dispatch_tf_mode_for_export()
         if mode is None:
