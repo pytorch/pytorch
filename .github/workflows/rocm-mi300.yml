@@ -70,4 +70,5 @@ jobs:
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      tests-to-include: "inductor/test_ck_backend"
     secrets: inherit
