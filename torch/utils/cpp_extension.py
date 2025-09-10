@@ -1496,7 +1496,7 @@ def SyclExtension(name, sources, *args, **kwargs):
 
     return setuptools.Extension(name, sources, *args, **kwargs)
 
-def include_paths(device_type: str = "cpu") -> list[str]:
+def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str]:
     """
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
@@ -1505,12 +1505,14 @@ def include_paths(device_type: str = "cpu") -> list[str]:
     Returns:
         A list of include path strings.
     """
+    paths = []
     lib_include = os.path.join(_TORCH_PATH, 'include')
-    paths = [
-        lib_include,
-        # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
-        os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
-    ]
+    if torch_include_dirs:
+        paths.extend([
+            lib_include,
+            # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
+            os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
+        ])
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
@@ -1533,7 +1535,7 @@ def include_paths(device_type: str = "cpu") -> list[str]:
     return paths
 
 
-def library_paths(device_type: str = "cpu") -> list[str]:
+def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1543,8 +1545,12 @@ def library_paths(device_type: str = "cpu") -> list[str]:
     Returns:
         A list of library path strings.
     """
-    # We need to link against libtorch.so
-    paths = [TORCH_LIB_PATH]
+
+    paths = []
+
+    if torch_include_dirs:
+        # We need to link against libtorch.so
+        paths.extend([TORCH_LIB_PATH])
 
     if device_type == "cuda" and IS_HIP_EXTENSION:
         lib_dir = 'lib'
