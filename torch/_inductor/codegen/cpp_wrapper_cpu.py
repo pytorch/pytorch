@@ -1364,9 +1364,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_handle = None
         if config.trace.provenance_tracking_level != 0:
+            shim_fn = self.get_c_shim_func_name(fallback_kernel.cpp_kernel_name, device) # type: ignore[arg-type]
             debug_handle = set_kernel_post_grad_provenance_tracing(
                 fallback_kernel,
-                fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
+                shim_fn,
                 is_extern=True,
             )
         self.generate_c_shim_extern_kernel_call(
@@ -2666,6 +2667,7 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
+        self.writeline("""std::cout << "before proxy exeuctor" << std::endl;""")
         self.writeline(
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
@@ -2674,6 +2676,8 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str});"
         )
+        self.writeline("""std::cout << "after proxy exeuctor" << std::endl;""")
+
 
     def generate_reset_kernel_saved_flags(self):
         pass
