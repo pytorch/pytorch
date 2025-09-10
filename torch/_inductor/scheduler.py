@@ -2201,13 +2201,6 @@ class Scheduler:
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
                 assert node.node.layout == out_buffer.layout
-                # multi_node = node.node
-                # out_tensorbox = node.node.replace()
-                # out_storage = out_tensorbox.data  # type: ignore[union-attr]
-                # assert isinstance(out_storage, ir.StorageBox)
-                # out_buffer = out_storage.data
-                # assert isinstance(out_buffer, ir.OperationBuffer)
-                # out_buffer.layout = multi_node.layout
                 replace_operation_buffer(node.node, out_buffer)
                 new_scheduler_node = self.create_scheduler_node(out_buffer)
 

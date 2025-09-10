@@ -1553,7 +1553,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return torch.accelerator.device_count()
 
     @classmethod
     def _run(
