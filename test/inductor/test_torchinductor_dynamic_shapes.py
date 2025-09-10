@@ -9,10 +9,10 @@ import unittest
 from functools import partial
 
 import torch
-from torch._inductor.choices import InductorChoices
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
+from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -1081,9 +1081,7 @@ class TestInductorDynamic(TestCase):
 
     @onlyOn(GPU_TYPE)
     def test_dynamic_rblock_bounds(self):
-
         class ForcePersistent(InductorChoices):
-
             @staticmethod
             def should_use_cooperative_reduction(*args, **kwargs) -> bool:
                 return False
@@ -1098,7 +1096,6 @@ class TestInductorDynamic(TestCase):
         x = torch.rand([31], device=GPU_TYPE)
 
         with V.set_choices_handler(ForcePersistent()):
-
             torch._dynamo.mark_dynamic(x, 0, min=1, max=62)
             fn_c = torch.compile(fn)
             actual, source_codes = run_and_get_code(fn_c, x)
