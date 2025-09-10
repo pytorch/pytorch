@@ -62,7 +62,7 @@ experimental_torch_module_num_outputs(ModuleHandle handle, uint64_t* ret_value);
 
 AOTI_TORCH_EXPORT AOTITorchError experimental_torch_module_forward_flattened(
     ModuleHandle handle,
-    const TypedStableIValue* args,
+    TypedStableIValue* args,
     uint64_t num_args,
     TypedStableIValue* ret_values,
     uint64_t num_outputs);
