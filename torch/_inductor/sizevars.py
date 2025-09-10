@@ -74,6 +74,7 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
+        self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -557,7 +558,7 @@ class SizeVarAllocator:
             return hint_override
 
         expr = self.remove_precomputed_replacements(expr)
-        return sympy_subs(expr, self.var_to_val)
+        return sympy_subs(sympy_subs(expr, self.var_to_hint_override), self.var_to_val)
 
     def size_hint(
         self,

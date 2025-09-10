@@ -536,6 +536,7 @@ class _DimRange:
 def mark_unbacked(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
+    hint_override: Optional[int] = None,
     strict: bool = False,
     specialize_on: Optional[list[Any]] = None,
 ) -> None:
@@ -566,6 +567,12 @@ def mark_unbacked(
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        if not hasattr(t, "_dynamo_hint_overrides"):
+            t._dynamo_hint_overrides = {}
+
+        if hint_override:
+            t._dynamo_hint_overrides[index] = hint_override
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
