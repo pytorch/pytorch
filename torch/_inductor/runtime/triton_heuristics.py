@@ -2900,6 +2900,7 @@ def _persistent_reduction_configs(
                     size_hints,
                     8,
                     rnumel,
+                    register_intensive=True,
                 )
             ]
         else:
@@ -2908,6 +2909,7 @@ def _persistent_reduction_configs(
                     size_hints,
                     4,
                     rnumel,
+                    register_intensive=True,
                 )
             ]
 
