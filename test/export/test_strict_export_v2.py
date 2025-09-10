@@ -6,6 +6,7 @@ except ImportError:
     import test_export  # @manual=fbcode//caffe2/test:test_export-library
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
+from torch._export import config
 from torch.export import export
 
 
@@ -14,12 +15,10 @@ test_classes = {}
 
 def mocked_strict_export_v2(*args, **kwargs):
     # If user already specified strict, don't make it strict
-    if "strict" in kwargs:
-        if kwargs["strict"]:
-            return export(*args, **kwargs, _use_new_tracer_experimental=True)
-        else:
+    with config.patch(use_new_tracer_experimental=True):
+        if "strict" in kwargs:
             return export(*args, **kwargs)
-    return export(*args, **kwargs, strict=True, _use_new_tracer_experimental=True)
+        return export(*args, **kwargs, strict=True)
 
 
 def make_dynamic_cls(cls):
