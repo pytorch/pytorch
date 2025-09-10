@@ -520,6 +520,15 @@ BatchNormBackend _select_batch_norm_backend(
     return BatchNormBackend::Cudnn;
   }
 
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
+  // See https://github.com/pytorch/pytorch/issues/64427.
+  // non static variable is used to be able to change environment variable in runtime for testing
+  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
+  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
+  bool is_miopen_3_4 = miopen_version >= 30400;  // ROCm 6.4
+  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
+  bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(is_miopen_3_5);
+
   if (
       detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
@@ -527,13 +536,15 @@ BatchNormBackend _select_batch_norm_backend(
       && input.dim() <= MIOPEN_DIM_MAX
       && input.dim() >= 3
       && input.scalar_type() != at::kDouble
-      && (detail::getCUDAHooks().versionMIOpen() >= 30400 || input.scalar_type() != at::kBFloat16)
+      && (is_miopen_3_4 || input.scalar_type() != at::kBFloat16)
       && weight.scalar_type() == at::kFloat // only FP32 weight for FP32 or FP16/BF16(mixed) input
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+      && (input.suggest_memory_format() == MemoryFormat::Contiguous
+          || (is_miopen_3_5 && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM &&
+              (input.suggest_memory_format() == MemoryFormat::ChannelsLast
+               || input.suggest_memory_format() == MemoryFormat::ChannelsLast3d)))
   ) {
     return BatchNormBackend::Miopen;
   }
