@@ -35,7 +35,7 @@ Definition of CuTe Layouts and functions to manipulate them
 """
 
 from itertools import chain
-from typing import Optional, TypeGuard, Union
+from typing import Optional, TypeAlias, TypeGuard, Union
 
 from .int_tuple import (
     crd2idx,
@@ -51,10 +51,10 @@ from .int_tuple import (
 
 
 # Type aliases
-LayoutOrIntTuple = Union["Layout", IntTuple]
-LayoutProfile = Optional[Union[tuple[object, ...], "Layout"]]
-LayoutInput = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
-CoordinateType = Optional[
+LayoutOrIntTuple: TypeAlias = Union["Layout", IntTuple]
+LayoutProfile: TypeAlias = Optional[Union[tuple[object, ...], "Layout"]]
+LayoutInput: TypeAlias = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
+CoordinateType: TypeAlias = Optional[
     Union[int, IntTuple, tuple[object, ...]]
 ]  # Input for slice_ and crd2idx functions
 

@@ -36,13 +36,13 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import Optional, TypeGuard, Union
+from typing import Optional, TypeAlias, TypeGuard, Union
 
 from .typing import Integer
 
 
 # Type aliases for better readability
-IntTuple = Union[int, tuple["IntTuple", ...]]
+IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
 
 
 def is_int(x: object) -> TypeGuard[int]:
