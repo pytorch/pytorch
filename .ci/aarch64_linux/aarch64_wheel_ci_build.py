@@ -253,7 +253,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             replace_tag(f"{f.path}/WHEEL")
             break
 
-    os.system(f"wheel pack {folder}/tmp/ -d {folder}")
+    os.system(f"python3 -m wheel pack {folder}/tmp/ -d {folder}")
     os.system(f"rm -rf {folder}/tmp/")
 
 
