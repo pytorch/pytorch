@@ -15510,7 +15510,7 @@ if RUN_GPU:
             y = torch.tensor([1, 2], device=GPU_TYPE)
 
             torch._dynamo.reset()
-            torch._inductor.config.force_fallback_repeat_interleave = False
+            torch._inductor.config._debug_do_not_use_force_fallback_repeat_interleave = False
             _, (graph_lowering,) = run_and_get_graph_lowering(fn, x, y)
             count = 0
             for node in graph_lowering.graph.nodes:
@@ -15519,7 +15519,7 @@ if RUN_GPU:
             self.assertEqual(count, 1)
 
             torch._dynamo.reset()
-            torch._inductor.config.force_fallback_repeat_interleave = True
+            torch._inductor.config._debug_do_not_use_force_fallback_repeat_interleave = True
             _, (graph_lowering,) = run_and_get_graph_lowering(fn, x, y)
             count = 0
             for node in graph_lowering.graph.nodes:

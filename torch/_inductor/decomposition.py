@@ -1157,7 +1157,7 @@ def repeat_interleave_Tensor(
     repeat: torch.Tensor,
     output_size: Optional[int] = None,
 ) -> torch.Tensor:
-    if config.force_fallback_repeat_interleave:
+    if config._debug_do_not_use_force_fallback_repeat_interleave:
         # TODO: Remove this config, this is temp hotfix
         return NotImplemented
     if config.triton.autotune_at_compile_time:

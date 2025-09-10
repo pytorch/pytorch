@@ -466,7 +466,8 @@ graph_partition: bool = (
 )
 
 # force fallback of aten.repeat_interleave.Tensor
-force_fallback_repeat_interleave: bool = (
+# temporary hotfix for sev: https://www.internalfb.com/sevmanager/view/560895
+_debug_do_not_use_force_fallback_repeat_interleave: bool = (
     os.environ.get("TORCHINDUCTOR_FORCE_FALLBACK_REPEAT_INTERLEAVE", "0") == "1"
 )
 
