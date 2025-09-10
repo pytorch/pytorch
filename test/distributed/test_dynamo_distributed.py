@@ -1183,7 +1183,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(a, b, c):
-                res = torch.sum(a @ b) + torch.sum(b @ c) + torch.sum(c @ a)
+                res = torch.sum((a @ b) + 1.0) + torch.sum(torch.relu(b @ c)) + torch.sum(c @ a)
                 
                 return res
             
@@ -1192,6 +1192,12 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             c = torch.randn(2048, 1024, device=self.rank, dtype=torch.bfloat16)
 
             f(a, b, c)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
 
             print(f"Result from {self.rank} is {f(a, b, c)}")
 

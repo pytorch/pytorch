@@ -1238,8 +1238,11 @@ def fresh_cache(
                     exc_info=exc_info,
                 ),
             )
-    except Exception:
+    except Exception as e:
+        import traceback
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        log.error(f"Error encountered {e}")
+        traceback.print_exc()
         raise
     finally:
         clear_caches()

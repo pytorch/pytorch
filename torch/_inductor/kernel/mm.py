@@ -690,10 +690,17 @@ def tuned_mm(mat1, mat2, *, layout=None):
         aten_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
+    
+    global autotuned_num
+    compile_pg = get_compile_pg()
+    if compile_pg:
+        if autotuned_num % compile_pg.size() != compile_pg.rank():
+            log.error(f"Rank {compile_pg.rank()} is not autotuning with autotuned_num {autotuned_num % compile_pg.size()}")
+            autotuned_num += 1
+            return torch._inductor.ir.TensorBox.create(AsyncMultiTemplateBuffer(name, kernel_inputs.nodes(), layout))
 
-    if autotuned_num != 0:
-        return AsyncMultiTemplateBuffer(name, kernel_inputs.nodes(), layout)
-
+        log.error(f"Rank {compile_pg.rank()} autotunes")
+    autotuned_num += 1
     # options to tune from
     choices = (
         [aten_mm.bind(kernel_inputs.nodes(), aten_layout)]
