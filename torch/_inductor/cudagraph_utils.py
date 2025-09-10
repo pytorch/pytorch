@@ -315,7 +315,7 @@ def log_data_ptr_mismatch(
     return error_msg
 
 
-def maybe_error_due_to_dynamic_shape(  # TODO
+def maybe_error_due_to_dynamic_shape(
     fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> None:
@@ -329,7 +329,7 @@ def maybe_error_due_to_dynamic_shape(  # TODO
             "Please consider the following options for better performance: "
             "a) padding inputs to a few fixed number of shapes; or b) set "
             "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
-            "If re-recording for many input sizes are expected, please set "
+            "If re-recording for many input sizes is expected, please set "
             "torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit "
             "to a larger number (e.g., 128) to allow more CUDAGraph re-recording, "
             "or set it to be None to skip this error check."
