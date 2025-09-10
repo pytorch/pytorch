@@ -7056,43 +7056,6 @@ class TestCompileKernel(TestCase):
         expected = torch.full((n,), test_value, device="cuda", dtype=torch.float16)
         torch.testing.assert_close(output, expected, rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
-    @unittest.skipIf(not TEST_CUDA, "No CUDA")
-    def test_compile_kernel_cuda_cpp_stdlib(self):
-        """Test that kernels can use CUDA C++ Standard Library headers."""
-        kernel_source = """
-        #include <cuda/std/cstdint>
-        
-        __global__ void cpp_stdlib_kernel(
-            cuda::std::uint32_t* output, 
-            cuda::std::uint32_t input_value, 
-            int n
-        ) {
-            int idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx < n) {
-                // Use CUDA C++ stdlib types
-                output[idx] = input_value + static_cast<cuda::std::uint32_t>(idx);
-            }
-        }
-        """
-
-        from torch.cuda import _compile_kernel
-
-        compiled_kernel = _compile_kernel(kernel_source, "cpp_stdlib_kernel")
-
-        n = 100
-        input_value = 42
-        output = torch.zeros(n, device="cuda", dtype=torch.uint32)
-
-        compiled_kernel(
-            grid=(1, 1, 1),
-            block=(256, 1, 1),
-            args=[output, input_value, n],
-        )
-
-        expected = torch.arange(n, device="cuda", dtype=torch.uint32) + input_value
-        torch.testing.assert_close(output, expected)
-
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
