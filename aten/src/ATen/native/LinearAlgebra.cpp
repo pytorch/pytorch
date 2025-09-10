@@ -1360,6 +1360,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1393,6 +1394,7 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_size = get_mkldnn_matmul_min_size();
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
+#endif
 
 
 static void addmm_impl_cpu_(
@@ -1771,6 +1773,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1781,6 +1784,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       at::globalContext().setUserEnabledMkldnn(false);
     }
   }
+#endif
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
