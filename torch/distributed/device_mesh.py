@@ -7,7 +7,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from functools import reduce
-from itertools import chain, zip_longest
+from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
@@ -185,12 +185,15 @@ else:
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
 
+            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
+            if device_mesh.ndim == 1 and mesh_dim_name in not_none(
+                device_mesh.mesh_dim_names
+            ):
+                return device_mesh
+
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
-            )
+            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
@@ -199,8 +202,6 @@ else:
                 )
 
             # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]

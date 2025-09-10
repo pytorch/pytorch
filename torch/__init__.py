@@ -2375,7 +2375,10 @@ class _TorchCompileInductorWrapper:
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        from torch._inductor.compile_fx import compile_fx
+        from torch._dynamo.utils import dynamo_timed
+
+        with dynamo_timed("inductor_import", log_pt2_compile_event=True):
+            from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
