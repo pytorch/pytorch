@@ -43,4 +43,4 @@ install_huggingface
 install_timm
 
 # Clean up
-conda_run pip uninstall -y torch torchvision torchaudio triton torchao
+conda_run pip uninstall -y torch torchvision torchaudio triton
