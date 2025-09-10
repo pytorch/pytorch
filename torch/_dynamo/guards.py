@@ -39,6 +39,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
 from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -225,6 +232,22 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> Optional[int]:
+    # Refer to index in the frame's localsplus directly.
+    # NOTE: name order for a code object doesn't change.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
+    framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    if var_name not in framelocals_names_reversed:
+        return None
+    framelocals_idx = (
+        len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
+    )
+    return framelocals_idx
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -1335,20 +1358,8 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # Refer to index in the frame's localsplus directly.
-            # NOTE: name order for a code object doesn't change.
-            # NOTE: we need to find the LAST matching index because <= 3.10 contains
-            # duplicate names in the case of cells: a name can be both local and cell
-            # and will take up 2 slots of the frame's localsplus. The correct behavior
-            # is to refer to the cell, which has a higher index.
-            framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                self.f_code
-            )
-            framelocals_idx = (
-                len(framelocals_names_reversed)
-                - framelocals_names_reversed.index(source.local_name)
-                - 1
-            )
+            framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
+            assert framelocals_idx is not None
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -1546,6 +1557,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
+            assert base_source_name
             assert callable(base_example_value)
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
@@ -1735,15 +1747,34 @@ class GuardBuilder(GuardBuilderBase):
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+
+        required_locals = {}
+        all_locals = self.scope["L"].keys()
+        for var_name in guard_fn.__code__.co_consts:
+            if isinstance(var_name, str) and var_name in all_locals:
+                index = get_framelocals_idx(self.f_code, var_name)
+                if index is not None:
+                    required_locals[var_name] = index
+
+        construct_partial_framelocals_dict = config.construct_partial_framelocals_dict
+
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
+            )
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -2028,10 +2059,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         forward_ad = torch.autograd.forward_ad
 
-        def fn(x: Any) -> bool:
+        def fn() -> bool:
             return forward_ad._current_level == dual_level
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2047,10 +2078,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn(x: Any) -> bool:
+        def fn() -> bool:
             return compare_fn(states)
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2076,10 +2107,10 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn(x: Any) -> bool:
+        def fn() -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2100,7 +2131,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
@@ -2175,8 +2206,8 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"__math_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],
+            self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+                _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2188,8 +2219,8 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"__numpy_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],
+            self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+                _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2797,14 +2828,14 @@ class GuardBuilder(GuardBuilderBase):
                         size,
                         stride,
                         pytype,
-                        dispatch_keys,  # type: ignore[arg-type]
+                        dispatch_keys,
                     ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
                     value,
-                    size,
-                    stride,
+                    size,  # type: ignore[arg-type]
+                    stride,  # type: ignore[arg-type]
                     tensor_name,
                     verbose_code_parts,
                     pytype,
@@ -2911,7 +2942,9 @@ class GuardBuilder(GuardBuilderBase):
             getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
         )
         # See D64140537 for why we are checking for tuple.
-        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
+        if supports_weakref and not isinstance(
+            guarded_object, (enum.Enum, tuple, weakref.ProxyTypes)
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
@@ -3271,6 +3304,7 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
+        strict_error: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3444,7 +3478,7 @@ class CheckFunctionManager:
                     builder, sorted_guards, self.output_graph
                 )
             except exc.PackageError as e:
-                if torch._dynamo.config.strict_precompile:
+                if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
@@ -3467,20 +3501,21 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "DICT_VERSION",
+        "NN_MODULE",
+        "ID_MATCH",
+        "FUNCTION_MATCH",
+        "CLOSURE_MATCH",
+        "WEAKREF_ALIVE",
+    )
+
     def serialize_guards(
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
-        UNSUPPORTED_GUARD_TYPES = (
-            "DICT_VERSION",
-            "NN_MODULE",
-            "ID_MATCH",
-            "FUNCTION_MATCH",
-            "CLOSURE_MATCH",
-            "WEAKREF_ALIVE",
-        )
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
@@ -3492,12 +3527,19 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard.name)
                     raise_local_type_error(obj)
-            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+            elif (
+                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
                 )
             elif failed := next(
-                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+                (
+                    i
+                    for i in derived_guard_types
+                    if i in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                ),
+                None,
             ):
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(

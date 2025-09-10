@@ -409,7 +409,7 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Authenticate with AWS
-        if: ${{ contains(matrix.runner, 'b200') }}
+        if: ${{ always() && contains(matrix.runner, 'b200') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results

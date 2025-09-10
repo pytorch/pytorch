@@ -2,12 +2,19 @@
 
 import unittest
 
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+    HAS_XPU_AND_TRITON,
+)
 from torch.utils._triton import has_triton
 
 
 requires_cuda_and_triton = unittest.skipUnless(
     HAS_CUDA_AND_TRITON, "requires cuda and triton"
+)
+requires_gpu_and_triton = unittest.skipUnless(
+    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
@@ -24,6 +31,8 @@ if has_triton():
                     {
                         "BLOCK_SIZE_M": 16,
                         "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
                         "matrix_instr_nonkdim": 16,
                         "waves_per_eu": 3,
                         "kpack": 2,
@@ -35,6 +44,8 @@ if has_triton():
                     {
                         "BLOCK_SIZE_M": 128,
                         "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
                         "matrix_instr_nonkdim": 16,
                         "waves_per_eu": 3,
                         "kpack": 2,
@@ -839,7 +850,28 @@ if has_triton():
         tl.store(out_ptr + offsets, output, mask=mask)
 
     @triton.autotune(
-        configs=_get_strange_configs(),
+        configs=[
+            triton.Config(
+                {
+                    "BLOCK_SIZE_M": 16,
+                    "BLOCK_SIZE_N": 16,
+                    "BLOCK_SIZE_K": 16,
+                    "GROUP_SIZE_M": 4,
+                },
+                num_stages=4,
+                num_warps=4,
+            ),
+            triton.Config(
+                {
+                    "BLOCK_SIZE_M": 128,
+                    "BLOCK_SIZE_N": 64,
+                    "BLOCK_SIZE_K": 32,
+                    "GROUP_SIZE_M": 8,
+                },
+                num_stages=4,
+                num_warps=4,
+            ),
+        ],
         key=["M_ptr", "N", "K"],
     )
     @triton.jit
