@@ -39,6 +39,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
 from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -225,6 +232,20 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
+    # Refer to index in the frame's localsplus directly.
+    # NOTE: name order for a code object doesn't change.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
+    framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    framelocals_idx = (
+        len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
+    )
+    return framelocals_idx
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -1335,20 +1356,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # Refer to index in the frame's localsplus directly.
-            # NOTE: name order for a code object doesn't change.
-            # NOTE: we need to find the LAST matching index because <= 3.10 contains
-            # duplicate names in the case of cells: a name can be both local and cell
-            # and will take up 2 slots of the frame's localsplus. The correct behavior
-            # is to refer to the cell, which has a higher index.
-            framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                self.f_code
-            )
-            framelocals_idx = (
-                len(framelocals_names_reversed)
-                - framelocals_names_reversed.index(source.local_name)
-                - 1
-            )
+            framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -3471,20 +3479,21 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "DICT_VERSION",
+        "NN_MODULE",
+        "ID_MATCH",
+        "FUNCTION_MATCH",
+        "CLOSURE_MATCH",
+        "WEAKREF_ALIVE",
+    )
+
     def serialize_guards(
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
-        UNSUPPORTED_GUARD_TYPES = (
-            "DICT_VERSION",
-            "NN_MODULE",
-            "ID_MATCH",
-            "FUNCTION_MATCH",
-            "CLOSURE_MATCH",
-            "WEAKREF_ALIVE",
-        )
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
@@ -3496,12 +3505,19 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard.name)
                     raise_local_type_error(obj)
-            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+            elif (
+                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
                 )
             elif failed := next(
-                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+                (
+                    i
+                    for i in derived_guard_types
+                    if i in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                ),
+                None,
             ):
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(

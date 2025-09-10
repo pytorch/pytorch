@@ -124,19 +124,15 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=10.15
+export MACOSX_DEPLOYMENT_TARGET=11.0
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
-SETUPTOOLS_PINNED_VERSION="==70.1.0"
-PYYAML_PINNED_VERSION="==5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
@@ -145,8 +141,6 @@ case $desired_python in
         ;;
     3.14)
         echo "Using 3.14t deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
         desired_python="3.14.0rc1"
@@ -154,8 +148,6 @@ case $desired_python in
         ;;
     3.13t)
         echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
@@ -164,37 +156,23 @@ case $desired_python in
         ;;
     3.13)
         echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
         echo "Using 3.12 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.11)
         echo "Using 3.11 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="==2.0.2"
-        ;;
-    3.9)
-        echo "Using 3.9 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     *)
-        echo "Using default deps"
-        NUMPY_PINNED_VERSION="==1.11.3"
+        echo "Unsupported version $desired_python"
+        exit 1
         ;;
 esac
 
@@ -204,8 +182,6 @@ conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_p
 source activate "$tmp_env_name"
 
 PINNED_PACKAGES=(
-    "setuptools${SETUPTOOLS_PINNED_VERSION}"
-    "pyyaml${PYYAML_PINNED_VERSION}"
     "numpy${NUMPY_PINNED_VERSION}"
 )
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements-build.txt"
@@ -213,8 +189,7 @@ pip install requests ninja typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
-# For USE_DISTRIBUTED=1 on macOS, this enables gloo, which needs libuv, which
-# is build as part of tensorpipe submodule
+# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
 export USE_MKLDNN=OFF
@@ -224,7 +199,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir"
+python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name ${mac_version}
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
