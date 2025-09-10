@@ -9,6 +9,7 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
+import torch.distributed._symmetric_memory as symm_mem
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import (
@@ -1041,6 +1042,36 @@ dtensor.max()
         )
         self.assertIn("_dispatch.py", stderr.decode("utf-8"))
         self.assertIn("redistribute=False", stderr.decode("utf-8"))
+
+
+class DTensorSymmMemTest(DTensorTestBase):
+    @property
+    def device(self):
+        return torch.device(self.device_type, self.rank)
+
+    @with_comms
+    def test_sm_all_reduce(self):
+        symm_mem.enable_symm_mem_for_group("0")
+        device_mesh = self.build_device_mesh()
+        local_tensor = symm_mem.empty((32, 32), device=self.device)
+        dtensor = DTensor.from_local(
+            local_tensor,
+            device_mesh,
+            [Partial()],
+        )
+        dtensor.redistribute(device_mesh, [Replicate()])
+
+    @with_comms
+    def test_sm_all_gather(self):
+        symm_mem.enable_symm_mem_for_group("0")
+        device_mesh = self.build_device_mesh()
+        local_tensor = symm_mem.empty((32, 32), device=self.device)
+        dtensor = DTensor.from_local(
+            local_tensor,
+            device_mesh,
+            [Shard(0)],
+        )
+        dtensor.redistribute(device_mesh, [Replicate()])
 
 
 if __name__ == "__main__":

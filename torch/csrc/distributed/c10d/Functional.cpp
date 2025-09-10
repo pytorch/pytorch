@@ -6,7 +6,10 @@
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <utility>
+
+using namespace c10d::symmetric_memory;
 
 namespace {
 
@@ -32,17 +35,28 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
-    int64_t group_size) {
+    int64_t group_size,
+    const std::optional<std::string>& group_name = std::nullopt) {
   TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
-  if (output_size.size() == 0) {
+  if (output_size.empty()) {
     output_size.push_back(group_size);
   } else {
     output_size[0] *= group_size;
   }
-  return at::empty(
-      output_size,
-      at::TensorOptions().dtype(input.dtype()).device(input.device()));
+  if (group_name.has_value()) {
+    return empty_strided_p2p(
+        output_size,
+        input.strides(),
+        input.scalar_type(),
+        input.device(),
+        group_name,
+        std::nullopt);
+  } else {
+    return at::empty(
+        output_size,
+        at::TensorOptions().dtype(input.dtype()).device(input.device()));
+  }
 }
 
 at::Tensor allocate_reduce_scatter_output(
@@ -61,9 +75,20 @@ at::Tensor allocate_reduce_scatter_output(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 }
 
+bool symm_mem_enabled_for_funcoll = true;
+
 } // namespace
 
 namespace c10d {
+
+C10_EXPORT bool is_symm_mem_enabled_for_funcoll() {
+  return symm_mem_enabled_for_funcoll;
+}
+
+C10_EXPORT void enable_symm_mem_for_funcoll(bool enabled) {
+  LOG(WARNING) << "Support is experimental and intra-node only.";
+  symm_mem_enabled_for_funcoll = enabled;
+}
 
 at::Tensor& all_reduce_(
     at::Tensor& input,
@@ -96,10 +121,22 @@ at::Tensor all_reduce(
         " does not support complex tensors");
   }
   auto input_real = input.is_complex() ? at::view_as_real(input) : input;
-  auto output = input_real.clone(at::MemoryFormat::Contiguous);
-  auto output_ret =
-      all_reduce_(output, std::move(reduce_op), std::move(group_name));
-  return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
+
+  if (is_symm_mem_enabled_for_funcoll()) {
+    auto output_ret = at::empty_like(input_real, at::MemoryFormat::Contiguous);
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("symm_mem::two_shot_all_reduce_out", "")
+            .typed<at::Tensor(
+                at::Tensor, std::string, std::string, at::Tensor)>();
+    op.call(input_real, reduce_op, group_name, output_ret);
+    return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
+  } else {
+    auto output = input_real.clone(at::MemoryFormat::Contiguous);
+    auto output_ret =
+        all_reduce_(output, std::move(reduce_op), std::move(group_name));
+    return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
+  }
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
@@ -159,10 +196,21 @@ at::Tensor all_gather_into_tensor(
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
   auto real_input = input.is_complex() ? at::view_as_real(input) : input;
-  std::vector<at::Tensor> inputs{real_input};
-  auto output = all_gather_into_tensor_coalesced(
-      inputs, group_size, std::move(group_name))[0];
-  return input.is_complex() ? at::view_as_complex(output) : output;
+  if (is_symm_mem_enabled_for_funcoll()) {
+    auto output =
+        allocate_all_gather_output(real_input, group_size, group_name);
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("symm_mem::multimem_all_gather_out", "")
+            .typed<at::Tensor(const at::Tensor&, std::string, at::Tensor)>();
+    op.call(real_input, group_name, output);
+    return input.is_complex() ? at::view_as_complex(output) : output;
+  } else {
+    std::vector<at::Tensor> inputs{real_input};
+    auto output = all_gather_into_tensor_coalesced(
+        inputs, group_size, std::move(group_name))[0];
+    return input.is_complex() ? at::view_as_complex(output) : output;
+  }
 }
 
 at::Tensor& all_gather_into_tensor_out(
