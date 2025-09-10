@@ -1,56 +1,29 @@
-#################################################################################################
-#
-# Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#################################################################################################
-
 """
-Definition of CuTe inspired Layouts for device mesh bookkeeping and functions to manipulate them
+Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and functions to manipulate them
 """
 
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
-from typing_extensions import TypeGuard
+from typing import TypeAlias
 
-
-IntTuple = tuple[int, ...]
-
-from typing import TypeAlias, Union
+from torch.distributed._pycute import (
+    # coalesce,
+    # complement,
+    # composition,
+    flatten,
+    is_tuple,
+    Layout,
+    IntTuple,
+)
 
 
 NestedIntTuple: TypeAlias = tuple["int | NestedIntTuple", ...]
 
 
-@dataclass(frozen=True)
-class _Layout:
+@dataclass(frozen=True, init=True)
+class _Layout(Layout):
     """
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
     See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
@@ -66,64 +39,49 @@ class _Layout:
     different from that of PyCute's.
     """
 
-    _sizes: NestedIntTuple
-    _strides: NestedIntTuple
+    shape: NestedIntTuple
+    stride: NestedIntTuple
 
     def __post_init__(self) -> None:
-        if len(_Layout.flatten(self._sizes)) != len(_Layout.flatten(self._strides)):
+        if not is_tuple(self.shape):
+            raise ValueError(f"shape must be a tuple, got {type(self.shape)}")
+        if not is_tuple(self.stride):
+            raise ValueError(f"stride must be a tuple, got {type(self.stride)}")
+        if len(flatten(self.shape)) != len(flatten(self.stride)):
             raise ValueError(
-                f"sizes {len(_Layout.flatten(self._sizes))} and "
-                f"strides {len(_Layout.flatten(self._strides))} must have the same length"
+                f"sizes {len(flatten(self.shape))} and "
+                f"strides {len(flatten(self.stride))} must have the same length"
             )
 
     @property
     def sizes(self) -> NestedIntTuple:
-        return self._sizes
+        return self.shape
 
     @property
     def strides(self) -> NestedIntTuple:
-        return self._strides
+        return self.stride
 
     @property
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        return zip(_Layout.flatten(self._sizes), _Layout.flatten(self._strides))
+        return zip(flatten(self.shape), flatten(self.stride))  # type: ignore[arg-type]
 
     def numel(self) -> int:
-        return math.prod(_Layout.flatten(self.sizes))
-
-    # operator len(L)  (len [rank] like tuples)
-    def __len__(self) -> int:
-        return len(_Layout.flatten(self._sizes))
+        return math.prod(flatten(self.shape))
 
     # operator []    (get-i like tuples)
     def __getitem__(self, i: int) -> "_Layout":
         size = self.sizes[i]
         stride = self.strides[i]
-        if _Layout.is_tuple(size) and _Layout.is_tuple(stride):
-            return _Layout(size, stride)
+        if is_tuple(size) and is_tuple(stride):
+            return _Layout(size, stride)  # type: ignore[arg-type]
         elif isinstance(size, int) and isinstance(stride, int):
             return _Layout((size,), (stride,))
         else:
             raise ValueError("size and stride must be either int or tuple")
-
+    
     @staticmethod
     def ceil_div(n: int, m: int) -> int:
         return (n + m - 1) // m
-
-    @staticmethod
-    def is_tuple(x: Union[int, NestedIntTuple]) -> TypeGuard[NestedIntTuple]:
-        return isinstance(x, tuple)
-
-    @staticmethod
-    def flatten(t: Union[int, NestedIntTuple]) -> IntTuple:
-        if _Layout.is_tuple(t):
-            if len(t) == 0:
-                return ()
-            else:
-                return tuple(i for a in t for i in _Layout.flatten(a))
-        else:
-            assert isinstance(t, int)
-            return (t,)
 
     def coalesce(self) -> "_Layout":
         """
@@ -182,7 +140,7 @@ class _Layout:
         # When layout is injective (aka one-to-one), composition is left-distributive with concatenation.
         # We return a flattened list of list of self compose with each sublayout.
         if len(layout.sizes) > 1:
-            layouts = (self.composition(layout_i) for layout_i in layout)  # type: ignore[attr-defined]
+            layouts = (self.composition(layout_i) for layout_i in layout) # type: ignore[attr-defined]
             zip_res_sizes, zip_res_strides = zip(
                 *((a.sizes, a.strides) for a in layouts)
             )
@@ -207,8 +165,8 @@ class _Layout:
         # Step 2: keep the first 3 of those strided elements, i.e., (3,2):(4,1) -> (3,1):(4,1)
         flattened_self = self.coalesce()
         for curr_size, curr_stride in zip(
-            _Layout.flatten(flattened_self.sizes)[:-1],
-            _Layout.flatten(flattened_self.sizes)[:-1],
+            flatten(flattened_self.sizes)[:-1],
+            flatten(flattened_self.sizes)[:-1],
         ):
             assert curr_size % sub_stride == 0 or sub_stride % curr_size == 0, (
                 "Layouts do not meet stride divisibility condition"
@@ -314,8 +272,8 @@ class _Layout:
         result = [0, 2, 4, 1, 3, 5]
         """
         return [
-            sum(c * s for c, s in zip(coord, _Layout.flatten(self.strides)))
-            for coord in product(*(range(s) for s in _Layout.flatten(self.sizes)))
+            sum(c * s for c, s in zip(coord, flatten(self.strides)))
+            for coord in product(*(range(s) for s in flatten(self.sizes)))
         ]
 
     def global_ranks(self, world_size: int) -> list[list[int]]:
@@ -357,32 +315,32 @@ class _MeshLayout:
     def layouts(self) -> MeshLayoutType:
         return self._layouts
 
-    @staticmethod
-    def to_single_depth_layouts(
-        mesh_size: IntTuple, mesh_stride: IntTuple
-    ) -> "_MeshLayout":
-        """
-        Convert a contiguous PyTorch mesh tensor's metadata (size, stride) into a list of layouts.
-        If there are no transformation is being made to a device mesh, each dim of mesh is represented
-        by a layout but this is not the case once the mesh has been transformed, unflatten for example.
+    # @staticmethod
+    # def to_single_depth_layouts(
+    #     mesh_size: IntTuple, mesh_stride: IntTuple
+    # ) -> "_MeshLayout":
+    #     """
+    #     Convert a contiguous PyTorch mesh tensor's metadata (size, stride) into a list of layouts.
+    #     If there are no transformation is being made to a device mesh, each dim of mesh is represented
+    #     by a layout but this is not the case once the mesh has been transformed, unflatten for example.
 
-        For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
-        and then wrap that (size, stride) pair into a 1D layout.
+    #     For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
+    #     and then wrap that (size, stride) pair into a 1D layout.
 
-        The result is a list of independent layout, one per dimension.
-        Each layout describes how indices in that dimension map to backend ranks.
+    #     The result is a list of independent layout, one per dimension.
+    #     Each layout describes how indices in that dimension map to backend ranks.
 
-        Example:
-            Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
-            Then:
-            layouts[0] = (3:4)   # first dimension: size=3, stride=4
-            layouts[1] = (4:1)   # second dimension: size=4, stride=1
-        """
-        if len(mesh_size) != len(mesh_stride):
-            raise ValueError("mesh_size and mesh_stride must have the same length")
-        return _MeshLayout(
-            tuple(
-                _Layout((size,), (stride,))
-                for size, stride in zip(mesh_size, mesh_stride)
-            )
-        )
+    #     Example:
+    #         Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
+    #         Then:
+    #         layouts[0] = (3:4)   # first dimension: size=3, stride=4
+    #         layouts[1] = (4:1)   # second dimension: size=4, stride=1
+    #     """
+    #     if len(mesh_size) != len(mesh_stride):
+    #         raise ValueError("mesh_size and mesh_stride must have the same length")
+    #     return _MeshLayout(
+    #         tuple(
+    #             _Layout((size,), (stride,))
+    #             for size, stride in zip(mesh_size, mesh_stride)
+    #         )
+    #     )
