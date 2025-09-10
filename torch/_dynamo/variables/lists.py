@@ -19,13 +19,18 @@ variable tracking system.
 import collections
 import inspect
 import operator
+import sys
 from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+)
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
@@ -277,6 +282,16 @@ class RangeVariable(BaseListVariable):
         else:
             raise AssertionError
 
+        def maybe_as_int(x):
+            return (
+                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+            )
+
+        # cast each argument to an integer
+        start = maybe_as_int(start)
+        step = maybe_as_int(step)
+        stop = maybe_as_int(stop)
+
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
 
@@ -363,7 +378,12 @@ class RangeVariable(BaseListVariable):
             index = length + index
 
         if index < 0 or index >= length:
-            raise IndexError(f"index {index} is out of range")
+            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+            raise_observed_exception(
+                IndexError,
+                tx,
+                args=[ConstantVariable("range object index out of range")],
+            )
 
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
 
@@ -397,8 +417,11 @@ class RangeVariable(BaseListVariable):
 
         if isinstance(index, slice):
             return self.apply_slice(index)
-        else:
+        elif isinstance(index, int):
             return self.apply_index(index)
+        else:
+            msg = ConstantVariable("range indices must be integers or slices")
+            raise_observed_exception(TypeError, tx, args=[msg])
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
@@ -421,6 +444,39 @@ class RangeVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr(range(0), name))
 
+    def range_equals(self, other: "RangeVariable"):
+        r0, r1 = self, other
+        if (
+            self.range_length() != r1.range_length()
+            or self.range_length() == 0
+            or r0.start() != r1.start()
+        ):
+            return False
+
+        if len(r0) == 1:
+            return True
+
+        return r0.step() == r1.step()
+
+    def range_count(self, x: VariableTracker):
+        # Based on CPython
+        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
+        x = x.as_python_constant()
+        if type(x) not in (bool, int, float):
+            return 0
+
+        start, stop, step = self.start(), self.stop(), self.step()
+
+        if step == 0:
+            return 0
+
+        in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+
+        if in_range:
+            re = ((x - start) % step) == 0
+            return int(re)
+        return 0
+
     def call_method(self, tx, name, args, kwargs):
         if name == "__iter__":
             if not all(var.is_python_constant() for var in self.items):
@@ -431,22 +487,44 @@ class RangeVariable(BaseListVariable):
             return RangeIteratorVariable(
                 self.start(), self.stop(), self.step(), self.range_length()
             )
+        elif name == "__len__":
+            length = self.range_length()
+            if length > sys.maxsize:
+                raise_observed_exception(OverflowError, tx)
+            return ConstantVariable.create(self.range_length())
+        elif name in ("count", "__contains__"):
+            return ConstantVariable(self.range_count(*args))
+        elif name == "__getitem__":
+            return self.getitem_const(tx, *args)
+        elif name in cmp_name_to_op_mapping:
+            other = args[0]
+            pt = other.python_type()
+            if name not in ("__eq__", "__ne__"):
+                # ranges are only comparable to other ranges
+                msg = f"{name} not supported between instances of 'range' and '{pt}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(msg)],
+                )
+
+            if pt is not range:
+                return ConstantVariable.create(NotImplemented)
+
+            cmp = self.range_equals(other)
+
+            # Two ranges are equal if they produce the same sequence of values
+            if name == "__eq__":
+                return ConstantVariable(cmp)
+            else:
+                return ConstantVariable(not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        if name == "__iter__":
-            return variables.GetAttrVariable(self, name)
-
-        unimplemented_v2(
-            gb_type="Unsupported attribute for range() object",
-            context=f"var_getattr {self} {name}",
-            explanation=f"Expected attribute to be one of {','.join(fields)} "
-            f"but got {name}",
-            hints=[*graph_break_hints.USER_ERROR],
-        )
+        return super().var_getattr(tx, name)
 
 
 class CommonListMethodsVariable(BaseListVariable):
@@ -1099,9 +1177,24 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         if self.is_structseq():
             # StructSequenceType(iterable)
-            return self.python_type()([x.as_python_constant() for x in self.items])
-        # NamedTupleType(*iterable)
-        return self.python_type()(*[x.as_python_constant() for x in self.items])
+            result = self.python_type()([x.as_python_constant() for x in self.items])
+        else:
+            # NamedTupleType(*iterable)
+            result = self.python_type()(*[x.as_python_constant() for x in self.items])
+
+        # Apply dynamic attributes if any were set
+        if self.dynamic_attributes:
+            for attr_name, attr_value in self.dynamic_attributes.items():
+                # Convert VariableTracker to Python constant if needed
+                if hasattr(attr_value, "as_python_constant"):
+                    python_value = attr_value.as_python_constant()
+                else:
+                    raise NotImplementedError(
+                        "Can not convert dynamic attribute without python constant value to python constant."
+                    )
+                setattr(result, attr_name, python_value)
+
+        return result
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -1112,6 +1205,7 @@ class NamedTupleVariable(TupleVariable):
         return self.python_type()(*self._as_proxy())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Always reconstruct the NamedTuple normally first
         # Constructors:
         #   StructSequenceType(iterable)
         #   NamedTupleType(*iterable)
@@ -1129,6 +1223,12 @@ class NamedTupleVariable(TupleVariable):
             ]
             + create_call_function(1, False)
         )
+
+        for name, value in self.dynamic_attributes.items():
+            codegen.dup_top()
+            codegen(value)
+            codegen.extend_output(create_rot_n(2))
+            codegen.store_attr(name)
 
     def call_method(
         self,
@@ -1153,6 +1253,8 @@ class NamedTupleVariable(TupleVariable):
                 raise_observed_exception(AttributeError, tx)
             # Subclass of namedtuple type can have dynamic attributes
             tx.output.side_effects.mutation(self)
+            if self.source:
+                tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)

@@ -8,6 +8,7 @@ import unittest
 import io
 import itertools
 import warnings
+import os
 import pickle
 import re
 from copy import deepcopy
@@ -58,6 +59,9 @@ from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+if TEST_WITH_ROCM:
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -7431,6 +7435,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
         # test for https://github.com/pytorch/pytorch/issues/136291
@@ -7461,14 +7466,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_fractional_max_pool2d_invalid_output_ratio(self):
         arg_1 = [2, 1]
         arg_2 = [0.5, 0.5, 0.6]
-        arg_class = torch.nn.FractionalMaxPool2d(kernel_size=arg_1, output_ratio=arg_2,)
-        arg_3_0_tensor = torch.rand([20, 16, 50, 32], dtype=torch.float32)
-        arg_3_0 = arg_3_0_tensor.clone()
-        arg_3 = [arg_3_0,]
-
-        with self.assertRaisesRegex(ValueError,
-                                    "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
-            res = arg_class(*arg_3)
+        with self.assertRaisesRegex(AssertionError, "Expected an iterable of length 2, but got length 3"):
+            arg_class = torch.nn.FractionalMaxPool2d(kernel_size=arg_1, output_ratio=arg_2,)
 
     def test_max_pool1d_invalid_output_size(self):
         arg_1 = 3
@@ -12042,6 +12041,12 @@ class TestNNDeviceType(NNTestCase):
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
             # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
+
+    def test_nll_loss_1d_input_1d_target_invalid_size(self, device):
+        x = torch.randn(10, device=device)
+        t = torch.randint(0, 10, (3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, "For 1D input, 1D target must have size 1"):
+            F.nll_loss(x, t)
 
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
