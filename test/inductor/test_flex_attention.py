@@ -1967,6 +1967,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
@@ -2060,6 +2061,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
@@ -2142,6 +2144,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""
@@ -2195,6 +2198,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     def test_dynamic_divisibility_guards(self, device, dtype):
         """Test guards for divisible/non-divisible shape transitions"""
@@ -4141,7 +4145,7 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -4165,7 +4169,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
                 "GPU_TYPE", torch.device(device).type

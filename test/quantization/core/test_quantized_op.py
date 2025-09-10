@@ -15,7 +15,7 @@ import torch
 from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
+from torch.nn.modules.utils import _ntuple, _pair, _single
 
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given, note
@@ -5311,10 +5311,11 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
-        kernels = _single(kernels)
-        strides = _single(strides)
-        pads = _single(pads)
-        dilations = _single(dilations)
+        input_dimension_function = _ntuple(len(input_feature_map_shape))
+        kernels = input_dimension_function(kernels)
+        strides = input_dimension_function(strides)
+        pads = input_dimension_function(pads)
+        dilations = input_dimension_function(dilations)
         for i in range(len(kernels)):
             assume(input_feature_map_shape[i] + 2 * pads[i]
                    >= dilations[i] * (kernels[i] - 1) + 1)
@@ -7846,10 +7847,11 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
-        kernels = _single(kernels)
-        strides = _single(strides)
-        pads = _single(pads)
-        dilations = _single(dilations)
+        input_dimension_function = _ntuple(len(input_feature_map_shape))
+        kernels = input_dimension_function(kernels)
+        strides = input_dimension_function(strides)
+        pads = input_dimension_function(pads)
+        dilations = input_dimension_function(dilations)
         for i in range(len(kernels)):
             assume(input_feature_map_shape[i] + 2 * pads[i]
                    >= dilations[i] * (kernels[i] - 1) + 1)
