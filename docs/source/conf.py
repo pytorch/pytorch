@@ -2514,6 +2514,8 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.hf_storage
     "HuggingFaceStorageReader",
     "HuggingFaceStorageWriter",
+    # torch.distributed.checkpoint.quantized_hf_storage
+    "QuantizedHuggingFaceStorageReader",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",

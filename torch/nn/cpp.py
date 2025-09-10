@@ -2,12 +2,16 @@
 """Functionality for Python <-> C++ frontend inter-op."""
 
 from collections.abc import Iterator, MutableMapping
-from typing import Any, Union
+from typing import Any, overload, TypeVar
 
-from torch import nn
+from torch import Tensor
+from torch.nn import Module, Parameter
 
 
-class OrderedDictWrapper(MutableMapping):
+_T = TypeVar("_T")
+
+
+class OrderedDictWrapper(MutableMapping[str, _T]):
     """A wrapper around a C++ OrderedDict.
 
     It dynamically evaluates the OrderedDict getter on a bound C++ module, such
@@ -17,7 +21,7 @@ class OrderedDictWrapper(MutableMapping):
     so using properties does not work.
     """
 
-    def __init__(self, cpp_module, attr):
+    def __init__(self, cpp_module, attr: str) -> None:
         self.cpp_module = cpp_module
         self.attr = attr
 
@@ -28,16 +32,18 @@ class OrderedDictWrapper(MutableMapping):
     # Magic methods cannot be assigned dynamically and bypass ``getattr``, so we
     # must manually override them.
 
-    def items(self):
+    def items(self) -> list[tuple[str, _T]]:  # type: ignore[override]
         return self.cpp_dict.items()
 
-    def keys(self):
+    def keys(self) -> list[str]:  # type: ignore[override]
         return self.cpp_dict.keys()
 
-    def values(self):
+    def values(self) -> list[_T]:  # type: ignore[override]
         return self.cpp_dict.values()
 
-    def __iter__(self) -> Iterator[Any]:
+    # This should return an Iterator[str], but OrderedDict::item is not currently
+    # designed to let us iterate over only the keys.
+    def __iter__(self) -> Iterator[tuple[str, _T]]:  # type: ignore[override]
         return self.cpp_dict.__iter__()
 
     def __len__(self) -> int:
@@ -48,17 +54,23 @@ class OrderedDictWrapper(MutableMapping):
             return False
         return self.cpp_dict.__contains__(key)
 
-    def __getitem__(self, key: Union[int, str]) -> Any:
-        return self.cpp_dict.__getitem__(key)
+    @overload
+    def __getitem__(self, arg0: str) -> _T: ...
 
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.cpp_dict.__setitem__(key, value)
+    @overload
+    def __getitem__(self, arg0: int) -> tuple[str, _T]: ...
 
-    def __delitem__(self, key: str) -> None:
-        self.cpp_dict.__delitem__(key)
+    def __getitem__(self, arg0: int | str) -> tuple[str, _T] | _T:
+        return self.cpp_dict.__getitem__(arg0)
+
+    def __setitem__(self, arg0: str, arg1: _T) -> None:
+        self.cpp_dict.__setitem__(arg0, arg1)
+
+    def __delitem__(self, arg0: str) -> None:
+        self.cpp_dict.__delitem__(arg0)
 
 
-class ModuleWrapper(nn.Module):
+class ModuleWrapper(Module):
     """A subclass of ``torch.nn.Module`` that wraps a C++ frontend module and delegates all access."""
 
     def __init__(self, cpp_module):
@@ -66,9 +78,15 @@ class ModuleWrapper(nn.Module):
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
         super().__init__()
-        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")
-        self._buffers = OrderedDictWrapper(cpp_module, "_buffers")
-        self._modules = OrderedDictWrapper(cpp_module, "_modules")
+
+        # In all three of these cases, None is not actually possible, but MutableMapping
+        # enforces an invariant on the value type.
+        self._parameters = OrderedDictWrapper[Parameter | None](
+            cpp_module, "_parameters"
+        )
+        self._buffers = OrderedDictWrapper[Tensor | None](cpp_module, "_buffers")
+        self._modules = OrderedDictWrapper[Module | None](cpp_module, "_modules")
+
         for attr in dir(cpp_module):
             # Skip magic methods and the three attributes above.
             if not attr.startswith("_"):

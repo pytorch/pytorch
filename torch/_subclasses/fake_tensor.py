@@ -1677,6 +1677,10 @@ class FakeTensorMode(TorchDispatchMode):
         )
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
+        if isinstance(args, (list, tuple, dict)):
+            result.append(type(args))
+            result.append(f"length_{len(args)}")
+
         if isinstance(args, dict):
             self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
             self._prep_args_for_hash(result, args.values(), state, id_hashed_objects)
@@ -2616,9 +2620,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func not in meta_table
             and not self.cpp_meta_supports_symint(func)
-            and not (
-                has_symbolic_sizes and func in self._unbacked_special_fake_handling_ops
-            )
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
         ):
             from torch._decomp import decomposition_table
 
@@ -2927,10 +2929,8 @@ class FakeTensorMode(TorchDispatchMode):
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
     )
 
-    _unbacked_special_fake_handling_ops = ordered_set(
-        aten.view.default,
-        aten._unsafe_view.default,
-        aten.slice.Tensor,
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

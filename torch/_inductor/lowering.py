@@ -314,6 +314,26 @@ def in_namespace(op, namespace):
     return False
 
 
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
+        return x
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -321,6 +341,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -347,6 +371,12 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
@@ -497,13 +527,9 @@ def broadcast_symbolic_shapes(a, b):
     """
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -949,13 +975,10 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
         if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1172,130 +1195,9 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
-    """
-    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
-    if the indices are unbacked and appropriate semantics aren't known.
-    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
-    """
-
-    from torch.fx.experimental.symbolic_shapes import (
-        CallMethodKey,
-        resolve_unbacked_bindings,
-    )
-
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    size = x.get_size()[dim]
-    step = sympy.expand(step)
-    assert isinstance(step, sympy.Expr) or step > 0, step
-
-    # maybe apply slice optimization
-    try:
-        if (
-            start == 0
-            and V.graph.sizevars.statically_known_leq(size, end)
-            and step == 1
-        ):
-            return x
-    except TypeError:
-        pass
-
-    # try to avoid dynamic slice
-    def handle_negative_index(idx, size, default):
-        if idx is None:
-            return default
-        idx = sympy.expand(idx)
-        size = sympy.expand(size)
-        if V.graph.sizevars.guard_or_false(idx >= 0):
-            return idx
-        elif V.graph.sizevars.guard_or_false(idx < 0):
-            return size + idx
-        return None
-
-    ambiguous_slice = clamp
-    if ambiguous_slice:
-        start_index = handle_negative_index(start, size, 0)
-        end_index = handle_negative_index(end, size, size)
-        if start_index is not None and end_index is not None:
-            start, end = start_index, end_index
-            ambiguous_slice = False
-
-    # ambiguous_slice=False means we know what semantics this slice call follows,
-    # and don't need to generate an extern kernel to represent the output size.
-    # This is assumed True for clamp=False
-    # (meant to follow standard indexing semantics: 0 <= index < size)
-    if not ambiguous_slice:
-        return TensorBox(
-            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
-        )  # go to SliceView/ReinterpretView
-
-    # unbacked territory: create DynamicSlice ExternKernel
-    # clamp is True, unbacked start / end
-    assert clamp
-    unbacked_bindings = resolve_unbacked_bindings(
-        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
-    )
-    assert unbacked_bindings is not None
-    assert len(unbacked_bindings) <= 2, unbacked_bindings
-    sym_size, sym_storage = None, None
-    for sym, keypath in unbacked_bindings.items():
-        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
-            sym_size = sym
-        elif keypath == (CallMethodKey("storage_offset"),):
-            sym_storage = sym
-
-    def compute_slice_index(index, size):
-        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
-
-        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
-            return index
-        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
-            return -index
-        elif fn(sympy.Gt(index, size)):
-            return size
-        elif fn(sympy.Lt(index, -size)):
-            return 0
-        return None
-
-    start_index = compute_slice_index(start, size)
-    end_index = compute_slice_index(end, size)
-    if start_index is not None and end_index is not None:
-        # we shouldn't have allocated size symbol, if output size was determinable from input indices
-        assert sym_size is None
-        new_size = sympy.Max(0, end_index - start_index)
-    else:
-        b_size = ir.DynamicSliceSize(
-            sym_size,
-            start,
-            end,
-            x.get_size()[dim],
-        )
-        b_size.name = V.graph.register_buffer(b_size)
-        V.graph.register_operation(b_size)
-        new_size = sym_size
-
-    if start_index is not None:
-        # we shouldn't have allocated storage offset symbol if start index was determinable
-        assert sym_storage is None
-        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
-    else:
-        b_storage = ir.DynamicSelectStorageOffset(
-            sym_storage,
-            start,
-            x.get_layout().offset,
-            x.get_stride()[dim],
-            x.get_size()[dim],
-            clamp=True,
-        )
-        b_storage.name = V.graph.register_buffer(b_storage)
-        V.graph.register_operation(b_storage)
-        new_storage_offset = sym_storage
-
-    new_sizes = list(x.get_size())
-    new_strides = list(x.get_stride())
-    new_sizes[dim] = new_size
-    new_strides[dim] *= step
-    return as_strided(x, new_sizes, new_strides, new_storage_offset)
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1448,6 +1350,34 @@ def quantized_decomposed_quantize_per_channel(
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
+
+
+def _assert_async(cond, msg):
+    cond.realize()
+    cond = to_dtype(cond, torch.bool)
+
+    def inner_fn(index):
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
+
+    assertion_op = Pointwise.create(
+        device=cond.get_device(),
+        dtype=cond.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(cond.get_size()),
+    )
+    assertion_op.realize()
+    return assertion_op
+
+
+@register_lowering(aten._assert_async.msg)
+def lower_assert_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
+@register_lowering(aten._functional_assert_async.msg)
+def lower_assert_functional_async(cond, msg):
+    return _assert_async(cond, msg)
 
 
 @register_lowering(
@@ -1921,7 +1851,6 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
-        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -3108,13 +3037,11 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    start = ir.SliceView.handle_negative_index(start, dim_size)
-    end = ir.SliceView.handle_negative_index(end, dim_size)
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
@@ -7138,7 +7065,7 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
-def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     if any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
@@ -7158,9 +7085,16 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         else:
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
     return list(map(_map_output, result))
+
+
+register_lowering(
+    torch.ops.higher_order.while_loop_stack_output, type_promotion_kind=None
+)(functools.partial(while_loop, stack_output=True))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)

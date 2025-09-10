@@ -39,8 +39,11 @@ SavedVariable::SavedVariable(
     // follow.
     TORCH_CHECK(
         !variable.is_inference(),
-        "Inference tensors cannot be saved for backward. To work around "
-        "you can make a clone to get a normal tensor and use it in autograd.")
+        "Inference tensors cannot be saved for backward. Please do not use "
+        "Tensors created in inference mode in computation tracked by autograd. "
+        "To work around this, you can make a clone to get a normal tensor and "
+        "use it in autograd, or use `torch.no_grad()` instead of "
+        "`torch.inference_mode()`.");
 
     was_default_constructed_ = false;
     saved_version_ = variable._version();

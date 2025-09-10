@@ -935,7 +935,7 @@ class CudaReproTests(TestCase):
 
         inp = inp.to(torch.float)
         out, code = run_and_get_code(torch.compile(foo), inp)
-        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        FileCheck().check_not("tl_math.exp").check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
         def foo(x):

@@ -35,8 +35,6 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
-from ._pointwise_ops import pointwise_strategy
-
 
 aten = torch.ops.aten
 
@@ -92,21 +90,6 @@ register_op_strategy(
 register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
 )(propagate_single_input_strategy)
-
-# copy_ is actually a pointwise op with broadcasting, so reuse the pointwise strategy, which takes care of these
-# requirements.
-#
-# Following torch broadcasting semantics (https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
-# - self can not change shape as a result of broadcasting since this is an inplace op
-# - src can broadcast, but when it does it always does so from the trailing end
-# e.g. the last dim of 'src' must match up with the last dim of 'self'
-#
-# DTensor semantics for inplace ops also dictates that we may NOT redistribute our 'self' input.
-# In practice, what this means is
-# - our output strategies should map 1:1 to our 'self' input strategies
-# - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
-#   broadcasting dim
-register_op_strategy(aten.copy_.default)(pointwise_strategy)
 
 
 @register_op_strategy(

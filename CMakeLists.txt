@@ -233,6 +233,7 @@ cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
+option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_XPU "Use XPU" ON)
@@ -272,7 +273,7 @@ cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
-                       "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
@@ -289,6 +290,7 @@ option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
 option(USE_PROF "Use profiling" OFF)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
+option(USE_EIGEN_SPARSE "Use Eigen Sparse Matrices" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 cmake_dependent_option(
@@ -879,9 +881,20 @@ cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  OFF
-  "USE_CUDA OR USE_ROCM"
+  ON
+  "USE_ROCM"
   OFF)
+
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
+
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a")
+  message(WARNING "Setting USE_FBGEMM_GENAI to ON for CUDA build on SM100")
+  set(USE_FBGEMM_GENAI ON)
+endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
