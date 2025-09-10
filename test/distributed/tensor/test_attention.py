@@ -356,7 +356,7 @@ def generate_doc_mask_mod(
     return doc_mask_mod
 
 
-class RingFlexAttentionTest(DTensorTestBase):
+class CPFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
