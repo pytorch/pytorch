@@ -2232,7 +2232,7 @@ def _reduction(
         valid_shape = a.ndim == 0 or sym_and(*(a.shape[i] > 0 for i in dims))
         torch._check(
             valid_shape,
-            "reducing over zero-size dimension for reduction operation without identity",
+            lambda: "reducing over zero-size dimension for reduction operation without identity",
         )
 
     computation_dtype, result_dtype = utils.reduction_dtypes(
