@@ -252,6 +252,11 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
+
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
@@ -275,9 +280,10 @@ IF(USE_FBGEMM_GENAI)
       ${fbgemm_genai_native_cuda_cpp}
     )
 
-    # Now, create the library and provide the sources at the same time
-    add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
-
+    hip_add_library(
+      fbgemm_genai STATIC
+      ${fbgemm_genai_native_rocm_hip}
+      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     set(fbgemm_genai_mx8mx8bf16_grouped
