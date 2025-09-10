@@ -1,8 +1,8 @@
 import enum
 from typing import Any, Callable, Optional
+from typing_extensions import TypeAlias
 
 import torch
-from typing_extensions import TypeAlias
 
 # TODO: We should move the `GuardManagerType`
 # defined in `guards.py` here and update other
