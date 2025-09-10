@@ -8,6 +8,7 @@
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
 - [**CI/CD security principles**](#cicd-security-principles)
+ 
 ## Reporting Security Issues
 
 Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
@@ -15,6 +16,7 @@ Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-sec
 However, if you believe you have found a security vulnerability in PyTorch, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
 
 Please report security issues using https://github.com/pytorch/pytorch/security/advisories/new
+* All reports submitted thru the security advisories mechanism should be considered public 90 days after they were submitted, and would either be made public or dimissed by the team. If advisory has been closed on the grounds that it does not consisute a security policy violation, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it's likely a valid correctness behaviour problem. 
 
 Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
 
