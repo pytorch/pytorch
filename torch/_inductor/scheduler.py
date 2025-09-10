@@ -2010,6 +2010,33 @@ def pick_loop_order(
         order.sort(key=index_cmp)
     return order
 
+def replace_operation_buffer(
+    orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
+) -> None:
+    replaced_buf_name = new_node.get_name()
+    orig_buf_name = orig_node.get_name()
+    assert isinstance(orig_buf_name, str) and isinstance(replaced_buf_name, str)
+
+    replaced_op_name = new_node.get_operation_name()
+    orig_op_name = orig_node.get_operation_name()
+    assert isinstance(orig_op_name, str) and isinstance(replaced_op_name, str)
+
+    del V.graph.name_to_buffer[replaced_buf_name]
+    new_node.name = orig_buf_name
+
+    del V.graph.name_to_op[replaced_op_name]
+    new_node.operation_name = orig_op_name
+
+    orig = V.graph.buffers.index(orig_node)
+    V.graph.buffers.remove(new_node)
+    V.graph.buffers[orig] = new_node
+    V.graph.name_to_buffer[orig_buf_name] = new_node
+
+    orig = V.graph.operations.index(orig_node)
+    V.graph.operations.remove(new_node)
+    V.graph.operations[orig] = new_node
+    V.graph.name_to_op[orig_op_name] = new_node
+
 
 @dataclasses.dataclass
 class NodeUser:
@@ -2132,6 +2159,82 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
+
+        autotune_results = {}
+        for node in self.nodes:
+            if isinstance(node, SchedulerNode) and isinstance(
+                node.node, ir.MultiTemplateBuffer
+            ) and not isinstance(node.node, ir.AsyncMultiTemplateBuffer):
+                # We force autotuning here
+                # Still takes advantage of async precompile
+                # We need all the configs before fusion
+                multi_node = node.node
+                min_choice, _ = multi_node.get_min_choice()
+                inputs_key = node.node.inputs_key
+
+                # We need a better way to do this
+                cfgs = min_choice.description.split(",")
+                cfg_dict = {}
+                for cfg in cfgs:
+                    key, val = cfg.split('=')
+                    key, val = key.strip(), val.strip()
+                    if val == "True":
+                        cfg_dict[key] = True
+                    elif val == "False":
+                        cfg_dict[key] = False
+                    elif val.isdigit():
+                        cfg_dict[key] = int(val)
+                    else:
+                        cfg_dict[key] = val.replace("'", "")
+                k = min_choice.input_nodes[0].get_size()[1]
+                cfg_dict["EVEN_K"] = sympy.gcd(k, cfg_dict["BLOCK_K"]) == cfg_dict["BLOCK_K"]
+
+                autotune_results[inputs_key] = cfg_dict
+
+        ir.AsyncMultiTemplateBuffer.sync(autotune_results)
+
+        for i, node in enumerate(self.nodes):
+            if isinstance(node, SchedulerNode) and isinstance(node.node, ir.AsyncMultiTemplateBuffer):
+                replacement_buf = node.node.replace()
+                out_storage = replacement_buf.data  # type: ignore[union-attr]
+                assert isinstance(out_storage, ir.StorageBox)
+                out_buffer = out_storage.data
+                assert isinstance(out_buffer, ir.OperationBuffer)
+                assert node.node.layout == out_buffer.layout
+                replace_operation_buffer(node.node, out_buffer)
+                new_scheduler_node = self.create_scheduler_node(out_buffer)
+
+                self.nodes[i] = new_scheduler_node
+                self.name_to_node[node.get_name()] = new_scheduler_node
+                self.name_to_fused_node[node.get_name()] = new_scheduler_node
+
+                # We need to reflect the mutation renames that were recorded in the original node
+                mutation_renames = {}
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.unmet_dependencies
+                ):
+                    if real_name := self.mutation_real_name.get(dep.name, None):
+                        mutation_renames[real_name] = dep.name
+
+                def rename_deps(deps: OrderedSet[Dep]) -> OrderedSet[Dep]:
+                    return OrderedSet(dep.rename(mutation_renames) for dep in deps)
+
+                new_scheduler_node.unmet_dependencies = rename_deps(
+                    new_scheduler_node.unmet_dependencies
+                )
+                new_scheduler_node.read_writes.reads = rename_deps(
+                    new_scheduler_node.read_writes.reads
+                )
+
+                for new_out, old_out in zip(
+                    new_scheduler_node.get_outputs(), node.get_outputs()
+                ):
+                    self.name_to_buf[old_out.get_name()] = new_out
+                    new_out.users = old_out.users
+
+                new_scheduler_node.min_order = node.min_order
+                new_scheduler_node.max_order = node.max_order
+                new_scheduler_node.last_usage = node.last_usage
 
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
@@ -2880,33 +2983,6 @@ class Scheduler:
         will force completion of compilation and benchmarking.
         """
 
-        def replace_operation_buffer(
-            orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
-        ) -> None:
-            replaced_buf_name = new_node.get_name()
-            orig_buf_name = orig_node.get_name()
-            assert isinstance(orig_buf_name, str) and isinstance(replaced_buf_name, str)
-
-            replaced_op_name = new_node.get_operation_name()
-            orig_op_name = orig_node.get_operation_name()
-            assert isinstance(orig_op_name, str) and isinstance(replaced_op_name, str)
-
-            del V.graph.name_to_buffer[replaced_buf_name]
-            new_node.name = orig_buf_name
-
-            del V.graph.name_to_op[replaced_op_name]
-            new_node.operation_name = orig_op_name
-
-            orig = V.graph.buffers.index(orig_node)
-            V.graph.buffers.remove(new_node)
-            V.graph.buffers[orig] = new_node
-            V.graph.name_to_buffer[orig_buf_name] = new_node
-
-            orig = V.graph.operations.index(orig_node)
-            V.graph.operations.remove(new_node)
-            V.graph.operations[orig] = new_node
-            V.graph.name_to_op[orig_op_name] = new_node
-
         for i, node in enumerate(self.nodes):
             if isinstance(node, SchedulerNode) and isinstance(
                 node.node, ir.MultiTemplateBuffer
@@ -3013,6 +3089,7 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+
         if not config.benchmark_fusion and not is_multi_template:
             return True
 

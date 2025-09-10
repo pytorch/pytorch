@@ -2442,6 +2442,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices, name, inputs_key, self.prescreening_cache
             )
             prescreening_elapse: Optional[float] = None
+
             if candidates:
                 prescreening_start_ts = time.time()
                 timings = self.lookup(
@@ -2591,6 +2592,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     get_timings,
                     choices,
                     allowed_prologue_inps,
+                    inputs_key,
                 )
             )
 

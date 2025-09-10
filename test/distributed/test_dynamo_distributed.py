@@ -1177,6 +1177,31 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_multiproc_autotune(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(a, b, c):
+                res = torch.sum((a @ b) + 1.0) + torch.sum(torch.relu(b @ c)) + torch.sum(c @ a)
+                
+                return res
+            
+            a = torch.randn(1024, 1024, device=self.rank, dtype=torch.bfloat16)
+            b = torch.randn(1024, 2048, device=self.rank, dtype=torch.bfloat16)
+            c = torch.randn(2048, 1024, device=self.rank, dtype=torch.bfloat16)
+
+            f(a, b, c)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+            print(f"Result from {self.rank} is {f(a, b, c)}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_get_pg_attr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             pg = dist.distributed_c10d._get_default_group()

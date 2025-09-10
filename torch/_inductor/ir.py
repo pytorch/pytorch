@@ -117,7 +117,7 @@ from .utils import (
     tensor_is_aligned,
 )
 from .virtualized import ops, OpsValue, V
-
+from torch._dynamo.distributed import get_compile_pg
 
 if TYPE_CHECKING:
     from torch._library.fake_class_registry import FakeScriptObject
@@ -5010,6 +5010,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         choice_timings_fn: Callable[[Optional[int]], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
         allowed_prologue_inps: OrderedSet[str],
+        inputs_key: str,
     ) -> None:
         super().__init__(
             layout=layout,
@@ -5029,6 +5030,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             for choice in unfiltered_choices
         )
         self._make_kernel_renders: dict[Optional[int], Any] = {}
+        self.inputs_key = inputs_key
 
     @property
     def output_plannable(self) -> bool:
@@ -5082,6 +5084,110 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
         # Set the default to be the one without hint override
         self.make_kernel_render = self._make_kernel_renders[None]
+
+class AsyncMultiTemplateBuffer(MultiTemplateBuffer):
+    synced = False
+    key_to_real_buffers = {}
+    key_to_async_buffers = {}
+
+    def __init__(
+        self,
+        name,
+        input_nodes,
+        layout,
+    ):
+        from .select_algorithm import create_inputs_key
+        super().__init__(
+            layout=layout,
+            inputs=input_nodes,
+            choice_timings_fn=None,
+            unfiltered_choices=[],
+            allowed_prologue_inps=OrderedSet({}),
+            inputs_key=create_inputs_key(input_nodes),
+        )
+        # "[('cuda', 'torch.bfloat16', 1024, 1024, 1024, 1, 0), ('cuda', 'torch.bfloat16', 1024, 2048, 2048, 1, 0)]"
+        AsyncMultiTemplateBuffer.key_to_async_buffers[self.inputs_key] = self
+        self.kernel_name = name
+
+    # Can we make this async?
+    @staticmethod
+    def sync(autotune_results):
+        from .select_algorithm import autotune_select_algorithm
+        from .kernel.mm import mm_template
+        from .kernel_inputs import MMKernelInputs
+
+        # Perform allgather
+        # We should spin this up when we are done autotuning
+        # Currently we do autotuning synchronously and 
+        # For each sent over result {mm1024,1024,...: (128, 128, 64, 5, 8)}
+        # do maybe_append_choice
+        # "[('cuda', 'torch.bfloat16', 1024, 1024, 1024, 1, 0), ('cuda', 'torch.bfloat16', 1024, 2048, 2048, 1, 0)]"
+        if compile_pg := get_compile_pg():
+            log.error(f"Reaching all gather with rank {compile_pg.rank()} with size {compile_pg.size()}")
+            all_states = [None] * compile_pg.size()
+            torch.distributed.all_gather_object(all_states, autotune_results, group=compile_pg)
+            cur_index = compile_pg.rank()
+            for i, other_results in enumerate(all_states):
+                if i == cur_index:
+                    continue
+                for inputs_key, config in other_results.items():
+                    choices = []
+                    async_buf = AsyncMultiTemplateBuffer.key_to_async_buffers[inputs_key]
+                    scheduler = V.graph.scheduler
+                    V.graph.scheduler = None
+                    # Original inputs with StorageBox
+                    kernel_inputs = MMKernelInputs([*async_buf.original_inputs])
+                    mm_template.maybe_append_choice(
+                        choices,
+                        input_nodes=kernel_inputs.nodes(),
+                        layout=async_buf.layout,
+                        **config,
+                    )
+                    AsyncMultiTemplateBuffer.key_to_real_buffers[inputs_key] = autotune_select_algorithm(
+                        async_buf.kernel_name,
+                        choices,
+                        kernel_inputs.nodes(),
+                        async_buf.layout,
+                    )
+                    V.graph.scheduler = scheduler
+                    del AsyncMultiTemplateBuffer.key_to_async_buffers[inputs_key]
+        else:
+            own_cfgs = list(autotune_results.values())
+            dummy_cfg = own_cfgs[0]
+
+            for key, async_buf in AsyncMultiTemplateBuffer.key_to_async_buffers.items():
+                choices = []
+                kernel_inputs = MMKernelInputs([*async_buf.original_inputs])
+                scheduler = V.graph.scheduler
+                V.graph.scheduler = None
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=kernel_inputs.nodes(),
+                    layout=async_buf.layout,
+                    **dummy_cfg,
+                )
+                AsyncMultiTemplateBuffer.key_to_real_buffers[key] = autotune_select_algorithm(
+                    async_buf.name,
+                    choices,
+                    kernel_inputs.nodes(),
+                    async_buf.layout,
+                )
+                V.graph.scheduler = scheduler
+
+            AsyncMultiTemplateBuffer.key_to_async_buffers = {}
+    
+        assert len(AsyncMultiTemplateBuffer.key_to_async_buffers) == 0
+        AsyncMultiTemplateBuffer.synced = True
+        return
+
+    def replace(self):
+        # Return ExternChoiceCaller or TritonTemplateBuffer
+        # Result of autotune_select_algorithm, in the scheduler
+        # Wait for sync to be true??
+        # This way, the scheduler logic is the exact same
+        assert self.synced, "AsyncMultiTemplateBuffer has not synced yet"
+        log.error(f"Synced buf {AsyncMultiTemplateBuffer.key_to_real_buffers[self.inputs_key]}")
+        return AsyncMultiTemplateBuffer.key_to_real_buffers[self.inputs_key]
 
 
 class CUDATemplateBuffer(TemplateBuffer):

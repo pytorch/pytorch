@@ -18,6 +18,10 @@ from .common import (
     TMADescriptorArg,
     WorkspaceArg,
 )
+import logging
+
+log = logging.getLogger(__name__)
+
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -172,6 +176,8 @@ def is_unaligned_buffer(arg: TensorArg):
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
         buffer = V.graph.try_get_buffer(buf_name)
+        # Distributed autotuning needs to hit this path, as we call into
+        # here when the scheduler is set
         # output arg
         if not buffer:
             assert buf_name == V.kernel.output_node.name
