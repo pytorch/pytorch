@@ -35,7 +35,8 @@ Definition of CuTe Layouts and functions to manipulate them
 """
 
 from itertools import chain
-from typing import Optional, TypeAlias, TypeGuard, Union
+from typing import Optional, Union
+from typing_extensions import TypeAlias, TypeGuard
 
 from .int_tuple import (
     crd2idx,

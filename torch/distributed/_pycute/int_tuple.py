@@ -36,7 +36,8 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import Optional, TypeAlias, TypeGuard, Union
+from typing import Optional, Union
+from typing_extensions import TypeAlias, TypeGuard
 
 from .typing import Integer
 
