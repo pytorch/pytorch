@@ -6847,53 +6847,71 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_large_shared_memory(self):
-        # Simple vector addition kernel
+        # Kernel that actually uses large shared memory for reduction
         kernel_source = """
-        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
-            int i = threadIdx.x + blockIdx.x * blockDim.x;
-            if (i < n)
-                c[i] = a[i] + b[i];
+        __global__ void large_shared_memory_kernel(const float* input, float* output, int n) {
+            extern __shared__ float shared_data[];
+            
+            int tid = threadIdx.x;
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            
+            // Load data into shared memory
+            if (idx < n) {
+                shared_data[tid] = input[idx];
+            } else {
+                shared_data[tid] = 0.0f;
+            }
+            __syncthreads();
+            
+            // Perform reduction in shared memory
+            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                if (tid < stride) {
+                    shared_data[tid] += shared_data[tid + stride];
+                }
+                __syncthreads();
+            }
+            
+            // Write result
+            if (tid == 0) {
+                output[blockIdx.x] = shared_data[0];
+            }
         }
         """
 
-        # Compile the kernel
         from torch.cuda import _compile_kernel, get_device_properties
 
-        add_kernel = _compile_kernel(kernel_source, "add_tensors")
+        kernel = _compile_kernel(kernel_source, "large_shared_memory_kernel")
 
-        # Prepare data
-        N = 1024
-        a = torch.rand(N, device="cuda")
-        b = torch.rand(N, device="cuda")
-        c = torch.empty_like(a)
-
-        # Calculate grid and block dimensions
-        threads_per_block = 256
-        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-
-        max_smem = get_device_properties().shared_memory_per_block_optin
-        shared_mem = (48 * 1024 + max_smem) // 2
-
+        # Test with 64KB shared memory (requires >48KB)
+        threads_per_block = 1024  # 1024 threads * 4 bytes = 4KB, but we'll request 64KB
+        shared_mem_size = 64 * 1024  # 64KB
+        
         # Configure shared memory for this kernel
-        add_kernel.set_shared_memory_config(shared_mem)
+        kernel.set_shared_memory_config(shared_mem_size)
 
-        # Launch kernel
-        add_kernel(
-            grid=(blocks_per_grid, 1, 1),
+        # Prepare test data
+        N = 4096
+        input_data = torch.ones(N, device="cuda", dtype=torch.float32)
+        output_data = torch.zeros(4, device="cuda", dtype=torch.float32)  # 4 blocks
+
+        # Launch kernel with large shared memory
+        kernel(
+            grid=(4, 1, 1),
             block=(threads_per_block, 1, 1),
-            args=[a, b, c, N],
-            shared_mem=shared_mem,
+            args=[input_data, output_data, N],
+            shared_mem=shared_mem_size,
         )
 
-        # Verify results
-        expected = a + b
-        self.assertEqual(c, expected)
+        # Verify results (each block should sum 1024 ones = 1024)
+        expected = torch.full((4,), 1024.0, dtype=torch.float32)
+        self.assertEqual(output_data.cpu(), expected)
 
         # Test error handling with more than supported shared memory size
-        shared_mem = max_smem * 2
+        max_smem = get_device_properties().shared_memory_per_block_optin
+        excessive_shared_mem = max_smem * 2
 
         with self.assertRaises(RuntimeError):
-            add_kernel.set_shared_memory_config(shared_mem)
+            kernel.set_shared_memory_config(excessive_shared_mem)
 
     @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
