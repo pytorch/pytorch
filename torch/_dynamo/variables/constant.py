@@ -9,6 +9,7 @@ maintaining type safety through the compilation process.
 """
 
 import operator
+from types import NoneType
 from typing import TYPE_CHECKING
 
 import torch
@@ -44,6 +45,9 @@ class ConstantVariable(VariableTracker):
         the guard will be `CONSTANT_MATCH`.
         """
         source = kwargs.get("source", None)
+
+        if istype(value, (int, bool, NoneType)) and (c := check_cache(value)):
+            return c
 
         # Routing for supported collection literals.
         if isinstance(value, set):
@@ -241,6 +245,45 @@ its type to `common_constant_types`.
     ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
+
+
+_constant_cache = {}
+
+
+def check_cache(value):
+    global _constant_cache
+    return _constant_cache.get(value)
+
+
+def fill_constant_cache():
+    # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
+    # strings (one-char latin-1) and code object constants, which are stored
+    # in "tx._constants_cache"
+    constant_none = ConstantVariable(None)
+    constant_true = ConstantVariable(True)
+    constant_false = ConstantVariable(False)
+    constant_NotImplemented = ConstantVariable(NotImplemented)
+
+    global _constant_cache
+    _constants_cache = {
+        None: constant_none,
+        True: constant_true,
+        False: constant_false,
+        NotImplemented: constant_NotImplemented,
+    }
+
+    _PY_NSMALLNEGINTS = 5
+    _PY_NSMALLPOSINTS = 257
+
+    for i in range(-_PY_NSMALLNEGINTS, _PY_NSMALLPOSINTS):
+        _constants_cache[i] = ConstantVariable(i)
+
+    # latin1 one-char strings
+    for i in range(256):
+        _constants_cache[chr(i)] = ConstantVariable(chr(i))
+
+
+fill_constant_cache()
 
 
 class EnumVariable(VariableTracker):
