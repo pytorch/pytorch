@@ -386,6 +386,7 @@ static void bindGetDeviceProperties(PyObject* module) {
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+    py::gil_scoped_release no_gil;
     return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
   });
   m.def(
