@@ -906,9 +906,10 @@ This class does not support ``__members__`` property.)");
             }
           }))
       .def_static("unbox", [](py::object obj) {
-          auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
-          auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-          return ivalue.toCustomClass<::c10d::ReduceOp>();
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), std::move(typePtr));
+        return std::move(ivalue).toCustomClass<::c10d::ReduceOp>();
       });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
