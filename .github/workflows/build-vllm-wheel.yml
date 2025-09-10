@@ -12,6 +12,9 @@ on:
     paths:
       - .github/workflows/build-vllm-wheel.yml
       - .github/ci_commit_pins/vllm.txt
+  schedule:
+    # every morning at 01:30PM UTC, 9:30AM EST, 6:30AM PST
+    - cron: 30 13 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -24,14 +27,21 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
-        # TODO (huydhn): Add cu130 https://github.com/pytorch/pytorch/pull/162000#issuecomment-3261541554
-        device: [ 'cu128', 'cu129' ]
-        runner: [ 'linux.12xlarge.memory' ]
+        # TODO (huydhn): Add cu130 after https://github.com/vllm-project/vllm/issues/24464 is resolved
+        device: [ 'cu128', 'cu129', 'aarch64-cu128', 'aarch64-cu129' ]
         include:
           - device: cu128
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
+            runner: linux.12xlarge.memory
           - device: cu129
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+            runner: linux.12xlarge.memory
+          - device: aarch64-cu128
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.8'
+            runner: linux.arm64.r7g.12xlarge.memory
+          - device: aarch64-cu129
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
+            runner: linux.arm64.r7g.12xlarge.memory
     name: "Build ${{ matrix.device }} vLLM wheel"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
