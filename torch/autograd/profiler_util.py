@@ -1092,6 +1092,9 @@ class _ShowName:
             return name
 
     def get_map_as_str(self):
+        if len(self.show_name_map) == 0:
+            return ""
+
         item = "Name"
         separation_line = ["-" * self.max_name_column_width, "  ", "-" * 20, "\n"]
 
