@@ -1162,6 +1162,8 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
     return OpStrategy(all_strategies)
 
 
+# TODO: fix remaining failures in xfail("unbind") in test_dtensor_ops.py
+#       and remove this xfail item
 @register_op_strategy(aten.unbind.int, schema_info=RuntimeSchemaInfo(1))
 def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
     """Forward all shardings except the unbind dimension."""
