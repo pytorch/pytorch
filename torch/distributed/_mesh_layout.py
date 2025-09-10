@@ -51,6 +51,17 @@ class _Layout(Layout):
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
+    # operator []    (get-i like tuples)
+    def __getitem__(self, i: int) -> "_Layout":
+        size = self.sizes[i]
+        stride = self.strides[i]
+        if is_tuple(size) and is_tuple(stride):
+            return _Layout(size, stride)  # type: ignore[arg-type]
+        elif isinstance(size, int) and isinstance(stride, int):
+            return _Layout((size,), (stride,))
+        else:
+            raise ValueError("size and stride must be either int or tuple")
+
     def coalesce(self) -> "_Layout":
         layout = coalesce(self)
         return _Layout(layout.shape, layout.stride)  # type: ignore[arg-type]
