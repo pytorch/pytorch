@@ -481,7 +481,7 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        decorators=[onlyCUDA, unittest.skipIf(not torch.distributed.is_available()), "requires distributed build"],
+        decorators=[onlyCUDA, unittest.skipIf(not torch.distributed.is_available(), "requires distributed build")],
     ),
     OpInfo(
         name="local_map_hop_backward",

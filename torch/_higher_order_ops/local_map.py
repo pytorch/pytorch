@@ -146,7 +146,9 @@ def create_hop_fw_bw(
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.
             # We must also filter the runtime tangents too.
-            if example_grad is not None and example_grad.requires_grad:
+            if example_grad is not None and (
+                isinstance(example_grad, torch.Tensor) and example_grad.requires_grad
+            ):
                 filtered_grads_idx.add(i)
 
         primals_and_tangents = [
