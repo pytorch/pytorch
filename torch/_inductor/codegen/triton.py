@@ -3881,7 +3881,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
 
-    def codegen_kernel_benchmark(self, num_gb: float) -> IndentedBuffer:
+    def codegen_kernel_benchmark(self, num_gb: Optional[float]) -> IndentedBuffer:
         """
         Generates Python code for benchmarking this Triton kernel.
         - Creates example inputs (random tensors, constants, sizes).
