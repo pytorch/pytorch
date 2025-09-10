@@ -11,7 +11,7 @@ load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
-load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
+load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -74,7 +74,7 @@ def _is_build_mode_dev():
     if is_production_build_android():
         # Android Prod builds
         return False
-    if is_production_build_ios():
+    if is_production_build_ios() or is_profile_build_ios():
         # iOS Prod builds
         return False
 
@@ -824,9 +824,13 @@ def get_pt_operator_registry_dict(
         apple_sdks = kwargs.get("apple_sdks"),
     )
 
+    # Extract existing linker_flags from kwargs and combine with default flags
+    existing_linker_flags = kwargs.pop("linker_flags", [])
+    combined_linker_flags = get_no_as_needed_linker_flag() + existing_linker_flags
+
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = get_no_as_needed_linker_flag(),
+        linker_flags = combined_linker_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
@@ -1143,6 +1147,9 @@ def define_buck_targets(
             "AT_BLAS_USE_CBLAS_DOT_FBXPLAT",
             "--replace",
             "@AT_KLEIDIAI_ENABLED@",
+            "0",
+            "--replace",
+            "@AT_USE_EIGEN_SPARSE@",
             "0",
         ]),
         outs = {

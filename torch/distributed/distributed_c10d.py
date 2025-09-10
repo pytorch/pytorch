@@ -1751,11 +1751,16 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
-            )
-            store, rank, world_size = next(rendezvous_iterator)
-            store.set_timeout(timeout)
+            if backend == "fake":
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
+            else:
+                rendezvous_iterator = rendezvous(
+                    not_none(init_method), rank, world_size, timeout=timeout
+                )
+                store, rank, world_size = next(rendezvous_iterator)
+                store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
@@ -1934,9 +1939,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
@@ -2035,8 +2040,12 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_options = ProcessGroupXCCL.Options()
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
-                backend_prefix_store, group_rank, group_size
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
@@ -3323,6 +3332,7 @@ def send_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_dst: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Sends picklable objects in ``object_list`` synchronously.
@@ -3343,6 +3353,10 @@ def send_object_list(
             ``device`` before sending. Default is ``None``.
         group_dst (int, optional): Destination rank on ``group``.
             Must specify one of ``dst`` and ``group_dst`` but not both
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
     Returns:
         ``None``.
 
@@ -3406,7 +3420,12 @@ def send_object_list(
     object_sizes_tensor = torch.cat(size_list)
 
     # Send object sizes
-    send(object_sizes_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_sizes_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_sizes_tensor, group_dst=group_dst, group=group)
 
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
@@ -3416,7 +3435,12 @@ def send_object_list(
     else:
         object_tensor = torch.cat(tensor_list)
 
-    send(object_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_tensor, group_dst=group_dst, group=group)
 
 
 @_exception_logger
@@ -3426,6 +3450,7 @@ def recv_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_src: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Receives picklable objects in ``object_list`` synchronously.
@@ -3443,6 +3468,10 @@ def recv_object_list(
         device (``torch.device``, optional): If not None, receives on this device.
             Default is ``None``.
         group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
 
     Returns:
         Sender rank. -1 if rank is not part of the group. If rank is part of the group,
@@ -3486,6 +3515,10 @@ def recv_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
+    group = _group_or_default_group(group)
+    group_src = _canonicalize_group_rank(group, src, group_src)
+    _check_not_self_rank(group, group_src, "source")
+
     if _rank_not_in_group(group):
         _warn_not_in_group("recv_object_list")
         return -1
@@ -3502,7 +3535,21 @@ def recv_object_list(
     )
 
     # Receive object sizes
-    rank_sizes = recv(object_sizes_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_sizes_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_sizes = get_global_rank(group, group_src)
+    else:
+        rank_sizes = recv(object_sizes_tensor, group=group, group_src=group_src)
 
     # Tensor to receive serialized objects into.
     object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -3511,7 +3558,21 @@ def recv_object_list(
         device=current_device,
     )
 
-    rank_objects = recv(object_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_objects = get_global_rank(group, group_src)
+    else:
+        rank_objects = recv(object_tensor, group=group, group_src=group_src)
     assert rank_sizes == rank_objects, (
         "Mismatch in return ranks for object sizes and objects."
     )
@@ -4811,9 +4872,11 @@ def barrier(
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
         opts.device = device
-        warnings.warn(  # warn only once
-            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
-        )
+        if group.rank() == 0:
+            warnings.warn(  # warn only once
+                "barrier(): using the device under current context. "
+                "You can specify `device_id` in `init_process_group` to mute this warning."
+            )
 
     work = group.barrier(opts=opts)
 

@@ -89,7 +89,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/ComputeLibrary
+  export ACL_ROOT_DIR=/acl
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
@@ -173,6 +173,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
+  export USE_MPI=0
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
@@ -194,8 +195,16 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
+  J=2  # default to 2 jobs
+  case "$RUNNER" in
+    linux.12xlarge.memory|linux.24xlarge.memory)
+      J=24
+      ;;
+  esac
+  echo "Building FlashAttention with job limit $J"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then

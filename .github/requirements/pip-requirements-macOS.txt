@@ -28,7 +28,7 @@ pyyaml==6.0.2
 scipy==1.12.0
 setuptools==72.1.0
 sympy==1.13.3
-tlparse==0.3.30
+tlparse==0.4.0
 tensorboard==2.13.0
 typing-extensions==4.12.2
 unittest-xml-reporting<=3.2.0,>=2.0.0
