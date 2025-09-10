@@ -42,7 +42,7 @@ template <typename T>
 void bind_ordered_dict(py::module module, const char* dict_name) {
   using ODict = OrderedDict<std::string, T>;
   // clang-format off
-  py::class_<ODict>(module, dict_name)
+  py::class_<ODict>(std::move(module), dict_name)
       .def("items", &ODict::items)
       .def("keys", &ODict::keys)
       .def("values", &ODict::values)
@@ -56,6 +56,12 @@ void bind_ordered_dict(py::module module, const char* dict_name) {
       })
       .def("__getitem__", [](const ODict& dict, size_t index) {
         return dict[index];
+      })
+      .def("__setitem__", [](ODict& dict, const std::string& key, const T& val) {
+        dict[key] = val;
+      })
+      .def("__delitem__", [](ODict& dict, const std::string& key) {
+        dict.erase(key);
       });
   // clang-format on
 }
