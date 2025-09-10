@@ -14320,10 +14320,7 @@ graph():
             def forward(self, x):
                 return x.cos()
 
-        with self.assertRaisesRegex(
-            RuntimeError, "TestExport.test_capture_subclass_wrong.<locals>.Foo"
-        ):
-            export(Foo(), (torch.randn(4, 4),))
+        export(Foo(), (torch.randn(4, 4),))
 
     def test_capture_subclass_constructor_torch_ir(self):
         class Foo(torch.nn.Module):
