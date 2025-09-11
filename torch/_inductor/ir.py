@@ -4972,6 +4972,10 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        # A place to store annotations that can be read post benchmarking
+        # Use this to shuttle information between ChoieCaller generation
+        # and the end of benchmarking
+        self.annotations = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
