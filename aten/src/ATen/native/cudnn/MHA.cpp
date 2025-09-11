@@ -146,7 +146,7 @@ namespace native {
 
 namespace fe = cudnn_frontend;
 
-#define MAX_MHA_DIM 4
+constexpr uint8_t MAX_MHA_DIM = 4;
 
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
@@ -238,7 +238,8 @@ void setMHAParams(
     const std::optional<Tensor>& attn_bias,
     double dropout_probability,
     bool is_causal,
-    bool return_softmaxstats) {
+    bool return_softmaxstats,
+    bool is_nested) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -255,23 +256,24 @@ void setMHAParams(
   params.is_causal = is_causal;
   params.return_softmaxstats = return_softmaxstats;
   params.has_attn_bias = attn_bias.has_value();
+  // Expect 4D dense tensor, 3D nested case (THD)
   TORCH_INTERNAL_ASSERT(
-      q.sizes().size() == MAX_MHA_DIM,
+      q.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      q.strides().size() == MAX_MHA_DIM,
+      q.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      k.sizes().size() == MAX_MHA_DIM,
+      k.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "K tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      k.strides().size() == MAX_MHA_DIM,
+      k.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "K tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      v.sizes().size() == MAX_MHA_DIM,
+      v.sizes().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "V tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(
-      v.strides().size() == MAX_MHA_DIM,
+      v.strides().size() == (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested),
       "V tensor has unexpected number of dims, please report a bug to PyTorch.");
   std::copy(q.sizes().begin(), q.sizes().end(), params.q_dim.begin());
   std::copy(q.strides().begin(), q.strides().end(), params.q_stride.begin());
@@ -320,7 +322,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const std::optional<Tensor>& attn_bias,
       double dropout_probability,
       bool is_causal,
-      bool return_softmaxstats) {
+      bool return_softmaxstats,
+      bool is_nested) {
     setMHAParams(
         this->pod,
         b,
@@ -335,7 +338,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         attn_bias,
         dropout_probability,
         is_causal,
-        return_softmaxstats);
+        return_softmaxstats,
+        is_nested);
   }
 };
 
@@ -1386,7 +1390,8 @@ void run_cudnn_SDP_fprop(
       attn_bias,
       dropout_probability,
       is_causal,
-      return_softmaxstats);
+      return_softmaxstats,
+      false);
   auto graph_ptr = getMHAGraphCache_().find(key);
   std::shared_ptr<fe::graph::Graph> mha_graph;
   if (graph_ptr) {
@@ -1484,30 +1489,53 @@ void run_cudnn_SDP_fprop_nestedtensor(
   if (return_softmaxstats && !softmaxstats.defined()) {
     softmaxstats = at::empty({q.size(0), h_q, 1}, q.options().dtype(kFloat));
   }
-  auto mha_graph = build_graph_nestedtensor(
+
+  auto key = MHACacheKeyWrapper(
       b,
       h_q,
-      h_k,
-      h_v,
-      s_q,
-      s_kv,
+      s_q, // max-seqlen-q
+      s_kv, // max-seqlen-kv
       d_qk,
       d_v,
-      scaling_factor,
-      return_softmaxstats,
-      is_causal,
-      dropout_probability,
-      cum_seqlen_q,
-      cum_seqlen_kv,
       q,
       k,
       v,
       attn_bias,
-      softmaxstats,
-      o,
-      dropoutseed,
-      dropoutoffset,
-      handle);
+      dropout_probability,
+      is_causal,
+      return_softmaxstats,
+      true);
+  auto graph_ptr = getMHAGraphCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
+
+  if (graph_ptr) {
+    mha_graph = *graph_ptr;
+  } else {
+    mha_graph = build_graph_nestedtensor(
+        b,
+        h_q,
+        h_k,
+        h_v,
+        s_q,
+        s_kv,
+        d_qk,
+        d_v,
+        scaling_factor,
+        return_softmaxstats,
+        is_causal,
+        dropout_probability,
+        cum_seqlen_q,
+        cum_seqlen_kv,
+        q,
+        k,
+        v,
+        attn_bias,
+        softmaxstats,
+        o,
+        dropoutseed,
+        dropoutoffset,
+        handle);
+  }
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
   auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
@@ -1636,7 +1664,8 @@ void run_cudnn_SDP_bprop(
       attn_bias,
       dropout_probability,
       is_causal,
-      true);
+      true,
+      false);
   auto graph_backward_ptr = getMHAGraphBackwardCache_().find(key);
   std::shared_ptr<fe::graph::Graph> mha_graph;
   if (graph_backward_ptr) {
@@ -1761,33 +1790,55 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
   cudnnHandle_t handle = getCudnnHandle();
 
-  auto mha_graph = build_graph_backward_nestedtensor(
+  auto key = MHACacheKeyWrapper(
       b,
       h_q,
-      h_k,
-      h_v,
-      s_q,
-      s_kv,
+      s_q, // max-seqlen-q
+      s_kv, // max-seqlen-kv
       d_qk,
       d_v,
-      scaling_factor,
-      is_causal,
-      dropout_probability,
-      cum_seqlen_q,
-      cum_seqlen_kv,
       q,
       k,
       v,
       attn_bias,
-      o,
-      dO_,
-      softmaxstats,
-      dQ,
-      dK,
-      dV,
-      dropoutseed,
-      dropoutoffset,
-      handle);
+      dropout_probability,
+      is_causal,
+      true,
+      true);
+  auto graph_ptr = getMHAGraphCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
+
+  if (graph_ptr) {
+    mha_graph = *graph_ptr;
+  } else {
+    mha_graph = build_graph_backward_nestedtensor(
+        b,
+        h_q,
+        h_k,
+        h_v,
+        s_q,
+        s_kv,
+        d_qk,
+        d_v,
+        scaling_factor,
+        is_causal,
+        dropout_probability,
+        cum_seqlen_q,
+        cum_seqlen_kv,
+        q,
+        k,
+        v,
+        attn_bias,
+        o,
+        dO_,
+        softmaxstats,
+        dQ,
+        dK,
+        dV,
+        dropoutseed,
+        dropoutoffset,
+        handle);
+  }
 
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
