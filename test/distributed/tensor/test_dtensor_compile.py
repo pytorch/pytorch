@@ -183,7 +183,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         torch.utils._pytree.register_constant(DeviceMesh)
 
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
         )
         self.assertExpectedInline(
