@@ -799,7 +799,12 @@ def _export_to_torch_ir(
         (args, kwargs),
     )
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+    dynamo_cfg = dataclasses.replace(
+        DEFAULT_EXPORT_DYNAMO_CONFIG,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+
+    with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
