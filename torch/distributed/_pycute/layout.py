@@ -251,7 +251,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
                 result_shape.append(new_shape)
                 result_stride.append(rest_stride * curr_stride)
 
-            rest_shape = rest_shape // new_shape
+            rest_shape = rest_shape // new_shape  # type: ignore[operator]
             rest_stride = -(
                 -rest_stride // curr_shape  # type: ignore[operator]
             )  # Python exclusive impl: "//" is always floor div so == ceil_div(abs(rest_stride), curr_shape) * signum(rest_stride)
@@ -261,9 +261,9 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
             result_stride.append(rest_stride * flatten(flat_A.stride)[-1])
 
         if len(result_shape) == 1:
-            return Layout(result_shape[0], result_stride[0])
+            return Layout(result_shape[0], result_stride[0])  # type: ignore[arg-type]
         else:
-            return Layout(tuple(result_shape), tuple(result_stride))
+            return Layout(tuple(result_shape), tuple(result_stride))  # type: ignore[arg-type]
 
 
 # Layout complement
