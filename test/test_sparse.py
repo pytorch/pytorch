@@ -3694,6 +3694,15 @@ class TestSparse(TestSparseBase):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
+    @dtypes(torch.float)
+    @expectedFailureMPS
+    def test_log_softmax_float(self, device, dtype):
+        x = (torch.rand(4, 3, dtype=dtype, device=device) - 10000000.0).to_sparse()
+        out = torch.sparse.log_softmax(x, dim=1).to_dense()
+        x_double = x.double()
+        out_double = torch.sparse.log_softmax(x_double, dim=1).to_dense()
+        self.assertEqual(out, out_double.to(dtype=dtype))
+
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
