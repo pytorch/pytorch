@@ -96,8 +96,8 @@ def parallel_apply(
             stream = torch.accelerator.current_stream(device)
         try:
             with (
-                device_module.device(device),
-                device_module.stream(stream),
+                torch.accelerator.device_index(device),
+                stream,
                 torch.amp.autocast(device_type, enabled=autocast_enabled),
             ):
                 # this also avoids accidental slicing of `input` if it is a Tensor
