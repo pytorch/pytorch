@@ -25,13 +25,13 @@ import types
 import unittest
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, overload, TypeVar, Union
-from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 from torch import fx
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
+from typing_extensions import ParamSpec
 
 from . import config, eval_frame, optimize, reset
 from .bytecode_transformation import (
@@ -379,7 +379,7 @@ def standard_test(
     correct1 = fn(*args1)
     correct2 = fn(*args2)
     reset()
-    opt_fn = optimize(actual, nopython=True)(fn)
+    opt_fn = optimize(actual, error_on_graph_break=True)(fn)
     val1a = opt_fn(*args1)
     val2a = opt_fn(*args2)
     val1b = opt_fn(*args1)
@@ -420,11 +420,12 @@ def rand_strided(
     device: Union[str, torch.device] = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(size, stride))
-        + 1
-        + extra_size
-    )
+    needed_size = extra_size
+    if all(s > 0 for s in size):
+        # only need to allocate if all sizes are non-zero
+        needed_size += (
+            sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
+        )
     if dtype.is_floating_point:
         if dtype.itemsize == 1:
             """

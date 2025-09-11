@@ -68,7 +68,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
@@ -1780,7 +1779,7 @@ def make_dynamo_test(
     Decorator function to create a dynamo test case. A function annotate with
     this decorator takes as input a unittest object.
     """
-    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    from torch._dynamo.testing import CompileCounter, reset, optimize
     if fn is None:
         return lambda fn: make_dynamo_test(fn)
 
@@ -1796,7 +1795,7 @@ def make_dynamo_test(
 
         dummy()
         reset()
-        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn = optimize(actual, error_on_graph_break=True)(dummy)
         opt_fn()
         reset()
 
@@ -5606,6 +5605,8 @@ class LazyVal:
 
 
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    from torch._dynamo.trace_rules import _as_posix_path
+
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
