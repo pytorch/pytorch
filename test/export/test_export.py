@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import decomposition_table, get_decompositions
+from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -214,12 +215,19 @@ TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp_strict"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_nonstrict"
 CPP_RUNTIME_STRICT_SUFFIX = "_cpp_runtime_strict"
 CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
+STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX)
+    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
+        STRICT_EXPORT_V2_SUFFIX
+    )
+
+
+def is_strict_v2_test(test_name):
+    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
@@ -4747,6 +4755,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
+
+    def test_issue_161902(self):
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        m = Add()
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        dx = Dim("dx", min=1, max=2)
+        conflicting = {"x": (2 * dx, Dim.STATIC), "y": (dx + 1, Dim.STATIC)}
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Constraints violated.*"
+            r"\n.*You marked 2\*dx as dynamic but your code specialized it to be a constant \(2\).*"
+            r"\n.*You marked dx \+ 1 as dynamic but your code specialized it to be a constant \(2\).*",
+        ):
+            export(m, (x, y), dynamic_shapes=conflicting)
 
     def test_range_constraints_with_replacement(self):
         class M(torch.nn.Module):
@@ -11759,6 +11787,7 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
+    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -13587,6 +13616,52 @@ def forward(self, x):
         ):
             _ = export(Foo(), (torch.randn(4, 4),), strict=False)
 
+    def test_vmap_custom_autograd_function(self):
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexingModule(torch.nn.Module):
+            def __init__(self, base_size: int = 10):
+                super().__init__()
+                self.register_buffer("base", torch.arange(base_size))
+
+            def forward(self, indices: torch.Tensor) -> torch.Tensor:
+                with TransformGetItemToIndex():
+                    # Each element of `indices` is a scalar tensor, so our override kicks in
+                    return torch.vmap(lambda i: self.base[i])(indices)
+
+        m = IndexingModule(10)
+        idxs = torch.tensor([0, 3, 7, 9])
+        ep = torch.export.export(m, (idxs,), strict=False)
+        self.assertExpectedInline(
+            ep.graph,
+            """\
+graph():
+    %b_base : [num_users=1] = placeholder[target=b_base]
+    %indices : [num_users=1] = placeholder[target=indices]
+    %lazy_load_decompositions : [num_users=0] = call_function[target=torch._functorch.predispatch.lazy_load_decompositions](args = (), kwargs = {})
+    %_vmap_increment_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_increment_nesting](args = (4, error), kwargs = {})
+    %_add_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%indices, 0, 1), kwargs = {})
+    %torch__dynamo__trace_wrapped_higher_order_op_mod_index0 : [num_users=1] = get_attr[target=torch__dynamo__trace_wrapped_higher_order_op_ModIndex0]
+    %function_const_func_spec0 : [num_users=1] = get_attr[target=function_const_func_spec0]
+    %flat_apply : [num_users=1] = call_function[target=torch.ops.higher_order.flat_apply](args = (%function_const_func_spec0, %torch__dynamo__trace_wrapped_higher_order_op_mod_index0, torch._dynamo._trace_wrapped_higher_order_op.ModIndex, %b_base, %_add_batch_dim), kwargs = {})
+    %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%flat_apply, 1, 4, 0), kwargs = {})
+    %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
+    return (_remove_batch_dim,)""",
+        )
+
+        self.assertEqual(m(idxs), ep.module()(idxs))
+        ep = ep.run_decompositions({})
+        self.assertExpectedInline(
+            ep.graph,
+            """\
+graph():
+    %b_base : [num_users=1] = placeholder[target=b_base]
+    %indices : [num_users=1] = placeholder[target=indices]
+    %index : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%b_base, [%indices]), kwargs = {})
+    return (index,)""",
+        )
+        self.assertEqual(m(idxs), ep.module()(idxs))
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -13683,7 +13758,7 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export.export(
+        ep = torch.export._trace._export(
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
@@ -14384,10 +14459,7 @@ graph():
             def forward(self, x):
                 return x.cos()
 
-        with self.assertRaisesRegex(
-            RuntimeError, "TestExport.test_capture_subclass_wrong.<locals>.Foo"
-        ):
-            export(Foo(), (torch.randn(4, 4),))
+        export(Foo(), (torch.randn(4, 4),))
 
     def test_capture_subclass_constructor_torch_ir(self):
         class Foo(torch.nn.Module):
@@ -14531,6 +14603,14 @@ graph():
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+        # This is fine since both of these will be deprecated soon.
+        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
+            self.assertEqual(
+                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
+            )
+            self.assertEqual(
+                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
+            )
         else:
             self.assertEqual(
                 filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
@@ -15369,6 +15449,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
+    @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureRetraceability  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureTrainingIRToRunDecomp  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureSerDerNonStrict  # TODO: serde torch.FunctionSchema is not implemented yet
