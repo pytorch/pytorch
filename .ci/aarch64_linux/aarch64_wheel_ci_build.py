@@ -170,7 +170,8 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         ]
 
         # CUDA version-specific libraries
-        if "130" in desired_cuda:
+        if "13" in desired_cuda:
+            minor_version = desired_cuda[-1]
             version_specific_libs = [
                 "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13",
                 "/usr/local/cuda/lib64/libcublas.so.13",
@@ -180,7 +181,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
                 "/usr/local/cuda/lib64/libcusolver.so.12",
                 "/usr/local/cuda/lib64/libnvJitLink.so.13",
                 "/usr/local/cuda/lib64/libnvrtc.so.13",
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.13.0",
+                f"/usr/local/cuda/lib64/libnvrtc-builtins.so.13.{minor_version}",
             ]
         elif "12" in desired_cuda:
             # Get the last character for libnvrtc-builtins version (e.g., "129" -> "9")
@@ -196,6 +197,8 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
                 "/usr/local/cuda/lib64/libnvrtc.so.12",
                 f"/usr/local/cuda/lib64/libnvrtc-builtins.so.12.{minor_version}",
             ]
+        else:
+            raise ValueError(f"Unsupported CUDA version: {desired_cuda}.")
 
         # Combine all libraries
         libs_to_copy = common_libs + version_specific_libs

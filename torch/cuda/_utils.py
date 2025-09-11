@@ -104,6 +104,13 @@ def _nvrtc_compile(
     options = []
     options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
 
+    # Auto-detect and add CUDA include paths
+    from torch.utils.cpp_extension import include_paths
+
+    cuda_include_paths = include_paths("cuda")
+    for cuda_path in cuda_include_paths:
+        options.append(f"-I{cuda_path}".encode())
+
     # Add custom include directories
     if cuda_include_dirs:
         for directory in cuda_include_dirs:
