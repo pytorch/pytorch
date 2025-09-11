@@ -16560,7 +16560,6 @@ def forward(self, x):
 
     def test_strict_export_with_shared_parameters(self):
         """Test that parameter names are preserved when there are shared parameters with the same name."""
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
