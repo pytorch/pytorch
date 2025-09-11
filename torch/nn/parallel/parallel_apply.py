@@ -63,8 +63,8 @@ def parallel_apply(
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
     streams = [torch.accelerator.current_stream(x) for x in devices]
-    device_type = _get_available_device_type()
-    assert device_type is not None, "No available device found"
+    assert torch.accelerator.is_available(), "No available accelerator found."
+    device_type = torch.accelerator.current_accelerator().type
     device_module = _get_device_module(device_type)
     lock = threading.Lock()
     results = {}
