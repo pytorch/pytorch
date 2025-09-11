@@ -3,7 +3,7 @@ name: operator_microbenchmark
 on:
   push:
     tags:
-      - ciflow/operator-microbenchmark/*
+      - ciflow/op-benchmark/*
   workflow_dispatch:
   schedule:
     # Run at 07:00 UTC every Sunday
