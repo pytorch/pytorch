@@ -396,6 +396,34 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_fallback_defaults_to_false(self):
+        """Test that fallback parameter defaults to False."""
+        import inspect
+        from torch.onnx import export
+        
+        # Get the signature of the export function
+        sig = inspect.signature(export)
+        
+        # Check the default value of the fallback parameter
+        fallback_param = sig.parameters['fallback']
+        self.assertEqual(fallback_param.default, False, 
+                        "fallback parameter should default to False")
+        
+        # Also test that calling export without fallback parameter works
+        # and behaves as if fallback=False (no fallback should occur)
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        # This should work fine without fallback
+        onnx_program = torch.onnx.export(
+            SimpleModel(),
+            (torch.randn(1, 1, 2),),
+            dynamo=True,
+            # Note: not specifying fallback, should default to False
+        )
+        self.assertIsNotNone(onnx_program)
+
 
 class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
