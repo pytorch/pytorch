@@ -227,9 +227,6 @@
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
 #      By default, It is only enabled on Windows.
 #
-#   USE_PRIORITIZED_TEXT_FOR_LD
-#      Uses prioritized text form cmake/prioritized_text.txt for LD
-#
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
@@ -323,7 +320,6 @@ from tools.setup_helpers.env import (
     IS_LINUX,
     IS_WINDOWS,
 )
-from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
 def str2bool(value: str | None) -> bool:
@@ -1626,26 +1622,6 @@ def main() -> None:
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
-
-    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
-        gen_linker_script(
-            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
-        )
-        linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = (
-            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-        os.environ["CXXFLAGS"] = (
-            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-    elif platform.system() == "Linux" and platform.processor() == "aarch64":
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
