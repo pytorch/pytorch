@@ -42,6 +42,7 @@ from .schema import (  # type: ignore[attr-defined]
     Argument,
     ArgumentKind,
     BufferMutationSpec,
+    ComplexValue,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -981,6 +982,15 @@ class GraphModuleSerializer(metaclass=Final):
                     return Argument.create(
                         as_graph=GraphArgument(name=arg.target, graph=graph)
                     )
+                elif type(attr).__name__ == "LoweredBackendModule":
+                    # Special handling for executorch_call_delegate HOP
+                    # It's first argument is a LoweredBackendModule, for which we
+                    # serialize name and backend id of the lowered module
+                    module_name = getattr(attr, "module_name", None)
+                    backend_id = getattr(attr, "backend_id", None)
+                    assert module_name is not None, "module_name should not be None"
+                    assert backend_id is not None, "backend_id should not be None"
+                    return Argument.create(as_string=f"{module_name}-{backend_id}")
                 else:
                     raise SerializeError(
                         f"Unsupported getattr attribute {arg.target} with type: {type(attr)}"
@@ -1048,6 +1058,10 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(as_int=arg)
         elif type(arg) is float:
             return Argument.create(as_float=arg)
+        elif type(arg) is complex:
+            return Argument.create(
+                as_complex=ComplexValue(real=arg.real, imag=arg.imag)
+            )
         elif arg is None:
             return Argument.create(as_none=True)
         elif isinstance(arg, (list, tuple)):
@@ -1780,6 +1794,7 @@ class ExportedProgramSerializer(metaclass=Final):
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
             torch_version=torch.__version__,
+            guards_code=exported_program._guards_code,
         )
 
         # Test canonical form is well defined.
@@ -2581,6 +2596,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return inp.as_bool
         elif typ_ == "as_string":
             return inp.as_string
+        elif typ_ == "as_complex":
+            return complex(inp.as_complex.real, inp.as_complex.imag)
         elif typ_ == "as_sym_int":
             return self.deserialize_sym_argument(inp.as_sym_int)
         elif typ_ == "as_sym_float":
@@ -3022,6 +3039,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             constants=res.constants,
             verifiers=[load_verifier(v) for v in exported_program.verifiers],
         )
+        result._guards_code = exported_program.guards_code
         log.debug("\n[deserialize]: %s", result)
         return result
 
@@ -3179,6 +3197,8 @@ def _canonicalize_graph(
         elif a.type == "as_string":
             return None
         elif a.type == "as_strings":
+            return None
+        elif a.type == "as_complex":
             return None
         elif a.type == "as_sym_int":
             return a.as_sym_int
@@ -3484,6 +3504,7 @@ def canonicalize(
     range_constraints = dict(
         sorted(ep.range_constraints.items(), key=operator.itemgetter(0))
     )
+    guards_code = sorted(ep.guards_code)
     module_call_graph = sorted(ep.graph_module.module_call_graph, key=lambda x: x.fqn)
     signature = ep.graph_module.signature
     graph = ep.graph_module.graph
@@ -3680,6 +3701,7 @@ def canonicalize(
         schema_version=ep.schema_version,
         verifiers=ep.verifiers,
         torch_version=ep.torch_version,
+        guards_code=guards_code,
     )
 
 

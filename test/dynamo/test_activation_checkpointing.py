@@ -18,7 +18,7 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -263,7 +263,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                         dynamic_shapes=None,
                         preserve_module_call_signature=(),
                         restore_fqn=False,
-                        allow_complex_guards_as_runtime_asserts=False,
+                        prefer_deferred_runtime_asserts_over_guards=False,
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
@@ -1364,7 +1364,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(out, out_compiled)
         self.assertEqual(input.grad, input_compiled.grad)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     def test_autocast_flash_attention(self, device):
         def fn(primals_1, primals_2, primals_3):
