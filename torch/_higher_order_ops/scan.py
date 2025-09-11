@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import enum
 import functools
 import itertools
-from typing import Any, Callable, Optional
+from re import S
+from typing import Any, Callable, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
@@ -12,6 +14,7 @@ from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     create_bw_fn,
+    fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,
     materialize_as_graph,
@@ -39,7 +42,7 @@ def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
     assert len(args) == (num_init_leaves + num_inp_leaves), (
-        f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+        f"combine_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
     )
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
@@ -240,7 +243,7 @@ def scan(
         combine_fn,
         leaves_init,
         leaves_xs,
-    )
+    )  # type: ignore
 
     if reverse:
         out = pytree.tree_map(lambda elem: elem.flip([0]), out)
@@ -459,124 +462,41 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs):
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
+def _partition(li, fn):
+    true_list = []
+    true_pos = []
+    false_list = []
+    false_pos =[]
+    for i, val in enumerate(li):
+        pred: bool = fn(val)
+        if pred:
+            true_pos.append(i)
+            true_list.append(val)
+        else:
+            false_pos.append(i)
+            false_list.append(val)
+    return true_list, true_pos, false_list, false_pos
+
+def _merge(true_list, true_pos, false_list, false_pos):
+    assert len(true_list)  == len(true_pos) and len(false_list) == len(false_pos)
+    if len(true_pos) == 0:
+        return false_list
+
+    if len(false_pos) == 0:
+        return true_list
+
+    l = max(true_pos[-1], false_pos[-1]) + 1
+    res = [None] * l
+    for pos, val in zip(true_pos, true_list):
+        res[pos] = val
+    for pos, val in zip(false_pos, false_list):
+        res[pos] = val
+    assert all(val is not None for val in res)
+    return res
+
 
 class ScanAutogradOp(torch.autograd.Function):
     """
-    Example ::
-
-        def combine_fn(x: torch.Tensor, y: torch.Tensor):
-            next_carry = y = x * y
-            return next_carry, y
-
-        The ``combine_fn_bw``, computing the gradients for x and y of ``combine_fn`` is computed as:
-        def combine_fn_bw(x: torch.Tensor, y: torch.Tensor, g_carry: torch.Tensor, g_y: torch.Tensor):
-            return g_y * y + g_carry * y, g_y * x + g_carry * x
-
-        Note: In a real usecase of scan, there may be additional_inputs that participate in the
-        forward as well as in the backward of the scan operator. For the sake of readability those inputs
-        have been omitted in the following example, but are included in the subsequent detailed description below
-
-        The forward output of scan is computed as:
-        carry, ys = scan(combine_fn, init, xs).
-
-        This computation can be unpacked as
-        c_0, ys_0 = combine_fn(init, xs_0)
-        c_1, ys_1 = combine_fn(carry_0, xs_1)
-        c_2, ys_2 = combine_fn(carry_1, xs_2)
-        ...
-        c_T, ys_T = combine_fn(carry_(T-1), xs_T)
-
-        We collect c_0, c_1, ..., c_T into a vector of carries that we save for the backward,
-        but we only output (c_T, ys),
-        where ys is the vector of all intermediate outputs [y_0, y_1, ..., y_T].
-
-        Given the carries and the ys, the gradients for xs and for init can be computed as follows:
-        We receive the upstream gradients in torch.autograd.Function, i.e., we get g_c_T and g_ys,
-        where g_ys is the vector of all intermediate gradients of the outputs [g_ys_0, g_ys_1, ..., g_ys_T]
-
-        We then proceed to compute the gradients for the init (g_init) and the xs (g_xs) by running a
-        scan operation reverse over time. For example,
-
-        g_c_(T-1), g_xs_T = combine_fn_bw(c_(T-1), xs_T, g_c_T, g_ys_T)
-        g_c_(T-2), g_xs_(T-1) = combine_fn_bw(c_(T-2), xs_(T-1), g_c_(T-1), g_ys_(T-1))
-        g_c_(T-3), g_xs_(T-2) = combine_fn_bw(c_(T-3), xs_(T-2), g_c_(T-2), g_ys_(T-2))
-        ...
-        g_init, g_xs_1 = combine_fn_bw(c_0, xs_1, g_c_0, g_ys_1)
-        0     , g_xs_0 = combine_fn_bw(init, xs_0, g_init, g_ys_0),
-
-        where combine_fn_bw takes the forward inputs of step t (i.e. c_(t-1), xs_t),
-        the gradients of the carry of step t (i.e. g_c_t) and
-        the upstream gradient of the output of step t (i.e. g_ys_T)
-        and returns the gradient of xs_t -> g_xs_t, as well as the gradient for the carry of step t-1 -> g_c_(t-1).
-
-        Through this procedure we end up with the
-        gradients for the init -> g_init,
-        the gradients for the xs -> g_xs.
-
-
-    NOTE: [scan autograd implementation]
-
-    The forward of scan can be computed as:
-    1.) Prepare the forward graph wrapper ``combine_fn_with_carry_checkpoint``:
-    To use a scan operation for the backward path as well, we need access to the carries from all steps.
-    Thus, the function ``combine_fn`` is wrapped such that it returns all carries and not only the last carry.
-    In particular, we define ``combine_fn_with_carry_checkpoint``:
-    def combine_fn_with_carry_checkpoint(x: torch.Tensor, y: torch.Tensor):
-        carry, y = combine_fn(x, y)
-        return carry, (carry, y)
-
-    The scan operator will stack all outputs along the scan dimension.
-    Thus, by putting next_carry also into outputs of ``combine_fn_with_carry_checkpoint``,
-    the carries from all steps will be stacked and hence gives us chekpointed_carries
-
-    2.) Compute all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``:
-    c_T, (carries, ys) = scan_op(combine_fn_with_carry_checkpoint, init, xs, additional_inputs),
-    Where c_T (last carry) and ys (all outputs) are the original results of scan with the ``combine_fn``.
-    However, carries are checkpointed carries from all steps.
-    As a result of the forward, only the last carry c_T and the ys are returned,
-    while all carries are saved for the backward.
-
-    The backward of scan can be computed as:
-
-    3.) Prepare the backward graph:
-    We prepare the backward graph to be used in the backward function.
-    We utilize ``create_bw_fn`` to generate the joint function, i.e.,
-    ctx._combine_fn_bw = create_bw_fn(ctx._combine_fn, fw_operands), where fw_operands = [init, xs_0, additional_inputs]
-
-    The ctx._combine_fn_bw requires the primals (operands)
-    followed by the tangents (upstream gradients) from a single step
-    and produces the gradients of that step, i.e.,
-    g_c_(T-1), g_xs_T, g_additional_input_T = ctx._combine_fn_bw(c_(T-1), xs_T, additional_inputs, g_c_T, g_ys_T).
-
-    4.) Create a wrapper of the ``combine_fn_bw``, i.e., ``combine_fn_bw_grad_accumulation``:
-    In the forward, there may be additional inputs that participate in every forward step.
-    The gradients for those additional inputs are also computed at every step and need to be accumulated over all steps,
-    which is taken care of in this wrapper. For example:
-    def combine_fn_bw_grad_accumulation(*args):
-        carried_g_additional_input = args[:num_additional_inputs]
-        inputs_bw_fn = args[num_additional_inputs:]
-        g_c_(t-1), g_xs_t, g_additional_input_t = ctx._combine_fn_bw(*inputs_bw_fn)
-        new_g_additional_inputs = carried_g_additional_input + g_additional_input_t
-        # The ``new_g_additional_inputs`` and the ``g_c_t`` are encoded in the carry of the backward scan operator
-        # The ``g_xs_t`` is encoded as the output of the backward scan operator
-        return [*new_g_additional_inputs, *g_c_t, *g_xs_t]
-
-    5.) Perform the backward scan as
-    g_additional_inputs, g_init, g_xs = scan_op(combine_fn_bw_grad_accumulation, bw_init, bw_xs), where
-    bw_init consists of the initial gradient carry for the additional_inputs (initialized with 0s):
-    initial_g_additional_inputs, and the gradient of the last carry: g_c_T. Thus:
-    bwd_init = [*initial_g_additional_inputs, *g_c_T].
-
-    bw_xs consists of the combination of the upstream gradients g_ys,
-    the forward carries prepended with the fw_init, i.e., bw_carries = concat([fw_init, fw_carries[:-1]]) and
-    the fw_xs. In particular,
-    bwd_xs = [*g_ys, *bw_carries, *fw_xs].
-
-    Note: g_c_T and g_ys are provided through the torch.autograd.Function.backward's input
-
-    As demonstrated in the Example above, this backward scan then yields the gradient for the init -> g_init
-    and the gradient for the xs -> g_xs
-
     NOTE: [scan partial grad handling]
     If any element of init, of xs, of the outputs or of the additional_inputs does not require gradients,
     i.e., requires_grad=False, there will be still gradients returned for those elements,
@@ -592,300 +512,580 @@ class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        combine_fn,
-        num_leaves_init,
-        num_leaves_xs,
-        num_additional_inputs,
+        hop_partitioned_graph,
+        n_init,
+        n_xs,
+        n_additional_inputs,
         *operands,
     ):
-        ctx._num_leaves_init = num_leaves_init
-        ctx._num_leaves_xs = num_leaves_xs
-        ctx._num_additional_inputs = num_additional_inputs
-        ctx._combine_fn = combine_fn
         init, xs, additional_inputs = split_into_chunks(
-            operands, [num_leaves_init, num_leaves_xs, num_additional_inputs]
+            operands, [n_init, n_xs, n_additional_inputs]
         )
-        additional_inputs_tensor_mask = get_tensor_mask(additional_inputs)
-        ctx._additional_inputs_tensor_mask = additional_inputs_tensor_mask
-
-        # We snapshot the dispatch keys in forward for materializing the
-        # the bw_graph in backward.
-        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
-        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-
-        # 1.) Prepare the forward graph wrapper ``combine_fn_with_carry_checkpoint``
-        # The wrapper of the forward graph returns carries from all iterations,
-        # not just from the last iteration. These are required in the backward path
-        def combine_fn_with_carry_checkpoint(*args):
-            carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
-            return [
-                *carry,
-                # We additionally checkpoint all the intermediate carry outputs for backward.
-                *[n_c.detach().clone() for n_c in carry],
-                *y,
-            ]
-
-        # Materialize the ``combine_fn_with_carry_checkpoint`` with enable_grad
-        # we need enable_grad to support torch.func.grad_and_value
-        # in subgraph.
-        gm = materialize_as_graph(
-            combine_fn_with_carry_checkpoint,
-            (*init, *[x[0] for x in xs], *additional_inputs),
-            force_enable_grad=True,
+        ctx._scan_impl = ScanAutogradImpl(
+            hop_partitioned_graph,
+            init,
+            xs,
+            additional_inputs
         )
-
         with torch._C._AutoDispatchBelowAutograd():
-            # 2.) Compute the all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``
-            c_T, carries_ys = _extract_carry_and_out(
-                scan_op(
-                    gm,
-                    init,
-                    xs,
-                    additional_inputs,
-                ),
-                num_leaves_init,
-            )
-
-            # Collect the carries for each time step from the outs
-            # and save them for the backward path
-            carries = list(carries_ys[:num_leaves_init])
-            ys = list(carries_ys[num_leaves_init:])
-            save_tensors_and_symints_for_backward(ctx, list(operands) + carries + ys)
-            ctx._num_leaves_ys = len(ys)
-
-            return (*c_T, *ys)
+            return ctx._scan_impl.call_forward(ctx, init, xs, additional_inputs)
 
     @staticmethod
-    def backward(ctx, *flat_grads):
-        r"""
-        This function computes the gradients of the scan operation.
-        It does so by using a scan operator using all carries and the upstream gradients (see description above)
+    def backward(ctx, *grad_fw_outputs):
+        return None, None, None, None, *ctx._scan_impl.call_backward(ctx, *grad_fw_outputs)
 
-        Args:
-            flat_grads (torch.Tensor): The tensor of flattened upstream gradients.
+
+def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
+    output_node_args = gm.graph.find_nodes(op="output")[0].args
+    assert isinstance(output_node_args, tuple)
+    return output_node_args[0]
+
+
+class HopPartitionedGraph:
+    def __init__(self,
+        fw_gm: torch.fx.GraphModule,
+        bw_gm: torch.fx.GraphModule,
+        n_fw_outputs: int,
+        n_checkpoints: int,
+    ):
+        self.fw_gm = fw_gm
+        self.bw_gm = bw_gm
+        self.n_fw_outputs = n_fw_outputs
+        self.n_checkpoints =  n_checkpoints
+        self._reorder_fw_output()
+
+    def _reorder_fw_output(self):
+        '''
+        Before the pass, fw_gm returns (*fw_outputs, *intermediates1)
+        and bw_gm takes (*intermediates2, *grad_fw_outputs) as input.
+        intermediates1 and intermediates2 share the same node names but
+        they might be in different order. E.g. this could happen if there
+        are inputs that contain symints.
+
+        To simplify downstream processing, this graph pass normalizes the output of fw_gm
+        to be consistent with the bacwkard inputs:
+
+        fw_gm:
+          - input: fw_args
+          - output: (*fw_outputs, *intermediates)
+
+        bw_gm:
+          - input: (*intermediates, *grad_fw_outputs)
+          - output: grad_fw_args
+
+        Exmaple:
+
+        def fw_gm(x, y, z):
+           a, b, c = f(x), g(y), k(z)
+           return a, b, c, f_tmp, g_tmp, k_tmp
+
+        , where a, b, c are fw_outputs, f_tmp, g_tmp, k_tmp are intermediates
+
+        The corresponding bw_gm has the following signature:
+
+        def bw_gm(f_tmp, g_tmp, k_tmp, grad_a, grad_b, grac):
+          return grad_x, grad_y, grad_z
+        '''
+        # Initially the intermediates are the latter part of the fw outputs
+        fw_gm_output_nodes = _find_hop_subgraph_outputs(self.fw_gm)
+        fw_outputs_nodes = fw_gm_output_nodes[:self.n_fw_outputs]
+        fw_intermediates_nodes = fw_gm_output_nodes[self.n_fw_outputs:]
+        n_intermediates = len(fw_intermediates_nodes)
+        if n_intermediates > 0:
+            fw_intermediates_name_to_node = {n.name: n for n in fw_intermediates_nodes}
+
+            # First n_intermediates placeholders
+            bw_names: list[str] = [ph.name for ph in list(self.bw_gm.graph.find_nodes(op="placeholder"))[:n_intermediates]]
+            new_fw_outputs = list(fw_outputs_nodes) + [fw_intermediates_name_to_node[name] for name in bw_names]
+
+            output_node = self.fw_gm.graph.find_nodes(op="output")[0]
+            output_node.args = (tuple(new_fw_outputs),)
+
+            self.fw_gm.graph.lint()
+            self.fw_gm.recompile()
+
+
+class HopJointGraph:
+    def __init__(self, joint_gm: torch.fx.GraphModule, n_primals: int, n_fw_outputs: int):
+        self.joint_gm = joint_gm
+        self.n_primals = n_primals
+        self.n_fw_outputs= n_fw_outputs
+        self._rename_phs()
+        self._remove_redundant_sym_size_ops()
+        self._mark_complex_exprs_as_must_recompute()
+
+    def _rename_phs(self) -> None:
+        self.n_tangents = 0
+        for i, ph in enumerate(self.joint_gm.graph.find_nodes(op="placeholder")):
+            if i < self.n_primals:
+                ph.target = f"primals_{i}"
+                ph.name = f"primals_{i}"
+            else:
+                self.n_tangents += 1
+                ph.target = f"tangents_{i - self.n_primals}"
+                ph.name = f"tangents_{i - self.n_primals}"
+
+        self.joint_gm.graph.lint()
+        self.joint_gm.compile()
+
+    def _remove_redundant_sym_size_ops(self) -> None:
         """
-        from torch._higher_order_ops.utils import fill_none_with_masks
+        Graph pass that deletes torch.ops.sym_size.int operators whose output is a
+        corresponding placeholder that holds the same symbol, and replace all uses
+        of their output to be directly accessing the placeholders.
+        """
+        # Find all placeholders and their symbolic values
+        placeholder_exprs = {}
+        for node in self.joint_gm.graph.nodes:
+            if isinstance(node, torch.fx.Node) and node.op == "placeholder" and hasattr(node, 'meta') and 'val' in node.meta:
+                val = node.meta['val']
+                if isinstance(val, torch.SymInt):
+                    placeholder_exprs[val.node.expr] = node
 
-        # Collect the saved items from the forward
-        num_leaves_init = ctx._num_leaves_init
-        num_leaves_xs = ctx._num_leaves_xs
-        num_leaves_ys = ctx._num_leaves_ys
-        num_additional_inputs = ctx._num_additional_inputs
-        additional_inputs_tensor_mask = ctx._additional_inputs_tensor_mask
+        # Find sym_size nodes to remove
+        nodes_to_remove = []
+        # TODO: change to find_nodes
+        for node in self.joint_gm.graph.find_nodes(op="call_function", target=torch.ops.aten.sym_size.int):
+            assert hasattr(node, 'meta') and 'val' in node.meta, node
+            # Check if we have a placeholder with the same symbol
+            val = node.meta['val']
+            expr = val.node.expr
+            if expr in placeholder_exprs:
+                placeholder_node = placeholder_exprs[expr]
+                # Replace all uses of sym_size node with placeholder
+                node.replace_all_uses_with(placeholder_node)
+                nodes_to_remove.append(node)
 
-        def prepend_init_to_carries(init, carries):
-            # Prepare the carries for the backward path.
-            # This requires to concatenate the init and the carries
-            return [
-                torch.cat([torch.unsqueeze(i, 0), c[:-1]], dim=0)
-                for i, c in zip(init, carries)
-            ]
+        # Remove the redundant sym_size nodes
+        for node in nodes_to_remove:
+            self.joint_gm.graph.erase_node(node)
 
-        def initialize_g_additional_inputs(
-            additional_inputs,
-        ):
-            g_additional_inputs = [
-                torch.zeros_like(ai)
-                for ai in filter_with_masks(
-                    additional_inputs, additional_inputs_tensor_mask
-                )
-            ]
-            return g_additional_inputs
+        # Clean up and recompile
+        self.joint_gm.graph.lint()
+        self.joint_gm.recompile()
 
-        # Retrieve the forward inputs and the forward outputs and dissect them
-        flat_args = saved_tensors_and_symints(ctx)
-        fw_init, fw_xs, additional_inputs, fw_carries, fw_ys = split_into_chunks(
-            flat_args,
-            [
-                num_leaves_init,
-                num_leaves_xs,
-                num_additional_inputs,
-                num_leaves_init,
-                num_leaves_ys,
-            ],
+    def _mark_complex_exprs_as_must_recompute(self) -> None:
+        def is_complex_expr(expr):
+           return not expr.is_symbol
+
+        for n in (node for node in self.joint_gm.graph.nodes if node.op =="call_function"):
+            if not "val" in n.meta:
+                continue
+            val = n.meta["val"]
+            if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
+                assert n.meta.get("recompute", None) is None
+                from torch._functorch.partitioners import CheckpointPolicy
+                n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+
+        # Clean up and recompile
+        self.joint_gm.graph.lint()
+        self.joint_gm.recompile()
+
+    def partition(self, partition_fn: Callable) -> HopPartitionedGraph:
+
+        print("before min_cut_partition:")
+        self.joint_gm.print_readable()
+
+        fw_gm, bw_gm = partition_fn(
+            self.joint_gm,
+            None,
+            num_fwd_outputs=self.n_fw_outputs
         )
 
-        # 3.) Prepare the backward graph
-        fw_operands = (
-            *fw_init,
-            *[first_slice_copy(xs) for xs in fw_xs],
-            *additional_inputs,
+        print("after partition_fn:")
+        print("fw:")
+        fw_gm.print_readable()
+        print("bw:")
+        bw_gm.print_readable()
+
+        n_checkpoints = len(_find_hop_subgraph_outputs(fw_gm)) - self.n_fw_outputs
+
+        return HopPartitionedGraph(
+            fw_gm,
+            bw_gm,
+            self.n_fw_outputs,
+            n_checkpoints,
         )
-        ctx._combine_fn_bw = create_bw_fn(ctx._combine_fn, fw_operands)
 
-        # Initialize the g_additional_inputs with zero-tensors.
-        # This step is necessary because the gradients of the additional inputs are accumulated in the
-        # ``wrapper_bwd_combine_fn`` and thus need a zero-initialized starting point
-        initial_g_additional_inputs = initialize_g_additional_inputs(additional_inputs)
+class HopGraphPartitioner:
+    @staticmethod
+    def _create_joint_graph(fw_fn: Callable, fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...]) -> HopJointGraph:
+        fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
+        fw_gm_output_nodes =  _find_hop_subgraph_outputs(fw_gm)
 
-        # 4.) Create the BW wrapper to accumulate the gradients for the additional_inputs
-        def combine_fn_bw_grad_accumulation(*args):
-            # Dissect args and re-order them for the ``ctx._combine_fn_bw``
-            # The content of ``combine_fn_bw_tangents`` is [*carries_g, *outs_g]
-            # The content of ``combine_fn_bw_primals`` is [*init, *xs, *additional_inputs]
-            (
-                carried_g_additional_input,
-                combine_fn_bw_tangents,
-                combine_fn_bw_primals,
-            ) = split_into_chunks(
-                args,
-                [
-                    len(initial_g_additional_inputs),
-                    num_leaves_init + num_leaves_ys,
-                    num_leaves_init + num_leaves_xs + num_additional_inputs,
-                ],
+        assert all(isinstance(n, torch.fx.Node) and "val" in n.meta for n in fw_gm_output_nodes)
+        fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)  # type: ignore[arg-type]
+
+        assert all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals)
+        example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
+
+        joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+        # Need to first trace out the joint_fn with autograd info on
+        # then functionalize the graph othewise the grad information is lost for functional tensor
+        joint_gm = materialize_as_graph(joint_fn, fw_args + example_grads, force_enable_grad=True)
+        joint_gm_functionalized = materialize_as_graph(torch.func.functionalize(joint_gm, remove="mutations_and_views"), fw_args + example_grads)
+
+        return HopJointGraph(
+            joint_gm_functionalized,
+            len(fw_args),
+            len(fw_gm_output_nodes),
+        )
+
+    @staticmethod
+    def create(fw_fn: Callable, fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...]) -> "HopPartitionedGraph":
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+
+        joint_graph: HopJointGraph = HopGraphPartitioner._create_joint_graph(fw_fn, fw_args)
+        return joint_graph.partition(min_cut_rematerialization_partition)
+
+class ScanOutputAliasPolicy(enum.Enum):
+    """
+    The partitioner can create aliasing between
+    Enum for specifying the policy for handling the alias created by partitioner.
+
+    1. if the output
+    1. the output is the carry, in this case, we need to clone the carry and put the cloned
+        result as part of return so that we can get a checkpoint in forward.
+    2. the output is xs or
+    """
+    NONE = 0
+    CLONE = 1
+    REMOVE_XS = 2
+    REMOVE_ADDITIONAL_INPUTS = 3
+
+
+class ScanAutogradImpl:
+    '''
+    Wraps over paritioned graph and encapsulates scan-specific implementation details
+    '''
+
+    def __init__(self, hop_partitioned_graph: HopPartitionedGraph, init, xs, additional_inputs):
+        self.hop_partitioned_graph = hop_partitioned_graph
+        self.init = init
+        self.xs = xs
+        self.additional_inputs = additional_inputs
+        self.output_policies = []
+        self.xs_checkpoints = {}
+        self.additional_inputs_checkpoints = {}
+        self.fw_spec = pytree.tree_flatten((init, xs, additional_inputs))[1]
+        self._remove_fw_gm_output_aliasing()
+
+    def _insert_clone(self, need_copy_node: torch.fx.Node, output_node: torch.fx.Node) -> torch.fx.Node:
+        graph: torch.fx.Graph = output_node.graph
+        with graph.inserting_before(output_node):
+            clone_node = graph.call_function(
+                torch.ops.aten.clone.default,
+                args=(need_copy_node,),
             )
-            combine_fn_bw_args = (*combine_fn_bw_primals, *combine_fn_bw_tangents)
+            clone_node.meta = need_copy_node.meta.copy() if hasattr(need_copy_node, 'meta') else {}
+        return clone_node
 
-            g_c_t, g_xs_t, g_additional_inputs_t = split_into_chunks(
-                ctx._combine_fn_bw(*combine_fn_bw_args),
-                [num_leaves_init, num_leaves_xs, num_additional_inputs],
+
+    def _remove_fw_gm_output_aliasing(self):
+        from torch._higher_order_ops.utils import check_input_alias_and_mutation_return_outputs
+
+        fw_gm = self.hop_partitioned_graph.fw_gm
+        print("Need remove aliasing in fw_gm")
+        fw_gm.print_readable()
+
+        fw_all_outputs = _find_hop_subgraph_outputs(fw_gm)
+        phs = list(fw_gm.graph.find_nodes(op="placeholder"))
+        fw_outputs = fw_all_outputs[:self.hop_partitioned_graph.n_fw_outputs]
+        fw_checkpoints = fw_all_outputs[self.hop_partitioned_graph.n_fw_outputs:]
+
+        # create a handling policy for each checkpoints
+        init_phs, xs_phs, additional_inputs_phs = pytree.tree_unflatten(phs, self.fw_spec)
+        init_node_set, xs_node_set, addi_node_set = set(init_phs), set(xs_phs), set(additional_inputs_phs)
+
+        assert len(self.output_policies) == 0
+        assert len(self.xs_checkpoints) == 0
+        assert len(self.additional_inputs_checkpoints) == 0
+        reverse_alias_map = {}
+        ph_idx = {ph: i for i, ph in enumerate(phs)}
+        for i, out in enumerate(fw_checkpoints):
+            if out in init_node_set:
+                self.output_policies.append(ScanOutputAliasPolicy.CLONE)
+                reverse_alias_map[i] = ph_idx[out]
+            elif out in xs_node_set:
+                self.output_policies.append(ScanOutputAliasPolicy.REMOVE_XS)
+                reverse_alias_map[i] = ph_idx[out]
+            elif out in addi_node_set:
+                self.output_policies.append(ScanOutputAliasPolicy.REMOVE_ADDITIONAL_INPUTS)
+                reverse_alias_map[i] = ph_idx[out]
+            else:
+               self.output_policies.append(ScanOutputAliasPolicy.NONE)
+
+
+        new_output_node = []
+        real_graph_inputs = list(self.init) + list(self.xs) + list(self.additional_inputs)
+        fw_output_node = list(fw_gm.graph.find_nodes(op="output"))[0]
+        for out_idx, (node, policy) in enumerate(zip(fw_checkpoints, self.output_policies)):
+            if policy == ScanOutputAliasPolicy.CLONE:
+                new_output_node.append(self._insert_clone(node, fw_output_node))
+            elif policy == ScanOutputAliasPolicy.REMOVE_XS:
+                assert out_idx in reverse_alias_map
+                inp_idx = reverse_alias_map[out_idx]
+                self.xs_checkpoints[out_idx] = real_graph_inputs[inp_idx]
+            elif policy == ScanOutputAliasPolicy.REMOVE_ADDITIONAL_INPUTS:
+                assert out_idx in reverse_alias_map
+                inp_idx = reverse_alias_map[out_idx]
+                self.additional_inputs_checkpoints[out_idx] = real_graph_inputs[inp_idx]
+            else:
+                new_output_node.append(node)
+
+        fw_output_node.args = (tuple(fw_outputs) + tuple(new_output_node),)
+        fw_gm.graph.lint()
+        fw_gm.recompile()
+        print("after removing aliasing")
+        fw_gm.print_readable()
+
+
+    def call_forward(self, ctx, init, xs, additional_inputs):
+        fw_outputs_and_checkpoints: tuple[Any] = scan_op(
+            self.hop_partitioned_graph.fw_gm,
+            init,
+            xs,
+            additional_inputs
+        )  # type: ignore[return-type]
+        fw_outs = fw_outputs_and_checkpoints[:self.hop_partitioned_graph.n_fw_outputs]
+        carry_checkpoints = fw_outputs_and_checkpoints[self.hop_partitioned_graph.n_fw_outputs:]
+        carry_checkpoint_iter = iter(carry_checkpoints)
+
+        # Put together the checkpoints
+        checkpoints = []
+        ctx._fw_policy = self.output_policies
+        for i, policy in enumerate(ctx._fw_policy):
+            if policy in (ScanOutputAliasPolicy.CLONE, ScanOutputAliasPolicy.NONE):
+                checkpoints.append(next(carry_checkpoint_iter))
+            elif policy == ScanOutputAliasPolicy.REMOVE_XS:
+                checkpoints.append(self.xs_checkpoints[i])
+            elif policy == ScanOutputAliasPolicy.REMOVE_ADDITIONAL_INPUTS:
+                checkpoints.append(self.additional_inputs_checkpoints[i])
+            else:
+                raise RuntimeError(f"Unknown policy: {policy}")
+
+
+        ctx._checkpoints = checkpoints
+        return tuple(fw_outs)
+
+    def call_backward(self, ctx, *grad_fw_outputs):
+        '''
+          Recall that fw_outputs = (*carry, *ys), bw_gm takes in (*fw_checkpoints, *grad_carry, *grad_ys)
+          and returns (*grad_init, *grad_xs, *grad_additional_inputs)
+          The bacwkard is a reversed scan that can be constructed as follows:
+
+            grad_additonal_inputs = torch.zeros_like(additional_inputs)
+            bw_init = (grad_carry, grad_additional_inputs)
+            bw_xs = (fw_checkpoints, grad_ys)
+            return scan(
+              combine_fn,
+              bw_init,
+              bw_xs,
+              reverse = True
+            )
+            , where combine_fn is defined as follows:
+
+             def combine_fn(bw_init, bw_xs):
+               grad_carry, grad_additional_inputs = bw_init
+               fw_checkpoints, grad_y = bw_xs
+               nxt_grad_carry, grad_x, nxt_grad_additional_inputs = bw_gm(*fw_checkpoints, *grad_carry, *grad_y)
+               return (nxt_grad_carry, grad_additional_inputs + nxt_grad_additional_inputs), grad_x
+
+            Note that grad_additional_inputs is accumulated with +, grad_carry is carried over to next iteration
+            grad_x is outputed directly, which will be stacked together after the loop and will have the same shape as xs.
+        '''
+        fw_checkpoints = ctx._checkpoints
+        fw_policy = ctx._fw_policy
+        carry_checkpoints = []
+        xs_checkpoints = []
+        additional_inputs_checkpoints = []
+        for t, policy in zip(fw_checkpoints, fw_policy):
+            if policy in (ScanOutputAliasPolicy.CLONE, ScanOutputAliasPolicy.NONE):
+                carry_checkpoints.append(t)
+            elif policy == ScanOutputAliasPolicy.REMOVE_XS:
+                xs_checkpoints.append(t)
+            elif policy == ScanOutputAliasPolicy.REMOVE_ADDITIONAL_INPUTS:
+                additional_inputs_checkpoints.append(t)
+            else:
+                raise RuntimeError(f"Unknown policy: {policy}")
+
+        n_carry = len(self.init)
+
+        grad_carry, grad_ys = grad_fw_outputs[:n_carry], grad_fw_outputs[n_carry:]
+        additional_inputs_tensor_masks = [True if isinstance(t, torch.Tensor) else False for t in self.additional_inputs]
+        grad_additional_inputs = [torch.zeros_like(t) for t in filter_with_masks(self.additional_inputs, additional_inputs_tensor_masks)]
+
+        bw_init = [
+            grad_carry,
+            grad_additional_inputs
+        ]
+        bw_xs = [
+            grad_ys,
+            xs_checkpoints,
+            carry_checkpoints,
+        ]
+        bw_additional_inputs = additional_inputs_checkpoints
+
+
+        _, flat_spec = pytree.tree_flatten(
+            (bw_init, bw_xs, bw_additional_inputs)
+        )
+
+        grad_spec = None
+
+        def bw_single_step_wrapper(*args):
+            bw_init, bw_xs, bw_additional_inputs = pytree.tree_unflatten(args, flat_spec)
+            grad_carry, grad_additional_inputs = bw_init
+            grad_y, xs_checkpoint, carry_checkpoint  = bw_xs
+            additional_inputs_checkpoints = bw_additional_inputs
+
+            fw_checkpoints = []
+            xs_it = iter(xs_checkpoint)
+            carry_it = iter(carry_checkpoint)
+            addi_it = iter(additional_inputs_checkpoints)
+            for policy in fw_policy:
+                if policy in (ScanOutputAliasPolicy.CLONE, ScanOutputAliasPolicy.NONE):
+                    fw_checkpoints.append(next(carry_it))
+                elif policy == ScanOutputAliasPolicy.REMOVE_XS:
+                    fw_checkpoints.append(next(xs_it))
+                elif policy == ScanOutputAliasPolicy.REMOVE_ADDITIONAL_INPUTS:
+                    fw_checkpoints.append(next(addi_it))
+                else:
+                    raise RuntimeError(f"Unknown policy: {policy}")
+
+            grad_fw_outputs = (*grad_carry, *grad_y)
+
+            flat_out = self.hop_partitioned_graph.bw_gm(
+                *fw_checkpoints,
+                *grad_fw_outputs,
             )
 
-            new_g_additional_inputs = [
-                # If the additional inputs are ints or SymInts, those values are taken as is and no gradients are added
-                carr_g + curr_g
-                for carr_g, curr_g in zip(
-                    carried_g_additional_input,
-                    filter_with_masks(
-                        g_additional_inputs_t, additional_inputs_tensor_mask
-                    ),
-                )
-            ]
-            assert all(isinstance(t, torch.Tensor) for t in new_g_additional_inputs)
-
-            # The ``new_g_additional_inputs`` and the ``g_c_t`` are encoded in the carry of the backward scan operator
-            # The ``g_xs_t`` is encoded as the output of the backward scan operator
-            return [*new_g_additional_inputs, *g_c_t, *g_xs_t]
-
-        # Materialize the ``combine_fn_bw_grad_accumulation``
-        def construct_args_single_step_bw():
-            # This function constructs the arguments for a single step of the backward scan.
-            # In other words, it creates the arguments for ``combine_fn_bw_grad_accumulation``
-            # The order of the arguments returned is identical to the order the backward scan
-            # operations provides
-
-            # The following arguments are used for the backward part of the joint graph
-            # The first argument relates to the gradient accumulation of the additional inputs.
-            # Because only tensor elements of additional inputs can have requires_grad=True,
-            # the values for non-tensor elements of additional inputs are None
-            masked_additional_inputs = [
-                a.clone()
-                for a in filter_with_masks(
-                    additional_inputs, additional_inputs_tensor_mask
-                )
-            ]
-
-            # The second argument relates to the gradients of the carries.
-            # Because the arguments are for a single step only,
-            # only the first slice of the carries is used.
-            sliced_carries = [first_slice_copy(c) for c in fw_carries]
-
-            # The third argument relates to the gradients of the ys.
-            # Because the arguments are for a single step only,
-            # only the first slice of the ys is used.
-            sliced_ys = [first_slice_copy(o) for o in fw_ys]
-
-            # The following arguments are used for the forward part of the joint graph
-            # The fourth argument relates to the init for the forward.
-            # I.e., fw_init
-
-            # The fifth argument relates to the xs for the forward.
-            # Because the arguments are for a single step only,
-            # only the first slice of the xs is used.
-            # Note: It is important to preserve the requires_grad flag of xs
-            # and thus we use the wrapper function ``first_slice_copy_with_grad``
-            fw_xs_slice = first_slice_copy_with_grad(fw_xs)
-
-            # The last argument relates to the additional inputs for the forward.
-            # I.e., additional_inputs
-
-            return (
-                *masked_additional_inputs,
-                *sliced_carries,
-                *sliced_ys,
-                *fw_init,
-                *fw_xs_slice,
-                *additional_inputs,
+            next_grad_carry, grad_xs, grad_addi = split_into_chunks(
+                flat_out,  # type: ignore[arg-type]
+                [len(self.init), len(self.xs), len(self.additional_inputs)]
             )
 
-        args_single_step_bw = construct_args_single_step_bw()
+            nonlocal grad_spec
+            flat_grads, grad_spec = pytree.tree_flatten(
+                (
+                    next_grad_carry,
+                    [
+                        prev + cur
+                        for prev, cur in zip(grad_additional_inputs, filter_with_masks(grad_addi, additional_inputs_tensor_masks))
+                    ],
+                    grad_xs,
+                )
+            )
+            return flat_grads
 
-        # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint function when torch.compile torch.autograd.grad.
-        combine_fn_bw_grad_accumulation_gm = materialize_as_graph(
-            combine_fn_bw_grad_accumulation,
-            args_single_step_bw,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
+        single_step_bw_xs = pytree.tree_map(lambda t: t[0], bw_xs)
+        bw_single_step_gm = materialize_as_graph(
+            bw_single_step_wrapper,
+            tuple(pytree.tree_flatten(
+                (bw_init, single_step_bw_xs, bw_additional_inputs)
+            )[0])
         )
 
-        # Decompose the flat_grads into g_c_T, g_ys
-        g_c_T, g_ys = split_into_chunks(flat_grads, [num_leaves_init, num_leaves_ys])
-        assert all(
-            isinstance(t, torch.Tensor) and t.dtype.is_floating_point for t in g_c_T
+        flat_grads = scan_op(
+            bw_single_step_gm,
+            pytree.tree_flatten(bw_init)[0],
+            # TODO: torch.flip copies the checkpoints, we should optimize it away
+            [torch.flip(x, (0,)) for x in pytree.tree_flatten(bw_xs)[0]],
+            pytree.tree_flatten(bw_additional_inputs)[0],
         )
-        assert all(
-            isinstance(t, torch.Tensor) and t.dtype.is_floating_point for t in g_ys
-        )
+        grad_init, grad_additional_inputs, grad_xs = pytree.tree_unflatten(flat_grads, grad_spec)  # type: ignore[arg-type]
+        return *grad_init, *grad_xs, *fill_none_with_masks(grad_additional_inputs, additional_inputs_tensor_masks)
 
-        # Prepend the inits to the carries.
-        # This is needed, because when computing the gradients, the last carry is not needed
-        # but the first carry, the init, is required.
-        bw_carries = prepend_init_to_carries(fw_init, fw_carries)
 
-        # Prepare the xs for the backward scan.
-        bwd_xs = [*g_ys, *bw_carries, *fw_xs]
+def _optimize_in_graph_checkpoint_nodes(fw_gm, fw_checkpoint_nodes, init, xs, additional_inputs):
+    """
+    Graph pass that clones/revmoes fw_checkpoint_nodes. Labels each fw_checkpoint_nodes as either:
+    1. "need clone and return in fw_gm" - if it's a placeholder that is part of init
+    2. "can save once as attribute ctx" - if it's a placeholder that is part of additional_inputs or xs
 
-        # The flipping of the ``bwd_xs`` is necessary because the scan_op in the backward is always performed in reverse
-        bwd_xs = [torch.flip(elem, [0]) for elem in bwd_xs]
+    The idea is that for init, we need to save it at every iteration so we want to keep it in the graph.
+    For additional_inputs and xs, we can save it once and then re-use it for all iterations.
 
-        # Prepare the bwd_init
-        bwd_init = [*initial_g_additional_inputs, *g_c_T]
+    The pass adds clones if they belong to category 1 and removes outputs if they belong to category 2
+    """
+    n_init = len(init)
+    n_xs = len(xs)
+    n_additional_inputs = len(additional_inputs)
 
-        # 5.) Perform the backward scan:
-        # The ``combine_fn_bw_wrapped`` receives the
-        # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
-        # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
-        gradients = scan_op(
-            combine_fn_bw_grad_accumulation_gm,
-            bwd_init,
-            bwd_xs,
-            additional_inputs,
-        )
+    # Get the original forward output nodes (before checkpoints were added)
+    output_node = fw_gm.graph.find_nodes(op="output")[0]
+    old_args = list(output_node.args[0])
+    fw_gm.print_readable()
 
-        # Unpack the computed gradients
-        g_additional_inputs, g_init, g_xs = split_into_chunks(
-            gradients,
-            [len(initial_g_additional_inputs), num_leaves_init, num_leaves_xs],
-        )
+    fw_placeholders = [n for n in fw_gm.graph.find_nodes(op="placeholder")]
+    init_placeholders = set(fw_placeholders[:n_init])
+    xs_ph_to_val = {ph: x for ph, x in zip(fw_placeholders[n_init:n_init + n_xs], xs)}
+    additional_input_ph_to_val = {ph: t for ph, t in zip(fw_placeholders[n_init + n_xs:], additional_inputs)}
 
-        # The flipping back along the scan dimension is required to get the gradients in the right order for ``xs``
-        g_xs = [torch.flip(elem, [0]) for elem in g_xs]
+    # Categorize checkpoint nodes
+    nodes_to_remove = [] # "can save once as attribute ctx"
+    nodes_to_clone = []  # "need clone and return in fw_gm"
 
-        return (
-            *[None] * 4,
-            *g_init,
-            *g_xs,
-            *fill_none_with_masks(g_additional_inputs, additional_inputs_tensor_mask),
-        )
+    output_node = fw_gm.graph.find_nodes(op="output")[0]
+    output_args = list(output_node.args[0])
+
+    for checkpoint_node in fw_checkpoint_nodes:
+        if checkpoint_node in additional_input_ph_to_val or checkpoint_node in xs_ph_to_val:
+            nodes_to_remove.append(checkpoint_node)
+        elif checkpoint_node in init_placeholders:
+            nodes_to_clone.append(checkpoint_node)
+
+    repalcement_map = {}
+    # Apply modifications to the graph
+    # First handle cloning
+    for node in nodes_to_clone:
+        with fw_gm.graph.inserting_before(output_node):
+            clone_node = fw_gm.graph.call_function(
+                torch.ops.aten.clone.default,
+                args=(node,),
+            )
+            clone_node.meta = node.meta.copy() if hasattr(node, 'meta') else {}
+            repalcement_map[node] = clone_node
+
+    new_output_args = []
+    for node in output_args:
+        if node in nodes_to_remove:
+            continue
+        if node in repalcement_map:
+            new_output_args.append(repalcement_map[node])
+        else:
+            new_output_args.append(node)
+
+
+    # Update the output node
+    output_node.args = (tuple(new_output_args),)
+    removed_node_to_pos = {node: i for i, node in enumerate(old_args[-len(fw_checkpoint_nodes):]) if node in nodes_to_remove}
+    saved_xs = {removed_node_to_pos[node] : xs_ph_to_val[node] for node in nodes_to_remove if node in xs_ph_to_val}
+    saved_additional_inputs = {removed_node_to_pos[node] : additional_input_ph_to_val[node] for node in nodes_to_remove if node in additional_input_ph_to_val}
+
+    # Recompile the graph
+    fw_gm.graph.lint()
+    fw_gm.recompile()
+    print("after _optimize", fw_checkpoint_nodes, nodes_to_remove)
+    fw_gm.print_readable()
+    return saved_xs, saved_additional_inputs
 
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    num_leaves_init = len(init)
-    num_leaves_xs = len(xs)
-    num_additional_inputs = len(additional_inputs)
 
-    flat_out = ScanAutogradOp.apply(
-        combine_fn,
-        num_leaves_init,
-        num_leaves_xs,
-        num_additional_inputs,
-        *(tuple(init) + tuple(xs) + additional_inputs),
+    with disable_proxy_modes_tracing():
+        hop_partitioned_graph = HopGraphPartitioner.create(combine_fn, (*init, *[x[0] for x in xs], *additional_inputs))
+
+    return ScanAutogradOp.apply(
+        hop_partitioned_graph,
+        len(init),
+        len(xs),
+        len(additional_inputs),
+        *init,
+        *xs,
+        *additional_inputs,
     )
-    return *flat_out[:num_leaves_init], *flat_out[num_leaves_init:]
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)

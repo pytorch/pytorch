@@ -170,36 +170,7 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
-            try:
-                self.env[node] = self.run_node(node)
-            except Exception as e:
-                if self.extra_traceback:
-                    msg = f"While executing {node.format_node()}"
-                    msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
-                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
-                    if (
-                        isinstance(self.module, GraphModule)
-                        and self.module.graph is not None
-                        and isinstance(self.module.graph, torch.fx.Graph)
-                    ):
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "fx_interpreter_error",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: (
-                                f"{msg}\nGraphModule: "
-                                f"{self.module.print_readable(print_output=False, include_stride=True)}"  # type: ignore[operator]
-                            ),
-                        )
-
-                    msg += "\nUse tlparse to see full graph. "
-                    msg += "(https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)"
-                    e.args = (msg,) + e.args[1:]
-                    if isinstance(e, KeyError):
-                        raise RuntimeError(*e.args) from e
-                raise
+            self.env[node] = self.run_node(node)
 
             if self.garbage_collect_values:
                 for to_delete in self.user_to_last_uses.get(node, []):
@@ -250,10 +221,11 @@ class Interpreter:
             Any: The result of executing ``n``
         """
         with self._set_current_node(n):
-            args, kwargs = self.fetch_args_kwargs_from_env(n)
-            assert isinstance(args, tuple)
-            assert isinstance(kwargs, dict)
-            return getattr(self, n.op)(n.target, args, kwargs)
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                assert isinstance(args, tuple)
+                assert isinstance(kwargs, dict)
+                return getattr(self, n.op)(n.target, args, kwargs)
+
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)

@@ -1662,6 +1662,7 @@ def _check_with(
 
         message_evaluated = str(message())
 
+    breakpoint()
     raise error_type(message_evaluated)
 
 

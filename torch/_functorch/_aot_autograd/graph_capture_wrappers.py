@@ -301,7 +301,7 @@ def create_joint(
         outs_to_grad = [
             o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent
         ]
-        assert len(outs_to_grad) == len(tangents)
+        assert len(outs_to_grad) == len(tangents), breakpoint()
 
         # Get the inputs that need gradients
         grad_primals: list[torch.Tensor] = []
