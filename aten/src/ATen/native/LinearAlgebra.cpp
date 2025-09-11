@@ -1360,7 +1360,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-
+#if (defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()) || !defined(__aarch64__)
+//Compile the following code only on (AArch64+ACL) or on non-AArch64 so it's actually used.
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1394,6 +1395,7 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_size = get_mkldnn_matmul_min_size();
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
+#endif
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
