@@ -16,7 +16,7 @@ However, if you believe you have found a security vulnerability in PyTorch, we e
 
 Please report security issues using https://github.com/pytorch/pytorch/security/advisories/new
 
-All reports submitted thru the security advisories mechanism would **either be made public or dimissed by the team withing 90 days of the submission**. If advisory has been closed on the grounds that it does not consisute a security policy violation, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it's likely a valid correctness behaviour problem. 
+All reports submitted thru the security advisories mechanism would **either be made public or dismissed by the team within 90 days of the submission**. If advisory has been closed on the grounds that it is not a security issue, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it is still likely a valid issue within the framework.
 
 Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
 
