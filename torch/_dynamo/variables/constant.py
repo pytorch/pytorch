@@ -9,7 +9,6 @@ maintaining type safety through the compilation process.
 """
 
 import operator
-from types import NoneType
 from typing import TYPE_CHECKING
 
 import torch
@@ -46,7 +45,9 @@ class ConstantVariable(VariableTracker):
         """
         source = kwargs.get("source", None)
 
-        if istype(value, (int, bool, NoneType)) and (c := check_cache(value)):
+        if ((value is None) or istype(value, (int, bool))) and (
+            c := check_cache(value)
+        ):
             return c
 
         # Routing for supported collection literals.
