@@ -26,6 +26,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
@@ -2045,7 +2046,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         index: sympy.Expr,
         *,
-        copy_shape=None,
+        copy_shape: Optional[Union[str, tuple[str]]] = None,
         dense_indexing=False,
         override_mask=None,
         block_ptr=False,
@@ -2332,9 +2333,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         expand_str = None
         expand_shape: BlockShapeType = None
         index_str = self.index_to_str(index)
+
+        def _get_expand_str():
+            if copy_shape:
+                if isinstance(copy_shape, str):
+                    return f"{copy_shape}.shape", None
+                else:
+                    return "[" + ", ".join(str(c) for c in copy_shape) + "]", copy_shape
+            else:
+                return self.dense_size_str(), tuple(self.dense_size_list())
+
         if isinstance(index, sympy.Integer):
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            expand_shape = None if copy_shape else tuple(self.dense_size_list())
+            expand_str, expand_shape = _get_expand_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
@@ -2352,12 +2362,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         if need_dense and not have_dense:
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            expand_shape = None if copy_shape else tuple(self.dense_size_list())
+            expand_str, expand_shape = _get_expand_str()
             index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
-            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+            expand_shape_str, expand_shape = _get_expand_str()
+            index_str = f"tl.broadcast_to({index_str}, {expand_shape_str})"
             mask_vars = dense_mask_vars
 
         if expand_shape is None:
@@ -3868,14 +3878,30 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    args.append(str(V.graph.sizevars.size_hint(arg.inner_expr)))
+                    hint = V.graph.sizevars.size_hint(
+                        arg.inner_expr, fallback=config.unbacked_symint_fallback
+                    )
+                    args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
-                    args.append(str(V.graph.sizevars.size_hint(arg)))
+                    hint = V.graph.sizevars.size_hint(
+                        arg, fallback=config.unbacked_symint_fallback
+                    )
+                    args.append(str(hint))
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
 
-    def codegen_kernel_benchmark(self, num_gb):
+    def codegen_kernel_benchmark(self, num_gb: Optional[float]) -> IndentedBuffer:
+        """
+        Generates Python code for benchmarking this Triton kernel.
+        - Creates example inputs (random tensors, constants, sizes).
+        - Runs the kernel on the current GPU/stream.
+        - Prints runtime (ms) and throughput (GB/s) using `num_gb`.
+        Args:
+            num_gb (float): The number of gigabytes to use for throughput calculation.
+        Returns:
+            IndentedBuffer: A buffer containing the generated Python benchmark code.
+        """
         result = IndentedBuffer()
         _argdefs, call_args, signature, _ = self.args.python_argdefs()
 
@@ -3887,14 +3913,34 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
+                    size = V.graph.sizevars.size_hints(
+                        buf.get_size(),
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    stride = V.graph.sizevars.size_hints(
+                        buf.get_stride(),
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
+                    )
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(buf.get_size(), hint_override=self.hint_override)}, {V.graph.sizevars.size_hints(buf.get_stride(), hint_override=self.hint_override)}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
+                    size = V.graph.sizevars.size_hints(
+                        const_tensor.size(),
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                    stride = V.graph.sizevars.size_hints(
+                        const_tensor.stride(),
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
+                    )
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size(), hint_override=self.hint_override)}, {V.graph.sizevars.size_hints(const_tensor.stride(), hint_override=self.hint_override)}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -4319,11 +4365,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = 128
-            while not V.graph.sizevars.statically_known_leq(rnumel, val):
-                if val > 16 * 1024:
-                    raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
-                val *= 2
+            val = bound_sympy(rnumel).upper
+            assert isinstance(val, int) or val.is_constant()
+
+            if val == torch.utils._sympy.numbers.IntInfinity():
+                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+
+            val = next_power_of_2(int(val))
+
+            if val > 16 * 1024:
+                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+
         return val
 
     @staticmethod
