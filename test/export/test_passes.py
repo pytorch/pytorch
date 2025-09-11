@@ -19,6 +19,7 @@ from torch._export.non_strict_utils import (
     _gather_constant_attrs,
 )
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
+from torch._export import config
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
@@ -179,7 +180,8 @@ def _set_grad_enabled_tests():
 
     def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
         with torch.set_grad_enabled(ambient_grad_enabled):
-            return _export(mod, args, pre_dispatch=True).module()
+            with config.patch(use_new_tracer_experimental=True):
+                return _export(mod, args, pre_dispatch=True).module()
 
     return {
         "ctx_manager": (
@@ -835,13 +837,14 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.aten.sin.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    submod_4 = self.submod_2
-    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
-    getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    submod_4 = self.submod_1
+    sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_4, add);  submod_4 = add = None
+    getitem = sum_1[0];  sum_1 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    submod_5 = self.submod_3
+    sub = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add_1);  submod_5 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((add_1, getitem_1), self._out_spec)
     """,
         )
 
