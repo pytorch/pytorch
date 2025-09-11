@@ -131,7 +131,7 @@ static void autogradBasedTransformSendToNext(
   auto args_size = op.schema().arguments().size();
   const auto ret_size = op.schema().returns().size();
   // Step 1
-  TORCH_INTERNAL_ASSERT(stack->size() >= args_size); // prevent front from being negative
+  TORCH_INTERNAL_ASSERT(stack->size() >= args_size); // prevent `front` from being negative
   auto front = static_cast<int64_t>(stack->size()) - args_size;
   for (const auto arg_idx : c10::irange(0, args_size)) {
     stack->push_back((*stack)[front + arg_idx]);
