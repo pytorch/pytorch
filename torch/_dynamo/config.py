@@ -381,6 +381,12 @@ use_recursive_dict_tags_for_guards = True
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
+# Controls whether to construct the partial framelocals to dict for lambda
+# guards. This is a temporary flag to allow quick fallback behavior in case of
+# unexpected issues. Default is True, i.e., we will construct only partial
+# dict, a faster version for guards. Set to False to fallback to old behavior.
+construct_partial_framelocals_dict = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
