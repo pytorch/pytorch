@@ -57,6 +57,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_graph_lowering,
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
@@ -15496,6 +15497,35 @@ if RUN_GPU:
                 )
 
             fn()
+
+        @skip_if_cpp_wrapper("skipping cpp checks")
+        @requires_cuda_and_triton
+        def test_force_fallback_repeat_interleave_config(self):
+            @torch.compile
+            def fn(x, y):
+                out = torch.repeat_interleave(x, y, dim=0, output_size=3)
+                return out
+
+            x = torch.tensor([[1, 2], [3, 4]], device=GPU_TYPE)
+            y = torch.tensor([1, 2], device=GPU_TYPE)
+
+            torch._dynamo.reset()
+            torch._inductor.config._debug_do_not_use_force_fallback_repeat_interleave = False
+            _, (graph_lowering,) = run_and_get_graph_lowering(fn, x, y)
+            count = 0
+            for node in graph_lowering.graph.nodes:
+                if "cumsum" == node.name:
+                    count += 1
+            self.assertEqual(count, 1)
+
+            torch._dynamo.reset()
+            torch._inductor.config._debug_do_not_use_force_fallback_repeat_interleave = True
+            _, (graph_lowering,) = run_and_get_graph_lowering(fn, x, y)
+            count = 0
+            for node in graph_lowering.graph.nodes:
+                if "repeat_interleave" == node.name:
+                    count += 1
+            self.assertEqual(count, 1)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
