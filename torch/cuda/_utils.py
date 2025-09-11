@@ -268,12 +268,11 @@ class _CudaKernel:
                 c_int = ctypes.c_int(arg)
                 # Store the C int for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_int))
-            # TODO: Python floats are actually doubles
             elif isinstance(arg, float):
-                # Convert floats to C float
-                c_float = ctypes.c_float(arg)
-                # Store the C float for reference keeping, not in processed_args
-                c_args.append(ctypes.byref(c_float))
+                # Python floats are doubles - use double by default
+                c_double = ctypes.c_double(arg)
+                # Store the C double for reference keeping, not in processed_args
+                c_args.append(ctypes.byref(c_double))
             else:
                 raise TypeError(f"Unsupported argument type: {type(arg)}")
 
