@@ -13,45 +13,49 @@ from torch.utils._pytree import tree_map
 __all__ = ["DebugMode"]
 
 
-def stringify_shape(shape) -> str:
+def _stringify_shape(shape) -> str:
     return f"[{', '.join([str(x) for x in shape])}]"
 
 
-def stringify_device_mesh(mesh) -> str:
+def _stringify_device_mesh(mesh) -> str:
     return f"DM({', '.join([str(s) for s in mesh.shape])})"
 
 
-def stringify_placement(placement) -> str:
+def _stringify_placement(placement) -> str:
     return f"[{', '.join([str(p) for p in placement])}]"
 
 
-def tensor_debug_string(tensor):
+def _tensor_debug_string(tensor) -> str:
     """Convert tensor to debug string representation."""
     if isinstance(tensor, DTensor):
         # omitted device mesh
-        return f"dt: {dtype_abbrs[tensor.dtype]}{stringify_shape(tensor.shape)}{stringify_placement(tensor.placements)}"
+        return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_placement(tensor.placements)}"
     elif isinstance(tensor, FakeTensor):
-        return f"ft: {dtype_abbrs[tensor.dtype]}{stringify_shape(tensor.shape)}"
+        return f"ft: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}"
     elif isinstance(tensor, torch.Tensor):
-        return f"t: {dtype_abbrs[tensor.dtype]}{stringify_shape(tensor.shape)}"
+        return f"t: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}"
+    else:
+        raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
 
 
-def arg_to_str(arg):
+def _arg_to_str(arg) -> str:
     def to_str(x):
         if isinstance(x, torch.Tensor):
-            return tensor_debug_string(x)
+            return _tensor_debug_string(x)
         elif isinstance(x, DTensorSpec):
-            return stringify_placement(x.placements)
+            return _stringify_placement(x.placements)
         return x
 
     arg = tree_map(to_str, arg)
     return str(arg)
 
 
-def op_to_str(op, *args, **kwargs):
-    args_str = ", ".join(arg_to_str(arg) for arg in args)
+def _op_to_str(op, *args, **kwargs) -> str:
+    args_str = ", ".join(_arg_to_str(arg) for arg in args)
     if kwargs:
-        kwargs_str = ", " + ", ".join(f"{k}={arg_to_str(v)}" for k, v in kwargs.items())
+        kwargs_str = ", " + ", ".join(
+            f"{k}={_arg_to_str(v)}" for k, v in kwargs.items()
+        )
     else:
         kwargs_str = ""
 
@@ -106,7 +110,8 @@ class DebugMode(TorchDispatchMode):
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                if func not in {torch.ops.prim.device.default}:
+                    self.operators.append((func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
                 self.operators.append((func, args, kwargs, self.call_depth + 1))
@@ -149,7 +154,7 @@ class DebugMode(TorchDispatchMode):
     def debug_string(self) -> str:
         result = ""
         result += "\n".join(
-            "  " + "  " * depth + op_to_str(op, *args, **kwargs)
+            "  " + "  " * depth + _op_to_str(op, *args, **kwargs)
             for op, args, kwargs, depth in self.operators
         )
         return result
