@@ -61,7 +61,6 @@ def parallel_apply(
     streams = [torch.accelerator.current_stream(x) for x in devices]
     assert torch.accelerator.is_available(), "No available accelerator found."
     device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
-    device_module = _get_device_module(device_type)
     lock = threading.Lock()
     results = {}
     grad_enabled, autocast_enabled = (
