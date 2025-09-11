@@ -1221,9 +1221,6 @@ coverage_ignore_functions = [
     "reduce_typed_storage_child",
     "storage_from_cache",
     # torch.multiprocessing.spawn
-    # Added docstring for this but I think we need to go through
-    # and add the entire torch.multiprocessing.spawn module to a .rst...
-    "should_use_parallel_start",
     "start_processes",
     # torch.nn.functional
     "adaptive_max_pool1d_with_indices",  # documented as adaptive_max_pool1d
@@ -2517,6 +2514,8 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.hf_storage
     "HuggingFaceStorageReader",
     "HuggingFaceStorageWriter",
+    # torch.distributed.checkpoint.quantized_hf_storage
+    "QuantizedHuggingFaceStorageReader",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -3333,13 +3332,6 @@ def coverage_post_process(app, exception):
     # Only run this test for the coverage build
     if not isinstance(app.builder, CoverageBuilder):
         return
-
-    if not torch.distributed.is_available():
-        raise RuntimeError(
-            "The coverage tool cannot run with a version "
-            "of PyTorch that was built with USE_DISTRIBUTED=0 "
-            "as this module's API changes."
-        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
