@@ -6,7 +6,7 @@ on:
       - ciflow/op-benchmark/*
   workflow_dispatch:
   schedule:
-    # Run at 07:00 UTC every Sunday
+    # Run at 06:00 UTC every Sunday
     - cron: 0 6 * * 0
 
 concurrency:
@@ -26,12 +26,14 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
-        { include: [
-          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.h100, extra_flags: '--use-compile', op_benchmark_tests: 'matmul mm add bmm' },
-          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.h100, extra_flags: '', op_benchmark_tests: 'matmul mm add bmm' }
-          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.a100, extra_flags: '--use-compile', op_benchmark_tests: 'matmul mm add bmm' },
-          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.a100, extra_flags: '', op_benchmark_tests: 'matmul mm add bmm' }
-        ]}
+        {
+          "config": ["operator_microbenchmark"],
+          "shard": [1],
+          "num_shards": [1],
+          "op_benchmark_tests": ["matmul", "mm", "add", "bmm"],
+          "runner": ["linux.aws.h100", "linux.aws.a100"],
+          "extra_flags": ["--use-compile", ""]
+        }
     secrets: inherit
 
   opmicrobenchmark-test:

@@ -1619,13 +1619,11 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
-  test_inductor_set_cpu_affinity
-
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install .
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  tests=${OP_BENCHMARK_TESTS:-"matmul mm add bmm"}
+  tests=${OP_BENCHMARK_TESTS:?OP_BENCHMARK_TESTS must be set}
   for t in $tests; do
     $TASKSET python -m "pt.${t}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark.json" \
