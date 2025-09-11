@@ -293,9 +293,9 @@ def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
         bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
     """
     _lazy_init()
-    device_idx = _get_device_index(device, optional=True)
-    peer_idx = _get_device_index(peer, optional=True)
-    return torch._C._xpu_canDeviceAccessPeer(device_idx, peer_idx)
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
 
 
 class StreamContext:
