@@ -662,7 +662,9 @@ class FxConverter:
             [] if ir_node.src_is_tensor else [ir_node.constant_args[1]]
         )
         args = (x, ir_node.constant_args[0], index, src)
-        kwargs = ir_node.kwargs.copy()
+        kwargs = {}
+        if reduce := ir_node.kwargs.get("reduce"):
+            kwargs["reduce"] = reduce
 
         fx_node = self.gm.graph.call_function(
             ir_node.op_overload,  # type: ignore[arg-type]

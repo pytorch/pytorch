@@ -24,6 +24,7 @@ from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -566,7 +567,33 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
-    def test_scatter_fallback(self):
+    def test_scatter_fallback_scalar_src(self):
+        """
+        Test a special case where ScatterFallback takes a scalar 'src' argument.
+        """
+
+        def foo(input_):
+            dim = 0
+            src = 1.5
+            return torch.ops.aten.scatter(input_, dim, index, src)
+
+        length = 8
+        index = torch.randint(length, (length,), device=self.device)
+        input_ = torch.randn(length, device=self.device)
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                foo,
+                (input_,),
+            )
+
+        # Check for the fallback op.
+        num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
+        self.assertEqual(num_fallback, 1)
+
+    def test_scatter_reduce_fallback(self):
+        """
+        Test the customized wrapper codegen for ScatterFallback ops.
+        """
         fallback_op = torch.ops.aten.scatter_reduce_.two
 
         def foo(out, index, src):
