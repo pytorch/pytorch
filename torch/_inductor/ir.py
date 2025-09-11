@@ -7064,6 +7064,7 @@ class ScatterFallback(ExternKernel):
         if self.src_is_tensor:
             (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
+            assert False #XXX
             (x, index) = (t.codegen_reference() for t in self.inputs)
             src = self.constant_args[1]
         wrapper.generate_scatter_fallback(
