@@ -40,20 +40,23 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
-  ${TORCH_ROOT}/torch/nativert/kernels/TritonKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/triton/CpuTritonKernelManager.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/TritonKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/DelegateExecutor.cpp
 )
 
 if(USE_CUDA)
   list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/triton/CudaTritonKernelManager.cpp)
-endif(MSVC)
-
+endif()
 
 add_executable(test_nativert
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${NATIVERT_TEST_SRCS}
 )
+
+if(MSVC)
+  target_compile_definitions(test_nativert PRIVATE NATIVERT_MSVC_TEST)
+endif()
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_nativert PRIVATE USE_GTEST)

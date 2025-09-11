@@ -681,7 +681,7 @@ class Pipe(torch.nn.Module):
         ``output_loss_value_spec={'loss': True, 'model_out': False}``
         """
 
-        traced = exported_program.module()
+        traced = exported_program.module(check_guards=False)
 
         if split_policy is not None:
             logger.info("Auto-splitting model")
