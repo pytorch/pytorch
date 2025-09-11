@@ -2233,7 +2233,7 @@ class ReduceOpTest(TestCase):
                 if func is torch.ops.c10d.allreduce_.default:
                     tensors, process_group_so, reduce_op_so, *_ = args
                     # This previously segfaulted when run
-                    reduce_op = ReduceOp.unbox(reduce_op_so)
+                    reduce_op = ReduceOp.unbox(reduce_op_so)  # noqa: F841
 
                 raise NotImplementedError
 
