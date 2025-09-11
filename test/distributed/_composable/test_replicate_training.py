@@ -12,14 +12,13 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.replicate_with_fsdp import replicate
 from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, OffloadPolicy
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
     FSDPTestMultiThread,
-    get_devtype,
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
@@ -39,6 +38,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
+
+from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
@@ -304,7 +305,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
-    def test_train_parity_multi_group(self):
+    def test_train_parity_multi_groups(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
@@ -313,7 +314,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False],
-                "device_type": [device_type.type],
+                "test_device_type": [device_type.type],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -338,7 +339,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
                     # CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
-                "device_type": [device_type.type],
+                "test_device_type": [device_type.type],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -352,7 +353,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         self,
         reshard_after_forward: Union[bool, int],
         offload_policy: OffloadPolicy,
-        device_type: str,
+        test_device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
@@ -368,7 +369,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert device_type in ("cuda", "hpu", "xpu", "cpu"), f"{device_type}"
+        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -382,16 +383,21 @@ class TestReplicate1DTrainingCore(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-        replicate_fn = functools.partial(
+        mesh = init_device_mesh(
+            test_device_type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        fully_shard_fn = functools.partial(
             replicate,
+            device_mesh=mesh,
             reshard_after_forward=reshard_after_forward,
             offload_policy=offload_policy,
         )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
-                replicate_fn(module)
-        replicate_fn(model)
+                fully_shard_fn(module)
+        fully_shard_fn(model)
         if unshard_async_op:
             model._set_unshard_async_op(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
