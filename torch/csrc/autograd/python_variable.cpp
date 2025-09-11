@@ -660,10 +660,9 @@ static Tensor make_tensor_for_subclass_helper(
   Storage storage{
       Storage::use_byte_size_t{},
       size_bytes,
+      at::DataPtr{nullptr, options.device()},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
-  // TODO: constructor should probably accept data pointer
-  storage.set_data_ptr_noswap(at::DataPtr{nullptr, options.device()});
 
   auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
   if (extra_dispatch_keys.has_value()) {
