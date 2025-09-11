@@ -210,7 +210,7 @@ class VllmBuildRunner(BaseRunner):
 
     def cp_torch_cleaning_script(self, inputs: VllmBuildParameters):
         script = get_path(inputs.cleaning_script, resolve=True)
-        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.sh")
+        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.py")
         copy(script, vllm_script)
 
     def cp_dockerfile_if_exist(self, inputs: VllmBuildParameters):
