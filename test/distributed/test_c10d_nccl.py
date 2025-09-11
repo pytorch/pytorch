@@ -999,6 +999,27 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_new_group_without_default(self):
+        """Test if new_group works without default world group created"""
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        dist.init(self.world_size, self.rank, store)
+        subgroup_ranks = [0, 1]
+        subgroup = dist.new_group(
+            ranks=subgroup_ranks,
+            backend="nccl",
+        )
+        tensor = torch.tensor([self.rank], device=device)
+        if self.rank in subgroup_ranks:
+            dist.broadcast(tensor, 0, group=subgroup)
+
+        full_group = dist.new_group(backend="nccl")
+        dist.all_reduce(tensor, group=full_group)
+        dist.destroy_process_group(subgroup)
+        dist.destroy_process_group(full_group)
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
     )
