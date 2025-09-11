@@ -115,7 +115,7 @@ def compute_local_shape_and_global_offset(
 
     """
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements
+        global_shape, mesh.shape, mesh.get_coordinate(), placements, device_order
     )
 
 
