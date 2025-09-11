@@ -373,11 +373,12 @@ class BenchmarkRunner:
         curr_test_total_time = 0
         time_trace = []
         peak_memory = 0
-        sample_input = next(iter(test_case.op_bench.inputs.values()))
+        input_values = test_case.op_bench.inputs.values()
         device, device_module = None, None
-        if hasattr(sample_input, "device"):
-            # The device and device module information are crutial for memory metric calculation,
+        if input_values and isinstance(next(iter(input_values)), torch.Tensor):
+            # The device and device module information are crucial for memory metric calculation,
             # In case of ops where inputs are integers (not tensor), memory metrics need not be calculated.
+            sample_input = next(iter(input_values))
             device = sample_input.device
             device_module = torch.get_device_module(device.type)
         # TODO: add support for cpu memory measurement
