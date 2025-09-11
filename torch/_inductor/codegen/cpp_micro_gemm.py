@@ -1054,11 +1054,11 @@ class CppMicroGemmAMX(CppMicroGemm):
             // 1) Load 32 x int8
             __m256i v8  = _mm256_loadu_si256((const __m256i*)(base_addr + idx_q + {{vec_idx}}));
             // 2) Extract two halves
-            auto v8_lo = _mm256_extracti128_si256(v8, 0);
-            auto v8_hi = _mm256_extracti128_si256(v8, 1);
+            __m128i v8_lo = _mm256_extracti128_si256(v8, 0);
+            __m128i v8_hi = _mm256_extracti128_si256(v8, 1);
             // 3) Widen each half to i32
-            auto v32_lo = _mm512_cvtepi8_epi32(v8_lo);
-            auto v32_hi = _mm512_cvtepi8_epi32(v8_hi);
+            __m512i v32_lo = _mm512_cvtepi8_epi32(v8_lo);
+            __m512i v32_hi = _mm512_cvtepi8_epi32(v8_hi);
             // 4) Convert to f32
             __m512 f_lo = _mm512_cvtepi32_ps(v32_lo);
             __m512 f_hi = _mm512_cvtepi32_ps(v32_hi);
