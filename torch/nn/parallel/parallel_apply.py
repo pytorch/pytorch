@@ -64,7 +64,7 @@ def parallel_apply(
     devices = [_get_device_index(x, True) for x in devices]
     streams = [torch.accelerator.current_stream(x) for x in devices]
     assert torch.accelerator.is_available(), "No available accelerator found."
-    device_type = torch.accelerator.current_accelerator().type
+    device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
     device_module = _get_device_module(device_type)
     lock = threading.Lock()
     results = {}
@@ -92,6 +92,8 @@ def parallel_apply(
                     )
                 return
             device = t.get_device()
+        if isinstance(device, torch.device):
+            device = device.index
         if stream is None:
             stream = torch.accelerator.current_stream(device)
         try:
