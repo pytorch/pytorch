@@ -45,9 +45,7 @@ class ConstantVariable(VariableTracker):
         """
         source = kwargs.get("source", None)
 
-        if ((value is None) or istype(value, (int, bool))) and (
-            c := _check_constant_cache(value)
-        ):
+        if c := _check_constant_cache(value):
             return c
 
         # Routing for supported collection literals.
@@ -253,7 +251,8 @@ _constant_cache = {}
 
 def _check_constant_cache(value):
     global _constant_cache
-    return _constant_cache.get(value)
+    if value in (None, NotImplemented) or istype(value, (int, bool, str)):
+        return _constant_cache.get(value)
 
 
 def _fill_constant_cache():
