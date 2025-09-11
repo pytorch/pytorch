@@ -78,10 +78,6 @@ class _Layout(Layout):
         else:
             raise ValueError("size and stride must be either int or tuple")
 
-    @staticmethod
-    def ceil_div(n: int, m: int) -> int:
-        return (n + m - 1) // m
-
     def coalesce(self) -> "_Layout":
         """
         A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
