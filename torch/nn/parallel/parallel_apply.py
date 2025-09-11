@@ -3,11 +3,7 @@ from collections.abc import Sequence
 from typing import Any, cast, Optional, Union
 
 import torch
-from torch._utils import (
-    _get_available_device_type,
-    _get_device_module,
-    ExceptionWrapper,
-)
+from torch._utils import ExceptionWrapper
 from torch.cuda._utils import _get_device_index
 from torch.nn.modules import Module
 
