@@ -282,6 +282,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device_idx = _get_device_index(device, optional=True)
+    peer_idx = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device_idx, peer_idx)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -425,22 +441,6 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
-    r"""Query whether a device can access a peer device's memory.
-
-    Args:
-        device (torch.device or int or str): selected device.
-        peer (torch.device or int or str): peer device to query access to.
-
-    Returns:
-        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
-    """
-    _lazy_init()
-    device_idx = _get_device_index(device, optional=True)
-    peer_idx = _get_device_index(peer, optional=True)
-    return torch._C._xpu_canDeviceAccessPeer(device_idx, peer_idx)
-
-
 def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
     if not _is_compiled():
@@ -536,6 +536,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",

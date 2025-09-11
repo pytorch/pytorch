@@ -12,6 +12,7 @@
     :nosignatures:
 
     StreamContext
+    can_device_access_peer
     current_device
     current_stream
     device

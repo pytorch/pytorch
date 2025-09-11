@@ -588,7 +588,7 @@ if __name__ == "__main__":
             for peer in range(device_count):
                 self.assertEqual(
                     torch.xpu.can_device_access_peer(device, peer),
-                    torch.xpu.can_device_access_peer(peer, device)
+                    torch.xpu.can_device_access_peer(peer, device),
                 )
 
     def test_torch_version_xpu(self):
