@@ -7155,9 +7155,7 @@ PyObject* torch_c_dynamo_guards_init() {
              int64_t level,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
-                self.get_root(),
-                level,
-                std::move(verbose_code_parts)));
+                self.get_root(), level, std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",
