@@ -482,6 +482,7 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckLinkerFlag)
 
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
@@ -509,5 +510,24 @@ function(target_compile_options_if_supported target flag)
   append_cxx_flag_if_supported("${flag}" _compile_options)
   if(NOT "${_compile_options}" STREQUAL "")
     target_compile_options(${target} PRIVATE ${flag})
+  endif()
+endfunction()
+
+# Check if a global link option is supported
+function(add_link_options_if_supported flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    add_link_options("LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
+  endif()
+endfunction()
+
+function(target_link_options_if_supported tgt flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
   endif()
 endfunction()
