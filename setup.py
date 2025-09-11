@@ -326,6 +326,9 @@ from tools.setup_helpers.env import (
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
+_IS_X8664 = platform.machine() == "x86_64"
+
+
 def str2bool(value: str | None) -> bool:
     """Convert environment variables to boolean values."""
     if not value:
@@ -1494,6 +1497,11 @@ def configure_extension_build() -> tuple[
             map(str.strip, pytorch_extra_install_requires.split("|"))
         )
 
+    # for Windows inductor
+    skip_iomp = os.getenv("FORCE_SKIP_INTEL_OPENMP_DEPENDENCY")
+    if IS_WINDOWS and _IS_X8664 and not skip_iomp:
+        extra_install_requires.extend(["intel-openmp==2025.1.1"])
+
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv("CMAKE_OSX_ARCHITECTURES", "")
@@ -1623,7 +1631,6 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
-        'intel-openmp==2025.1.1 ;platform_system == "Windows" and platform_machine == "x86_64"',  # for Windows inductor
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
