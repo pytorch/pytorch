@@ -7,12 +7,11 @@ import logging
 import multiprocessing as mp
 import os
 import tempfile
+import threading
 from bisect import bisect_right
 from collections import defaultdict
-from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor, ProcessPoolExecutor
 from typing import Any, Dict, List, Optional, Union
-
-from tqdm import tqdm
 
 import torch
 from torch._inductor.analysis.device_info import (
@@ -21,6 +20,8 @@ from torch._inductor.analysis.device_info import (
 )
 from torch._inductor.utils import tabulate_2d, zip_dicts
 from torch.utils._ordered_set import OrderedSet
+
+from tqdm import tqdm
 
 from .dag_nodes import TraceDAG
 from .types import _IdxEvt, Device, DeviceMap, KernelStats, Table
@@ -719,98 +720,30 @@ class JsonProfile:
                 node = dag.add_node(name, typ)
             return node
 
-        for k in tqdm(kernels, desc="Processing kernels"):
-            kev = k["event"]
-            kname = kev.get("name", "unknown_kernel")
-            kdur = kev.get("dur", 0.0)
-            ktid = kev.get("tid", 0)
-
-            # 1) Prefer External id mapping to a concrete cpu_op
-            start_chain_names: list[str] = []
-            ext_ok = False
-            if "args" in kev and "External id" in kev["args"]:
-                ext_id = kev["args"]["External id"]
-                lst = extern_map.get(ext_id)
-                if lst:
-                    # Use the cpu_op we mapped; find its compact record via per-thread binary search
-                    cpu_ev = lst[0]
-                    tid = cpu_ev.get("tid", 0)
-                    arr = per_tid_compact.get(tid, [])
-                    if arr:
-                        # binary search nearest exact match by ts
-                        ts = cpu_ev.get("ts", 0)
-                        idx = bisect_right([x.ts for x in arr], ts) - 1
-                        # walk forward to the first with same ts/name if needed
-                        found = None
-                        for j in range(max(idx, 0), min(idx + 4, len(arr))):
-                            if arr[j].ts == ts and arr[j].name == cpu_ev.get(
-                                "name", ""
-                            ):
-                                found = arr[j]
-                                break
-                        if found:
-                            start_chain_names = self._collect_chain_from(
-                                found, per_tid_compact
-                            )
-                            ext_ok = True
-
-            # 2) Else resolve launch site by bisect
-            if not ext_ok:
-                launch = self._find_launch_for_kernel(kev, launches_per_tid)
-                if launch:
-                    start_chain_names = self._collect_chain_from(
-                        launch, per_tid_compact
-                    )
-
-            # If nothing found, skip — we only keep kernel-linked chains
-            if not start_chain_names:
-                continue
-
-            # Count operation instances and add op nodes and edges
-            for nm in start_chain_names:
-                op_instance_counts[nm] += 1
-
-            prev = None
-            for nm in start_chain_names:
-                _get_or_add(nm, "op")
-                if prev is not None:
-                    dag.add_edge(prev, nm)
-                prev = nm
-
-            # Add the kernel node + edge from last op
-            kernel_node = _get_or_add(kname, "kernel")
-            if prev is not None:
-                dag.add_edge(prev, kname)
-            dag.add_kernel_instance(kname, float(kdur), int(ktid))
-
-            # Collect performance statistics for this kernel instance
-            if "device" in kev.get("args", {}):
-                device_id = kev["args"]["device"]
-                if device_id in self._devices:
-                    dev = self._devices[device_id]
-                    if kname in dev.stats:
-                        # For each kernel instance, add its performance stats
-                        # Since the stats are collected from the same kernel events we're processing,
-                        # we can use all stats for this kernel name
-                        stats_list = list(dev.stats[kname])
-                        if stats_list:
-                            # Find the best matching stats by latency
-                            best_stats = min(
-                                stats_list, key=lambda s: abs(s.latency - kdur)
-                            )
-                            latency_diff = abs(best_stats.latency - kdur)
-                            if (
-                                latency_diff < 100.0
-                            ):  # Increase tolerance to 100 microseconds
-                                kernel_node.achieved_flops_list.append(
-                                    best_stats.achieved_flops
-                                )
-                                kernel_node.achieved_bandwidth_list.append(
-                                    best_stats.achieved_bandwidth
-                                )
-                                kernel_node.bound_type_list.append(
-                                    best_stats.bound_type
-                                )
+        # Parallelize kernel processing for better performance
+        num_kernels = len(kernels)
+        if num_kernels > 1000:  # Use parallel processing for large traces
+            self._process_kernels_parallel(
+                kernels,
+                extern_map,
+                per_tid_compact,
+                launches_per_tid,
+                dag,
+                op_instance_counts,
+                _get_or_add,
+            )
+        else:
+            # Use original sequential processing for small traces
+            for k in tqdm(kernels, desc="Processing kernels"):
+                self._process_single_kernel(
+                    k,
+                    extern_map,
+                    per_tid_compact,
+                    launches_per_tid,
+                    dag,
+                    op_instance_counts,
+                    _get_or_add,
+                )
 
         # Store operation instance counts in the DAG nodes
         for op_name, count in tqdm(
@@ -823,6 +756,209 @@ class JsonProfile:
                     node.instance_count = count
 
         return dag
+
+    def _process_single_kernel(
+        self,
+        kernel_data,
+        extern_map,
+        per_tid_compact,
+        launches_per_tid,
+        dag,
+        op_instance_counts,
+        _get_or_add,
+    ) -> None:
+        """Process a single kernel to build the DAG."""
+        kev = kernel_data["event"]
+        kname = kev.get("name", "unknown_kernel")
+        kdur = kev.get("dur", 0.0)
+        ktid = kev.get("tid", 0)
+
+        # 1) Prefer External id mapping to a concrete cpu_op
+        start_chain_names: list[str] = []
+        ext_ok = False
+        if "args" in kev and "External id" in kev["args"]:
+            ext_id = kev["args"]["External id"]
+            lst = extern_map.get(ext_id)
+            if lst:
+                # Use the cpu_op we mapped; find its compact record via per-thread binary search
+                cpu_ev = lst[0]
+                tid = cpu_ev.get("tid", 0)
+                arr = per_tid_compact.get(tid, [])
+                if arr:
+                    # binary search nearest exact match by ts
+                    ts = cpu_ev.get("ts", 0)
+                    idx = bisect_right([x.ts for x in arr], ts) - 1
+                    # walk forward to the first with same ts/name if needed
+                    found = None
+                    for j in range(max(idx, 0), min(idx + 4, len(arr))):
+                        if arr[j].ts == ts and arr[j].name == cpu_ev.get("name", ""):
+                            found = arr[j]
+                            break
+                    if found:
+                        start_chain_names = self._collect_chain_from(
+                            found, per_tid_compact
+                        )
+                        ext_ok = True
+
+        # 2) Else resolve launch site by bisect
+        if not ext_ok:
+            launch = self._find_launch_for_kernel(kev, launches_per_tid)
+            if launch:
+                start_chain_names = self._collect_chain_from(launch, per_tid_compact)
+
+        # If nothing found, skip — we only keep kernel-linked chains
+        if not start_chain_names:
+            return
+
+        # Count operation instances and add op nodes and edges
+        for nm in start_chain_names:
+            op_instance_counts[nm] += 1
+
+        prev = None
+        for nm in start_chain_names:
+            _get_or_add(nm, "op")
+            if prev is not None:
+                dag.add_edge(prev, nm)
+            prev = nm
+
+        # Add the kernel node + edge from last op
+        kernel_node = _get_or_add(kname, "kernel")
+        if prev is not None:
+            dag.add_edge(prev, kname)
+        dag.add_kernel_instance(kname, float(kdur), int(ktid))
+
+        # Collect performance statistics for this kernel instance
+        if "device" in kev.get("args", {}):
+            device_id = kev["args"]["device"]
+            if device_id in self._devices:
+                dev = self._devices[device_id]
+                if kname in dev.stats:
+                    # For each kernel instance, add its performance stats
+                    # Since the stats are collected from the same kernel events we're processing,
+                    # we can use all stats for this kernel name
+                    stats_list = list(dev.stats[kname])
+                    if stats_list:
+                        # Find the best matching stats by latency
+                        best_stats = min(
+                            stats_list, key=lambda s: abs(s.latency - kdur)
+                        )
+                        latency_diff = abs(best_stats.latency - kdur)
+                        if (
+                            latency_diff < 100.0
+                        ):  # Increase tolerance to 100 microseconds
+                            kernel_node.achieved_flops_list.append(
+                                best_stats.achieved_flops
+                            )
+                            kernel_node.achieved_bandwidth_list.append(
+                                best_stats.achieved_bandwidth
+                            )
+                            kernel_node.bound_type_list.append(best_stats.bound_type)
+
+    def _process_kernels_parallel(
+        self,
+        kernels,
+        extern_map,
+        per_tid_compact,
+        launches_per_tid,
+        dag,
+        op_instance_counts,
+        _get_or_add,
+    ) -> None:
+        """Process kernels in parallel to build the DAG."""
+        import threading
+
+        num_kernels = len(kernels)
+        num_workers = min(mp.cpu_count(), max(1, num_kernels // 100))
+        chunk_size = max(1, num_kernels // num_workers)
+
+        print(f"Processing {num_kernels} kernels using {num_workers} workers...")
+
+        # Create thread-local storage for each worker's results
+        worker_results = {}
+        results_lock = threading.Lock()
+
+        def process_kernel_chunk(chunk_id, kernel_chunk):
+            """Process a chunk of kernels in a separate thread."""
+            thread_local_dag = TraceDAG()
+            thread_local_op_counts = defaultdict(int)
+
+            def thread_local_get_or_add(name: str, typ: str):
+                node = thread_local_dag.nodes.get(name)
+                if node is None:
+                    node = thread_local_dag.add_node(name, typ)
+                return node
+
+            # Process each kernel in this chunk
+            for kernel_data in kernel_chunk:
+                self._process_single_kernel(
+                    kernel_data,
+                    extern_map,
+                    per_tid_compact,
+                    launches_per_tid,
+                    thread_local_dag,
+                    thread_local_op_counts,
+                    thread_local_get_or_add,
+                )
+
+            # Store results thread-safely
+            with results_lock:
+                worker_results[chunk_id] = (thread_local_dag, thread_local_op_counts)
+
+        # Split kernels into chunks and process in parallel
+        chunks = []
+        for i in range(0, num_kernels, chunk_size):
+            chunk = kernels[i : i + chunk_size]
+            chunks.append(chunk)
+
+        # Process chunks using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for chunk_id, chunk in enumerate(chunks):
+                future = executor.submit(process_kernel_chunk, chunk_id, chunk)
+                futures.append(future)
+
+            # Wait for all chunks to complete
+            for future in tqdm(
+                as_completed(futures),
+                desc="Processing kernel chunks",
+                total=len(futures),
+            ):
+                future.result()  # This will raise any exceptions
+
+        print("Merging parallel results...")
+
+        # Merge all worker results into the main DAG
+        for chunk_id, (thread_dag, thread_op_counts) in worker_results.items():
+            # Merge nodes
+            for node_name, node in thread_dag.nodes.items():
+                if node_name not in dag.nodes:
+                    dag.add_node(node_name, node.node_type)
+
+                main_node = dag.nodes[node_name]
+
+                # Merge kernel instances if it's a kernel node
+                if node.node_type == "kernel":
+                    for dur, tid in node.kernel_instances:
+                        dag.add_kernel_instance(node_name, dur, tid)
+
+                    # Merge performance stats
+                    main_node.achieved_flops_list.extend(node.achieved_flops_list)
+                    main_node.achieved_bandwidth_list.extend(
+                        node.achieved_bandwidth_list
+                    )
+                    main_node.bound_type_list.extend(node.bound_type_list)
+
+            # Merge edges
+            for parent, child in thread_dag.edges:
+                dag.add_edge(parent, child)
+
+            # Merge operation counts
+            for op_name, count in thread_op_counts.items():
+                op_instance_counts[op_name] += count
+
+        print(
+            f"Parallel processing completed. Merged {len(dag.nodes)} nodes and {len(dag.edges)} edges."
+        )
 
     def _trace_up_from_kernel(
         self, kernel_info: Dict, thread_stacks: Dict
@@ -1088,6 +1224,8 @@ class JsonProfile:
                         shape="note",
                         style="filled",
                         fillcolor="white",
+                        pos="0,1!",
+                        pin="true",
                     )
 
             # Render to specified format
@@ -1126,14 +1264,11 @@ class JsonProfile:
         if not kernel_nodes:
             return {}
 
-        # Always start with time-based gradients as the base
         base_time_gradients = dag.calculate_kernel_time_gradients()
 
         if color_mode == "time":
-            # For "time" mode, just return the base gradients
             return base_time_gradients
 
-        # For other modes, modify the intensity based on the specific metrics
         if color_mode == "diff":
             if baseline_profile is None:
                 print(
@@ -1141,7 +1276,6 @@ class JsonProfile:
                 )
                 return base_time_gradients
 
-            # Build baseline DAG to get kernel durations
             baseline_dag = baseline_profile.build_trace_dag()
             baseline_durations = {}
 
@@ -1161,19 +1295,17 @@ class JsonProfile:
                 baseline_duration = baseline_durations.get(name, 0.0)
 
                 if baseline_duration == 0.0:
-                    # Kernel not present in baseline - use red tinted version
                     kernel_colors[name] = self._tint_color(base_color, "red", 0.8)
                 else:
                     diff_ratio = (
                         current_duration - baseline_duration
                     ) / baseline_duration
-                    # Positive diff (slower) -> red tint, negative diff (faster) -> blue tint
-                    if diff_ratio > 0.1:  # More than 10% slower
+                    if diff_ratio > 0.1:
                         tint_intensity = min(1.0, diff_ratio)
                         kernel_colors[name] = self._tint_color(
                             base_color, "red", tint_intensity
                         )
-                    elif diff_ratio < -0.1:  # More than 10% faster
+                    elif diff_ratio < -0.1:
                         tint_intensity = min(1.0, abs(diff_ratio))
                         kernel_colors[name] = self._tint_color(
                             base_color, "blue", tint_intensity
@@ -1334,15 +1466,15 @@ class JsonProfile:
                 for dur, tid in kernel_node.kernel_instances:
                     filtered_dag.add_kernel_instance(kernel_name, dur, tid)
                 # Copy performance stats
-                filtered_dag.nodes[
-                    kernel_name
-                ].achieved_flops_list = kernel_node.achieved_flops_list[:]
-                filtered_dag.nodes[
-                    kernel_name
-                ].achieved_bandwidth_list = kernel_node.achieved_bandwidth_list[:]
-                filtered_dag.nodes[
-                    kernel_name
-                ].bound_type_list = kernel_node.bound_type_list[:]
+                filtered_dag.nodes[kernel_name].achieved_flops_list = (
+                    kernel_node.achieved_flops_list[:]
+                )
+                filtered_dag.nodes[kernel_name].achieved_bandwidth_list = (
+                    kernel_node.achieved_bandwidth_list[:]
+                )
+                filtered_dag.nodes[kernel_name].bound_type_list = (
+                    kernel_node.bound_type_list[:]
+                )
             return filtered_dag
 
         # Perform reverse BFS from kernels to find nodes within height limit
@@ -1381,21 +1513,21 @@ class JsonProfile:
                 for dur, tid in original_node.kernel_instances:
                     filtered_dag.add_kernel_instance(node_name, dur, tid)
                 # Copy performance stats
-                filtered_dag.nodes[
-                    node_name
-                ].achieved_flops_list = original_node.achieved_flops_list[:]
-                filtered_dag.nodes[
-                    node_name
-                ].achieved_bandwidth_list = original_node.achieved_bandwidth_list[:]
-                filtered_dag.nodes[
-                    node_name
-                ].bound_type_list = original_node.bound_type_list[:]
+                filtered_dag.nodes[node_name].achieved_flops_list = (
+                    original_node.achieved_flops_list[:]
+                )
+                filtered_dag.nodes[node_name].achieved_bandwidth_list = (
+                    original_node.achieved_bandwidth_list[:]
+                )
+                filtered_dag.nodes[node_name].bound_type_list = (
+                    original_node.bound_type_list[:]
+                )
             else:
                 # Copy operation node data
                 if hasattr(original_node, "instance_count"):
-                    filtered_dag.nodes[
-                        node_name
-                    ].instance_count = original_node.instance_count
+                    filtered_dag.nodes[node_name].instance_count = (
+                        original_node.instance_count
+                    )
 
         # Add edges that connect nodes within our filtered set
         for parent, child in dag.edges:

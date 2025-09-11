@@ -64,7 +64,34 @@ class MultiTraceDAGNode:
         self.present_in_traces.add(trace_id)
 
 
-class MultiTraceDAG:
+class BaseDAG:
+    """Base class for DAG implementations with common functionality."""
+
+    def _create_gradient_color(
+        self, base_color: str, percentage: float, max_percentage: float
+    ) -> str:
+        """Create a gradient color from light to dark based on percentage."""
+        base_color = base_color.lstrip("#")
+        r, g, b = tuple(int(base_color[i : i + 2], 16) for i in (0, 2, 4))
+
+        if max_percentage > 0:
+            intensity = percentage / max_percentage
+        else:
+            intensity = 0
+
+        min_intensity = 0.01
+        max_intensity = 1.2
+
+        scaled_intensity = min_intensity + (max_intensity - min_intensity) * intensity
+
+        final_r = int(255 * (1 - scaled_intensity) + r * scaled_intensity)
+        final_g = int(255 * (1 - scaled_intensity) + g * scaled_intensity)
+        final_b = int(255 * (1 - scaled_intensity) + b * scaled_intensity)
+
+        return f"#{final_r:02x}{final_g:02x}{final_b:02x}"
+
+
+class MultiTraceDAG(BaseDAG):
     """Directed Acyclic Graph representing multiple collapsed trace trees."""
 
     def __init__(self):
@@ -122,7 +149,6 @@ class MultiTraceDAG:
                     kernel_times[node_name] = kernel_time
                     total_kernel_time += kernel_time
 
-            # Calculate percentages and create gradient mapping
             gradients = {}
             if total_kernel_time > 0:
                 max_percentage = (
@@ -135,41 +161,12 @@ class MultiTraceDAG:
 
                 for node_name, kernel_time in kernel_times.items():
                     percentage = (kernel_time / total_kernel_time) * 100
-                    # Create gradient from light to dark based on percentage
                     gradient_color = self._create_gradient_color(
                         base_color, percentage, max_percentage
                     )
                     gradients[node_name] = gradient_color
 
             self.trace_kernel_gradients[trace_id] = gradients
-
-    def _create_gradient_color(
-        self, base_color: str, percentage: float, max_percentage: float
-    ) -> str:
-        """Create a gradient color from light to dark based on percentage."""
-        # Convert hex to RGB
-        base_color = base_color.lstrip("#")
-        r, g, b = tuple(int(base_color[i : i + 2], 16) for i in (0, 2, 4))
-
-        # Create gradient: 0% = very light, max% = original color
-        if max_percentage > 0:
-            intensity = percentage / max_percentage
-        else:
-            intensity = 0
-
-        # Ensure minimum visibility by setting a floor
-        min_intensity = 0.01  # Minimum 1% of original color (colorless)
-        max_intensity = 1.2  # 120% of original color (slightly darker)
-
-        # Scale intensity between min and max
-        scaled_intensity = min_intensity + (max_intensity - min_intensity) * intensity
-
-        # Blend with white: higher intensity = more original color, less white
-        final_r = int(255 * (1 - scaled_intensity) + r * scaled_intensity)
-        final_g = int(255 * (1 - scaled_intensity) + g * scaled_intensity)
-        final_b = int(255 * (1 - scaled_intensity) + b * scaled_intensity)
-
-        return f"#{final_r:02x}{final_g:02x}{final_b:02x}"
 
     def calculate_kernel_colors(
         self,
@@ -191,13 +188,10 @@ class MultiTraceDAG:
 
         trace_kernel_colors = {}
 
-        # For time mode, just return the existing gradients
         if color_mode == "time":
             return self.trace_kernel_gradients
 
-        # For other modes, calculate enhanced coloring for each trace
         for trace_id in self.trace_names.keys():
-            # Get base gradients for this trace
             base_gradients = self.trace_kernel_gradients.get(trace_id, {})
             trace_kernel_colors[trace_id] = {}
 
@@ -209,7 +203,6 @@ class MultiTraceDAG:
                     trace_kernel_colors[trace_id] = base_gradients.copy()
                     continue
 
-                # Build baseline DAG to get kernel durations
                 baseline_dag = baseline_profile.build_trace_dag()
                 baseline_durations = {}
 
@@ -218,7 +211,6 @@ class MultiTraceDAG:
                         total_duration = sum(dur for dur, _ in node.kernel_instances)
                         baseline_durations[name] = total_duration
 
-                # Calculate duration differences for kernels in this trace
                 for kernel_name, multi_node in self.nodes.items():
                     if (
                         multi_node.node_type == "kernel"
@@ -233,7 +225,6 @@ class MultiTraceDAG:
                         baseline_duration = baseline_durations.get(kernel_name, 0.0)
 
                         if baseline_duration == 0.0:
-                            # Kernel not present in baseline - use red tinted version
                             trace_kernel_colors[trace_id][kernel_name] = (
                                 self._tint_color(base_color, "red", 0.8)
                             )
@@ -241,22 +232,20 @@ class MultiTraceDAG:
                             diff_ratio = (
                                 current_duration - baseline_duration
                             ) / baseline_duration
-                            if diff_ratio > 0.1:  # More than 10% slower
+                            if diff_ratio > 0.1:
                                 tint_intensity = min(1.0, diff_ratio)
                                 trace_kernel_colors[trace_id][kernel_name] = (
                                     self._tint_color(base_color, "red", tint_intensity)
                                 )
-                            elif diff_ratio < -0.1:  # More than 10% faster
+                            elif diff_ratio < -0.1:
                                 tint_intensity = min(1.0, abs(diff_ratio))
                                 trace_kernel_colors[trace_id][kernel_name] = (
                                     self._tint_color(base_color, "blue", tint_intensity)
                                 )
                             else:
-                                # Similar performance - use base gradient
                                 trace_kernel_colors[trace_id][kernel_name] = base_color
 
             elif color_mode == "mem-utilization":
-                # Modify base gradients based on memory bandwidth utilization
                 for kernel_name, multi_node in self.nodes.items():
                     if (
                         multi_node.node_type == "kernel"
@@ -269,7 +258,6 @@ class MultiTraceDAG:
                             avg_utilization = sum(
                                 kernel_node.achieved_bandwidth_list
                             ) / len(kernel_node.achieved_bandwidth_list)
-                            # Higher utilization -> more green tint
                             utilization_intensity = min(1.0, avg_utilization / 100.0)
                             trace_kernel_colors[trace_id][kernel_name] = (
                                 self._tint_color(
@@ -277,7 +265,6 @@ class MultiTraceDAG:
                                 )
                             )
                         else:
-                            # No utilization data - use base gradient
                             trace_kernel_colors[trace_id][kernel_name] = base_color
 
             elif color_mode == "compute-utilization":
@@ -417,29 +404,24 @@ class MultiTraceDAG:
 
         filtered_dag = MultiTraceDAG()
 
-        # Copy trace metadata
         filtered_dag.trace_colors = self.trace_colors.copy()
         filtered_dag.trace_names = self.trace_names.copy()
 
-        # Find all kernel nodes first across all traces
         kernel_nodes = set()
         for node_name, multi_node in self.nodes.items():
             if multi_node.node_type == "kernel":
                 kernel_nodes.add(node_name)
 
-        # If height is 0, only show kernels
         if height == 0:
             for kernel_name in kernel_nodes:
                 if kernel_name in self.nodes:
                     multi_node = self.nodes[kernel_name]
                     new_multi_node = MultiTraceDAGNode(kernel_name, "kernel")
-                    # Copy all trace instances
                     for trace_id, node in multi_node.trace_instances.items():
                         new_multi_node.add_trace_instance(trace_id, node)
                     filtered_dag.nodes[kernel_name] = new_multi_node
             return filtered_dag
 
-        # Build reverse edge mapping for each trace
         reverse_edges_by_trace = {}
         for trace_id in self.trace_names.keys():
             reverse_edges_by_trace[trace_id] = {}
@@ -478,7 +460,7 @@ class MultiTraceDAG:
                                 nodes_to_include.add(parent)
 
                 if not next_level:
-                    break  # No more levels to explore
+                    break
 
                 current_level = next_level
 
@@ -519,16 +501,15 @@ class MultiTraceDAG:
         return filtered_dag
 
 
-class TraceDAG:
+class TraceDAG(BaseDAG):
     """Directed Acyclic Graph representing the collapsed trace tree."""
 
     def __init__(self):
         self.nodes: Dict[str, TraceDAGNode] = {}
-        self.edges: OrderedSet[Tuple[str, str]] = (
-            OrderedSet()
-        )  # (parent, child) relationships
+        # (parent, child) relationships
+        self.edges: OrderedSet[Tuple[str, str]] = OrderedSet()
 
-    def add_node(self, name: str, node_type: str) -> TraceDAGNode:
+    def add_node(self, name: str, node_type: NodeName) -> TraceDAGNode:
         """Add a node to the DAG if it doesn't exist."""
         if name not in self.nodes:
             self.nodes[name] = TraceDAGNode(name=name, node_type=node_type)
@@ -577,31 +558,3 @@ class TraceDAG:
                 gradients[node_name] = gradient_color
 
         return gradients
-
-    def _create_gradient_color(
-        self, base_color: str, percentage: float, max_percentage: float
-    ) -> str:
-        """Create a gradient color from light to dark based on percentage."""
-        # Convert hex to RGB
-        base_color = base_color.lstrip("#")
-        r, g, b = tuple(int(base_color[i : i + 2], 16) for i in (0, 2, 4))
-
-        # Create gradient: 0% = very light, max% = original color
-        if max_percentage > 0:
-            intensity = percentage / max_percentage
-        else:
-            intensity = 0
-
-        # Ensure minimum visibility by setting a floor
-        min_intensity = 0.01  # Minimum 1% of original color (colorless)
-        max_intensity = 1.2  # 120% of original color (slightly darker)
-
-        # Scale intensity between min and max
-        scaled_intensity = min_intensity + (max_intensity - min_intensity) * intensity
-
-        # Blend with white: higher intensity = more original color, less white
-        final_r = int(255 * (1 - scaled_intensity) + r * scaled_intensity)
-        final_g = int(255 * (1 - scaled_intensity) + g * scaled_intensity)
-        final_b = int(255 * (1 - scaled_intensity) + b * scaled_intensity)
-
-        return f"#{final_r:02x}{final_g:02x}{final_b:02x}"
