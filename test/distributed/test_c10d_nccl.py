@@ -3408,6 +3408,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @runOnRocmArch(MI300_ARCH)
+    @skip_but_pass_in_sandcastle_if(True, "https://github.com/pytorch/pytorch/issues/162429")
     def test_intra_node_comm_all_reduce(self):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater

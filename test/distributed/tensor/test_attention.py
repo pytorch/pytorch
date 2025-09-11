@@ -104,6 +104,10 @@ class RingAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
+    @unittest.skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162743",
+    )
     @with_comms
     def test_ring_attention_sdpa(self) -> None:
         self.run_subtests(
