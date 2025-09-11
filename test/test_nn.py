@@ -5203,7 +5203,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                         "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
                     and _get_torch_rocm_version() < (6, 4):
                 # NCHW bfloat16 path uses native kernels for rocm<=6.3
-                # train failed on rocm<=6.3 due to nativei accuracy issue
+                # train failed on rocm<=6.3 due to native accuracy issue
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
 
