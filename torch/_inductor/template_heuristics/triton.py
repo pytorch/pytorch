@@ -74,7 +74,8 @@ ConvConfig = BaseConfig
 class FlexConfig:
     """
     Base Config class for flex attention
-    - FlexAttn forward, backward and flex decode will use this
+    - FlexAttn forward and backward will use this. For flex decoding,
+      please use FlexDecodingConfig.
 
     NOTE:
     For flex_attn bwd block_m and block_n are reused for block_m1, block_m2, block_n1, block_n2
@@ -356,6 +357,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 64, 64, 6, 2),
             GemmConfig(32, 128, 64, 6, 4),
             GemmConfig(32, 256, 64, 6, 4),
+            GemmConfig(64, 16, 256, 5, 4),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 256, 128, 4, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -368,6 +373,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 5, 8),
             GemmConfig(128, 128, 128, 6, 8),
             GemmConfig(128, 128, 64, 4, 8),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(128, 256, 128, 3, 8),
+            GemmConfig(64, 128, 256, 4, 4),
+            GemmConfig(64, 256, 128, 4, 4),
         ]
 
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
