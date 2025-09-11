@@ -1250,27 +1250,10 @@ class DistributedTest:
                     (global_avg_period, world_size),
                 ]
             )
-
-            # Record the process group count before creating the averager to get baseline
-            pg_count_before = dist.get_pg_count()
-
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
-
-            # Calculate how many new process groups should have been created
-            # new_subgroups(group_size) creates world_size // group_size process groups
-            # For group_size == world_size, it reuses the existing default process group
-            expected_new_groups = 0
-            for period, group_size in period_group_size_dict.items():
-                if group_size != world_size:
-                    expected_new_groups += world_size // group_size
-                # group_size == world_size reuses default group, adds 0 new groups
-
-            # Check that the expected number of new groups were created
-            pg_count_after = dist.get_pg_count()
-            actual_new_groups = pg_count_after - pg_count_before
-            self.assertEqual(actual_new_groups, expected_new_groups)
+            self.assertEqual(dist.get_pg_count(), len(period_group_size_dict))
 
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
