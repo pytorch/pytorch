@@ -150,7 +150,6 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
-        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         try:
             self.sharding_propagator.propagate(op_info)
@@ -171,7 +170,6 @@ class OpDispatcher:
             ) from e
 
         output_sharding = op_info.output_sharding
-        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
