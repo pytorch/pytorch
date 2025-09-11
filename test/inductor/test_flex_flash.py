@@ -25,9 +25,11 @@ def _rel_bias(score, _b, _h, token_q, token_kv):
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
     """ALiBi with learned per-head slopes (tests tensor loading)."""
     slopes = torch.exp2(-torch.linspace(1, 8, num_heads, device="cuda", dtype=dtype))
+
     def alibi_score_mod(score, b, h, q_idx, kv_idx):
         bias = (kv_idx - q_idx) * slopes[h]
         return score + bias
+
     return alibi_score_mod
 
 
@@ -35,35 +37,43 @@ def create_pos_bias_table(seq_len=512, dtype=torch.float16):
     """Relative position bias table (tests computed indexing)."""
     max_len = seq_len
     table = torch.randn(2 * max_len - 1, device="cuda", dtype=dtype) * 0.1
+
     def pos_bias_mod(score, b, h, q_idx, kv_idx):
         rel_pos = kv_idx - q_idx + max_len - 1
         bias = table[rel_pos]
         return score + bias
+
     return pos_bias_mod
 
 
 def create_head_scale(num_heads=4, dtype=torch.float16):
     """Per-head scaling factors (tests multiplication with tensor loading)."""
     scales = torch.rand(num_heads, device="cuda", dtype=dtype) + 0.5
+
     def head_scale_mod(score, b, h, q_idx, kv_idx):
         return score * scales[h]
+
     return head_scale_mod
 
 
 def create_batch_bias(batch_size=2, dtype=torch.float16):
     """Per-batch bias (tests batch indexing)."""
     bias = torch.randn(batch_size, device="cuda", dtype=dtype) * 0.1
+
     def batch_bias_mod(score, b, h, q_idx, kv_idx):
         return score + bias[b]
+
     return batch_bias_mod
 
 
 def create_batch_head_bias(batch_size=2, num_heads=4, dtype=torch.float16):
     """Per-batch-head bias matrix (tests 2D indexing with batch + head)."""
     bias_matrix = torch.randn(batch_size, num_heads, device="cuda", dtype=dtype) * 0.5
+
     def batch_head_mod(score, b, h, q_idx, kv_idx):
         bias = bias_matrix[b, h]
         return score + bias
+
     return batch_head_mod
 
 
@@ -71,10 +81,12 @@ def create_dual_buffer_bias(num_heads=4, seq_len=512, dtype=torch.float16):
     """Dual buffer loading (tests loading from 2 separate tensors)."""
     head_bias = torch.randn(num_heads, device="cuda", dtype=dtype) * 0.2
     pos_scale = torch.arange(seq_len, device="cuda", dtype=dtype)
+
     def dual_buffer_mod(score, b, h, q_idx, kv_idx):
         head_component = head_bias[h]
         pos_component = pos_scale[q_idx] * 0.01
         return score + head_component + pos_component
+
     return dual_buffer_mod
 
 
