@@ -808,8 +808,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    making `PREMUL_SUM` callable, i.e., allowing for
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
-  py::class_<::c10d::ReduceOp> reduce_op(
-      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
+  py::class_<::c10d::ReduceOp, IntrusivePtrNoGilDestructor<::c10d::ReduceOp>>
+      reduce_op(
+          module,
+          "ReduceOp",
+          py::metaclass((PyObject*)GetReduceOpMetaclass()),
+          R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -904,7 +908,13 @@ This class does not support ``__members__`` property.)");
             } else {
               return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
             }
-          }));
+          }))
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
