@@ -43,11 +43,6 @@ on:
         required: false
         type: boolean
         default: false
-      freezing:
-        description: Run freezing?
-        required: false
-        type: boolean
-        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -107,7 +102,7 @@ jobs:
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -121,9 +116,10 @@ jobs:
     name: inductor-test
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-build
+    if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
