@@ -380,6 +380,62 @@ class TestCppExtensionJIT(common.TestCase):
             len(empty_flags), 0, "Empty list should generate default flags"
         )
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_warning_behavior(self):
+        """Test that TORCH_CUDA_ARCH_LIST warning behaves correctly (issue #161629)"""
+        import logging
+        import io
+        
+        # Save original env var
+        old_envvar = os.environ.get("TORCH_CUDA_ARCH_LIST", None)
+        
+        try:
+            # Remove TORCH_CUDA_ARCH_LIST to trigger the warning path
+            os.environ.pop("TORCH_CUDA_ARCH_LIST", None)
+            
+            # Test 1: Warning should not appear at INFO level (changed to DEBUG)
+            with self.assertLogs(level=logging.INFO) as cm:
+                # Add a dummy log to ensure assertLogs doesn't fail
+                logging.getLogger("torch.utils.cpp_extension").info("Test message")
+                _get_cuda_arch_flags()
+                
+            # The TORCH_CUDA_ARCH_LIST message should NOT be in INFO logs
+            cuda_arch_messages = [msg for msg in cm.output if "TORCH_CUDA_ARCH_LIST" in msg]
+            self.assertEqual(len(cuda_arch_messages), 0, 
+                           "TORCH_CUDA_ARCH_LIST message should not appear at INFO level")
+            
+            # Test 2: Message should appear at DEBUG level
+            with self.assertLogs("torch.utils.cpp_extension", level=logging.DEBUG) as cm:
+                _get_cuda_arch_flags()
+                
+            # The message should be present at DEBUG level
+            cuda_arch_messages = [msg for msg in cm.output if "TORCH_CUDA_ARCH_LIST" in msg]
+            self.assertGreater(len(cuda_arch_messages), 0,
+                             "TORCH_CUDA_ARCH_LIST message should appear at DEBUG level")
+            
+            # Test 3: Verify it's a debug message, not warning
+            for msg in cuda_arch_messages:
+                self.assertIn("DEBUG", msg, "Message should be at DEBUG level, not WARNING")
+                self.assertNotIn("WARNING", msg, "Message should not be at WARNING level")
+            
+            # Test 4: When TORCH_CUDA_ARCH_LIST is set, no message should appear
+            os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
+            with self.assertLogs("torch.utils.cpp_extension", level=logging.DEBUG) as cm:
+                # Add a dummy log to ensure assertLogs doesn't fail
+                logging.getLogger("torch.utils.cpp_extension").debug("Test message")
+                _get_cuda_arch_flags()
+                
+            cuda_arch_messages = [msg for msg in cm.output if "TORCH_CUDA_ARCH_LIST is not set" in msg]
+            self.assertEqual(len(cuda_arch_messages), 0,
+                           "No message should appear when TORCH_CUDA_ARCH_LIST is set")
+                
+        finally:
+            # Restore original env var
+            if old_envvar is None:
+                os.environ.pop("TORCH_CUDA_ARCH_LIST", None)
+            else:
+                os.environ["TORCH_CUDA_ARCH_LIST"] = old_envvar
+
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):

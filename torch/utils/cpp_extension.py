@@ -2419,9 +2419,15 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If not given or set as native, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list or _arch_list == "native":
         if not _arch_list:
-            logger.warning(
-                "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-                "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
+            # Only log on rank 0 in distributed settings to avoid spam
+            should_log = True
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                should_log = torch.distributed.get_rank() == 0
+            
+            if should_log:
+                logger.debug(
+                    "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
+                    "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
