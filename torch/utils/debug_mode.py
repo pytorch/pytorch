@@ -2,14 +2,16 @@
 import contextlib
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import _get_current_dispatch_mode, TorchDispatchMode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._pytree import tree_map
 
+
 __all__ = ["DebugMode"]
+
 
 def stringify_shape(shape) -> str:
     return f"[{', '.join([str(x) for x in shape])}]"
@@ -64,7 +66,13 @@ def op_to_str(op, *args, **kwargs):
 
 
 class DebugMode(TorchDispatchMode):
-    def __init__(self, *, record_torchfunction=True, record_faketensor=False, record_realtensor=True):
+    def __init__(
+        self,
+        *,
+        record_torchfunction=True,
+        record_faketensor=False,
+        record_realtensor=True,
+    ):
         super().__init__()
 
         self.record_torchfunction = record_torchfunction
