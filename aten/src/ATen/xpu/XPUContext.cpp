@@ -76,4 +76,23 @@ int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   return device_global_idxs[device];
 }
 
+// Check if a device can access the memory of a peer device directly.
+bool canDeviceAccessPeer(DeviceIndex device, DeviceIndex peer) {
+  if (device == -1) {
+    device = c10::xpu::current_device();
+  }
+  if (peer == -1) {
+    peer = c10::xpu::current_device();
+  }
+  check_device_index(device);
+  check_device_index(peer);
+  // A device can always access itself
+  if (device == peer) {
+    return true;
+  }
+  return c10::xpu::get_raw_device(device).ext_oneapi_can_access_peer(
+      c10::xpu::get_raw_device(peer),
+      sycl::ext::oneapi::peer_access::access_supported);
+}
+
 } // namespace at::xpu
