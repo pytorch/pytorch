@@ -320,9 +320,7 @@ class _CudaKernel:
             self._max_shared_mem_bytes = shared_mem_bytes
             return
 
-        import torch
-
-        libcuda = torch.cuda._utils._get_cuda_library()
+        libcuda = _get_cuda_library()
 
         # Get device properties to validate against limits
         device_props = torch.cuda.get_device_properties()
