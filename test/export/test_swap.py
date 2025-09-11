@@ -9,6 +9,7 @@ from parameterized import parameterized_class
 import torch
 import torch._dynamo as torchdynamo
 from torch import Tensor
+from torch._export import config
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch.export import export
 from torch.export._swap import _swap_modules
@@ -378,14 +379,14 @@ def forward(self, x, y):
                 return x + torch.matmul(inputs.a, inputs.b)
 
         for use_new_tracer in [True, False]:
-            ep = torch.export._trace._export(
-                Foo(),
-                (torch.randn(2, 2),),
-                {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
-                strict=self.strict,
-                pre_dispatch=True,
-                _use_new_tracer_experimental=use_new_tracer,
-            )
+            with config.patch(use_new_tracer_experimental=use_new_tracer):
+                ep = torch.export._trace._export(
+                    Foo(),
+                    (torch.randn(2, 2),),
+                    {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
+                    strict=self.strict,
+                    pre_dispatch=True,
+                )
         swapped = _swap_modules(ep, {})
         inp_args = (torch.randn(2, 2),)
         inp_kwargs = {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))}
