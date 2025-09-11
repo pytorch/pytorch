@@ -371,13 +371,9 @@ def cudagraphify_impl(
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
     get_ints: Any = operator.itemgetter(*int_key) if int_key else lambda _: None
 
-    has_warn = False
-
     del inputs
 
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
-        nonlocal has_warn
-
         int_key = get_ints(inputs)
 
         if not is_cudagraph_capture_sizes(int_key):
@@ -392,8 +388,7 @@ def cudagraphify_impl(
         else:
             log.info("recording cudagraph tree for symint key %s", int_key)
 
-        if not has_warn:
-            has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
+        maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
 
         # first get indices we need to check to align, then update our static inputs,
         # and finally copy
