@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -1862,7 +1861,6 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(grads, expected_grads)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2007,7 +2005,6 @@ def forward(self, pred_1, x_1):
     # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -3747,7 +3744,17 @@ class AssociativeScanTests(TestCase):
         if autograd_param is not None and any(
             par.requires_grad for par in autograd_param
         ):
-            self._check_autograd(result, result_exp, autograd_param)
+            result_flat = pytree.tree_leaves(result)
+            result_exp_flat = pytree.tree_leaves(result_exp)
+            exp_grad_mask = [
+                True if r.requires_grad else False for r in result_exp_flat
+            ]
+
+            self._check_autograd(
+                [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
+                autograd_param,
+            )
 
         # Return the result of the functions under test for further investigations
         return result
@@ -3775,7 +3782,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3859,7 +3865,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -3921,7 +3926,6 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3940,7 +3944,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4044,7 +4047,6 @@ class AssociativeScanTests(TestCase):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4230,7 +4232,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4279,7 +4280,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4330,7 +4330,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4526,7 +4525,6 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["device"] == torch.device("cpu")
             or params["compile_mode"] == "compile_dynamic_shape"
-            or torch.version.hip
         ),
     )
     def test_associative_scan_cond_in_combine_fn(
@@ -4653,7 +4651,6 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4672,7 +4669,6 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or torch.version.hip
             )
         ),
     )
@@ -4702,7 +4698,6 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else elements,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -5079,6 +5074,115 @@ class GraphModule(torch.nn.Module):
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
             autograd_param=None if not autograd else (*pytree.tree_leaves(inp),),
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
+        ),
+    )
+    def test_associative_scan_partial_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        import random
+
+        n_params = 6
+        autograds = []
+        autograds.append([True, True, True, True, True, True])
+        autograds.append([False, False, False, False, False, False])
+        autograds.append([False, True, False, False, False, False])
+        for _ in range(5):
+            autograds.append([bool(random.randint(0, 1)) for _ in range(n_params)])
+
+        def mul2(x, y):
+            return (*[xv * yv for xv, yv in zip(x, y)],)
+
+        for a_grads in autograds:
+            inp = tuple(
+                [
+                    torch.randn(10, 3, 2, device=device, requires_grad=a_grads[n])
+                    for n in range(n_params)
+                ]
+            )
+
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": mul2,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+                autograd_param=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
+        ),
+    )
+    def test_associative_scan_partial_grad_no_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        def mul_single_nograd(x, y):
+            xy1 = x[0] * y[0]
+            with torch.no_grad():
+                xy2 = x[1] * y[1]
+            return xy1, xy2
+
+        inp = tuple(
+            [torch.randn(10, 3, 2, device=device, requires_grad=True) for n in range(2)]
+        )
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": mul_single_nograd,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+            autograd_param=inp[0:1],
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
