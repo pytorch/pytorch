@@ -398,7 +398,7 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def(
       "_xpu_canDeviceAccessPeer",
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
-        torch::utils::device_lazy_init(at::kCUDA);
+        torch::utils::device_lazy_init(at::kXPU);
         return c10::xpu::canDeviceAccessPeer(device, peer);
       });
 }
