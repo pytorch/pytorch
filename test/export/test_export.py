@@ -4755,6 +4755,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
 
+    def test_issue_161902(self):
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        m = Add()
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        dx = Dim("dx", min=1, max=2)
+        conflicting = {"x": (2 * dx, Dim.STATIC), "y": (dx + 1, Dim.STATIC)}
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Constraints violated.*"
+            r"\n.*You marked 2\*dx as dynamic but your code specialized it to be a constant \(2\).*"
+            r"\n.*You marked dx \+ 1 as dynamic but your code specialized it to be a constant \(2\).*",
+        ):
+            export(m, (x, y), dynamic_shapes=conflicting)
+
     def test_range_constraints_with_replacement(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
