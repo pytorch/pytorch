@@ -24,7 +24,7 @@ These schema definitions enable the DTensor system to:
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Optional, Union
 from typing_extensions import deprecated
@@ -334,6 +334,8 @@ class OpSchema:
     schema_info: Optional[RuntimeSchemaInfo] = None
 
     _comparison_key: Optional[tuple[object, ...]] = None
+
+    has_symints: bool = field(init=False)
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:

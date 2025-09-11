@@ -207,6 +207,25 @@ from user code:
                     },
                 ).aot_compile((example_inputs, {}))
 
+    def test_aot_compile_basic_fn_inductor(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
