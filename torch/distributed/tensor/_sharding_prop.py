@@ -277,11 +277,16 @@ class ShardingPropagator:
                                 "does not have an associated TensorMeta"
                             )
 
-                    new_specs.append(spec.shallow_copy_with_tensor_meta(output_tensor_meta_i))
+                    new_specs.append(
+                        spec.shallow_copy_with_tensor_meta(output_tensor_meta_i)
+                    )
                 else:
                     new_specs.append(spec)
 
-                return tuple(new_specs)
+            return tuple(new_specs)
+        else:
+            # I think it should always be None here
+            return output_specs
 
     def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
         """
