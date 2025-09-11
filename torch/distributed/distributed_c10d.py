@@ -2262,9 +2262,12 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     else:
         pg = group
 
-    assert pg is not None
-    if _world.pg_map.get(pg, None) is None:
-        raise ValueError("Invalid process group specified")
+    # If pg is still None, then default group has not been created, we will skip
+    # destruction of default group below.
+    # Otherwise, some checking:
+    if pg is not None:
+        if _world.pg_map.get(pg, None) is None:
+            raise ValueError("Invalid process group specified")
 
     # When users register Python onCompletion hooks, those hooks will run on a
     # different thread than the main thread. Today, the ProcessGroup dtor does
@@ -2352,13 +2355,16 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
 
     pg = group or GroupMember.WORLD
 
-    assert pg is not None
-    if _world.pg_map.get(pg, None) is None:
-        raise ValueError("Invalid process group specified or has been destroyed.")
+    # If pg is still None, then default group has not been created, we will skip
+    # destruction of default group below.
+    # Otherwise, some checking:
+    if pg is not None:
+        if _world.pg_map.get(pg, None) is None:
+            raise ValueError("Invalid process group specified or has been destroyed.")
 
     try:
         backend = pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
+    except Exception:
         backend = None
 
     if group is None or group == GroupMember.WORLD:
