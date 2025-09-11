@@ -37,7 +37,7 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 
 from itertools import chain
 from typing import Optional, Union
-from typing_extensions import TypeAlias, TypeGuard
+from typing_extensions import TypeAlias, TypeIs
 
 from .int_tuple import (
     crd2idx,
@@ -65,7 +65,7 @@ class LayoutBase:
     pass
 
 
-def is_layout(x: object) -> TypeGuard["Layout"]:
+def is_layout(x: object) -> TypeIs["Layout"]:
     return isinstance(x, LayoutBase)
 
 
@@ -101,9 +101,9 @@ class Layout(LayoutBase):
         """
         if has_none(args):
             if len(args) == 1:
-                return Layout(slice_(args[0], self.shape), slice_(args[0], self.stride))  # type: ignore[arg-type]
+                return Layout(slice_(args[0], self.shape), slice_(args[0], self.stride))
             else:
-                return Layout(slice_(args, self.shape), slice_(args, self.stride))  # type: ignore[arg-type]
+                return Layout(slice_(args, self.shape), slice_(args, self.stride))
         else:
             if len(args) == 1:
                 return crd2idx(args[0], self.shape, self.stride)  # type: ignore[arg-type]
@@ -138,7 +138,7 @@ class Layout(LayoutBase):
 # Make Layout from a list of layouts (each layout it's own mode in the result)
 def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
-        layouts = layouts[0]  # type: ignore[assignment]
+        layouts = layouts[0]
 
     shape, stride = zip(*((a.shape, a.stride) for a in layouts))  # type: ignore[union-attr]
     return Layout(shape, stride)
@@ -148,7 +148,7 @@ def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
 def size(layout: LayoutOrIntTuple) -> int:
     if is_layout(layout):
         return layout.size()
-    return product(layout)  # type: ignore[arg-type]
+    return product(layout)
 
 
 # Size of the codomain
@@ -161,8 +161,8 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
-            chain(  # type: ignore[arg-type]
-                (coalesce(layout[i], profile[i]) for i in range(0, len(profile))),
+            chain(
+                (coalesce(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -198,8 +198,8 @@ def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
-            chain(  # type: ignore[arg-type]
-                (filter(layout[i], profile[i]) for i in range(0, len(profile))),
+            chain(
+                (filter(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -228,16 +228,16 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(  # type: ignore[arg-type]
-                (composition(layoutA[i], layoutB[i]) for i in range(0, len(layoutB))),
+            chain(
+                (composition(layoutA[i], layoutB[i]) for i in range(0, len(layoutB))),  # type: ignore[arg-type]
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
-    elif is_tuple(layoutB.shape) and len(layoutB.shape) > 1:  # type: ignore[union-attr]
-        return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)  # type: ignore[arg-type,union-attr]
+    elif is_tuple(layoutB.shape) and len(layoutB.shape) > 1:
+        return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)  # type: ignore[arg-type, attr-defined]
 
-    if layoutB.stride == 0:  # type: ignore[union-attr]
-        return Layout(layoutB.shape, 0)  # type: ignore[union-attr]
+    if layoutB.stride == 0:
+        return Layout(layoutB.shape, 0)
     else:
         result_shape = []
         result_stride = []
@@ -249,8 +249,14 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         flat_A_shapes = flatten(flat_A.shape)
         flat_A_strides = flatten(flat_A.stride)
 
-        # Build lists in reverse order (append to end), then reverse at the end for efficiency
-        # Iterate from last element down to second element (index len-1 down to 1)
+        # when left layout is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
+        # for integral s and d means that we want:
+        # (1) “remove” the first d elements from left, starting from rightmost. (This will increase the stride.)
+        # (2) “keep” the first s of those strided elements. (This does not affect the stride.)
+        # For example, if self = (6,2):(2,1), layout = (3:2)
+        # Step 1: remove the first 2 elements from self with stride increase, i.e., (6,2):(2,1) -> (6,1):(2,2)
+        # Step 2: keep the first 3 of those strided elements, i.e., (6,1):(2,2) -> (3,1):(2,2)
+        # Because we are going lexicographically, we go through left layout from right to left.
         for i in range(len(flat_A_shapes) - 1, 0, -1):
             curr_shape = flat_A_shapes[i]
             curr_stride = flat_A_strides[i]
@@ -267,12 +273,14 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
                 -rest_stride // curr_shape  # type: ignore[operator]
             )  # Python exclusive impl: "//" is always floor div so == ceil_div(abs(rest_stride), curr_shape) * signum(rest_stride)
 
-        # Handle the first element (index 0) separately
+        # When left has single-size sublayout or reach the last sublayout, aka, left = a:b, layout = s:d,
+        # the result is rather trivial: left o layout = a:b o s:d = s:(b*d).
+        # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
         if rest_shape != 1 or len(result_shape) == 0:
             result_shape.append(rest_shape)  # Append to end, will reverse later
             result_stride.append(rest_stride * flat_A_strides[0])
 
-        # Reverse the lists to get lexicographic order
+        # Reverse the lists because we build lists in reverse order (append to end), this way it is more efficient.
         result_shape.reverse()
         result_stride.reverse()
 
@@ -362,9 +370,9 @@ def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(  # type: ignore[arg-type]
+            chain(
                 (
-                    logical_divide(layoutA[i], layoutB[i])
+                    logical_divide(layoutA[i], layoutB[i])  # type: ignore[arg-type]
                     for i in range(0, len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
@@ -373,7 +381,7 @@ def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
 
     return composition(
         layoutA,
-        make_layout(layoutB, complement(layoutB, size(layoutA))),  # type: ignore[arg-type]
+        make_layout(layoutB, complement(layoutB, size(layoutA))),
     )
 
 
@@ -387,9 +395,9 @@ def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
-            chain(  # type: ignore[arg-type]
+            chain(
                 (
-                    logical_product(layoutA[i], layoutB[i])
+                    logical_product(layoutA[i], layoutB[i])  # type: ignore[arg-type]
                     for i in range(0, len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
@@ -398,7 +406,7 @@ def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
 
     return make_layout(
         layoutA,
-        composition(complement(layoutA, size(layoutA) * cosize(layoutB)), layoutB),  # type: ignore[arg-type]
+        composition(complement(layoutA, size(layoutA) * cosize(layoutB)), layoutB),
     )
 
 
@@ -413,8 +421,9 @@ def hier_unzip(
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         # A layout with shape ((A,a),(B,b),(C,c))
-        split = make_layout(  # type: ignore[arg-type]
-            hier_unzip(splitter, layoutA[i], layoutB[i]) for i in range(0, len(layoutB))
+        split = make_layout(
+            hier_unzip(splitter, layoutA[i], layoutB[i])  # type: ignore[arg-type]
+            for i in range(0, len(layoutB))
         )
         # Gather to shape ((A,B,C,...),(a,b,c,...,y,z))
         return make_layout(

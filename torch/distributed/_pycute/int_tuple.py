@@ -37,7 +37,7 @@ Functions for manipulating IntTuples
 from functools import reduce
 from itertools import chain
 from typing import Optional, Union
-from typing_extensions import TypeAlias, TypeGuard
+from typing_extensions import TypeAlias, TypeIs
 
 from .typing import Integer
 
@@ -46,11 +46,11 @@ from .typing import Integer
 IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
 
 
-def is_int(x: object) -> TypeGuard[int]:
+def is_int(x: object) -> TypeIs[int]:
     return isinstance(x, Integer)
 
 
-def is_tuple(x: object) -> TypeGuard[tuple]:
+def is_tuple(x: object) -> TypeIs[tuple]:
     return isinstance(x, tuple)
 
 
@@ -61,7 +61,7 @@ def flatten(t: IntTuple) -> tuple[int, ...]:
         else:
             return tuple(i for a in t for i in flatten(a))
     else:
-        return (t,)  # type: ignore[return-value]  # t is int, converted to tuple[int]
+        return (t,)
 
 
 def signum(a: int) -> int:
@@ -72,7 +72,7 @@ def product(a: IntTuple) -> int:
     if is_tuple(a):
         return reduce(lambda val, elem: val * product(elem), a, 1)
     else:
-        return a  # type: ignore[return-value]  # a is int after is_tuple check
+        return a
 
 
 def inner_product(a: IntTuple, b: IntTuple) -> int:
@@ -81,14 +81,14 @@ def inner_product(a: IntTuple, b: IntTuple) -> int:
         return sum(inner_product(x, y) for x, y in zip(a, b))  # type: ignore[arg-type,misc]
     else:  # "int" "int"
         assert not is_tuple(b)
-        return a * b  # type: ignore[operator,return-value]  # both are ints after type checks
+        return a * b
 
 
 def tuple_max(a: IntTuple) -> int:
     if is_tuple(a):
         return max(tuple_max(x) for x in a)
     else:
-        return a  # type: ignore[return-value]  # a is int after is_tuple check
+        return a
 
 
 def elem_scale(a: IntTuple, b: IntTuple) -> IntTuple:
@@ -102,7 +102,7 @@ def elem_scale(a: IntTuple, b: IntTuple) -> IntTuple:
         if is_tuple(b):  # "int" tuple
             return elem_scale(a, product(b))
         else:  # "int" "int"
-            return a * b  # type: ignore[operator,return-value]  # a and b are ints after type checks
+            return a * b
 
 
 # Inclusive prefix ceil div with output congruent to input a
@@ -116,14 +116,14 @@ def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
             r = []
             for v in a:
                 r.append(shape_div(v, b))
-                b = shape_div(b, product(v))  # type: ignore[assignment]  # b is updated within loop
+                b = shape_div(b, product(v))
             return tuple(r)
     else:
         if is_tuple(b):  # "int" tuple
             return shape_div(a, product(b))
         else:  # "int" "int"
-            assert a % b == 0 or b % a == 0  # type: ignore[operator]  # both are ints after type checks
-            return (a + b - 1) // b  # type: ignore[operator,return-value]  # result is int, operators valid on ints
+            assert a % b == 0 or b % a == 0
+            return (a + b - 1) // b
 
 
 # Exclusive prefix product with output congruent to input a (lexicographic)
@@ -218,13 +218,13 @@ def crd2crd(
         else:  # tuple "int"
             # Ambiguous unless we have src_shape
             assert src_shape is not None
-            return crd2idx(crd, src_shape)  # type: ignore[return-value]
+            return crd2idx(crd, src_shape)
     else:
         if is_tuple(dst_shape):  # "int" tuple
             return idx2crd(crd, dst_shape)
         else:  # "int" "int"
-            assert crd < dst_shape  # type: ignore[operator]  # both are ints after type checks
-            return crd  # type: ignore[return-value]  # crd is int after type check
+            assert crd < dst_shape
+            return crd
 
 
 # Filter trg according to crd: keep only elements of trg that are paired with None
