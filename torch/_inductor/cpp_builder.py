@@ -6,6 +6,7 @@ import ctypes
 import errno
 import functools
 import json
+import locale
 import logging
 import os
 import platform
@@ -67,7 +68,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -572,7 +573,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
             cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
     except subprocess.CalledProcessError as e:
-        output = e.stdout.decode("utf-8")
+        output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
