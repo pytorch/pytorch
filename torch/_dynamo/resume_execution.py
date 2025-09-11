@@ -311,6 +311,7 @@ class ContinueExecutionCache:
         argnames: tuple[str, ...],
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
+        handle_inactive_ctx: bool,
         stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
         argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
         null_idxes: tuple[int, ...],
@@ -334,6 +335,7 @@ class ContinueExecutionCache:
                 argnames,
                 argnames_null,
                 setup_fns,
+                handle_inactive_ctx,
                 stack_ctx_vars,
                 argnames_ctx_vars,
                 null_idxes,
@@ -433,7 +435,7 @@ class ContinueExecutionCache:
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
-                if i in stack_ctx_vars_d:
+                if handle_inactive_ctx and i in stack_ctx_vars_d:
                     # NOTE: we assume that current stack var is a context manager CLASS!
                     # Load args for context variable and construct it
                     prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[i]))
@@ -449,10 +451,11 @@ class ContinueExecutionCache:
 
             # NOTE: we assume that local var is a context manager CLASS!
             # initialize inactive context vars in argnames
-            for name, vals in argnames_ctx_vars:
-                prefix.append(create_instruction("LOAD_FAST", argval=name))
-                prefix.extend(_load_tuple_and_call(vals))
-                prefix.append(create_instruction("STORE_FAST", argval=name))
+            if handle_inactive_ctx:
+                for name, vals in argnames_ctx_vars:
+                    prefix.append(create_instruction("LOAD_FAST", argval=name))
+                    prefix.extend(_load_tuple_and_call(vals))
+                    prefix.append(create_instruction("STORE_FAST", argval=name))
 
             # 3.12+: store NULL into variables that were NULL
             if argnames_null:
