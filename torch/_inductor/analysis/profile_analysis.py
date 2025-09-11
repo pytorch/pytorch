@@ -505,6 +505,12 @@ Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arg
         default=True,
         help="Make kernel names compact without line wrapping.",
     )
+    parser.add_argument(
+        "--split",
+        nargs=3,
+        metavar=("input_file", "n", "output_prefix"),
+        help="Split a JSON profile into n equal parts by number of events. Specify as <input_file> <n> <output_prefix>",
+    )
     args = parser.parse_args()
 
     compact_mode = args.compact
@@ -657,6 +663,119 @@ Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arg
             print(
                 f"Combined {len(input_files)} traces with {len(multi_dag.nodes)} unique nodes"
             )
+
+    if args.split:
+        input_file = args.split[0]
+        n = int(args.split[1])
+        output_prefix = args.split[2]
+
+        if n <= 0:
+            print("Error: n must be a positive integer")
+            return
+
+        print(
+            f"Splitting profile {input_file} into {n} parts with prefix {output_prefix}..."
+        )
+        split_profile(input_file, n, output_prefix)
+        print(f"Successfully split profile into {n} parts")
+
+
+def split_profile(input_file: str, n: int, output_prefix: str) -> None:
+    """
+    Split a JSON profile into n equal parts by number of events.
+
+    The function sorts events by timestamp, splits them into n equal parts,
+    and cleans up dangling event ID references.
+    """
+    import copy
+    import json
+
+    # Load the original profile
+    with open(input_file, "r") as f:
+        data = json.load(f)
+
+    events = data.get("traceEvents", [])
+    if not events:
+        print("Warning: No trace events found in the profile")
+        return
+
+    # Sort events by timestamp to maintain temporal ordering
+    events.sort(key=lambda e: e.get("ts", 0))
+
+    # Calculate the number of events per split
+    events_per_split = len(events) // n
+    remainder = len(events) % n
+
+    print(f"Total events: {len(events)}")
+    print(
+        f"Events per split: {events_per_split} (with {remainder} extra events distributed)"
+    )
+
+    start_idx = 0
+    for i in range(n):
+        # Calculate end index for this split
+        current_split_size = events_per_split + (1 if i < remainder else 0)
+        end_idx = start_idx + current_split_size
+
+        # Extract events for this split
+        split_events = events[start_idx:end_idx]
+
+        # Build a mapping of event ID -> event for this split
+        eid_to_event = {}
+        split_event_ids = set()
+
+        # First pass: collect all event IDs that exist in this split
+        for event in split_events:
+            if "id" in event:
+                event_id = event["id"]
+                eid_to_event[event_id] = event
+                split_event_ids.add(event_id)
+
+            # Also collect External IDs which are references to other events
+            if "args" in event and "External id" in event["args"]:
+                ext_id = event["args"]["External id"]
+                split_event_ids.add(ext_id)
+
+        # Second pass: clean up events, removing those with dangling references
+        cleaned_events = []
+        removed_count = 0
+
+        for event in split_events:
+            should_keep = True
+            cleaned_event = copy.deepcopy(event)
+
+            # Check if this event references external IDs not in this split
+            if "args" in cleaned_event and "External id" in cleaned_event["args"]:
+                ext_id = cleaned_event["args"]["External id"]
+                # If the external ID is not in our split's event IDs, remove this event
+                if ext_id not in eid_to_event:
+                    should_keep = False
+                    removed_count += 1
+
+            # Also check for other potential ID references (pid, tid, etc. are usually fine)
+            # but we might want to validate other fields that could reference events
+
+            if should_keep:
+                cleaned_events.append(cleaned_event)
+
+        # Create the split profile data
+        split_data = copy.deepcopy(data)
+        split_data["traceEvents"] = cleaned_events
+
+        # Save the split profile
+        output_file = f"{output_prefix}_{i+1}_of_{n}.json"
+        with open(output_file, "w") as f:
+            json.dump(split_data, f, indent=2)
+
+        print(
+            f"Created split {i+1}/{n}: {output_file} with {len(cleaned_events)} events"
+        )
+        if removed_count > 0:
+            print(
+                f"  Removed {removed_count} events with dangling external ID references"
+            )
+
+        start_idx = end_idx
 
 
 if __name__ == "__main__":

@@ -549,8 +549,6 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     Get the theoretical TFLOPS of the device for a given dtype. This can throw an exception if the device
     is not in the datasheet list above.
     """
-    if not torch.cuda.is_available():
-        return None
     name: Optional[str] = torch.cuda.get_device_name()
     if name is None:
         log.info("No device found, returning None")
@@ -577,9 +575,9 @@ def compute_device_ridgepoint(
     device_name: str, dtype: torch.dtype, is_tf32: bool = False
 ) -> Optional[float]:
     """
-    Compute the device ridgepoint B = TOPS / bandwidth.
-    This is the threshold ratio of TOPS to GB/s that determines whether a kernel
-    is compute-bound (TOPS/BW >= B) or memory-bound (TOPS/BW < B).
+    Compute the device ridgepoint B = FLOPS / bandwidth.
+    This is the threshold ratio of FLOPS to B/s that determines whether a kernel
+    is compute-bound (FLOPS/BW >= B) or memory-bound (FLOPS/BW < B).
 
     Args:
         device_name: Name of the device (e.g., "NVIDIA H100")
@@ -587,23 +585,16 @@ def compute_device_ridgepoint(
         is_tf32: Whether TF32 mode is enabled for float32
 
     Returns:
-        Ridgepoint B in TOPS/GB/s, or None if device info is not available
+        Ridgepoint B in FLOPS/B/s (operations per byte), or None if device info is not available
     """
-    device_info = lookup_device_info(device_name)
-    if device_info is None:
+    flops = DeviceInfo.lookup_tops(device_name, dtype, is_tf32)
+    if flops is None:
         return None
 
-    # Get TOPS for the dtype
-    tops = device_info.tops.get(
-        "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
-    )
-    if tops is None:
-        return None
-
-    # Get bandwidth
-    bw_gbs = device_info.dram_bw_gbs
+    bw_gbs = DeviceInfo.lookup_dram_bw_gbs(device_name)
     if bw_gbs is None or bw_gbs == 0:
         return None
 
-    # Ridgepoint B = TOPS / GB/s
-    return tops / bw_gbs
+    bw_bs = bw_gbs * 1e9
+
+    return flops / bw_bs

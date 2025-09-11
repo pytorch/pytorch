@@ -105,13 +105,11 @@ class MultiTraceDAG(BaseDAG):
         """Add a single trace's DAG to the multi-trace DAG."""
         self.trace_names[trace_id] = trace_name
 
-        # Add nodes
         for node_name, node in dag.nodes.items():
             if node_name not in self.nodes:
                 self.nodes[node_name] = MultiTraceDAGNode(node_name, node.node_type)
             self.nodes[node_name].add_trace_instance(trace_id, node)
 
-        # Add edges with trace information
         for parent, child in dag.edges:
             self.edges.add((parent, child, trace_id))
 
@@ -135,7 +133,6 @@ class MultiTraceDAG(BaseDAG):
         self.trace_kernel_gradients = {}
 
         for trace_id in self.trace_names.keys():
-            # Calculate total kernel time for this trace
             total_kernel_time = 0.0
             kernel_times = {}
 
@@ -177,10 +174,12 @@ class MultiTraceDAG(BaseDAG):
         Calculate colors for kernel nodes based on the specified color mode for each trace.
         Returns a dictionary mapping trace_id -> {kernel_name: color_string}.
         """
+        from .utils import calculate_kernel_colors as calc_kernel_colors
+
         if color_mode not in [
             "time",
             "diff",
-            "mem-utilization",
+            "mem-utilization", 
             "compute-utilization",
             "roofline",
         ]:
@@ -193,200 +192,27 @@ class MultiTraceDAG(BaseDAG):
 
         for trace_id in self.trace_names.keys():
             base_gradients = self.trace_kernel_gradients.get(trace_id, {})
-            trace_kernel_colors[trace_id] = {}
+              
+            # Collect kernel nodes for this trace
+            trace_kernel_nodes = {}
+            for kernel_name, multi_node in self.nodes.items():
+                if (
+                    multi_node.node_type == "kernel"
+                    and trace_id in multi_node.trace_instances
+                ):
+                    trace_kernel_nodes[kernel_name] = multi_node.trace_instances[trace_id]
 
-            if color_mode == "diff":
-                if baseline_profile is None:
-                    print(
-                        f"Warning: diff coloring requested but no baseline profile provided for trace {trace_id}"
-                    )
-                    trace_kernel_colors[trace_id] = base_gradients.copy()
-                    continue
-
-                baseline_dag = baseline_profile.build_trace_dag()
-                baseline_durations = {}
-
-                for name, node in baseline_dag.nodes.items():
-                    if node.node_type == "kernel":
-                        total_duration = sum(dur for dur, _ in node.kernel_instances)
-                        baseline_durations[name] = total_duration
-
-                for kernel_name, multi_node in self.nodes.items():
-                    if (
-                        multi_node.node_type == "kernel"
-                        and trace_id in multi_node.trace_instances
-                    ):
-                        kernel_node = multi_node.trace_instances[trace_id]
-                        base_color = base_gradients.get(kernel_name, "#4ECDC4")
-
-                        current_duration = sum(
-                            dur for dur, _ in kernel_node.kernel_instances
-                        )
-                        baseline_duration = baseline_durations.get(kernel_name, 0.0)
-
-                        if baseline_duration == 0.0:
-                            trace_kernel_colors[trace_id][kernel_name] = (
-                                self._tint_color(base_color, "red", 0.8)
-                            )
-                        else:
-                            diff_ratio = (
-                                current_duration - baseline_duration
-                            ) / baseline_duration
-                            if diff_ratio > 0.1:
-                                tint_intensity = min(1.0, diff_ratio)
-                                trace_kernel_colors[trace_id][kernel_name] = (
-                                    self._tint_color(base_color, "red", tint_intensity)
-                                )
-                            elif diff_ratio < -0.1:
-                                tint_intensity = min(1.0, abs(diff_ratio))
-                                trace_kernel_colors[trace_id][kernel_name] = (
-                                    self._tint_color(base_color, "blue", tint_intensity)
-                                )
-                            else:
-                                trace_kernel_colors[trace_id][kernel_name] = base_color
-
-            elif color_mode == "mem-utilization":
-                for kernel_name, multi_node in self.nodes.items():
-                    if (
-                        multi_node.node_type == "kernel"
-                        and trace_id in multi_node.trace_instances
-                    ):
-                        kernel_node = multi_node.trace_instances[trace_id]
-                        base_color = base_gradients.get(kernel_name, "#4ECDC4")
-
-                        if kernel_node.achieved_bandwidth_list:
-                            avg_utilization = sum(
-                                kernel_node.achieved_bandwidth_list
-                            ) / len(kernel_node.achieved_bandwidth_list)
-                            utilization_intensity = min(1.0, avg_utilization / 100.0)
-                            trace_kernel_colors[trace_id][kernel_name] = (
-                                self._tint_color(
-                                    base_color, "green", utilization_intensity
-                                )
-                            )
-                        else:
-                            trace_kernel_colors[trace_id][kernel_name] = base_color
-
-            elif color_mode == "compute-utilization":
-                # Modify base gradients based on compute (FLOPS) utilization
-                for kernel_name, multi_node in self.nodes.items():
-                    if (
-                        multi_node.node_type == "kernel"
-                        and trace_id in multi_node.trace_instances
-                    ):
-                        kernel_node = multi_node.trace_instances[trace_id]
-                        base_color = base_gradients.get(kernel_name, "#4ECDC4")
-
-                        if kernel_node.achieved_flops_list:
-                            avg_utilization = sum(
-                                kernel_node.achieved_flops_list
-                            ) / len(kernel_node.achieved_flops_list)
-                            # Higher utilization -> more purple tint
-                            utilization_intensity = min(1.0, avg_utilization / 100.0)
-                            trace_kernel_colors[trace_id][kernel_name] = (
-                                self._tint_color(
-                                    base_color, "purple", utilization_intensity
-                                )
-                            )
-                        else:
-                            # No utilization data - use base gradient
-                            trace_kernel_colors[trace_id][kernel_name] = base_color
-
-            elif color_mode == "roofline":
-                # Modify base gradients based on roofline analysis
-                for kernel_name, multi_node in self.nodes.items():
-                    if (
-                        multi_node.node_type == "kernel"
-                        and trace_id in multi_node.trace_instances
-                    ):
-                        kernel_node = multi_node.trace_instances[trace_id]
-                        base_color = base_gradients.get(kernel_name, "#4ECDC4")
-
-                        if (
-                            kernel_node.bound_type_list
-                            and kernel_node.achieved_flops_list
-                            and kernel_node.achieved_bandwidth_list
-                        ):
-                            # Calculate the average roofline score
-                            bound_types = kernel_node.bound_type_list
-                            flops_utils = kernel_node.achieved_flops_list
-                            bw_utils = kernel_node.achieved_bandwidth_list
-
-                            total_score = 0.0
-                            valid_instances = 0
-
-                            for i in range(
-                                min(len(bound_types), len(flops_utils), len(bw_utils))
-                            ):
-                                bound_type = bound_types[i]
-                                if bound_type == "compute":
-                                    total_score += flops_utils[i]
-                                    valid_instances += 1
-                                elif bound_type == "memory":
-                                    total_score += bw_utils[i]
-                                    valid_instances += 1
-
-                            if valid_instances > 0:
-                                avg_score = total_score / valid_instances
-                                # Lower utilization -> more red tint (worse performance)
-                                utilization_intensity = 1.0 - min(
-                                    1.0, avg_score / 100.0
-                                )
-                                trace_kernel_colors[trace_id][kernel_name] = (
-                                    self._tint_color(
-                                        base_color, "red", utilization_intensity
-                                    )
-                                )
-                            else:
-                                trace_kernel_colors[trace_id][kernel_name] = base_color
-                        else:
-                            # No roofline data - use base gradient
-                            trace_kernel_colors[trace_id][kernel_name] = base_color
+            # Use the common function to calculate colors
+            trace_kernel_colors[trace_id] = calc_kernel_colors(
+                color_mode, base_gradients, trace_kernel_nodes, baseline_profile
+            )
 
         return trace_kernel_colors
 
-    def _tint_color(self, base_color: str, tint: str, intensity: float) -> str:
-        """Apply a color tint to a base color with given intensity."""
-        # Convert hex to RGB
-        base_color = base_color.lstrip("#")
-        r, g, b = tuple(int(base_color[i : i + 2], 16) for i in (0, 2, 4))
-
-        # Define tint colors
-        tint_colors = {
-            "red": (255, 0, 0),
-            "blue": (0, 0, 255),
-            "green": (0, 255, 0),
-            "purple": (255, 0, 255),
-        }
-
-        if tint not in tint_colors:
-            return base_color
-
-        tint_r, tint_g, tint_b = tint_colors[tint]
-
-        # Blend base color with tint based on intensity
-        final_r = int(r * (1 - intensity) + tint_r * intensity)
-        final_g = int(g * (1 - intensity) + tint_g * intensity)
-        final_b = int(b * (1 - intensity) + tint_b * intensity)
-
-        # Ensure values are in valid range
-        final_r = max(0, min(255, final_r))
-        final_g = max(0, min(255, final_g))
-        final_b = max(0, min(255, final_b))
-
-        return f"#{final_r:02x}{final_g:02x}{final_b:02x}"
-
     def get_color_legend_text(self, color_mode: str) -> Optional[str]:
         """Get legend text for the specified color mode."""
-        if color_mode == "diff":
-            return "Legend\\nRed: Slower than baseline\\nBlue: Faster than baseline\\nNeutral: Same as baseline"
-        elif color_mode == "mem-utilization":
-            return "Legend\\nGreen: High memory bandwidth utilization\\nNeutral: Low memory bandwidth utilization"
-        elif color_mode == "compute-utilization":
-            return "Legend\\nPurple: High compute utilization\\nNeutral: Low compute utilization"
-        elif color_mode == "roofline":
-            return "Legend\\nRoofline Analysis\\nRed: Low utilization (worse)\\nNeutral: High utilization (better)\\nCompute-bound: Uses compute %\\nMemory-bound: Uses memory %"
-        return None
+        from .utils import get_color_legend_text
+        return get_color_legend_text(color_mode)
 
     def filter_by_height(self, height: int) -> "MultiTraceDAG":
         """

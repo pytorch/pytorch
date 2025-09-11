@@ -182,8 +182,21 @@ class JsonProfile:
                     raise RuntimeError(
                         "dtype is not found on tensor and default dtype is not set"
                     )
-                achieved_flops = 100 * op_flops / (1e12 * dev.info.tops[dtype])
-                achieved_bandwidth = 100 * op_gbps / dev.info.dram_bw_gbs
+                
+                # Use DeviceInfo API to get FLOPS and bandwidth correctly
+                from torch._inductor.analysis.device_info import DeviceInfo
+                peak_flops = DeviceInfo.lookup_tops(dev.name, dtype)
+                peak_bandwidth_gbs = DeviceInfo.lookup_dram_bw_gbs(dev.name)
+                
+                if peak_flops is not None and peak_flops > 0:
+                    achieved_flops = 100 * op_flops / peak_flops
+                else:
+                    achieved_flops = 0
+                    
+                if peak_bandwidth_gbs is not None and peak_bandwidth_gbs > 0:
+                    achieved_bandwidth = 100 * op_gbps / peak_bandwidth_gbs
+                else:
+                    achieved_bandwidth = 0
 
                 # Calculate roofline bound type
                 bound_type = self._calculate_bound_type(
@@ -223,20 +236,21 @@ class JsonProfile:
         Returns:
             "compute" if compute-bound, "memory" if memory-bound, "unknown" if calculation fails
         """
-        # Calculate the device ridgepoint B = TOPS / BW
+        # Calculate the device ridgepoint B = FLOPS / B/s (operations per byte)
         ridgepoint = compute_device_ridgepoint(device_name, dtype)
         if ridgepoint is None:
             return "unknown"
 
-        # Convert op_flops to TOPS
-        op_tops = op_flops / 1e12
-
-        # Calculate kernel's operational intensity: TOPS / GB/s
+        # Calculate kernel's operational intensity: FLOPS / B/s (operations per byte)
         if op_gbps == 0:
             # No memory traffic - pure compute
             return "compute"
 
-        kernel_intensity = op_tops / op_gbps
+        # Convert GB/s to B/s (base 10: 1 GB = 10^9 bytes)
+        op_bps = op_gbps * 1e9
+        
+        # Kernel intensity = FLOPS / B/s = operations per byte
+        kernel_intensity = op_flops / op_bps
 
         # Compare to ridgepoint: if kernel intensity >= ridgepoint, it's compute-bound
         if kernel_intensity >= ridgepoint:
@@ -688,52 +702,42 @@ class JsonProfile:
         - Pre-index per-thread with parent pointers (O(N))
         - Resolve each kernel to a cpu site (External id or cudaLaunch via bisect) (O(log N) each)
         - Add edges only (set handles de-dupe)
-        The slow bits are from (a) O(K·N) overlap scans and (b) de-duping whole chains. Below is a drop-in, sweep-line + parent-pointer approach that makes everything essentially O(N log N):
+
+        # Algorithm Description
+        The slow bits are from O(K·N) overlap scans and de-duping whole chains.
         Pre-index every cpu_op / user_annotation / cudaLaunchKernel by thread, with parent pointers built from the per-thread stack (no overlap scans).
-        For each kernel, resolve its launching site fast:
-        Prefer args["External id"] → cpu_op (your existing mapping).
+        For each kernel, resolve its launching site fast
         Else, find the cudaLaunchKernel whose interval contains the kernel start using bisect over a per-thread sorted list (O(log N)).
         Build the op chain by walking parent pointers from the launch (or external op) up to the root; don't de-dup chains—just add edges (the set takes care of uniqueness).
-        Intern strings and store compact structs to keep memory/cache friendly.
-        Notes on why this is fast
-        No per-kernel O(N) overlap scans; ancestor resolution is O(log N) via bisect → O(K log N).
-        Parent pointers are built in one linear sweep per thread.
-        No chain de-duplication pass; sets make edge/node insertion idempotent.
         """
         dag = TraceDAG()
 
-        # Compute stats first to have performance data available
         self._compute_stats()
 
         extern_map, kernels, per_tid_compact, launches_per_tid = (
             self._build_extern_and_kernel_maps()
         )
 
-        # Track operation instance counts
         op_instance_counts = defaultdict(int)
 
-        # Pre-intern node objects to reduce dict churn
         def _get_or_add(name: str, typ: str):
             node = dag.nodes.get(name)
             if node is None:
                 node = dag.add_node(name, typ)
             return node
 
-        # Process kernels sequentially
         for k in tqdm(kernels, desc="Processing kernels"):
             kev = k["event"]
             kname = kev.get("name", "unknown_kernel")
             kdur = kev.get("dur", 0.0)
             ktid = kev.get("tid", 0)
 
-            # 1) Prefer External id mapping to a concrete cpu_op
             start_chain_names: list[str] = []
             ext_ok = False
             if "args" in kev and "External id" in kev["args"]:
                 ext_id = kev["args"]["External id"]
                 lst = extern_map.get(ext_id)
                 if lst:
-                    # Use the cpu_op we mapped; find its compact record via per-thread binary search
                     cpu_ev = lst[0]
                     tid = cpu_ev.get("tid", 0)
                     arr = per_tid_compact.get(tid, [])
@@ -755,7 +759,7 @@ class JsonProfile:
                             )
                             ext_ok = True
 
-            # 2) Else resolve launch site by bisect
+            # Else resolve launch site by bisect
             if not ext_ok:
                 launch = self._find_launch_for_kernel(kev, launches_per_tid)
                 if launch:
@@ -763,11 +767,10 @@ class JsonProfile:
                         launch, per_tid_compact
                     )
 
-            # If nothing found, skip — we only keep kernel-linked chains
+            # If nothing found, skip
             if not start_chain_names:
                 continue
 
-            # Count operation instances and add op nodes and edges
             for nm in start_chain_names:
                 op_instance_counts[nm] += 1
 
@@ -778,7 +781,6 @@ class JsonProfile:
                     dag.add_edge(prev, nm)
                 prev = nm
 
-            # Add the kernel node + edge from last op
             kernel_node = _get_or_add(kname, "kernel")
             if prev is not None:
                 dag.add_edge(prev, kname)
@@ -795,14 +797,11 @@ class JsonProfile:
                         # we can use all stats for this kernel name
                         stats_list = list(dev.stats[kname])
                         if stats_list:
-                            # Find the best matching stats by latency
                             best_stats = min(
                                 stats_list, key=lambda s: abs(s.latency - kdur)
                             )
                             latency_diff = abs(best_stats.latency - kdur)
-                            if (
-                                latency_diff < 100.0
-                            ):  # Increase tolerance to 100 microseconds
+                            if  latency_diff < 100.0:
                                 kernel_node.achieved_flops_list.append(
                                     best_stats.achieved_flops
                                 )
@@ -854,18 +853,27 @@ class JsonProfile:
                 op_name = event.get("name", "")
 
                 # Filter for relevant operations (aten:: ops)
-                if op_name.startswith("aten::") or any(
-                    x in op_name for x in ["contiguous", "clone", "copy", "empty"]
-                ):
-                    overlapping_ops.append(
-                        {
-                            "name": op_name,
-                            "ts": event_ts,
-                            "dur": event_dur,
-                            "end_ts": event_end_ts,
-                            "event": event,
-                        }
-                    )
+                # if op_name.startswith("aten::") or any(
+                #     x in op_name for x in ["contiguous", "clone", "copy", "empty"]
+                # ):
+                #     overlapping_ops.append(
+                #         {
+                #             "name": op_name,
+                #             "ts": event_ts,
+                #             "dur": event_dur,
+                #             "end_ts": event_end_ts,
+                #             "event": event,
+                #         }
+                #     )
+                overlapping_ops.append(
+                    {
+                        "name": op_name,
+                        "ts": event_ts,
+                        "dur": event_dur,
+                        "end_ts": event_end_ts,
+                        "event": event,
+                    }
+                )
 
         # Sort by start time to build the chain
         overlapping_ops.sort(key=lambda x: x["ts"])
@@ -935,7 +943,6 @@ class JsonProfile:
                     of non-kernel nodes above the kernels. For example, height=1 shows
                     only the first level of operations directly connected to kernels.
         """
-        # Note: Visualization libraries assumed to be available
 
         # Apply height filtering if specified
         if height is not None and height >= 0:
@@ -966,51 +973,40 @@ class JsonProfile:
                 dag, color_mode, baseline_profile
             )
 
-        # Use graphviz for clean DAG layout
         try:
             import graphviz
 
             dot = graphviz.Digraph(comment="Trace DAG")
-            dot.attr(rankdir="TB")  # Top to bottom layout
+            dot.attr(rankdir="TB")
             dot.attr("node", shape="box")
 
-            # Add nodes with different styles for ops vs kernels
-            # Create a mapping for safe node names (graphviz doesn't like special chars)
             safe_names = {}
             for i, (node_name, node) in enumerate(dag.nodes.items()):
-                # Create safe name for graphviz
                 safe_name = f"node_{i}"
                 safe_names[node_name] = safe_name
 
                 if node.node_type == "kernel":
-                    # Kernel nodes at bottom with instance count and performance stats
                     instance_count = len(node.kernel_instances)
                     total_duration = sum(dur for dur, _ in node.kernel_instances)
 
-                    # Handle kernel name display based on compact setting
                     if compact:
-                        # Use compact names without wrapping
                         display_name = node_name[:40] + "..."
                     else:
-                        # Wrap long kernel names for display with proper line breaks
                         display_name = _wrap_text(node_name, 40)
 
                     label = f"{display_name}\\n{instance_count} inst\\n{total_duration:.2f}μs total"
 
-                    # Calculate average duration per instance
                     avg_duration = (
                         total_duration / instance_count if instance_count > 0 else 0
                     )
                     label += f"\\n{avg_duration:.1f}μs avg"
 
-                    # Add performance statistics if available and non-zero
                     if node.achieved_flops_list:
                         flops_min = min(node.achieved_flops_list)
                         flops_max = max(node.achieved_flops_list)
                         flops_avg = sum(node.achieved_flops_list) / len(
                             node.achieved_flops_list
                         )
-                        # Only show FLOPS stats if they're not all zero
                         if flops_max > 0.0:
                             label += f"\\nFLOPS %: min={flops_min:.1f}, max={flops_max:.1f}, avg={flops_avg:.1f}"
 
@@ -1020,11 +1016,9 @@ class JsonProfile:
                         bw_avg = sum(node.achieved_bandwidth_list) / len(
                             node.achieved_bandwidth_list
                         )
-                        # Only show BW stats if they're not all zero
                         if bw_max > 0.0:
                             label += f"\\nBW %: min={bw_min:.1f}, max={bw_max:.1f}, avg={bw_avg:.1f}"
 
-                    # Add bound type information if available
                     if node.bound_type_list:
                         # Count compute vs memory bound instances
                         compute_count = node.bound_type_list.count("compute")
@@ -1046,7 +1040,6 @@ class JsonProfile:
                             # All instances are unknown bound type
                             label += "\\nBound: Unknown"
 
-                    # Use color from coloring algorithm or default
                     color = kernel_colors.get(node_name, "lightcoral")
                     dot.node(
                         safe_name,
@@ -1056,15 +1049,10 @@ class JsonProfile:
                         shape="ellipse",
                     )
                 else:
-                    # Operation nodes with instance counts and total kernel runtime
                     instance_count = getattr(node, "instance_count", 0)
-                    # Truncate long operation names for display
-                    # Handle operation name display based on compact setting
                     if compact:
-                        # Use compact names without wrapping
                         display_name = node_name[:40] + "..."
                     else:
-                        # Wrap long operation names for display
                         display_name = _wrap_text(node_name, 40)
                     label = f"{display_name}"
                     if instance_count > 0:
@@ -1083,12 +1071,12 @@ class JsonProfile:
                         shape="box",
                     )
 
-            # Add edges using safe names
+            # Add edges
             for parent, child in dag.edges:
                 if parent in safe_names and child in safe_names:
                     dot.edge(safe_names[parent], safe_names[child])
 
-            # Add color legend based on color mode
+            # Add color legend
             if color_mode:
                 legend_text = self._get_color_legend_text(color_mode)
                 if legend_text:
@@ -1103,7 +1091,7 @@ class JsonProfile:
                         pin="true",
                     )
 
-            # Render to specified format
+            # Render
             base_path = output_path.replace(".png", "").replace(".svg", "")
             dot.render(base_path, format=format, cleanup=True)
             print(f"DAG visualization saved to {output_path}")
@@ -1122,16 +1110,8 @@ class JsonProfile:
         Always uses time-based gradients as the base, with intensity modified by color mode.
         Returns a dictionary mapping kernel names to color strings.
         """
-        if color_mode not in [
-            "time",
-            "diff",
-            "mem-utilization",
-            "compute-utilization",
-            "roofline",
-        ]:
-            return {}
-
-        kernel_colors = {}
+        from .utils import calculate_kernel_colors
+          
         kernel_nodes = {
             name: node for name, node in dag.nodes.items() if node.node_type == "kernel"
         }
@@ -1141,174 +1121,9 @@ class JsonProfile:
 
         base_time_gradients = dag.calculate_kernel_time_gradients()
 
-        if color_mode == "time":
-            return base_time_gradients
-
-        if color_mode == "diff":
-            if baseline_profile is None:
-                print(
-                    "Warning: diff coloring requested but no baseline profile provided"
-                )
-                return base_time_gradients
-
-            baseline_dag = baseline_profile.build_trace_dag()
-            baseline_durations = {}
-
-            for name, node in baseline_dag.nodes.items():
-                if node.node_type == "kernel":
-                    total_duration = sum(dur for dur, _ in node.kernel_instances)
-                    baseline_durations[name] = total_duration
-
-            # Calculate duration differences and modify the base gradients
-            for name, base_color in base_time_gradients.items():
-                if name not in kernel_nodes:
-                    continue
-
-                current_duration = sum(
-                    dur for dur, _ in kernel_nodes[name].kernel_instances
-                )
-                baseline_duration = baseline_durations.get(name, 0.0)
-
-                if baseline_duration == 0.0:
-                    kernel_colors[name] = self._tint_color(base_color, "red", 0.8)
-                else:
-                    diff_ratio = (
-                        current_duration - baseline_duration
-                    ) / baseline_duration
-                    if diff_ratio > 0.1:
-                        tint_intensity = min(1.0, diff_ratio)
-                        kernel_colors[name] = self._tint_color(
-                            base_color, "red", tint_intensity
-                        )
-                    elif diff_ratio < -0.1:
-                        tint_intensity = min(1.0, abs(diff_ratio))
-                        kernel_colors[name] = self._tint_color(
-                            base_color, "blue", tint_intensity
-                        )
-                    else:
-                        # Similar performance - use base time gradient
-                        kernel_colors[name] = base_color
-
-        elif color_mode == "mem-utilization":
-            # Modify base gradients based on memory bandwidth utilization
-            for name, base_color in base_time_gradients.items():
-                if name not in kernel_nodes:
-                    continue
-
-                node = kernel_nodes[name]
-                if node.achieved_bandwidth_list:
-                    avg_utilization = sum(node.achieved_bandwidth_list) / len(
-                        node.achieved_bandwidth_list
-                    )
-                    # Higher utilization -> more green tint
-                    utilization_intensity = min(
-                        1.0, avg_utilization / 100.0
-                    )  # Normalize to [0,1]
-                    kernel_colors[name] = self._tint_color(
-                        base_color, "green", utilization_intensity
-                    )
-                else:
-                    # No utilization data - use base gradient
-                    kernel_colors[name] = base_color
-
-        elif color_mode == "compute-utilization":
-            # Modify base gradients based on compute (FLOPS) utilization
-            for name, base_color in base_time_gradients.items():
-                if name not in kernel_nodes:
-                    continue
-
-                node = kernel_nodes[name]
-                if node.achieved_flops_list:
-                    avg_utilization = sum(node.achieved_flops_list) / len(
-                        node.achieved_flops_list
-                    )
-                    # Higher utilization -> more purple tint
-                    utilization_intensity = min(
-                        1.0, avg_utilization / 100.0
-                    )  # Normalize to [0,1]
-                    kernel_colors[name] = self._tint_color(
-                        base_color, "purple", utilization_intensity
-                    )
-                else:
-                    # No utilization data - use base gradient
-                    kernel_colors[name] = base_color
-
-        elif color_mode == "roofline":
-            # Modify base gradients based on roofline analysis
-            for name, base_color in base_time_gradients.items():
-                if name not in kernel_nodes:
-                    continue
-
-                node = kernel_nodes[name]
-                if (
-                    node.bound_type_list
-                    and node.achieved_flops_list
-                    and node.achieved_bandwidth_list
-                ):
-                    # Calculate the average roofline score
-                    bound_types = node.bound_type_list
-                    flops_utils = node.achieved_flops_list
-                    bw_utils = node.achieved_bandwidth_list
-
-                    total_score = 0.0
-                    valid_instances = 0
-
-                    for i in range(
-                        min(len(bound_types), len(flops_utils), len(bw_utils))
-                    ):
-                        bound_type = bound_types[i]
-                        if bound_type == "compute":
-                            total_score += flops_utils[i]
-                            valid_instances += 1
-                        elif bound_type == "memory":
-                            total_score += bw_utils[i]
-                            valid_instances += 1
-
-                    if valid_instances > 0:
-                        avg_score = total_score / valid_instances
-                        # Lower utilization -> more red tint (worse performance)
-                        utilization_intensity = 1.0 - min(1.0, avg_score / 100.0)
-                        kernel_colors[name] = self._tint_color(
-                            base_color, "red", utilization_intensity
-                        )
-                    else:
-                        kernel_colors[name] = base_color
-                else:
-                    # No roofline data - use base gradient
-                    kernel_colors[name] = base_color
-
-        return kernel_colors
-
-    def _tint_color(self, base_color: str, tint: str, intensity: float) -> str:
-        """Apply a color tint to a base color with given intensity."""
-        # Convert hex to RGB
-        base_color = base_color.lstrip("#")
-        r, g, b = tuple(int(base_color[i : i + 2], 16) for i in (0, 2, 4))
-
-        # Define tint colors
-        tint_colors = {
-            "red": (255, 0, 0),
-            "blue": (0, 0, 255),
-            "green": (0, 255, 0),
-            "purple": (255, 0, 255),
-        }
-
-        if tint not in tint_colors:
-            return base_color
-
-        tint_r, tint_g, tint_b = tint_colors[tint]
-
-        # Blend base color with tint based on intensity
-        final_r = int(r * (1 - intensity) + tint_r * intensity)
-        final_g = int(g * (1 - intensity) + tint_g * intensity)
-        final_b = int(b * (1 - intensity) + tint_b * intensity)
-
-        # Ensure values are in valid range
-        final_r = max(0, min(255, final_r))
-        final_g = max(0, min(255, final_g))
-        final_b = max(0, min(255, final_b))
-
-        return f"#{final_r:02x}{final_g:02x}{final_b:02x}"
+        return calculate_kernel_colors(
+            color_mode, base_time_gradients, kernel_nodes, baseline_profile
+        )
 
     def _filter_dag_by_height(self, dag: TraceDAG, height: int) -> TraceDAG:
         """
@@ -1327,20 +1142,16 @@ class JsonProfile:
 
         filtered_dag = TraceDAG()
 
-        # Find all kernel nodes first
         kernel_nodes = OrderedSet(
             [name for name, node in dag.nodes.items() if node.node_type == "kernel"]
         )
 
-        # If height is 0, only show kernels
         if height == 0:
             for kernel_name in kernel_nodes:
                 kernel_node = dag.nodes[kernel_name]
                 filtered_dag.add_node(kernel_name, "kernel")
-                # Copy kernel instances
                 for dur, tid in kernel_node.kernel_instances:
                     filtered_dag.add_kernel_instance(kernel_name, dur, tid)
-                # Copy performance stats
                 filtered_dag.nodes[kernel_name].achieved_flops_list = (
                     kernel_node.achieved_flops_list[:]
                 )
@@ -1360,7 +1171,8 @@ class JsonProfile:
             reverse_edges[child].append(parent)
 
         # BFS from kernel nodes going backwards (upwards in the DAG)
-        nodes_to_include = OrderedSet(kernel_nodes)  # Always include kernels
+        # start with kernels
+        nodes_to_include = OrderedSet(kernel_nodes)
         current_level = kernel_nodes.copy()
 
         for level in range(height):
@@ -1373,7 +1185,7 @@ class JsonProfile:
                         nodes_to_include.add(parent)
 
             if not next_level:
-                break  # No more levels to explore
+                break
 
             current_level = next_level
 
@@ -1382,12 +1194,9 @@ class JsonProfile:
             original_node = dag.nodes[node_name]
             filtered_dag.add_node(node_name, original_node.node_type)
 
-            # Copy node-specific data
             if original_node.node_type == "kernel":
-                # Copy kernel instances
                 for dur, tid in original_node.kernel_instances:
                     filtered_dag.add_kernel_instance(node_name, dur, tid)
-                # Copy performance stats
                 filtered_dag.nodes[node_name].achieved_flops_list = (
                     original_node.achieved_flops_list[:]
                 )
@@ -1398,13 +1207,11 @@ class JsonProfile:
                     original_node.bound_type_list[:]
                 )
             else:
-                # Copy operation node data
                 if hasattr(original_node, "instance_count"):
                     filtered_dag.nodes[node_name].instance_count = (
                         original_node.instance_count
                     )
 
-        # Add edges that connect nodes within our filtered set
         for parent, child in dag.edges:
             if parent in nodes_to_include and child in nodes_to_include:
                 filtered_dag.add_edge(parent, child)
@@ -1427,7 +1234,6 @@ class JsonProfile:
         """Check if the trace has been augmented with performance information."""
         for event in self.events:
             if event.get("cat") == "kernel" and "args" in event:
-                # If we find a kernel with performance data, the trace is augmented
                 if "kernel_flop" in event["args"] or "kernel_num_gb" in event["args"]:
                     return True
         return False
@@ -1446,7 +1252,6 @@ class JsonProfile:
         Automatically augments the trace if it hasn't been augmented yet.
         Returns the created DAG for further analysis.
         """
-        # Check if trace needs augmentation
         if not self._is_trace_augmented():
             print("Trace not augmented with performance data. Augmenting trace...")
             self.augment_trace()
@@ -1524,7 +1329,6 @@ shape and type information needed for calculations. To include performance metri
             if key not in combined_data:
                 combined_data[key] = value
 
-        # Create a temporary file to write the combined data
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
@@ -1533,7 +1337,6 @@ shape and type information needed for calculations. To include performance metri
             tmp_path = tmp_file.name
 
         try:
-            # Create new JsonProfile from the combined data
             combined_profile = JsonProfile(
                 tmp_path,
                 benchmark_name=f"{self.benchmark_name or 'Profile1'}_+_{other.benchmark_name or 'Profile2'}",
@@ -1541,5 +1344,4 @@ shape and type information needed for calculations. To include performance metri
             )
             return combined_profile
         finally:
-            # Clean up temporary file
             os.unlink(tmp_path)
