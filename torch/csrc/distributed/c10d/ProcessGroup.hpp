@@ -1015,9 +1015,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
-  // This mapping is ordered, as splitGroup must call split on the underlying
-  // backends in a consistent order.
-  std::map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
