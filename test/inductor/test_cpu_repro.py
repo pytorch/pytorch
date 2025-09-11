@@ -1131,6 +1131,7 @@ class CPUReproTests(TestCase):
             (300, 400, torch.float16, (0,)),
         )
 
+    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_put(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y):
@@ -1146,6 +1147,7 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(x_clone, y_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_put2(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(y, index0, index1):
@@ -1162,6 +1164,7 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_add(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y, scale_y, index):
