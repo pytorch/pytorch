@@ -3314,10 +3314,10 @@ exit(2)
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
-            subtest((False, False, True), decorators=[skipIfRocm]),
-            subtest((True, False, True), decorators=[skipIfRocm]),
+            subtest((False, False, True)),
+            subtest((True, False, True)),
             subtest((True, True, True), decorators=[unittest.expectedFailure]),
-            subtest((False, False, False), decorators=[skipIfRocm]),
+            subtest((False, False, False)),
         ],
         name_fn=lambda x, y, z: "{}{}{}".format(
             {True: "with_amp", False: "without_amp"}[x],
@@ -7022,6 +7022,39 @@ class TestCompileKernel(TestCase):
         result = add_scalar_op(input_data, scalar_val)
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_cuda_headers(self):
+        """Test that kernels can include and use CUDA headers like cuda_fp16.h."""
+        kernel_source = """
+        #include <cuda_fp16.h>
+
+        extern "C"
+        __global__ void half_precision_kernel(__half* output, float input_value, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                output[idx] = __float2half(input_value);
+            }
+        }
+        """
+
+        from torch.cuda import _compile_kernel
+
+        compiled_kernel = _compile_kernel(kernel_source, "half_precision_kernel")
+
+        n = 100
+        test_value = 3.14159
+        output = torch.zeros(n, device="cuda", dtype=torch.float16)
+
+        compiled_kernel(
+            grid=(1, 1, 1),
+            block=(256, 1, 1),
+            args=[output, test_value, n],
+        )
+
+        expected = torch.full((n,), test_value, device="cuda", dtype=torch.float16)
+        torch.testing.assert_close(output, expected, rtol=1e-3, atol=1e-3)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
