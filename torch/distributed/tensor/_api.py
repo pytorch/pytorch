@@ -240,19 +240,14 @@ class DTensor(torch.Tensor):
     # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    @staticmethod
+    __new__ = torch.Tensor._dtensor__new__
+
     @torch._disable_dynamo
-    def __new__(
-        cls,
-        local_tensor: torch.Tensor,
-        spec: DTensorSpec,
-        *,
-        requires_grad: bool,
-    ) -> "DTensor":
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, *args, **kwargs):
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
         other tensor properties (i.e. shape, requires_grad, strides, etc).
-
         .. note:: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using ``DTensor.from_local``, if
@@ -260,31 +255,6 @@ class DTensor(torch.Tensor):
             already have tensor initialized and want to shard this tensor),
             consider using ``distribute_tensor``.
         """
-        if local_tensor.requires_grad and not requires_grad:
-            warnings.warn(
-                "To construct DTensor from torch.Tensor, it's recommended to "
-                "use local_tensor.detach() and make requires_grad consistent."
-            )
-
-        # new method instruct wrapper tensor from local_tensor and add
-        # placement spec, it does not do actual distribution
-        assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-
-        r = torch.Tensor._make_dtensor(
-            cls,
-            spec.tensor_meta.shape,
-            spec.tensor_meta.stride,
-            local_tensor,
-            requires_grad,
-        )
-
-        r._spec = spec
-        r._local_tensor = local_tensor
-        return r
-
-    @torch._disable_dynamo
-    @mark_subclass_constructor_exportable_experimental
-    def __init__(self, *args, **kwargs):
         super().__init__()
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
