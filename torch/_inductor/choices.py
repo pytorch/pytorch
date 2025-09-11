@@ -106,7 +106,7 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _finalize_mm_configs(
+    def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
@@ -148,12 +148,12 @@ class InductorChoices:
         """
         Utility to get the KernelTemplateChoice generator for a specific input.
 
-        This is a per template/op call, whereas get_mm_configs is an op wide call (all templates).
+        This is a per template/op call, whereas get_template_configs is an op wide call (all templates).
         Consider when overriding/using at which level you need to make decisions
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
+        assert device_type is not None, "get_ktc requires a valid device type"
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -233,7 +233,7 @@ class InductorChoices:
             not isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
         )
 
-    def get_mm_configs(
+    def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
@@ -270,7 +270,7 @@ class InductorChoices:
             )
 
         # Second pass: Adjust the template choices
-        adjusted_choices = self._finalize_mm_configs(
+        adjusted_choices = self._finalize_template_configs(
             template_choices,
             kernel_inputs,
             templates,
