@@ -36,20 +36,20 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
             "nvrtc64_120_0.dll",
-            "nvrtc64_112_0.dll", 
+            "nvrtc64_112_0.dll",
             "nvrtc64_111_0.dll",
             "nvrtc64_110_0.dll",
         ]
     else:
         nvrtc_libs = [
             "libnvrtc.so.13",
-            "libnvrtc.so.12", 
+            "libnvrtc.so.12",
             "libnvrtc.so.11.2",
             "libnvrtc.so.11.1",
             "libnvrtc.so.11.0",
             "libnvrtc.so",  # Fallback to unversioned
         ]
-    
+
     last_error = None
     for lib_name in nvrtc_libs:
         try:
@@ -57,7 +57,7 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         except OSError as e:
             last_error = e
             continue
-    
+
     # If none of the versioned libraries could be loaded, raise the last error
     if last_error:
         raise last_error
@@ -90,6 +90,7 @@ def _nvrtc_compile(
     """
     # Ensure CUDA is initialized
     import torch.cuda
+
     if not torch.cuda.is_initialized():
         torch.cuda.init()
 
@@ -329,6 +330,7 @@ def _cuda_load_module(
     """
     # Ensure CUDA is initialized
     import torch.cuda
+
     if not torch.cuda.is_initialized():
         torch.cuda.init()
 
