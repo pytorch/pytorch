@@ -524,9 +524,26 @@ def _get_input_paths(example_inputs, signature):
     """
 
     args, kwargs = example_inputs
-    ctx = signature.bind(*args, **kwargs).arguments
+    binded = signature.bind(*args, **kwargs)
+    binded.apply_defaults()
+    ctx = binded.arguments
     flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
     return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _replace_sources(result_str: str, flat_input_paths: list[Any]):
+    """
+    Given user specified input paths, maybe fix up the guard string
+    to reflect user path instead of tracer path.
+    """
+    name_mapping = {}
+    for idx, path in enumerate(flat_input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    replace = result_str
+    for key, val in name_mapping.items():
+        replace = replace.replace(key, val)
+    return replace
 
 
 def _get_input_guards_for_graph(
@@ -744,15 +761,9 @@ def _unlift_exported_program_lifted_states(
         # lot easier to manipulate after we turn them into strings and only
         # time we use these guards is during retracing or running exported program,
         # so it is probably ok to have "not useful" guards on ep for now.
-        name_mapping = {}
-        for idx, path in enumerate(input_paths):
-            name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
-
         ep_guards = []
         for guard in ep._guards_code:
-            for old_name, new_name in name_mapping.items():
-                guard = guard.replace(old_name, new_name)
-            ep_guards.append(guard)
+            ep_guards.append(_replace_sources(guard, input_paths))
 
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
