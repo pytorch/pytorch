@@ -564,6 +564,33 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
+    def test_combo_kernel_size_hint_failure(self, device):
+        # A size hint failure is "TypeError: Cannot convert symbols to int"
+        if device == "cpu":
+            raise unittest.SkipTest("Combo kernels must be for GPU.")
+
+        def fn(x):
+            nz = torch.nonzero(x)
+            u0 = nz.size(0)
+            t1 = torch.ones(u0, device=device)
+            t2 = torch.zeros(u0 + 1, device=device)
+            t3 = torch.zeros(u0 * 2, device=device)
+            t4 = torch.zeros(u0 - x.size(0), device=device)
+            out1 = t1 - 1
+            out2 = t2 + 2
+            out3 = t3 * 3
+            out4 = t4 / 4
+            return out1, out2, out3, out4
+
+        example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
