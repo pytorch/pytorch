@@ -566,6 +566,24 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
+    def test_scatter_fallback(self):
+        fallback_op = torch.ops.aten.scatter_reduce_.two
+
+        def foo(out, index, src):
+            dim = 0
+            out = fallback_op(out, dim, index, src, reduce="amax", include_self=False)
+            return out + 1
+
+        length = 8
+        out, src = [torch.randn(length, device=self.device) for _ in range(2)]
+        index = torch.randint(length, (length,), device=self.device)
+        (gm,) = self._compile_and_check(
+            foo, (out, index, src), expected_num_triton_kernels=2
+        )
+
+        # Check for the fallback.
+        self.assertEqual(self._count_ops(gm, fallback_op), 1)
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_subgraph_raises(self):
         """
