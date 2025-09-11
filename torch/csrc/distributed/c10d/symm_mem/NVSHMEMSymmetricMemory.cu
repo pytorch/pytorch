@@ -51,7 +51,7 @@ struct NVSHMEMAllocation {
 class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NVSHMEMPeerAllocInfo(
-      const std::unique_ptr<NVSHMEMAllocation>& allocation,
+      NVSHMEMAllocation* allocation,
       const std::string& group_name)
       : base_ptr_(allocation->ptr),
         buffer_size_(allocation->buffer_size) {
@@ -144,7 +144,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
-      const std::unique_ptr<NVSHMEMAllocation>& allocation,
+      NVSHMEMAllocation* allocation,
       const std::string& group_name)
       : device_idx_(allocation->device_idx),
         group_name_(group_name) {
@@ -388,7 +388,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     } else {
       // Create a new rendezvous
       symm_mem =
-          c10::make_intrusive<NVSHMEMSymmetricMemory>(allocation, *group_name);
+          c10::make_intrusive<NVSHMEMSymmetricMemory>(allocation.get(), *group_name);
     }
 
     // Cache rendezvous using allocation's base address as key
