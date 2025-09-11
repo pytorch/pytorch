@@ -67,7 +67,7 @@ class VllmBuildParameters:
     )
 
     # the cleaning script to remove torch dependencies from pip
-    cleaning_script: Path = env_path_field("cleaning_script", ".github/ci_configs/vllm/use_existing_torch.sh")
+    cleaning_script: Path = env_path_field("cleaning_script", ".github/ci_configs/vllm/use_existing_torch.py")
 
     # OUTPUT_DIR: where docker buildx (local exporter) will write artifacts
     output_dir: Path = env_path_field("OUTPUT_DIR", "external/vllm")
