@@ -86,7 +86,6 @@ def _flash_attention_forward(
     shapes: tuple[Any, ...], concrete: tuple[Any, ...]
 ) -> tuple[tuple[Any], dict[Any, Any]]:
     breakpoint()
-    pass
 
 
 @register_adapter(["_efficient_attention_forward"])
@@ -1123,6 +1122,7 @@ def _safe_html_wrap(text: str, max_width: int) -> str:
 
     return "<BR/>".join(lines)
 
+
 def _wrap_text(text: str, max_width: int) -> str:
     """Wrap text to fit within max_width characters per line, preserving word boundaries when possible."""
     if len(text) <= max_width:
@@ -1157,6 +1157,7 @@ def _wrap_text(text: str, max_width: int) -> str:
         lines.append(current_line)
 
     return "\\n".join(lines)
+
 
 def _estimate_kernel_performance(
     kernel_name: str, duration_us: float
@@ -1228,7 +1229,6 @@ def _ensure_performance_statistics(multi_dag: "MultiTraceDAG") -> None:
     This function recalculates performance stats if they're missing, ensuring fresh data.
     """
     from .device_info import compute_device_ridgepoint, lookup_device_info
-    from .json_profile import JsonProfile
 
     print("Ensuring performance statistics are available for all traces...")
 
@@ -1328,7 +1328,7 @@ def _ensure_performance_statistics(multi_dag: "MultiTraceDAG") -> None:
                     )
                 else:
                     print(
-                        f"    Warning: No device info available for performance calculation"
+                        "    Warning: No device info available for performance calculation"
                     )
                     # Add placeholder data to avoid repeated attempts
                     for kernel_name, kernel_node in kernel_nodes_in_trace:

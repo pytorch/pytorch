@@ -12,6 +12,8 @@ from collections import defaultdict
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Union
 
+from tqdm import tqdm
+
 import torch
 from torch._inductor.analysis.device_info import (
     compute_device_ridgepoint,
@@ -19,7 +21,6 @@ from torch._inductor.analysis.device_info import (
 )
 from torch._inductor.utils import tabulate_2d, zip_dicts
 from torch.utils._ordered_set import OrderedSet
-from tqdm import tqdm
 
 from .dag_nodes import TraceDAG
 from .types import _IdxEvt, Device, DeviceMap, KernelStats, Table
@@ -1320,9 +1321,9 @@ class JsonProfile:
         filtered_dag = TraceDAG()
 
         # Find all kernel nodes first
-        kernel_nodes = {
-            name for name, node in dag.nodes.items() if node.node_type == "kernel"
-        }
+        kernel_nodes = OrderedSet(
+            [name for name, node in dag.nodes.items() if node.node_type == "kernel"]
+        )
 
         # If height is 0, only show kernels
         if height == 0:
@@ -1333,15 +1334,15 @@ class JsonProfile:
                 for dur, tid in kernel_node.kernel_instances:
                     filtered_dag.add_kernel_instance(kernel_name, dur, tid)
                 # Copy performance stats
-                filtered_dag.nodes[kernel_name].achieved_flops_list = (
-                    kernel_node.achieved_flops_list[:]
-                )
-                filtered_dag.nodes[kernel_name].achieved_bandwidth_list = (
-                    kernel_node.achieved_bandwidth_list[:]
-                )
-                filtered_dag.nodes[kernel_name].bound_type_list = (
-                    kernel_node.bound_type_list[:]
-                )
+                filtered_dag.nodes[
+                    kernel_name
+                ].achieved_flops_list = kernel_node.achieved_flops_list[:]
+                filtered_dag.nodes[
+                    kernel_name
+                ].achieved_bandwidth_list = kernel_node.achieved_bandwidth_list[:]
+                filtered_dag.nodes[
+                    kernel_name
+                ].bound_type_list = kernel_node.bound_type_list[:]
             return filtered_dag
 
         # Perform reverse BFS from kernels to find nodes within height limit
@@ -1352,11 +1353,11 @@ class JsonProfile:
             reverse_edges[child].append(parent)
 
         # BFS from kernel nodes going backwards (upwards in the DAG)
-        nodes_to_include = set(kernel_nodes)  # Always include kernels
+        nodes_to_include = OrderedSet(kernel_nodes)  # Always include kernels
         current_level = kernel_nodes.copy()
 
         for level in range(height):
-            next_level = set()
+            next_level = OrderedSet()
             for node in current_level:
                 # Add all parents of current level nodes
                 for parent in reverse_edges[node]:
@@ -1380,21 +1381,21 @@ class JsonProfile:
                 for dur, tid in original_node.kernel_instances:
                     filtered_dag.add_kernel_instance(node_name, dur, tid)
                 # Copy performance stats
-                filtered_dag.nodes[node_name].achieved_flops_list = (
-                    original_node.achieved_flops_list[:]
-                )
-                filtered_dag.nodes[node_name].achieved_bandwidth_list = (
-                    original_node.achieved_bandwidth_list[:]
-                )
-                filtered_dag.nodes[node_name].bound_type_list = (
-                    original_node.bound_type_list[:]
-                )
+                filtered_dag.nodes[
+                    node_name
+                ].achieved_flops_list = original_node.achieved_flops_list[:]
+                filtered_dag.nodes[
+                    node_name
+                ].achieved_bandwidth_list = original_node.achieved_bandwidth_list[:]
+                filtered_dag.nodes[
+                    node_name
+                ].bound_type_list = original_node.bound_type_list[:]
             else:
                 # Copy operation node data
                 if hasattr(original_node, "instance_count"):
-                    filtered_dag.nodes[node_name].instance_count = (
-                        original_node.instance_count
-                    )
+                    filtered_dag.nodes[
+                        node_name
+                    ].instance_count = original_node.instance_count
 
         # Add edges that connect nodes within our filtered set
         for parent, child in dag.edges:

@@ -2,9 +2,10 @@
 DAG node classes for representing trace execution graphs.
 """
 
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
+
 
 if TYPE_CHECKING:
     from .json_profile import JsonProfile
@@ -15,46 +16,47 @@ try:
 except ImportError:
     pass
 
+NodeName = Literal["op", "kernel"]
+RooflineName = Literal["compute", "memory"]
+
 
 class TraceDAGNode:
     """Represents a node in the DAG - either an operation or a kernel."""
 
-    def __init__(self, name: str, node_type: str):
+    def __init__(self, name: str, node_type: NodeName):
         self.name = name
-        self.node_type = node_type  # 'op' or 'kernel'
-        self.kernel_instances: List[
-            Tuple[float, int]
-        ] = []  # List of (duration_us, thread_id) for kernels
-        self.instance_count: int = (
-            0  # Number of times this operation appears in the trace
-        )
-        # Performance statistics for kernels
-        self.achieved_flops_list: List[
-            float
-        ] = []  # List of achieved FLOPS % for each instance
-        self.achieved_bandwidth_list: List[
-            float
-        ] = []  # List of achieved bandwidth % for each instance
+        self.node_type: NodeName = node_type
+        # List of (duration_us, thread_id) for kernels
+        self.kernel_instances: List[Tuple[float, int]] = []
 
-        # Roofline analysis
-        self.bound_type_list: List[
-            str
-        ] = []  # List of "compute" or "memory" for each instance based on roofline analysis
+        # Number of times this operation appears in the trace
+        self.instance_count: int = 0
 
-        # Multi-trace support
-        self.trace_data: Dict[int, Dict] = {}  # Maps trace_id to trace-specific data
+        # List of achieved FLOPS % for each instance
+        self.achieved_flops_list: List[float] = []
+
+        # List of achieved bandwidth % for each instance
+        self.achieved_bandwidth_list: List[float] = []
+
+        # List of "compute" or "memory" for each instance based on roofline analysis
+        self.bound_type_list: List[RooflineName] = []
+
+        # Multi-trace support: maps trace_id to trace-specific data
+        self.trace_data: Dict[int, Dict] = {}
 
 
 class MultiTraceDAGNode:
     """Represents a composite node in the multi-trace DAG."""
 
-    def __init__(self, name: str, node_type: str):
+    def __init__(self, name: str, node_type: NodeName):
         self.name = name
-        self.node_type = node_type  # 'op' or 'kernel'
-        self.trace_instances: Dict[int, TraceDAGNode] = {}  # Maps trace_id to node data
-        self.present_in_traces: OrderedSet[int] = (
-            OrderedSet()
-        )  # Which traces contain this node
+        self.node_type: NodeName = node_type
+
+        # Maps trace_id to node data
+        self.trace_instances: Dict[int, TraceDAGNode] = {}
+
+        # Which traces contain this node
+        self.present_in_traces: OrderedSet[int] = OrderedSet()
 
     def add_trace_instance(self, trace_id: int, node: TraceDAGNode):
         """Add data for this node from a specific trace."""
@@ -67,9 +69,8 @@ class MultiTraceDAG:
 
     def __init__(self):
         self.nodes: Dict[str, MultiTraceDAGNode] = {}
-        self.edges: OrderedSet[Tuple[str, str, int]] = (
-            OrderedSet()
-        )  # (parent, child, trace_id) relationships
+        # (parent, child, trace_id) relationships
+        self.edges: OrderedSet[Tuple[str, str, int]] = OrderedSet()
         self.trace_colors: Dict[int, str] = {}
         self.trace_names: Dict[int, str] = {}
 
@@ -233,8 +234,8 @@ class MultiTraceDAG:
 
                         if baseline_duration == 0.0:
                             # Kernel not present in baseline - use red tinted version
-                            trace_kernel_colors[trace_id][kernel_name] = self._tint_color(
-                                base_color, "red", 0.8
+                            trace_kernel_colors[trace_id][kernel_name] = (
+                                self._tint_color(base_color, "red", 0.8)
                             )
                         else:
                             diff_ratio = (
@@ -270,8 +271,10 @@ class MultiTraceDAG:
                             ) / len(kernel_node.achieved_bandwidth_list)
                             # Higher utilization -> more green tint
                             utilization_intensity = min(1.0, avg_utilization / 100.0)
-                            trace_kernel_colors[trace_id][kernel_name] = self._tint_color(
-                                base_color, "green", utilization_intensity
+                            trace_kernel_colors[trace_id][kernel_name] = (
+                                self._tint_color(
+                                    base_color, "green", utilization_intensity
+                                )
                             )
                         else:
                             # No utilization data - use base gradient
@@ -288,13 +291,15 @@ class MultiTraceDAG:
                         base_color = base_gradients.get(kernel_name, "#4ECDC4")
 
                         if kernel_node.achieved_flops_list:
-                            avg_utilization = sum(kernel_node.achieved_flops_list) / len(
+                            avg_utilization = sum(
                                 kernel_node.achieved_flops_list
-                            )
+                            ) / len(kernel_node.achieved_flops_list)
                             # Higher utilization -> more purple tint
                             utilization_intensity = min(1.0, avg_utilization / 100.0)
-                            trace_kernel_colors[trace_id][kernel_name] = self._tint_color(
-                                base_color, "purple", utilization_intensity
+                            trace_kernel_colors[trace_id][kernel_name] = (
+                                self._tint_color(
+                                    base_color, "purple", utilization_intensity
+                                )
                             )
                         else:
                             # No utilization data - use base gradient
@@ -337,7 +342,9 @@ class MultiTraceDAG:
                             if valid_instances > 0:
                                 avg_score = total_score / valid_instances
                                 # Lower utilization -> more red tint (worse performance)
-                                utilization_intensity = 1.0 - min(1.0, avg_score / 100.0)
+                                utilization_intensity = 1.0 - min(
+                                    1.0, avg_score / 100.0
+                                )
                                 trace_kernel_colors[trace_id][kernel_name] = (
                                     self._tint_color(
                                         base_color, "red", utilization_intensity
@@ -397,29 +404,29 @@ class MultiTraceDAG:
     def filter_by_height(self, height: int) -> "MultiTraceDAG":
         """
         Filter the multi-trace DAG to only show nodes up to a specified height above kernel nodes.
-          
+
         Args:
             height: Maximum levels of non-kernel nodes to show above kernels
                    (0 = only kernels, 1 = kernels + direct parents, etc.)
-          
+
         Returns:
             A new filtered MultiTraceDAG containing only nodes within the height limit
         """
         if height < 0:
             return self
-              
+
         filtered_dag = MultiTraceDAG()
-          
+
         # Copy trace metadata
         filtered_dag.trace_colors = self.trace_colors.copy()
         filtered_dag.trace_names = self.trace_names.copy()
-          
+
         # Find all kernel nodes first across all traces
         kernel_nodes = set()
         for node_name, multi_node in self.nodes.items():
             if multi_node.node_type == "kernel":
                 kernel_nodes.add(node_name)
-          
+
         # If height is 0, only show kernels
         if height == 0:
             for kernel_name in kernel_nodes:
@@ -431,32 +438,34 @@ class MultiTraceDAG:
                         new_multi_node.add_trace_instance(trace_id, node)
                     filtered_dag.nodes[kernel_name] = new_multi_node
             return filtered_dag
-          
+
         # Build reverse edge mapping for each trace
         reverse_edges_by_trace = {}
         for trace_id in self.trace_names.keys():
             reverse_edges_by_trace[trace_id] = {}
-              
+
         for parent, child, trace_id in self.edges:
             if trace_id not in reverse_edges_by_trace:
                 reverse_edges_by_trace[trace_id] = {}
             if child not in reverse_edges_by_trace[trace_id]:
                 reverse_edges_by_trace[trace_id][child] = []
             reverse_edges_by_trace[trace_id][child].append(parent)
-          
+
         # For each trace, perform BFS from kernels going backwards
         nodes_to_include_by_trace = {}
         for trace_id in self.trace_names.keys():
             nodes_to_include = set()
             current_level = set()
-              
+
             # Start with kernels that exist in this trace
             for kernel_name in kernel_nodes:
-                if (kernel_name in self.nodes and 
-                    trace_id in self.nodes[kernel_name].present_in_traces):
+                if (
+                    kernel_name in self.nodes
+                    and trace_id in self.nodes[kernel_name].present_in_traces
+                ):
                     nodes_to_include.add(kernel_name)
                     current_level.add(kernel_name)
-              
+
             # BFS backwards for specified height
             for level in range(height):
                 next_level = set()
@@ -467,42 +476,46 @@ class MultiTraceDAG:
                             if parent not in nodes_to_include:
                                 next_level.add(parent)
                                 nodes_to_include.add(parent)
-                  
+
                 if not next_level:
                     break  # No more levels to explore
-                      
+
                 current_level = next_level
-              
+
             nodes_to_include_by_trace[trace_id] = nodes_to_include
-          
+
         # Union all nodes to include across all traces
         all_nodes_to_include = set()
         for nodes_set in nodes_to_include_by_trace.values():
             all_nodes_to_include.update(nodes_set)
-          
+
         # Build the filtered DAG with only the nodes we want to include
         for node_name in all_nodes_to_include:
             if node_name in self.nodes:
                 original_multi_node = self.nodes[node_name]
-                new_multi_node = MultiTraceDAGNode(node_name, original_multi_node.node_type)
-                  
+                new_multi_node = MultiTraceDAGNode(
+                    node_name, original_multi_node.node_type
+                )
+
                 # Only include trace instances that should be included for this node
                 for trace_id, node in original_multi_node.trace_instances.items():
                     if node_name in nodes_to_include_by_trace.get(trace_id, set()):
                         new_multi_node.add_trace_instance(trace_id, node)
-                  
+
                 # Only add the multi-node if it has at least one trace instance
                 if new_multi_node.trace_instances:
                     filtered_dag.nodes[node_name] = new_multi_node
-          
+
         # Add edges that connect nodes within our filtered set
         for parent, child, trace_id in self.edges:
-            if (parent in filtered_dag.nodes and 
-                child in filtered_dag.nodes and
-                parent in nodes_to_include_by_trace.get(trace_id, set()) and
-                child in nodes_to_include_by_trace.get(trace_id, set())):
+            if (
+                parent in filtered_dag.nodes
+                and child in filtered_dag.nodes
+                and parent in nodes_to_include_by_trace.get(trace_id, set())
+                and child in nodes_to_include_by_trace.get(trace_id, set())
+            ):
                 filtered_dag.edges.add((parent, child, trace_id))
-          
+
         return filtered_dag
 
 
@@ -532,7 +545,9 @@ class TraceDAG:
             if node.node_type == "kernel":
                 node.kernel_instances.append((duration_us, thread_id))
 
-    def calculate_kernel_time_gradients(self, base_color: str = "#4ECDC4") -> Dict[str, str]:
+    def calculate_kernel_time_gradients(
+        self, base_color: str = "#4ECDC4"
+    ) -> Dict[str, str]:
         """Calculate gradient colors based on kernel time percentages."""
         # Calculate total kernel time
         total_kernel_time = 0.0
