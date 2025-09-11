@@ -8,9 +8,9 @@ for file in requires_files:
         lines = f.readlines()
     if "torch" in "".join(lines).lower():
         print("removed:")
-        with open(file, 'w') as f:
+        with open(file, "w") as f:
             for line in lines:
-                if 'torch' not in line.lower():
+                if "torch" not in line.lower():
                     f.write(line)
     print(f"<<< done cleaning {file}")
     print()
