@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     MACOS_VERSION,
     parametrize,
     serialTest,
+    skipIfMPS,
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
@@ -2989,6 +2990,18 @@ class CommonTemplate:
                 torch.randint(10, (2, 3), dtype=torch.int32),
             ),
         )
+
+    def test_torch_device_split(self):
+        def fn(x):
+            return x.split(2)
+
+        x = torch.rand(10)
+
+        with x.device:
+            out = torch.compile(fn)(x)
+            ref = fn(x)
+            for a, b in zip(out, ref):
+                self.assertTrue(torch.allclose(a, b))
 
     def test_relu(self):
         def fn(a, b):
@@ -6081,6 +6094,16 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    def test_unsigned_constant_tensors(self):
+        def fn(x):
+            c = torch.tensor(7, dtype=torch.uint8)
+            return c + x, torch.neg(c), torch.neg(c) + x
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     # Disable size_asserts for this test due to https://github.com/pytorch/pytorch/issues/145963
     @config.patch(size_asserts=os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS") == "1")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -8480,6 +8503,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfMPS
+    def test_slice_scatter_dtype_consistency(self):
+        # Test dtype consistency of slice_scatter
+        def fn(x, y):
+            return torch.slice_scatter(y, x, 0)
+
+        for dtype in [
+            torch.int64,
+            torch.float64,
+        ]:
+            self.common(
+                fn,
+                [
+                    torch.tensor([0], dtype=dtype),
+                    torch.tensor([0], dtype=torch.float32),
+                ],
+            )
+
     @skip_if_gpu_halide  # compile error on gpu
     def test_scatter1(self):
         def fn(a, dim, index, b):
@@ -10711,6 +10752,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_pattern_matcher_unbacked(self):
+        @torch.compile(fullgraph=True)
+        def get_mask(W: torch.Tensor, percentage_nonzeros: torch.Tensor):
+            total_elements = W.numel()
+            k = total_elements * percentage_nonzeros
+            top_k_indices = torch.topk(torch.abs(W).flatten(), k.int())[1]
+            mask = torch.zeros(total_elements, dtype=torch.bool, device=W.device)
+            mask.scatter_(0, top_k_indices, True)
+            mask = mask.view(W.shape)
+            return mask
+
+        x = torch.randn((128, 64), device=self.device)
+        p = torch.tensor(0.50, device=self.device)
+        get_mask(x, p)
+
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
@@ -12874,8 +12931,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             not in [
                 "airy_ai",
                 "erfcx",
-                "gammainc",
-                "gammaincc",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
@@ -14411,6 +14466,55 @@ if RUN_GPU:
             self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
+
+        @config.patch(expand_dimension_for_pointwise_nodes=True)
+        def test_rope_fusion(self):
+            batch_size, seq_length, hidden_dim = 8, 16, 128
+            num_q_heads, num_kv_heads = 32, 8
+
+            def prepare_input(batch_size, seq_length):
+                q = torch.randn(
+                    (batch_size, num_q_heads, seq_length, hidden_dim), device=GPU_TYPE
+                )
+                k = torch.randn(
+                    (batch_size, num_kv_heads, seq_length, hidden_dim),
+                    device=GPU_TYPE,
+                )
+                pos_ids = torch.arange(
+                    seq_length, device=GPU_TYPE, dtype=torch.long
+                ).unsqueeze(0)
+
+                # dummy cos and sin
+                cos, sin = (
+                    torch.randn((1, seq_length, hidden_dim), device=GPU_TYPE),
+                    torch.randn((1, seq_length, hidden_dim), device=GPU_TYPE),
+                )
+                return q, k, cos, sin, pos_ids
+
+            def rotate_half(x):
+                """Rotates half the hidden dims of the input."""
+                x1 = x[..., : x.shape[-1] // 2]
+                x2 = x[..., x.shape[-1] // 2 :]
+                return torch.cat((-x2, x1), dim=-1)
+
+            def apply_rotary_pos_emb(
+                q, k, cos, sin, position_ids=None, unsqueeze_dim=1
+            ):
+                cos = cos.unsqueeze(unsqueeze_dim)
+                sin = sin.unsqueeze(unsqueeze_dim)
+                q_embed = (q * cos) + (rotate_half(q) * sin)
+                k_embed = (k * cos) + (rotate_half(k) * sin)
+                return q_embed, k_embed
+
+            q, k, cos, sin, pos_ids = prepare_input(batch_size, seq_length)
+            compiled_fn = torch.compile(apply_rotary_pos_emb)
+            compiled_out = compiled_fn(q, k, cos, sin, pos_ids)
+            eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
+            self.assertEqual(compiled_out, eager_out)
+
+            # make sure that rope is fused into 1 kernel
+            code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
+            self.assertEqual(code.count(".run("), 1)
 
         def test_numpy_autograd(self):
             def my_torch(x):

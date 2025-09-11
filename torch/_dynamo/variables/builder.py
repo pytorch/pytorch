@@ -168,10 +168,10 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -630,7 +630,7 @@ class VariableBuilder:
 
         from ..decorators import (
             DynamoConfigPatchProxy,
-            SetFullgraphDecoratorContextManager,
+            ErrorOnGraphBreakDecoratorContextManager,
         )
 
         if has_triton():
@@ -988,8 +988,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
-        elif isinstance(value, SetFullgraphDecoratorContextManager):
-            return SetFullgraphVariable(value.fullgraph)
+        elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
+            return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -2991,12 +2991,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, (int, float, bool)) and (
         proxy.node.target is call_torchbind
-    ):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is flat_apply
+        or proxy.node.target is flat_apply
+        or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
