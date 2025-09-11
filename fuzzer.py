@@ -1272,7 +1272,7 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
         max_depth: Maximum depth for operation stack to use in all iterations
     """
     known_issues = {
-        "RuntimeError: self.stride(-1) must be 1 to view ComplexDouble as Double (different element sizes)":"https://github.com/pytorch/pytorch/issues/162561",
+        "RuntimeError: self.stride(-1) must be 1 to view ComplexDouble as":"https://github.com/pytorch/pytorch/issues/162561",
         "BooleanAtom not allowed in this context":"https://github.com/pytorch/pytorch/issues/160726"
     }
 
@@ -1285,7 +1285,7 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
     if max_depth is not None:
         print(f"Using max_depth: {max_depth}")
 
-    for i in range(100):
+    for i in range(1000):
         print(f"------------------ TEST iteration {i} ---------------")
 
         # Use starting seed + iteration number for reproducible but varied results
@@ -1297,6 +1297,7 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
         if not success:
             if known_issue(error_message):
                 print(f"Known issue skipped")
+                continue
 
             print(f"Test failed with error: {error_message}")
             return
@@ -1379,12 +1380,6 @@ if __name__ == "__main__":
         print(f"Result: seed={seed}, success={success}")
         if not success:
             print(f"Error: {error_message}")
-    elif args.test:
-        # Run the test loop
-        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
     else:
-        # Default behavior - run all tests
-        test_fuzzing_tensors()
-
-        # Test the new function interface
-        fuzz_and_test()
+        # Default behavior - run the test loop (--test is now the default)
+        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
