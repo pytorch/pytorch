@@ -30,12 +30,39 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
-    # Since PyTorch already loads NVRTC, we can use the system library
-    # which should be compatible with PyTorch's version
+    # Try to load versioned NVRTC libraries in order from newest to oldest
+    # This matches how PyTorch loads NVRTC in torch/__init__.py
     if sys.platform == "win32":
-        return ctypes.CDLL("nvrtc64_120_0.dll")
+        nvrtc_libs = [
+            "nvrtc64_130_0.dll",
+            "nvrtc64_120_0.dll",
+            "nvrtc64_112_0.dll", 
+            "nvrtc64_111_0.dll",
+            "nvrtc64_110_0.dll",
+        ]
     else:
-        return ctypes.CDLL("libnvrtc.so")
+        nvrtc_libs = [
+            "libnvrtc.so.13",
+            "libnvrtc.so.12", 
+            "libnvrtc.so.11.2",
+            "libnvrtc.so.11.1",
+            "libnvrtc.so.11.0",
+            "libnvrtc.so",  # Fallback to unversioned
+        ]
+    
+    last_error = None
+    for lib_name in nvrtc_libs:
+        try:
+            return ctypes.CDLL(lib_name)
+        except OSError as e:
+            last_error = e
+            continue
+    
+    # If none of the versioned libraries could be loaded, raise the last error
+    if last_error:
+        raise last_error
+    else:
+        raise OSError("Could not find any NVRTC library")
 
 
 def _nvrtc_compile(
@@ -63,6 +90,8 @@ def _nvrtc_compile(
     """
     # Ensure CUDA is initialized
     import torch.cuda
+    if not torch.cuda.is_initialized():
+        torch.cuda.init()
 
     # Load NVRTC library
     libnvrtc = _get_nvrtc_library()
@@ -300,6 +329,8 @@ def _cuda_load_module(
     """
     # Ensure CUDA is initialized
     import torch.cuda
+    if not torch.cuda.is_initialized():
+        torch.cuda.init()
 
     # Load CUDA driver library
     libcuda = _get_cuda_library()
