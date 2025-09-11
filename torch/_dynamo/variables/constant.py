@@ -46,7 +46,7 @@ class ConstantVariable(VariableTracker):
         source = kwargs.get("source", None)
 
         if ((value is None) or istype(value, (int, bool))) and (
-            c := check_cache(value)
+            c := _check_constant_cache(value)
         ):
             return c
 
@@ -251,21 +251,25 @@ its type to `common_constant_types`.
 _constant_cache = {}
 
 
-def check_cache(value):
+def _check_constant_cache(value):
     global _constant_cache
     return _constant_cache.get(value)
 
 
-def fill_constant_cache():
+def _fill_constant_cache():
     # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
     # strings (one-char latin-1) and code object constants, which are stored
     # in "tx._constants_cache"
+
+    global _constant_cache
+    if len(_constant_cache) > 0:
+        return
+
     constant_none = ConstantVariable(None)
     constant_true = ConstantVariable(True)
     constant_false = ConstantVariable(False)
     constant_NotImplemented = ConstantVariable(NotImplemented)
 
-    global _constant_cache
     _constants_cache = {
         None: constant_none,
         True: constant_true,
@@ -284,7 +288,7 @@ def fill_constant_cache():
         _constants_cache[chr(i)] = ConstantVariable(chr(i))
 
 
-fill_constant_cache()
+_fill_constant_cache()
 
 
 class EnumVariable(VariableTracker):
