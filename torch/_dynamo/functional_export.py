@@ -49,7 +49,9 @@ def post_process_error_msg(
     return constraint_violation_error
 
 
-def clean_nn_module_stack(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def clean_nn_module_stack(
+    graph_module: torch.fx.GraphModule, is_inline_builtin=False
+) -> torch.fx.GraphModule:
     for node in graph_module.graph.nodes:
         if "nn_module_stack" in node.meta:
             nn_module_stack = node.meta["nn_module_stack"].copy()
@@ -58,10 +60,22 @@ def clean_nn_module_stack(graph_module: torch.fx.GraphModule) -> torch.fx.GraphM
                 del nn_module_stack[first_key]
             nn_module_stack_corrected = {}
             for k, v in nn_module_stack.items():
-                k_new = "".join(k.split("__export_root"))
+                k_new = k
+                if "._modules['_export_root']" in k:
+                    k_new = "".join(k.split("._modules['_export_root']"))
+                elif "._export_root" in k:
+                    k_new = "".join(k.split("._export_root"))
                 child_name, child_class = v
-                child_name = child_name.replace("._export_root", "")
-                nn_module_stack_corrected[k_new] = (child_name, child_class)
+                if "._modules['_export_root']" in child_name:
+                    child_name = child_name.replace("._modules['_export_root']", "")
+                elif "._export_root" in child_name:
+                    child_name = child_name.replace("._export_root", "")
+
+                if is_inline_builtin:
+                    if child_name != "L['self']":
+                        nn_module_stack_corrected[k_new] = (child_name, child_class)
+                else:
+                    nn_module_stack_corrected[k_new] = (child_name, child_class)
             node.meta["nn_module_stack"] = nn_module_stack_corrected
     return graph_module
 
@@ -71,7 +85,11 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
 
     # Clean parameter names: L__self____export_root_param -> L__self___param
     def clean_name(name) -> str:
-        return name.replace("__export_root_", "_") if "__export_root_" in name else name
+        if "____modules___export_root_" in name:
+            return name.replace("____modules___export_root_", "_")
+        if "__export_root_" in name:
+            return name.replace("__export_root_", "_")
+        return name
 
     # Update get_attr nodes in-place
     for node in graph_module.graph.nodes:
@@ -409,7 +427,9 @@ def _dynamo_graph_capture_for_export(
             )
             transformed_graph.recompile()
 
-            clean_nn_module_stack(transformed_graph)
+            clean_nn_module_stack(
+                transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
+            )
             clean_export_root(transformed_graph)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
