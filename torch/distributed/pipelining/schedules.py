@@ -3220,10 +3220,11 @@ def _check_torch_compile_compatibility(
         RuntimeError: If any stage uses torch.compile
     """
     for stage in stages:
-        for module in stage.submod.modules():
-            if isinstance(module, OptimizedModule):
-                raise RuntimeError(
-                    f"The {schedule_name} schedule is not supported with "
-                    "stage modules that have used torch.compile. "
-                    f"Found OptimizedModule in {type(module).__name__}"
-                )
+        if isinstance(stage.submod, torch.nn.Module):
+            for module in stage.submod.modules():
+                if isinstance(module, OptimizedModule):
+                    raise RuntimeError(
+                        f"The {schedule_name} schedule is not supported with "
+                        "stage modules that have used torch.compile. "
+                        f"Found OptimizedModule in {type(module).__name__}"
+                    )
