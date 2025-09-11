@@ -223,7 +223,7 @@ class ShardingPropagator:
         op: OpOverload,
         output_specs: OutputSpecType,
         output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
-    ) -> None:
+    ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
         """
@@ -241,8 +241,9 @@ class ShardingPropagator:
                     "not equal the "
                     f"number of op outputs: {len(output_tensor_meta)}."
                 )
-            output_specs.tensor_meta = output_tensor_meta
+            return output_specs.shallow_copy_with_tensor_meta(output_tensor_meta)
         elif isinstance(output_specs, (tuple, list)):
+            new_specs = []
             if not isinstance(output_tensor_meta, (tuple, list)) or len(
                 output_specs
             ) != len(output_tensor_meta):
@@ -276,7 +277,11 @@ class ShardingPropagator:
                                 "does not have an associated TensorMeta"
                             )
 
-                    spec.tensor_meta = output_tensor_meta_i
+                    new_specs.append(spec.shallow_copy_with_tensor_meta(output_tensor_meta_i))
+                else:
+                    new_specs.append(spec)
+
+                return tuple(new_specs)
 
     def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
         """
@@ -504,9 +509,10 @@ class ShardingPropagator:
                 raise ValueError("Unsupported op strategy type")
 
             # associate the output sharding with the output tensor metadata
-            self._wrap_output_spec_tensor_meta(
+            new_output_spec = self._wrap_output_spec_tensor_meta(
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
+            output_sharding.output_spec = new_output_spec
             return output_sharding
         elif op_schema.op in self.op_to_rules:
             # propagate the sharding with rule
@@ -546,9 +552,10 @@ class ShardingPropagator:
                     output_sharding.needs_redistribute = True
 
             # associate the output sharding with the output tensor metadata
-            self._wrap_output_spec_tensor_meta(
+            new_output_spec = self._wrap_output_spec_tensor_meta(
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
+            output_sharding.output_spec = new_output_spec
 
             return output_sharding
         else:
