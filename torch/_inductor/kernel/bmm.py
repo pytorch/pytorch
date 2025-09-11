@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -28,7 +28,6 @@ from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_a
 
 if TYPE_CHECKING:
     from ..ir import ChoiceCaller
-    from ..select_algorithm import KernelTemplate
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -198,29 +197,21 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
-
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
-    kwarg_overrides = {}
-
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten_handler)
-        kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
+        )
 
     if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        templates_to_use.append(bmm_template)
 
-    # Single unified call for all templates
-    choices.extend(
-        V.choices.get_mm_configs(
-            kernel_inputs,
-            templates_to_use,
-            name,
-            kwarg_overrides=kwarg_overrides,
-        )
-    )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [bmm_template], name))
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -280,16 +271,16 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "baddbmm"
     # options to tune from
     choices: list[ChoiceCaller] = []
-
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten_baddbmm)
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [aten_baddbmm], name))
 
     if use_triton_template(layout, check_max_autotune=False):
-        templates_to_use.append(bmm_template)
-
-    # Single unified call for all templates
-    choices.extend(V.choices.get_mm_configs(kernel_inputs, templates_to_use, name))
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                [bmm_template],
+                name,
+            )
+        )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
