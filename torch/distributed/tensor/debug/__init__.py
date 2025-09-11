@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
-from torch.distributed.tensor.debug._comm_mode import CommDebugMode, DTensorDebugMode
+from torch.distributed.tensor.debug._comm_mode import CommDebugMode
 from torch.distributed.tensor.debug._visualize_sharding import visualize_sharding
 
 
-__all__ = ["CommDebugMode", "DTensorDebugMode", "visualize_sharding"]
+__all__ = ["CommDebugMode", "visualize_sharding"]
 
 
 def _get_sharding_prop_cache_info():
@@ -21,5 +21,4 @@ def _get_sharding_prop_cache_info():
 
 # Set namespace for exposed private names
 CommDebugMode.__module__ = "torch.distributed.tensor.debug"
-DTensorDebugMode.__module__ = "torch.distributed.tensor.debug"
 visualize_sharding.__module__ = "torch.distributed.tensor.debug"
