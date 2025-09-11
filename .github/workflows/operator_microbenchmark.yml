@@ -1,0 +1,43 @@
+name: operator_microbenchmark
+
+on:
+  push:
+    tags:
+      - ciflow/operator-microbenchmark/*
+  workflow_dispatch:
+  schedule:
+    # Run at 07:00 UTC every Sunday
+    - cron: 0 6 * * 0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  opmicrobenchmark-build:
+    if: github.repository_owner == 'pytorch'
+    name: opmicrobenchmark-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark", shard: 1, num_shards: 1, runner: "linux.12xlarge", extra_flags: "--use-compile", op_benchmark_tests: "matmul mm add bmm" },
+          { config: "operator_microbenchmark", shard: 1, num_shards: 1, runner: "linux.12xlarge", extra_flags: "", op_benchmark_tests: "matmul mm add bmm" }
+        ]}
+    secrets: inherit
+
+  opmicrobenchmark-test:
+    name: opmicrobenchmark-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: opmicrobenchmark-build
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
+    secrets: inherit
