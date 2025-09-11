@@ -3179,9 +3179,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
 
-            auto options = ::c10d::ProcessGroupGloo::Options::create_default();
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store, rank, size, std::move(options));
+                store,
+                rank,
+                size,
+                ::c10d::ProcessGroupGloo::Options::create_default(timeout));
           }),
           py::arg("store"),
           py::arg("rank"),
