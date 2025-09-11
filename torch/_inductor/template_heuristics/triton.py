@@ -41,8 +41,6 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
-    from ..ir import Layout
-
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -76,7 +74,8 @@ ConvConfig = BaseConfig
 class FlexConfig:
     """
     Base Config class for flex attention
-    - FlexAttn forward, backward and flex decode will use this
+    - FlexAttn forward and backward will use this. For flex decoding,
+      please use FlexDecodingConfig.
 
     NOTE:
     For flex_attn bwd block_m and block_n are reused for block_m1, block_m2, block_n1, block_n2
@@ -358,6 +357,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 64, 64, 6, 2),
             GemmConfig(32, 128, 64, 6, 4),
             GemmConfig(32, 256, 64, 6, 4),
+            GemmConfig(64, 16, 256, 5, 4),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 256, 128, 4, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -370,6 +373,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 5, 8),
             GemmConfig(128, 128, 128, 6, 8),
             GemmConfig(128, 128, 64, 4, 8),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(128, 256, 128, 3, 8),
+            GemmConfig(64, 128, 256, 4, 4),
+            GemmConfig(64, 256, 128, 4, 4),
         ]
 
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
@@ -1451,7 +1458,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
@@ -1479,7 +1485,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # Generate and process configs
         for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
             template_kwargs = self._convert_config_to_template_kwargs(
-                c, m, n, k, layout
+                c,
+                m,
+                n,
+                k,
+                kernel_inputs.out_dtype(),
             )
             yield template_kwargs
 
@@ -1489,7 +1499,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         m: sympy.Integer,
         n: sympy.Integer,
         k: sympy.Integer,
-        layout: Any,
+        out_dtype: torch.dtype,
     ) -> dict[str, Any]:
         """
         Convert triton config to template kwargs.
@@ -1513,7 +1523,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             EVEN_K=even_k_symbolic,
             ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
-            ACC_TYPE=self._get_acc_type(layout.dtype),
+            ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
             **triton_config.kwargs,
@@ -1562,14 +1572,11 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
         m, n, k = kernel_inputs.mnk_symbolic()
-        for kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name
-        ):
+        for kwargs in super()._get_template_configs_impl(kernel_inputs, op_name):
             # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
@@ -1586,10 +1593,9 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
     ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         kwargs["workspace_arg"] = get_tma_workspace_arg(
             num_tma_descriptors=2,
             device=kernel_inputs.device(),
@@ -1614,7 +1620,6 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
@@ -1634,7 +1639,6 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
-            layout,
             op_name,
         ):
             yield {**template_kwargs, **tma_opts}
@@ -1684,7 +1688,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
@@ -1734,7 +1737,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, layout, op_name
+            kernel_inputs, op_name
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
@@ -1752,10 +1755,9 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
     ) -> dict[str, Any]:
-        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         from ..kernel.mm_common import scale_mm_epilogue
 
         return {
@@ -1792,7 +1794,6 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Any,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
@@ -1801,7 +1802,6 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
-            layout,
             op_name,
         ):
             # Add TMA-specific options for device TMA scaled MM
