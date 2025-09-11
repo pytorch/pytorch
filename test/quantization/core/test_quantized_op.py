@@ -7,8 +7,8 @@ import itertools
 import numpy as np
 import operator
 import random
-import sys
 import unittest
+from packaging.version import Version
 from typing import NamedTuple
 
 import torch
@@ -73,7 +73,7 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
-    if sys.version_info >= (3, 13):
+    if Version(np.__version__) >= Version("2.1"):
         raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):

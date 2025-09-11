@@ -2912,7 +2912,9 @@ class GuardBuilder(GuardBuilderBase):
             getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
         )
         # See D64140537 for why we are checking for tuple.
-        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
+        if supports_weakref and not isinstance(
+            guarded_object, (enum.Enum, tuple, weakref.ProxyTypes)
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
@@ -3272,6 +3274,7 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
+        strict_error: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3445,7 +3448,7 @@ class CheckFunctionManager:
                     builder, sorted_guards, self.output_graph
                 )
             except exc.PackageError as e:
-                if torch._dynamo.config.strict_precompile:
+                if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
