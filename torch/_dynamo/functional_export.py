@@ -27,6 +27,27 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 log = logging.getLogger(__name__)
 
 
+def post_process_error_msg(
+    constraint_violation_error: ConstraintViolationError,
+    mod: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+):
+    """
+    Because we trace a different callable, the sources are all messed up.
+    Manually patch them so the error message looks correct.
+    """
+    from torch.export._unlift import _get_input_paths, _replace_sources
+
+    assert isinstance(mod, torch.nn.Module)
+    orig_sig = inspect.signature(mod.forward)
+    flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
+    constraint_violation_error.args = (
+        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+    )
+    return constraint_violation_error
+
+
 def clean_nn_module_stack(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in graph_module.graph.nodes:
         if "nn_module_stack" in node.meta:
@@ -398,10 +419,7 @@ def _dynamo_graph_capture_for_export(
                 module_to_trace.forward.__code__
             ).guard_manager
             check_fn.check(f_locals)
-        except (
-            ConstraintViolationError,
-            torch.utils._sympy.value_ranges.ValueRangeError,
-        ) as e:
+        except ConstraintViolationError as e:
             constraint_violation_error = e
 
         if (
@@ -443,6 +461,9 @@ def _dynamo_graph_capture_for_export(
                         'Set TORCH_LOGS="+export" for more information.'
                     )
         if constraint_violation_error:
+            constraint_violation_error = post_process_error_msg(
+                constraint_violation_error, mod, args, kwargs
+            )
             raise constraint_violation_error
 
         return transformed_graph
