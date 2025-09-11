@@ -114,6 +114,7 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual bool has_multicast_support(int device_idx) = 0;
   virtual c10::DeviceType supported_device_type() = 0;
   virtual std::string name() = 0;
+  virtual size_t num_active_allocations() = 0;
 };
 
 C10_EXPORT bool is_finalizing();
@@ -206,5 +207,7 @@ C10_EXPORT void register_mempool_allocator(
 
 TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
     c10::Device device);
+
+TORCH_API size_t num_active_allocations(c10::Device device);
 
 } // namespace c10d::symmetric_memory

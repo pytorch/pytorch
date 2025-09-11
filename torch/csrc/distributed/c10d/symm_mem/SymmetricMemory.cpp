@@ -267,6 +267,11 @@ TORCH_API bool has_multicast_support(
   }
 }
 
+TORCH_API size_t num_active_allocations(c10::Device device) {
+  auto allocator = get_allocator(device.type());
+  return allocator->num_active_allocations();
+}
+
 // MemPool Support
 
 // A map from device type to allocator for MemPool.

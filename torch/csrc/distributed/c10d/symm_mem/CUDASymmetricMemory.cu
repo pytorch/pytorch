@@ -817,6 +817,11 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
   return it->second;
 }
 
+size_t CUDASymmetricMemoryAllocator::num_active_allocations() {
+  std::shared_lock lock(mutex_);
+  return ptr_to_block_.size();
+}
+
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();

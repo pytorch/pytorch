@@ -779,6 +779,8 @@ class _SymmetricMemory:
     def rendezvous(
         tensor: torch.Tensor, group_name: str | None = None
     ) -> _SymmetricMemory: ...
+    @staticmethod
+    def num_active_allocations(device: torch.device) -> int: ...
     def get_buffer(
         self,
         rank: int,

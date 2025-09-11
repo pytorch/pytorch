@@ -7,6 +7,7 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -66,6 +67,29 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
 
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
+    def test_dealloc(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+
+        foo()
+        self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
+
+        t0 = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(t0, group=group_name)
+        t1 = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(t1, group=group_name)
+        del t0, t1
+        self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
 
     @skipIfRocm
     def test_alloc_without_device_context(self) -> None:
