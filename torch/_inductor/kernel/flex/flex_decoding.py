@@ -354,6 +354,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
             **cur_kernel_options,
         )
 
+    filtered_score_mod_buffers = [
+        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+    ]
+    filtered_mask_mod_buffers = [
+        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+    ]
+
     inputs_for_flex_decoding = (
         [
             query,
@@ -366,8 +373,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_num_blocks,
             full_kv_indices,
         ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
+        + filtered_score_mod_buffers
+        + filtered_mask_mod_buffers
     )
 
     input_gen_fns = {

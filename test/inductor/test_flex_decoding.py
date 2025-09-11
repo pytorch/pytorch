@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.utils._triton import has_triton_tma_device
 
 
 if IS_WINDOWS and IS_CI:
@@ -101,12 +102,13 @@ def skip_on_xpu(test_func):
     return decorated_func
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
+        kernel_options=kernel_options,
     )
 
 
@@ -379,6 +381,7 @@ class TestFlexDecoding(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
         device="cuda",
+        kernel_options=None,
     ):
         assert score_mod is not None or block_mask is not None, (
             "Must provide score_mod or block_mask"
@@ -409,7 +412,10 @@ class TestFlexDecoding(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         sdpa_partial = create_attention(
-            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+            score_mod,
+            block_mask,
+            enable_gqa=(not Q_H == KV_H),
+            kernel_options=kernel_options,
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         if not self.test_inference_only:
@@ -556,8 +562,13 @@ class TestFlexDecoding(InductorTestCase):
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
-        converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)
-        converted_score_mod = paged_attention.get_score_mod(score_mod)
+        kv_len_tensor = torch.full((KV_B,), KV_S, device=device, dtype=torch.int64)
+        converted_block_mask = paged_attention.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
+        converted_score_mod = paged_attention.get_score_mod(
+            score_mod, kv_len=kv_len_tensor
+        )
 
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
@@ -840,6 +851,28 @@ class TestFlexDecoding(InductorTestCase):
             noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
+
+    @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_tma_decoding(self, device, dtype: torch.dtype):
+        n_heads, head_dim, seq_len = 4, 16, 128
+
+        score_mod = _generate_alibi_bias(n_heads)
+        kernel_options = {"USE_TMA": True}
+        self.run_test(
+            score_mod=score_mod,
+            dtype=dtype,
+            Q_B=1,
+            Q_H=n_heads,
+            Q_S=1,
+            Q_D=head_dim,
+            KV_B=1,
+            KV_H=n_heads,
+            KV_S=seq_len,
+            V_D=head_dim,
+            device=device,
+            kernel_options=kernel_options,
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1548,6 +1581,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(score_mod, device=device)
         self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test_with_paged_attention(
+            score_mod=score_mod,
+            dtype=torch.bfloat16,
+            Q_B=4,
+            Q_H=1,
+            Q_S=1,
+            QK_D=16,
+            KV_B=4,
+            KV_H=1,
+            KV_S=64,
+            V_D=16,
+            device=device,
+        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -1866,9 +1912,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             # Ensure no more re-compilation after the second automatic dynamic shape version.
             if i == 0:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 4)
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -2016,11 +2062,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         input_pos = torch.tensor(prefill_length, device=device, dtype=torch.int32).view(
             max_batch_size, 1
         )
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod), new_block_mask, enable_gqa=False
+                paged_cache.get_score_mod(score_mod, kv_len=kv_len_tensor),
+                new_block_mask,
+                enable_gqa=False,
             )
         )
         paged_out = compiled_sdpa(

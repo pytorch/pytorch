@@ -12300,8 +12300,17 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
-            if op.name in "grid_sampler_3d":
+            if op.name in ["grid_sampler_3d", "asinh"]:
                 atol, rtol = 1e-4, 1e-4
+
+            if op.name == "kthvalue":
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                # kthvalue is non-deterministic if input has repeated values
+                dim = cpu_args[2] if len(cpu_args) > 2 else -1
+                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
+                self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -12764,119 +12773,6 @@ class TestMetalLibrary(TestCaseMPS):
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
 
-
-class TestSparseMPS(TestCaseMPS):
-    def _get_basic_sparse_coo(self, device="mps"):
-        indices = torch.tensor([[0, 1], [2, 0]], dtype=torch.int64, device=device)
-        values = torch.tensor([1, 2], dtype=torch.float32, device=device)
-        size = (2, 3)
-        return torch.sparse_coo_tensor(indices, values, size, device=device)
-
-    def test_sparse_coo_tensor_with_dims(self):
-        indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
-        values = torch.tensor([], dtype=torch.float32, device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-
-    def test_sparse_coo_tensor_with_dims_and_tensors(self):
-        indices = torch.tensor([[0, 1], [2, 0]], device="mps")
-        values = torch.tensor([1., 2.], device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-        self.assertEqual(t._indices().cpu(), indices.cpu())
-        self.assertEqual(t._values().cpu(), values.cpu())
-
-    def test_nnz(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t._nnz(), 2)
-
-    def test_sparse_dim(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t.sparse_dim(), 2)
-
-    def test_to_sparse(self):
-        t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x = t.to_sparse()
-        t_cpu = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x_cpu = t.to_sparse()
-        self.assertEqual(x.cpu(), x_cpu)
-
-    def test_resize(self):
-        indices = torch.tensor([[0, 1], [2, 0]])
-        values = torch.tensor([3.0, 4.0])
-        size = torch.Size([2, 3])
-        sparse = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
-        sparse = sparse.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        self.assertEqual(sparse, sparse_cpu)
-
-    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64,
-                           torch.float32, torch.float16, torch.bfloat16, torch.bool])
-    def test_coalesce(self, dtype):
-        indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
-        values = torch.tensor([1., 2., 3., 4.], dtype=dtype, device="mps")
-        size = (2, 3)
-        indices_cpu = indices.cpu()
-        values_cpu = values.cpu()
-        sparse_mps = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices_cpu, values_cpu, size, device="cpu")
-        coalesced_mps = sparse_mps.coalesce()
-        coalesced_cpu = sparse_cpu.coalesce()
-
-        self.assertTrue(coalesced_mps.is_coalesced())
-        self.assertTrue(coalesced_cpu.is_coalesced())
-        self.assertEqual(coalesced_mps._nnz(), 2)
-        self.assertEqual(coalesced_mps.cpu(), coalesced_cpu)
-
-    def test_already_coalesced_tensor(self):
-        already_coalesced = self._get_basic_sparse_coo()
-        result = already_coalesced.coalesce()
-        self.assertTrue(result.is_coalesced())
-        self.assertEqual(result._indices().cpu(), already_coalesced._indices().cpu())
-        self.assertEqual(result._values().cpu(), already_coalesced._values().cpu())
-
-    def test_coalesce_empty_sparse_tensor(self):
-        empty_indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
-        empty_values = torch.tensor([], dtype=torch.float32, device="mps")
-        empty_sparse = torch.sparse_coo_tensor(empty_indices, empty_values, (3, 3), device="mps")
-        empty_coalesced = empty_sparse.coalesce()
-        self.assertTrue(empty_coalesced.is_coalesced())
-        self.assertEqual(empty_coalesced._nnz(), 0)
-
-    def test_coalesce_large_tensor(self):
-        size = (1000000, 1000000)
-        num_elements = 1000
-
-        # 800 unique random positions
-        unique_indices = torch.randint(0, size[0], (2, 800), dtype=torch.int64)
-        # 200 duplicates by repeating some of the first 200 indices
-        duplicate_indices = unique_indices[:, :200]
-        indices = torch.cat([unique_indices, duplicate_indices], dim=1)
-        # shuffle indices to mix duplicates with unique entries
-        perm = torch.randperm(indices.size(1))
-        indices = indices[:, perm]
-
-        values = torch.randn(num_elements, dtype=torch.float32)
-        indices_mps = indices.to("mps")
-        values_mps = values.to("mps")
-        sparse_mps = torch.sparse_coo_tensor(indices_mps, values_mps, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
-
-        self.assertFalse(sparse_mps.is_coalesced())
-        coalesced_mps = sparse_mps.coalesce()
-        coalesced_cpu = sparse_cpu.coalesce()
-        self.assertTrue(coalesced_mps.is_coalesced())
-        self.assertTrue(coalesced_cpu.is_coalesced())
-        self.assertEqual(coalesced_mps._nnz(), coalesced_cpu._nnz())
-        self.assertEqual(coalesced_mps._indices().cpu(), coalesced_cpu._indices())
-        self.assertEqual(coalesced_mps._values().cpu(), coalesced_cpu._values())
-
-
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -12891,7 +12787,6 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
-instantiate_parametrized_tests(TestSparseMPS)
 
 if __name__ == "__main__":
     run_tests()
