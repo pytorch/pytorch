@@ -32,8 +32,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocmVersionLessThan,
     TEST_HPU,
-    TEST_XPU,
-    xfailIf,
 )
 
 
@@ -95,7 +93,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_compute_dtype(self):
         use_shard_placement_fn_vals = (
             self._get_use_shard_placement_fn_vals_for_bf16_reduce()
@@ -176,7 +173,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_reduce_dtype(self):
         self.run_subtests(
             {
@@ -299,7 +295,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_grad_acc_with_reduce_dtype(self):
         """
         Tests that gradient accumulation without reduce-scatter when using
@@ -619,7 +614,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
         model = Model()
-        inp = Input(torch.randn(2, 10).to(device_type))
+        inp = Input(torch.randn(2, 10).cuda())
 
         fully_shard(model, mp_policy=mp_policy)
         loss = model(inp).sum()
