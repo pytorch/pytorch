@@ -7,15 +7,15 @@ import itertools
 import numpy as np
 import operator
 import random
-import sys
 import unittest
+from packaging.version import Version
 from typing import NamedTuple
 
 import torch
 from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
+from torch.nn.modules.utils import _ntuple, _pair, _single
 
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given, note
@@ -73,7 +73,7 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
-    if sys.version_info >= (3, 13):
+    if Version(np.__version__) >= Version("2.1"):
         raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
@@ -5311,10 +5311,11 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
-        kernels = _single(kernels)
-        strides = _single(strides)
-        pads = _single(pads)
-        dilations = _single(dilations)
+        input_dimension_function = _ntuple(len(input_feature_map_shape))
+        kernels = input_dimension_function(kernels)
+        strides = input_dimension_function(strides)
+        pads = input_dimension_function(pads)
+        dilations = input_dimension_function(dilations)
         for i in range(len(kernels)):
             assume(input_feature_map_shape[i] + 2 * pads[i]
                    >= dilations[i] * (kernels[i] - 1) + 1)
@@ -7846,10 +7847,11 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
-        kernels = _single(kernels)
-        strides = _single(strides)
-        pads = _single(pads)
-        dilations = _single(dilations)
+        input_dimension_function = _ntuple(len(input_feature_map_shape))
+        kernels = input_dimension_function(kernels)
+        strides = input_dimension_function(strides)
+        pads = input_dimension_function(pads)
+        dilations = input_dimension_function(dilations)
         for i in range(len(kernels)):
             assume(input_feature_map_shape[i] + 2 * pads[i]
                    >= dilations[i] * (kernels[i] - 1) + 1)
