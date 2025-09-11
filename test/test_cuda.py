@@ -6844,6 +6844,70 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_large_shared_memory(self):
+        kernel_source = """
+        __global__ void large_shared_memory_kernel(const float* input, float* output, int n) {
+            extern __shared__ float shared_data[];
+
+            int tid = threadIdx.x;
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+            // Load data into shared memory
+            if (idx < n) {
+                shared_data[tid] = input[idx];
+            } else {
+                shared_data[tid] = 0.0f;
+            }
+            __syncthreads();
+
+            // Perform reduction in shared memory
+            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                if (tid < stride) {
+                    shared_data[tid] += shared_data[tid + stride];
+                }
+                __syncthreads();
+            }
+
+            // Write result
+            if (tid == 0) {
+                output[blockIdx.x] = shared_data[0];
+            }
+        }
+        """
+
+        from torch.cuda import _compile_kernel, get_device_properties
+
+        kernel = _compile_kernel(kernel_source, "large_shared_memory_kernel")
+
+        threads_per_block = 1024  # 1024 threads * 4 bytes = 4KB, but we'll request 64KB
+        shared_mem_size = 64 * 1024  # 64KB
+
+        kernel.set_shared_memory_config(shared_mem_size)
+
+        N = 4096
+        input_data = torch.ones(N, device="cuda", dtype=torch.float32)
+        output_data = torch.zeros(4, device="cuda", dtype=torch.float32)  # 4 blocks
+
+        kernel(
+            grid=(4, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[input_data, output_data, N],
+            shared_mem=shared_mem_size,
+        )
+
+        # Each block should sum 1024 ones = 1024
+        expected = torch.full((4,), 1024.0, dtype=torch.float32)
+        self.assertEqual(output_data.cpu(), expected)
+
+        # Test error handling with more than supported shared memory size
+        max_smem = get_device_properties().shared_memory_per_block_optin
+        excessive_shared_mem = max_smem * 2
+
+        with self.assertRaises(RuntimeError):
+            kernel.set_shared_memory_config(excessive_shared_mem)
+
     @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")

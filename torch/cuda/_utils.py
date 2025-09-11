@@ -38,6 +38,27 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         return ctypes.CDLL("libnvrtc.so")
 
 
+def _get_nvrtc_compatible_flags() -> list[str]:
+    """
+    Get NVCC flags that are compatible with NVRTC compilation.
+
+    Returns:
+        List of NVCC flags that can be safely used with NVRTC.
+    """
+    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
+
+    nvrtc_unsupported_flags = {
+        "--expt-relaxed-constexpr",
+    }
+
+    # Filter out unsupported flags
+    compatible_flags = [
+        flag for flag in COMMON_NVCC_FLAGS if flag not in nvrtc_unsupported_flags
+    ]
+
+    return compatible_flags
+
+
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
@@ -121,13 +142,7 @@ def _nvrtc_compile(
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
 
-    # TODO: Should we refactor flags into a common place?
-    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
-
-    # Filter out flags not supported by NVRTC
-    nvrtc_compatible_flags = [
-        flag for flag in COMMON_NVCC_FLAGS if flag != "--expt-relaxed-constexpr"
-    ]
+    nvrtc_compatible_flags = _get_nvrtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
 
     # Convert options to C array
@@ -206,6 +221,7 @@ class _CudaKernel:
     def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
+        self._max_shared_mem_bytes = 0
 
     def __call__(
         self,
@@ -273,6 +289,22 @@ class _CudaKernel:
 
             stream = torch.cuda.current_stream()
 
+        # Check if kernel requires large shared memory but hasn't been configured
+        if shared_mem >= 48 * 1024 and (
+            self._max_shared_mem_bytes == 0 or shared_mem > self._max_shared_mem_bytes
+        ):
+            configured_msg = (
+                "not configured"
+                if self._max_shared_mem_bytes == 0
+                else f"only {self._max_shared_mem_bytes} bytes configured"
+            )
+            raise RuntimeError(
+                f"Kernel requires {shared_mem} bytes of shared memory (>= 48KB), "
+                f"but {configured_msg}. "
+                "Call kernel.set_shared_memory_config(shared_mem) after compilation "
+                "and before launching the kernel."
+            )
+
         _check_cuda(
             libcuda.cuLaunchKernel(
                 self.func,
@@ -288,6 +320,38 @@ class _CudaKernel:
                 None,
             )
         )
+
+    def set_shared_memory_config(self, shared_mem_bytes: int) -> None:
+        if shared_mem_bytes < 48 * 1024:
+            # No configuration needed for <= 48KB, just update the value
+            self._max_shared_mem_bytes = shared_mem_bytes
+            return
+
+        libcuda = _get_cuda_library()
+
+        # Get device properties to validate against limits
+        device_props = torch.cuda.get_device_properties()
+        max_shared_mem = getattr(device_props, "shared_memory_per_block_optin", 49152)
+
+        if shared_mem_bytes > max_shared_mem:
+            raise RuntimeError(
+                f"Requested shared memory ({shared_mem_bytes} bytes) exceeds "
+                f"device limit ({max_shared_mem} bytes). "
+                "Consider reducing block size or shared memory usage."
+            )
+
+        # Set the function attribute once
+        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
+        cudaFuncAttributeMaxDynamicSharedMemorySize = 8
+        _check_cuda(
+            libcuda.cuFuncSetAttribute(
+                self.func,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem_bytes,
+            )
+        )
+
+        self._max_shared_mem_bytes = shared_mem_bytes
 
 
 def _cuda_load_module(
