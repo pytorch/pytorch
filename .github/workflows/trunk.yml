@@ -224,13 +224,12 @@ jobs:
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
     secrets: inherit
 
-  # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-jammy-cuda12_8-py3_10-gcc9-inductor-build:
-    name: cuda12.8-py3.10-gcc9-sm80
+  inductor-build:
+    name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
     secrets: inherit
@@ -242,7 +241,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
