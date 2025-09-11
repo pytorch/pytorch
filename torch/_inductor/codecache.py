@@ -1233,6 +1233,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
+        )
         return graph, cache_info
 
     @staticmethod
@@ -1571,8 +1587,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
 @functools.cache
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
+    def get_module_ext_type() -> str:
+        if _IS_WINDOWS:
+            return ".pyd"
+        else:
+            return ".so"
+
     """Returns the path where the AOT Inductor compiled kernels are stored."""
-    if path.endswith(".so"):
+    if path.endswith(get_module_ext_type()):
         return os.path.split(path)
     elif path.endswith(".pt2"):
         return os.path.split(path)
