@@ -31,7 +31,8 @@ def _check_cuda(result: int) -> None:
 
 def _get_nvrtc_library() -> ctypes.CDLL:
     # Try to load versioned NVRTC libraries in order from newest to oldest
-    # This matches how PyTorch loads NVRTC in torch/__init__.py
+    # This matches how cuda-python does it
+    # https://github.com/NVIDIA/cuda-python/tree/90096d270d795b9295545e25dc84e1bcd0ca2765/cuda_pathfinder/cuda/pathfinder/_dynamic_libs
     if sys.platform == "win32":
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
