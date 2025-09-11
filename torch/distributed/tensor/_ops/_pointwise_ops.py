@@ -421,6 +421,7 @@ linear_pointwise_ops = {
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
+    aten.copy_.default: 1,
 }
 
 
@@ -748,9 +749,9 @@ def list_pointwise_strategy(
             args_schema,
             child_strtgy,
             linearity,
-            scalar_tensor_idx=_FUSED_OP_SCALAR_IDX
-            if op_schema.op in fused_ops
-            else None,
+            scalar_tensor_idx=(
+                _FUSED_OP_SCALAR_IDX if op_schema.op in fused_ops else None
+            ),
         )
         list_strategy.append(pointwise_strategy)
     return TupleStrategy(list_strategy)
