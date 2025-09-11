@@ -7524,6 +7524,39 @@ class TestMPS(TestCaseMPS):
             uniq = mps_out.unique()
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_dropout(self, dtype):
+        shapes = [
+            (100_000,),
+            (100, 1000),
+            (10, 100, 100),
+            (10, 10, 10, 10, 10),
+        ]
+        p_list = [0, 0.34, 0.78, 1]
+
+        for shape, p, train in itertools.product(shapes, p_list, [False, True]):
+            input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
+            output, mask = torch.native_dropout(input, p, train=train)
+
+            p_actual_mps = 1 - (mask.sum() / mask.numel())
+            if train:
+                self.assertEqual(p_actual_mps, p, atol=1e-2, rtol=1e-2)
+                self.assertTrue((output[mask.logical_not()] == 0).all())
+                self.assertEqual(output[mask], input[mask] / (1 - p))
+            else:
+                self.assertEqual(output, input)
+                self.assertTrue(mask.all())
+
+            output_grad = torch.randn_like(output)
+            output.backward(output_grad)
+
+            grad_scale = 0 if p == 1 else 1 / (1 - p)
+            if train:
+                self.assertEqual(input.grad, output_grad * mask * grad_scale)
+            else:
+                self.assertEqual(input.grad, output_grad)
+
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -8924,9 +8957,9 @@ class TestPad(TestCaseMPS):
         # pad dims == input dims
         helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
         # input.numel() == 0 but output.numel() > 0
-        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        helper((0, 3, 3), 1, nn.ConstantPad2d)
         # pad dims < input dims - 2
-        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
+        helper((1, 2, 3, 4, 5), (1, 2, 0, 0), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -8939,7 +8972,7 @@ class TestPad(TestCaseMPS):
         # input size < pad size
         helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # check the workaround for the right padding bug in Monterey
-        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
+        helper((1, 2, 2, 2, 2), (0, 1, 0, 1, 0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))

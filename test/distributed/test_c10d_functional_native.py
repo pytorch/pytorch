@@ -78,7 +78,7 @@ class TestWithNCCL(MultiProcessTestCase):
         return torch.device(self.rank)
 
     def _init_process_group(self) -> None:
-        torch.accelerator.set_device_idx(self.device.index)
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         backend = dist.get_default_backend_for_device(self.device.type)
 
