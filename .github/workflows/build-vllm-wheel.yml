@@ -47,7 +47,7 @@ jobs:
             device: cu129
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
             runner: linux.arm64.r7g.12xlarge.memory
-    name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix_platform }}"
+    name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
     env:
@@ -161,7 +161,7 @@ jobs:
 
   # Copied from build-triton-wheel workflow (mostly)
   upload-wheel:
-    name: "Upload ${{ matrix.device }} vLLM wheel on ${{ matrix_platform }}"
+    name: "Upload ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     needs:
       - build-wheel
     runs-on: ubuntu-latest
