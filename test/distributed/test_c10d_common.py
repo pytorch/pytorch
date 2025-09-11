@@ -2218,7 +2218,7 @@ class ReduceOpTest(TestCase):
             self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
     def test_use_after_free(self):
-        from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
+        from torch.distributed.distributed_c10d import ReduceOp
         from torch.testing._internal.distributed.fake_pg import FakeStore
         from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -2235,7 +2235,7 @@ class ReduceOpTest(TestCase):
                     # This previously segfaulted when run
                     reduce_op = ReduceOp.unbox(reduce_op_so)
 
-                raise NotImplementedError()
+                raise NotImplementedError
 
         fake_store = FakeStore()
         dist.init_process_group("fake", store=fake_store, rank=0, world_size=3)
