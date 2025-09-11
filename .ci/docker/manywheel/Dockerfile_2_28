@@ -88,8 +88,6 @@ RUN yum install -y \
         which \
         xz \
         glibc-langpack-en \
-        zip \
-        openssl \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \

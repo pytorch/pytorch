@@ -18,10 +18,24 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-IS_MANYLINUX2_28=0
+MANYLINUX_TAG=""
+# TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
-    IS_MANYLINUX2_28=1
+    retry yum install -q -y zip openssl
+    MANYLINUX_TAG="manylinux_2_28"
+elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
+    retry dnf install -q -y zip openssl
+elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
+    # TODO: Remove this once nvidia package repos are back online
+    # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+    # shellcheck disable=SC2046
+    sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+    retry apt-get update
+    retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'
@@ -346,9 +360,9 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     done
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
-    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+    if [[ $MANYLINUX_TAG == "manylinux_2_28" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_#"manylinux_2_28_"# $wheel_file;
+        sed -i -e s#linux_#"${MANYLINUX_TAG}_"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes
@@ -391,8 +405,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     fi
 
     # Rename wheel for Manylinux 2_28
-    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
-        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_#"manylinux_2_28_"#)
+    if [[ $MANYLINUX_TAG == "manylinux_2_28" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_#"${MANYLINUX_TAG}_"#)
         zip -rq $pkg_name $PREIX*
         rm -f $pkg
         mv $pkg_name $(dirname $pkg)/$pkg_name

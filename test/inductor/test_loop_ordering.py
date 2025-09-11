@@ -26,7 +26,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -415,7 +414,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
@@ -438,7 +436,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_pattern_2(self):
         """
