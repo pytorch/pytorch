@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import os
 import pathlib
 import tempfile
 import unittest
@@ -33,7 +32,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase
 
 
 c10d_functional = torch.ops.c10d_functional
