@@ -897,6 +897,10 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         )
         return
 
+    if orig_scatter_dim >= len(_get_tensor(matmul.nodes[0]).shape) - 1:
+        # Decomposing the matmul on the K dimension is not supported
+        return
+
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
         log.warning(
             "reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion"
