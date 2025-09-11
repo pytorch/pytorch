@@ -13,6 +13,49 @@ def list_dir(path: str) -> list[str]:
     return check_output(["ls", "-1", path]).decode().split("\n")
 
 
+def build_ArmComputeLibrary() -> None:
+    """
+    Using ArmComputeLibrary for aarch64 PyTorch
+    """
+    print("Building Arm Compute Library")
+    acl_build_flags = [
+        "debug=0",
+        "neon=1",
+        "opencl=0",
+        "os=linux",
+        "openmp=1",
+        "cppthreads=0",
+        "arch=armv8a",
+        "multi_isa=1",
+        "fixed_format_kernels=1",
+        "build=native",
+    ]
+    acl_install_dir = "/acl"
+    acl_checkout_dir = os.getenv("ACL_SOURCE_DIR", "ComputeLibrary")
+    if os.path.isdir(acl_install_dir):
+        shutil.rmtree(acl_install_dir)
+    if not os.path.isdir(acl_checkout_dir) or not len(os.listdir(acl_checkout_dir)):
+        check_call(
+            [
+                "git",
+                "clone",
+                "https://github.com/ARM-software/ComputeLibrary.git",
+                "-b",
+                "v25.02",
+                "--depth",
+                "1",
+                "--shallow-submodules",
+            ]
+        )
+
+    check_call(
+        ["scons", "Werror=1", f"-j{os.cpu_count()}"] + acl_build_flags,
+        cwd=acl_checkout_dir,
+    )
+    for d in ["arm_compute", "include", "utils", "support", "src", "build"]:
+        shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
+
+
 def replace_tag(filename) -> None:
     with open(filename) as f:
         lines = f.readlines()
@@ -170,7 +213,8 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         ]
 
         # CUDA version-specific libraries
-        if "130" in desired_cuda:
+        if "13" in desired_cuda:
+            minor_version = desired_cuda[-1]
             version_specific_libs = [
                 "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13",
                 "/usr/local/cuda/lib64/libcublas.so.13",
@@ -180,7 +224,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
                 "/usr/local/cuda/lib64/libcusolver.so.12",
                 "/usr/local/cuda/lib64/libnvJitLink.so.13",
                 "/usr/local/cuda/lib64/libnvrtc.so.13",
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.13.0",
+                f"/usr/local/cuda/lib64/libnvrtc-builtins.so.13.{minor_version}",
             ]
         elif "12" in desired_cuda:
             # Get the last character for libnvrtc-builtins version (e.g., "129" -> "9")
@@ -196,6 +240,8 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
                 "/usr/local/cuda/lib64/libnvrtc.so.12",
                 f"/usr/local/cuda/lib64/libnvrtc-builtins.so.12.{minor_version}",
             ]
+        else:
+            raise ValueError(f"Unsupported CUDA version: {desired_cuda}.")
 
         # Combine all libraries
         libs_to_copy = common_libs + version_specific_libs
@@ -271,7 +317,7 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
-    build_vars = ""
+    build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
         build_vars += "MAX_JOBS=5 "
@@ -310,13 +356,19 @@ if __name__ == "__main__":
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
 
     if enable_mkldnn:
+        build_ArmComputeLibrary()
         print("build pytorch with mkldnn+acl backend")
-        build_vars += "USE_MKLDNN=ON USE_MKLDNN_ACL=ON "
-        build_vars += "ACL_ROOT_DIR=/acl "
+        build_vars += (
+            "USE_MKLDNN=ON USE_MKLDNN_ACL=ON "
+            "ACL_ROOT_DIR=/acl "
+            "LD_LIBRARY_PATH=/pytorch/build/lib:/acl/build:$LD_LIBRARY_PATH "
+            "ACL_INCLUDE_DIR=/acl/build "
+            "ACL_LIBRARY=/acl/build "
+        )
         if enable_cuda:
             build_vars += "BLAS=NVPL "
         else:
-            build_vars += "BLAS=OpenBLAS OpenBLAS_HOME=/opt/OpenBLAS "
+            build_vars += "BLAS=OpenBLAS OpenBLAS_HOME=/OpenBLAS "
     else:
         print("build pytorch without mkldnn backend")
 

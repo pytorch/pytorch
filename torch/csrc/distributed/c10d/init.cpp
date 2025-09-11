@@ -48,7 +48,10 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#ifdef USE_NVSHMEM
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -3179,9 +3182,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
 
-            auto options = ::c10d::ProcessGroupGloo::Options::create_default();
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store, rank, size, std::move(options));
+                store,
+                rank,
+                size,
+                ::c10d::ProcessGroupGloo::Options::create_default(timeout));
           }),
           py::arg("store"),
           py::arg("rank"),
