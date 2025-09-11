@@ -2761,3 +2761,30 @@ class _StaticCudaLauncher:
 class fft:
     @staticmethod
     def rfft(input: Tensor, n: _int = ..., dim: _int = ..., norm: str = ...) -> Tensor: ...
+
+def stft(
+    input: Tensor,
+    n_fft: _int,
+    hop_length: _int = ...,
+    win_length: _int = ...,
+    window: Tensor = ...,
+    center: _bool = ...,
+    pad_mode: str = ...,
+    normalized: _bool = ...,
+    onesided: _bool = ...,
+    return_complex: _bool = ...,
+    align_to_window: _bool = ...,
+) -> Tensor: ...
+
+def istft(
+    input: Tensor,
+    n_fft: _int,
+    hop_length: _int = ...,
+    win_length: _int = ...,
+    window: Tensor = ...,
+    center: _bool = ...,
+    normalized: _bool = ...,
+    onesided: _bool = ...,
+    length: _int = ...,
+    return_complex: _bool = ...,
+) -> Tensor: ...
