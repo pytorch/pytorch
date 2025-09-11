@@ -41,32 +41,24 @@ def get_extension():
         "cxx": ["-fdiagnostics-color=always"],
     }
 
-    extensions = []
     if torch.cuda.is_available():
-        cuda_sources = list(CSRC_DIR.glob("**/*.cu"))
+        sources = list(CSRC_DIR.glob("**/*.cu"))
+        extension = CUDAExtension
+    elif torch.xpu.is_available():
+        sources = list(CSRC_DIR.glob("**/*.sycl"))
+        extension = SyclExtension
+    else:
+        raise AssertionError("Expected CUDA or XPU device backend, found none")
 
-        extensions.append(
-            CUDAExtension(
-                "python_agnostic.cuda",
-                sources=sorted(str(s) for s in cuda_sources),
-                py_limited_api=True,
-                extra_compile_args=extra_compile_args,
-                extra_link_args=[],
-            )
+    return [
+        extension(
+            "python_agnostic._C",
+            sources=sorted(str(s) for s in sources),
+            py_limited_api=True,
+            extra_compile_args=extra_compile_args,
+            extra_link_args=[],
         )
-    if torch.xpu.is_available():
-        sycl_sources = list(CSRC_DIR.glob("**/*.sycl"))
-
-        extensions.append(
-            SyclExtension(
-                "python_agnostic.sycl",
-                sources=sorted(str(s) for s in sycl_sources),
-                py_limited_api=True,
-                extra_compile_args=extra_compile_args,
-                extra_link_args=[],
-            )
-        )
-    return extensions
+    ]
 
 
 setup(
