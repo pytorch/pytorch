@@ -6844,6 +6844,70 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_large_shared_memory(self):
+        kernel_source = """
+        __global__ void large_shared_memory_kernel(const float* input, float* output, int n) {
+            extern __shared__ float shared_data[];
+
+            int tid = threadIdx.x;
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+            // Load data into shared memory
+            if (idx < n) {
+                shared_data[tid] = input[idx];
+            } else {
+                shared_data[tid] = 0.0f;
+            }
+            __syncthreads();
+
+            // Perform reduction in shared memory
+            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                if (tid < stride) {
+                    shared_data[tid] += shared_data[tid + stride];
+                }
+                __syncthreads();
+            }
+
+            // Write result
+            if (tid == 0) {
+                output[blockIdx.x] = shared_data[0];
+            }
+        }
+        """
+
+        from torch.cuda import _compile_kernel, get_device_properties
+
+        kernel = _compile_kernel(kernel_source, "large_shared_memory_kernel")
+
+        threads_per_block = 1024  # 1024 threads * 4 bytes = 4KB, but we'll request 64KB
+        shared_mem_size = 64 * 1024  # 64KB
+
+        kernel.set_shared_memory_config(shared_mem_size)
+
+        N = 4096
+        input_data = torch.ones(N, device="cuda", dtype=torch.float32)
+        output_data = torch.zeros(4, device="cuda", dtype=torch.float32)  # 4 blocks
+
+        kernel(
+            grid=(4, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[input_data, output_data, N],
+            shared_mem=shared_mem_size,
+        )
+
+        # Each block should sum 1024 ones = 1024
+        expected = torch.full((4,), 1024.0, dtype=torch.float32)
+        self.assertEqual(output_data.cpu(), expected)
+
+        # Test error handling with more than supported shared memory size
+        max_smem = get_device_properties().shared_memory_per_block_optin
+        excessive_shared_mem = max_smem * 2
+
+        with self.assertRaises(RuntimeError):
+            kernel.set_shared_memory_config(excessive_shared_mem)
+
     @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
@@ -6979,7 +7043,7 @@ class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
         kernel_source = """
-        __global__ void add_scalar(const float* input, float* output, float scalar, int n) {
+        __global__ void add_scalar(const float* input, float* output, double scalar, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx < n) {
                 output[idx] = input[idx] + scalar;
@@ -7025,16 +7089,51 @@ class TestCompileKernel(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_double_precision(self):
+        """Test that Python floats are correctly handled as doubles in kernels."""
+        kernel_source = """
+        __global__ void test_double_precision(double* output, double value, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                output[idx] = value;
+            }
+        }
+        """
+
+        from torch.cuda import _compile_kernel
+
+        compiled_kernel = _compile_kernel(kernel_source, "test_double_precision")
+
+        # Test with high precision value that would lose precision if cast to float32
+        # float32 has 7 digits of precision, so we use a value with 15 digits
+        high_precision_value = 1.23456789012345
+        n = 10
+
+        output = torch.zeros(n, device="cuda", dtype=torch.float64)
+        compiled_kernel(
+            grid=(1, 1, 1),
+            block=(256, 1, 1),
+            args=[output, high_precision_value, n],
+        )
+
+        # Verify high precision is preserved (would fail with old float32 casting)
+        expected = torch.full(
+            (n,), high_precision_value, device="cuda", dtype=torch.float64
+        )
+        torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_cuda_headers(self):
         """Test that kernels can include and use CUDA headers like cuda_fp16.h."""
         kernel_source = """
         #include <cuda_fp16.h>
 
         extern "C"
-        __global__ void half_precision_kernel(__half* output, float input_value, int n) {
+        __global__ void half_precision_kernel(__half* output, double input_value, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx < n) {
-                output[idx] = __float2half(input_value);
+                output[idx] = __float2half((float)input_value);
             }
         }
         """
