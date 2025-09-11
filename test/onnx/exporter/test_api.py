@@ -396,6 +396,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
+
 class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
         from onnxscript import opset18 as op
