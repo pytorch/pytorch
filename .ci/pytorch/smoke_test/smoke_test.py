@@ -397,6 +397,7 @@ def smoke_test_nvshmem() -> None:
         # Not built with NVSHMEM support.
         # torch is not compiled with NVSHMEM prior to 2.9
         from torch.torch_version import TorchVersion
+
         if TorchVersion(torch.__version__) < (2, 9):
             return
         else:
