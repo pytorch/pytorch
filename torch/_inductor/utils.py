@@ -59,7 +59,8 @@ from unittest import mock
 import sympy
 
 import torch
-from torch._inductor.analysis.device_info import datasheet_tops
+import torch.utils._pytree as pytree
+from torch._inductor.analysis.device_info import DeviceInfo
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
@@ -1842,7 +1843,7 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     Check if we should use the contiguous subgraph transform.
     This transform makes the second matrix contiguous before the matmul.
     """
-    decompose_k_threshold = config.triton.decompose_k_threshold
+    contiguous_threshold = config.rocm.contiguous_threshold
 
     # Similar conditions to decompose_k but for contiguous transform
     from torch._inductor.virtualized import V
@@ -1851,8 +1852,8 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         bool(torch.version.hip)  # Only relevant on AMD
         and V.graph.sizevars.statically_known_true(
             sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
+                sympy.Ge(k, contiguous_threshold * m),
+                sympy.Ge(k, contiguous_threshold * n),
             )
         )
         and not V.graph.aot_mode
@@ -1984,16 +1985,7 @@ def use_ck_template(layout: Layout) -> bool:
         log.warning("Please pip install Composable Kernel package")
         return False
 
-    if config.is_fbcode():
-        config.rocm.ck_dir = ck_package_dirname
-
-    if not config.rocm.ck_dir:
-        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
-        return False
-
-    if ck_package_dirname != config.rocm.ck_dir:
-        log.warning("Invalid path to CK library")
-        return False
+    config.rocm.ck_dir = ck_package_dirname
 
     return True
 
@@ -2389,7 +2381,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    ds_tops = DeviceInfo.lookup_tops_current_device(
+        dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32
+    )
     if ds_tops is not None:
         return ds_tops
 
@@ -3395,8 +3389,8 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
 def is_using_cudagraph_partition() -> bool:
     return (
         torch._inductor.config.triton.cudagraphs
-        and torch._inductor.config.graph_partition
-    )
+        or _unstable_customized_partition_wrapper.wrapper is not None
+    ) and torch._inductor.config.graph_partition
 
 
 def dtype_from_size(size: int) -> torch.dtype:
@@ -3621,3 +3615,83 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
+
+
+@dataclasses.dataclass(frozen=True)
+class CUDAGraphWrapperMetadata:
+    """
+    Metadata for Customized CUDAGraphWrapper.
+
+    Currently assumes there is 1 dynamo graph and will extend to
+    multiple graphs in the future.
+    """
+
+    # The number of partitions that are cudagraphable.
+    num_partitions: int
+
+    # Index of the current partition.
+    partition_index: int
+
+
+PartitionFnType = Callable[..., Any]
+CUDAGraphWrapperType = Callable[
+    [PartitionFnType, CUDAGraphWrapperMetadata], PartitionFnType
+]
+
+
+# only incremented by user call of mark_step_begin
+class CUDAGraphWrapper:
+    wrapper: Optional[CUDAGraphWrapperType] = None
+
+
+# A customized partition wrappers from users. Interface should be:
+#
+# def wrapper(fn: PartitionFnType, metadata: CUDAGraphWrapperMetadata) -> PartitionFnType
+#
+# Inductor generates N wrapper functions for N partition functions, and mechanically wrap
+# each partition fn with the generated wrapper function. Users need to handle all details
+# such as static inputs, dynamic shapes, etc.
+# Users could customize the wrapper based on the metadata. One example is to have special
+# handle for the first and last wrapper function.
+#
+# Warning: This API is unstable and may change in the future.
+_unstable_customized_partition_wrapper = CUDAGraphWrapper()
+
+
+def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
+    _unstable_customized_partition_wrapper.wrapper = wrapper
+
+
+def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
+    args = snode.node.inputs  # type: ignore[union-attr]
+    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
+        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
+        snode.node.kwargs,  # type: ignore[union-attr]
+    )
+    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+
+    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
+        return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
+            x, torch._inductor.ir.GeneratorState
+        )
+
+    flat_args = [
+        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
+        if _is_tensor_ir(a)
+        else a
+        for a in flat_args
+    ]
+
+    def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
+        return torch.empty(size, dtype=dtype, device=device)
+
+    def to_real_tensor(e: Any) -> Any:
+        if not isinstance(e, torch.Tensor):
+            return e
+        out = _tensor(e.size(), e.dtype, e.device)
+        return out
+
+    flat_args = [to_real_tensor(a) for a in flat_args]
+    args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
+    return args, kwargs
