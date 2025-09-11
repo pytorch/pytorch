@@ -4254,6 +4254,18 @@ class TestLinalg(TestCase):
 
         test(500)
 
+    @dtypes(torch.float)
+    def test_einsum_output_layout(self, device, dtype):
+        batch, in_dim, out_dim = 2, 3, 5
+        x = make_tensor((batch, in_dim), dtype=dtype, device=device)
+        w = make_tensor((out_dim, in_dim), dtype=dtype, device=device)
+        result = torch.einsum("fd,bd->bf", w, x)
+        expected = x.matmul(w.t())
+        self.assertEqual(result, expected)
+        self.assertTrue(result.is_contiguous())
+        self.assertEqual(result.stride(), expected.stride())
+
+
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
             tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
@@ -6003,6 +6015,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -6013,6 +6026,7 @@ class TestLinalg(TestCase):
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
