@@ -47,6 +47,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
 from .utils import _materialize_cpp_cia_ops
+from . import config
 
 if TYPE_CHECKING:
     from torch._C._aoti import AOTIModelContainerRunner
@@ -65,7 +66,6 @@ class ExportDynamoConfig:
 # is called multiple times.
 @lru_cache
 def aot_compile_warning():
-    from torch._inductor import config
 
     log.warning("+============================+")
     log.warning("|     !!!   WARNING   !!!    |")
@@ -124,11 +124,11 @@ def aot_compile(
     """
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
-    from torch._inductor import config
+    from torch._inductor import config as inductor_config
 
     aot_compile_warning()
 
-    if config.is_predispatch:
+    if inductor_config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
