@@ -1131,6 +1131,9 @@ This class does not support ``__members__`` property.)");
       .def_static(
           "get_mempool_allocator",
           &::c10d::symmetric_memory::get_mempool_allocator)
+      .def_static(
+          "num_active_allocations",
+          &::c10d::symmetric_memory::num_active_allocations)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(

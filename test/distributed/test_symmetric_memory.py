@@ -88,6 +88,33 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertEqual(len(row), torch.cuda.device_count())
 
     @runOnRocmArch(MI300_ARCH)
+    def test_alloc_free(self) -> None:
+        """Tests that we can allocate and free memory."""
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+            self.assertGreater(_SymmetricMemory.num_active_allocations(self.device), 0)
+
+        foo()
+        self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
+
+        t0 = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(t0, group=group_name)
+        t1 = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(t1, group=group_name)
+        self.assertGreater(_SymmetricMemory.num_active_allocations(self.device), 0)
+
+        del t0, t1
+        self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
+
+    @runOnRocmArch(MI300_ARCH)
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)

@@ -421,6 +421,10 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return "NVSHMEM";
   }
 
+  size_t num_active_allocations() override {
+    return allocations_.size();
+  }
+
  private:
   std::unordered_map<void*, std::unique_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NVSHMEMSymmetricMemory>>
