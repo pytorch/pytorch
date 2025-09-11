@@ -2217,6 +2217,41 @@ class ReduceOpTest(TestCase):
             self.assertFalse(None in (reduce_op, reduce_op_obj))
             self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
+    def test_use_after_free(self):
+        from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        # The dispatch mode is a long-winded way of forcing a ScriptObject
+        # to be created out of a pre-existing, regular ReduceOp, and how we
+        # encountered the bug originally.
+        class MinimalDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.ops.c10d.allreduce_.default:
+                    tensors, process_group_so, reduce_op_so, *_ = args
+                    # This previously segfaulted when run
+                    reduce_op = ReduceOp.unbox(reduce_op_so)
+
+                raise NotImplementedError()
+
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=3)
+        fake_pg = dist.distributed_c10d._get_default_group()
+
+        tensor = torch.tensor([1.0, 2.0, 3.0])
+        mode = MinimalDispatchMode()
+
+        with mode:
+            try:
+                dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=fake_pg)
+            except NotImplementedError:
+                pass
+
+        dist.destroy_process_group()
+
 
 class LocalRankTest(MultiProcessTestCase):
     @property
