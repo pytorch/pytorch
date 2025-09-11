@@ -65,9 +65,9 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import SizeVariable
+from .lists import ListIteratorVariable, SizeVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -414,7 +414,7 @@ class TensorVariable(VariableTracker):
         # Today, var_getattr returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
-        if name in ("size", "stride"):
+        if name in ("size", "stride", "__iter__"):
             return ConstantVariable(True)
 
         try:
@@ -453,6 +453,11 @@ class TensorVariable(VariableTracker):
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
+        elif name == "__iter__":
+            it = ListIteratorVariable(
+                list(self.unpack_var_sequence(tx)), mutation_type=ValueMutationNew()
+            )
+            return variables.GetAttrVariable(it, "__iter__")
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -1546,6 +1551,11 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
+        elif name == "__iter__":
+            it = ListIteratorVariable(
+                list(self.unpack_var_sequence(tx)), mutation_type=ValueMutationNew()
+            )
+            return variables.GetAttrVariable(it, "__iter__")
         if result is None:
             raise NotImplementedError
         return result

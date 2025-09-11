@@ -1817,31 +1817,23 @@ class BuiltinVariable(VariableTracker):
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
+    # TODO use substitute_in_graph on polyfill instead
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
-        if isinstance(obj, variables.IteratorVariable):
-            ret = obj
-        elif isinstance(obj, variables.RangeVariable):
-            ret = obj.call_method(tx, "__iter__", [], {})
-        else:
-            # Handle the case where we are iterating over a tuple, list or iterator
-            ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+        # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
+        # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
+        # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
+        # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
+        # with an integer argument starting at 0, until __getitem__ raises IndexError
+        ret = variables.UserFunctionVariable(polyfills.builtins.iter_).call_function(
+            tx, [obj, *args], {}
+        )
 
-        if ret is None:
-            # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
-            # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
-            # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
-            # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
-            # with an integer argument starting at 0, until __getitem__ raises IndexError
-            ret = variables.UserFunctionVariable(
-                polyfills.builtins.iter_
-            ).call_function(tx, [obj, *args], {})
-
-            if len(args):
-                # iter(obj, sentinel) returns an object that implements
-                # __iter__ and __next__ methods (UserDefinedObjectVariable)
-                # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
-                # that forwards the next_variable call to the object.
-                ret = variables.ObjectIteratorVariable(ret)
+        if len(args):
+            # iter(obj, sentinel) returns an object that implements
+            # __iter__ and __next__ methods (UserDefinedObjectVariable)
+            # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
+            # that forwards the next_variable call to the object.
+            ret = variables.ObjectIteratorVariable(ret)
         return ret
 
     call_tuple = _call_tuple_list
