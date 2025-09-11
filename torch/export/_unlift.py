@@ -640,19 +640,30 @@ def _get_input_guards_for_graph(
     return new_guards_code
 
 
+def _ok_to_generate_guards_fn():
+    patterns = [
+        "executorch",
+        "modai",
+        "on_device_ai",
+        "torchao",
+    ]
+    # force check_guards=False for files matching `patterns`
+    # because they have too many calls to .module() and
+    # do not like any call modules in the graph
+    # TODO: fix these files to handle guard fns
+    frame = inspect.currentframe()
+    while frame is not None:
+        if any(path in frame.f_code.co_filename for path in patterns):
+            return False
+        frame = frame.f_back
+
+    return True
+
+
 def _unlift_exported_program_lifted_states(
     ep: ExportedProgram, check_guards=True
 ) -> torch.fx.GraphModule:
-    # force check_guards=False for executorch because
-    # its pass infra has too many calls to .module()
-    # and but does not like call modules in the graph
-    # TODO: update executorch to check_guards=False
-    frame = inspect.currentframe()
-    while frame is not None:
-        if "executorch" in frame.f_code.co_filename:
-            check_guards = False
-            break
-        frame = frame.f_back
+    check_guards = check_guards and _ok_to_generate_guards_fn()
 
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":

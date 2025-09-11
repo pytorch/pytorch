@@ -82,11 +82,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,3
+doctr_det_predictor,pass,5
 
 
 
-doctr_reco_predictor,pass,1
+doctr_reco_predictor,pass,4
 
 
 

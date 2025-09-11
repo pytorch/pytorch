@@ -37,7 +37,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: linux-jammy-py3.9-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
@@ -56,7 +56,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: nightly-dynamo-benchmarks-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.nightly-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.nightly-dynamo-benchmarks-build.outputs.test-matrix }}
       timeout-minutes: 720
