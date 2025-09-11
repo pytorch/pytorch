@@ -5416,7 +5416,9 @@ class CppScheduling(BaseScheduling):
         args = self.kernel_group.args if kernel_args is None else kernel_args
         _, _, arg_types = args.cpp_argdefs()
         if not V.graph.cpp_wrapper:
-            compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, r'''")
+            compile_wrapper.writeline(
+                f"async_compile.cpp_pybinding({arg_types!r}, r'''"
+            )
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
