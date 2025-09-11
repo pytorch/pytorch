@@ -407,6 +407,8 @@ class TestDynamoTimed(TestCase):
  'additional_fake_tensor_prop': [0.0, 0.0],
  'aot_collect_metadata': [0.0],
  'aot_trace_joint_graph': [0.0],
+ 'aot_try_load': [0.0],
+ 'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
  'build_guards': [0.0],
  'bytecode_tracing': [0.0],
@@ -418,6 +420,7 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
+ 'inductor_import': [0.0],
  'min_cut_rematerialization_partition': [0.0]}"""
             if _IS_WINDOWS
             else """\
