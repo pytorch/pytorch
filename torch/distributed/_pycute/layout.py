@@ -167,14 +167,10 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
             )
         )
 
-    flattened_shape = flatten(layout.shape)
-    flattened_stride = flatten(layout.stride)
-    # Skip leading shape-1 modes and find the first non-unit mode
     result_shape: list[int] = []
     result_stride: list[int] = []
-
-    for shape, stride in zip(flattened_shape, flattened_stride):
-        # skip shape-1s
+    for shape, stride in zip(flatten(layout.shape), flatten(layout.stride)):
+        # skip their shape-1s
         if shape == 1:
             continue
         # merge modes if the shape*stride match
@@ -245,8 +241,8 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     else:
         result_shape = []
         result_stride = []
-        rest_shape = layoutB.shape if is_int(layoutB.shape) else layoutB.shape[0]  # type: ignore[union-attr]
-        rest_stride = layoutB.stride if is_int(layoutB.stride) else layoutB.stride[0]  # type: ignore[union-attr]
+        rest_shape = layoutB.shape if is_int(layoutB.shape) else layoutB.shape[0]  # type: ignore[union-attr,index]
+        rest_stride = layoutB.stride if is_int(layoutB.stride) else layoutB.stride[0]  # type: ignore[union-attr,index]
         flat_A = coalesce(layoutA)
 
         # Process from right to left for lexicographic ordering
@@ -279,7 +275,6 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         # Reverse the lists to get lexicographic order
         result_shape.reverse()
         result_stride.reverse()
-        print(result_shape, result_stride)
 
         if len(result_shape) == 1:
             return Layout(result_shape[0], result_stride[0])  # type: ignore[arg-type]

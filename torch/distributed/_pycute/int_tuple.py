@@ -137,11 +137,13 @@ def prefix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
             r: list[IntTuple] = []
             current_init = init
 
-            # Calculate products from right to left
+            # Calculate products from right to left, appending to list
             for i in range(len(a) - 1, -1, -1):
-                r.insert(0, prefix_product(a[i], current_init))
+                r.append(prefix_product(a[i], current_init))
                 current_init = current_init * product(a[i])
 
+            # Reverse to get correct lexicographic order
+            r.reverse()
             return tuple(r)
     else:
         if is_tuple(init):  # "int" tuple

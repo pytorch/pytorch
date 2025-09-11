@@ -51,13 +51,11 @@ class TestComposition(TestCase):
         layoutR = composition(layoutA, layoutB)
 
         _LOGGER.debug(f"{layoutA} o {layoutB}  =>  {layoutR}")
-        print(layoutR.shape, layoutR.stride, size(layoutR))
 
         # True post-condition: Every coordinate c of layoutB with L1D(c) < size(layoutR) is a coordinate of layoutR.
 
         # Test that R(c) = A(B(c)) for all coordinates c in layoutR
         for i in range(size(layoutR)):
-            print(i, layoutR(i), layoutB(i), layoutA(layoutB(i)))
             self.assertEqual(layoutR(i), layoutA(layoutB(i)))
 
     def test_composition(self):
