@@ -852,19 +852,6 @@ class JsonProfile:
             if event_ts <= kernel_end_ts and event_end_ts >= kernel_ts:
                 op_name = event.get("name", "")
 
-                # Filter for relevant operations (aten:: ops)
-                # if op_name.startswith("aten::") or any(
-                #     x in op_name for x in ["contiguous", "clone", "copy", "empty"]
-                # ):
-                #     overlapping_ops.append(
-                #         {
-                #             "name": op_name,
-                #             "ts": event_ts,
-                #             "dur": event_dur,
-                #             "end_ts": event_end_ts,
-                #             "event": event,
-                #         }
-                #     )
                 overlapping_ops.append(
                     {
                         "name": op_name,
