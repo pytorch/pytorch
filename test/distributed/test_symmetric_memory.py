@@ -266,6 +266,9 @@ class AsyncTPTest(MultiProcContinuousTest):
     def _init_process(self):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
+        torch.use_deterministic_algorithms(True)
+        torch.set_deterministic_debug_mode("warn")
+        torch.utils.deterministic.fill_uninitialized_memory = True
 
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
@@ -555,7 +558,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
         assert outputs[0].stride() == outputs[1].stride()
-        assert torch.allclose(outputs[0], outputs[1]), (outputs[0], outputs[1])
+        self.assertEqual(outputs[0], outputs[1])
 
     @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
