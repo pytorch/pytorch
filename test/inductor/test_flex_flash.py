@@ -61,12 +61,13 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_different_seq_lens(self, device, dtype):
-        for seq_len in [128, 256, 1024, 2048]:
-            q, k, v = create_test_tensors(seq_len=seq_len, dtype=dtype, device=device)
-            compiled_fn = torch.compile(flex_attention)
-            out = compiled_fn(q, k, v, kernel_options={"disable_flash": False})
-            self.assertEqual(out.shape, q.shape)
+    @parametrize("seq_len", [127, 255, 383, 511])
+    def test_flash_attention_unfriendly_seqlen_with_causal(
+        self, device, dtype, seq_len
+    ):
+        """Test flash attention with unfriendly sequence lengths and causal masking."""
+        q, k, v = create_test_tensors(seq_len=seq_len, dtype=dtype, device=device)
+        flash_vs_triton(q, k, v, score_mod=_causal)
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
