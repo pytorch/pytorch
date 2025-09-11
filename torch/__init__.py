@@ -1135,7 +1135,7 @@ def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]
         >>> torch.is_storage(x)
         True
         >>> y = torch.tensor([1, 2, 3])
-        >>> torch.is_storage(x)
+        >>> torch.is_storage(y)
         False
 
     """
