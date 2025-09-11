@@ -2,6 +2,7 @@
 
 import torch
 import torch.distributed as dist
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -103,6 +104,42 @@ class TestDTensorDebugMode(TestCase):
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
     aten::view(dt: f32[16, 6, 4, 4, 1][P, P], [16, 6, 4, 4])
       aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
+        )
+
+    def test_real_tensor(self):
+        x = torch.randn(8, 8, 8)
+        linear = torch.nn.Linear(8, 8)
+
+        with DebugMode() as debug_mode:
+            linear(x).sum()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  torch._C._nn.linear(t: f32[8, 8, 8], t: f32[8, 8], t: f32[8])
+      aten::view(t: f32[8, 8, 8], [64, 8])
+      aten::t(t: f32[8, 8])
+      aten::addmm(t: f32[8], t: f32[64, 8], t: f32[8, 8])
+      aten::view(t: f32[64, 8], [8, 8, 8])
+  <method 'sum' of 'torch._C.TensorBase' objects>(t: f32[8, 8, 8])
+      aten::sum(t: f32[8, 8, 8])""",
+        )
+
+    def test_fake_tensor(self):
+        with FakeTensorMode():
+            x = torch.randn(8, 8)
+            y = torch.randn(8, 8, 8)
+
+        with DebugMode(record_faketensor=True) as debug_mode:
+            torch.matmul(y, x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  torch.matmul(ft: f32[8, 8, 8], ft: f32[8, 8])
+      aten::view(ft: f32[8, 8, 8], [64, 8])
+      aten::mm(ft: f32[64, 8], ft: f32[8, 8])
+      aten::_unsafe_view(ft: f32[64, 8], [8, 8, 8])""",
         )
 
 
