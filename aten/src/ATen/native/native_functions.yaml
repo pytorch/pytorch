@@ -1798,7 +1798,7 @@
   device_guard: False
   dispatch:
     MkldnnCPU: copy_mkldnn_
-    SparseCPU, SparseCUDA: copy_sparse_wrapper_
+    SparseCPU, SparseCUDA, SparseMPS: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: copy_sparse_compressed_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: copy_nested_
@@ -2160,7 +2160,7 @@
   variants: function, method
   structured_delegate: div.out
   dispatch:
-    SparseCPU, SparseCUDA: div_sparse
+    SparseCPU, SparseCUDA, SparseMPS: div_sparse
     ZeroTensor: div_zerotensor
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_div_Tensor
   tags: [core, pointwise]
@@ -2170,7 +2170,7 @@
   variants: method
   structured_delegate: div.out
   dispatch:
-    SparseCPU, SparseCUDA: div_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: div_sparse_
   tags: pointwise
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -2179,7 +2179,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: div_out
-    SparseCPU, SparseCUDA: div_out_sparse_zerodim
+    SparseCPU, SparseCUDA, SparseMPS: div_out_sparse_zerodim
   tags: pointwise
 
 - func: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
@@ -2187,7 +2187,7 @@
   variants: function, method
   structured_delegate: div.out_mode
   dispatch:
-    SparseCPU, SparseCUDA: div_sparse
+    SparseCPU, SparseCUDA, SparseMPS: div_sparse
   tags: [core, pointwise]
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
@@ -2195,7 +2195,7 @@
   variants: method
   structured_delegate: div.out_mode
   dispatch:
-    SparseCPU, SparseCUDA: div_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: div_sparse_
   tags: pointwise
 
 - func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
@@ -2204,7 +2204,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: div_out_mode
-    SparseCPU, SparseCUDA: div_out_sparse_zerodim
+    SparseCPU, SparseCUDA, SparseMPS: div_out_sparse_zerodim
   tags: pointwise
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -2768,20 +2768,20 @@
   variants: function, method
   dispatch:
     CPU, CUDA, MPS, MTIA: floor_divide
-    SparseCPU, SparseCUDA: floor_divide_sparse
+    SparseCPU, SparseCUDA, SparseMPS: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA, MPS: floor_divide_
-    SparseCPU, SparseCUDA: floor_divide_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS: floor_divide_out
-    SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
+    SparseCPU, SparseCUDA, SparseMPS: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4273,7 +4273,7 @@
   structured_delegate: mul.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: mul_sparse
+    SparseCPU, SparseCUDA, SparseMPS: mul_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
@@ -4285,7 +4285,7 @@
   structured_delegate: mul.out
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: mul_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: mul_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_sparse_csr_
     MkldnnCPU: mkldnn_mul_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_mul__Tensor
@@ -4299,6 +4299,7 @@
     CPU, CUDA, MPS, MTIA: mul_out
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
+    SparseMPS: mul_out_sparse_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_out_sparse_csr
     MkldnnCPU: mkldnn_mul_out
   tags: pointwise
@@ -5848,7 +5849,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
-    SparseCPU, SparseCUDA, SparseMeta: sum_coo
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: sum_coo
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sum_csr
   autogen: sum.out
 
@@ -5859,7 +5860,7 @@
   variants: function, method
   dispatch:
     NestedTensorCPU: NestedTensor_sum_dim_CPU
-    SparseCPU, SparseCUDA: sum_sparse_coo
+    SparseCPU, SparseCUDA, SparseMPS: sum_sparse_coo
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sum_sparse_compressed
   tags: core
 
@@ -6975,7 +6976,7 @@
     CPU, CUDA: sub_out
     MPS: sub_out_mps
     MTIA: sub_out_mtia
-    SparseCPU, SparseCUDA: sub_out_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sub_out_sparse
   tags: pointwise
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -6983,7 +6984,7 @@
   variants: function, method
   structured_delegate: sub.out
   dispatch:
-    SparseCPU, SparseCUDA: sub_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sub_sparse
     ZeroTensor: sub_zerotensor
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_sub_Tensor
   tags: [core, pointwise]
@@ -6993,7 +6994,7 @@
   variants: method
   structured_delegate: sub.out
   dispatch:
-    SparseCPU, SparseCUDA: sub_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: sub_sparse_
   tags: pointwise
 # For C++ only, until we have conversion from C++ numbers to Tensor
 
@@ -10342,7 +10343,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: pow_Tensor_Scalar_out
-    SparseCPU, SparseCUDA: pow_out_sparse_scalar
+    SparseCPU, SparseCUDA, SparseMPS: pow_out_sparse_scalar
     MPS: pow_tensor_scalar_out_mps
   tags: pointwise
 
@@ -10351,7 +10352,7 @@
   structured_delegate: pow.Tensor_Scalar_out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: pow_sparse_scalar
+    SparseCPU, SparseCUDA, SparseMPS: pow_sparse_scalar
   tags: [core, pointwise]
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
