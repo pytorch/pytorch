@@ -27,6 +27,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     return_and_correct_aliasing,
 )
+from torch.utils.debug_mode import DebugMode
 
 
 try:
@@ -337,11 +338,8 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
-        from torch.utils.debug_mode import DebugMode
-
         debug_mode = _get_current_dispatch_mode()
         in_debug_mode = isinstance(debug_mode, DebugMode)
-        redistribute_context = contextlib.nullcontext()
 
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
@@ -357,10 +355,13 @@ class OpDispatcher:
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
-                    if in_debug_mode:
-                        redistribute_context = debug_mode.record_redistribute_calls(
+                    redistribute_context = (
+                        debug_mode.record_redistribute_calls(
                             i, arg_spec, reshard_arg_spec
                         )
+                        if in_debug_mode
+                        else contextlib.nullcontext()
+                    )
 
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(

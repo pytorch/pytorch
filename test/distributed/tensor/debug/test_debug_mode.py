@@ -33,17 +33,43 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
         with DebugMode() as debug_mode:
-            torch.mm(x_dtensor, y_dtensor)
+            torch.mm(x_dtensor, y_dtensor).sum().backward()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
   torch.mm(dt: f32[8, 8][S(0)], dt: f32[8, 32][S(0)])
     aten::mm(dt: f32[8, 8][S(0)], dt: f32[8, 32][S(0)])
-      redistribute_input(1, [S(0)], [R])
+      redistribute_input(1, [S(0)] -> [R])
         _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0)
         _c10d_functional::wait_tensor(t: f32[8, 32])
-      aten::mm(t: f32[1, 8], t: f32[8, 32])""",
+      aten::mm(t: f32[1, 8], t: f32[8, 32])
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32][S(0)])
+    aten::sum(dt: f32[8, 32][S(0)])
+      aten::sum(t: f32[1, 32])
+  torch._tensor.backward(dt: f32[][P], gradient=None, retain_graph=None, create_graph=False, inputs=None)
+    aten::ones_like(dt: f32[][P], pin_memory=False, memory_format=torch.preserve_format)
+      aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
+    aten::expand(dt: f32[][R], [8, 32])
+      aten::expand(t: f32[], [8, 32])
+    aten::t(dt: f32[8, 8][S(0)])
+      aten::t(t: f32[1, 8])
+    aten::mm(dt: f32[8, 8][S(1)], dt: f32[8, 32][R])
+      redistribute_input(1, [R] -> [S(0)])
+        aten::chunk(t: f32[8, 32], 8)
+        aten::clone(t: f32[1, 32])
+      aten::mm(t: f32[8, 1], t: f32[1, 32])
+    aten::t(dt: f32[8, 32][S(0)])
+      aten::t(t: f32[1, 32])
+    aten::mm(dt: f32[8, 32][R], dt: f32[32, 8][S(1)])
+      aten::mm(t: f32[8, 32], t: f32[32, 1])
+      _c10d_functional::reduce_scatter_tensor(t: f32[8, 32], sum, 8, 0)
+      _c10d_functional::wait_tensor(t: f32[1, 32])
+      aten::_to_copy(t: f32[1, 32], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::detach(t: f32[1, 32])
+      _dtensor::shard_dim_alltoall(t: f32[8, 1], 1, 0, 0)
+      aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::detach(t: f32[1, 8])""",
         )
 
     def test_debug_mode_einsum(self):
@@ -85,12 +111,12 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1][R, P], [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8][P, R], dt: f32[1, 8, 16][R, P])
-      redistribute_input(0, [P, R], [S(2), S(2)])
+      redistribute_input(0, [P, R] -> [S(2), S(2)])
         aten::chunk(t: f32[1, 96, 8], 4, 2)
         aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
         _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 2)
         aten::clone(t: f32[1, 96, 1])
-      redistribute_input(1, [R, P], [S(1), S(1)])
+      redistribute_input(1, [R, P] -> [S(1), S(1)])
         aten::chunk(t: f32[1, 8, 16], 4, 1)
         aten::clone(t: f32[1, 2, 16])
         aten::chunk(t: f32[1, 2, 16], 2, 1)
