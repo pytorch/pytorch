@@ -104,20 +104,26 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         self.prepare()
-        with working_directory(self.work_directory):
-            if self.test_type == TestInpuType.TEST_PLAN:
-                if self.num_shards > 1:
-                    run_test_plan(
-                        self.test_plan,
-                        "vllm",
-                        sample_vllm_test_library(),
-                        self.shard_id,
-                        self.num_shards,
-                    )
+        try:
+            with working_directory(self.work_directory):
+                if self.test_type == TestInpuType.TEST_PLAN:
+                    if self.num_shards > 1:
+                        run_test_plan(
+                            self.test_plan,
+                            "vllm",
+                            sample_vllm_test_library(),
+                            self.shard_id,
+                            self.num_shards,
+                        )
+                    else:
+                        run_test_plan(
+                            self.test_plan, "vllm", sample_vllm_test_library()
+                        )
                 else:
-                    run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
-            else:
-                raise ValueError(f"Unknown test type {self.test_type}")
+                    raise ValueError(f"Unknown test type {self.test_type}")
+        finally:
+            # double check the torches are not overridden by other packages
+            check_versions()
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
@@ -220,6 +226,8 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
+    pkgs_to_add = []
+
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
     kept_lines = [line for line in lines if not pattern.match(line)]
@@ -236,7 +244,11 @@ def preprocess_test_in(
     ]
 
     # Write back: header_lines + blank + kept_lines
-    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    out_lines = header_lines + [""] + kept_lines
+    if pkgs_to_add:
+        out_lines += [""] + pkgs_to_add
+
+    out = "\n".join(out_lines) + "\n"
     target_path.write_text(out)
     logger.info("[INFO] Updated %s", target_file)
 

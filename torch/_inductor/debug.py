@@ -34,7 +34,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
-from .ir import ExternKernelOut
+from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -46,6 +46,11 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+# Graph execution tracking for debugging
+GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
+RECORD_GRAPH_EXECUTION: bool = False
+GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -808,6 +813,39 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
         log.debug("Failed to log inductor_runtime_and_tensor_meta", exc_info=True)
 
 
+def log_graph_execution() -> None:
+    """Emit a structured artifact with the graph execution order."""
+    if not GRAPH_EXECUTION_ORDER:
+        return
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "graph_execution",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"graph_execution_order": GRAPH_EXECUTION_ORDER},
+        )
+    except Exception:
+        log.debug("Failed to log graph_execution", exc_info=True)
+
+
+@contextlib.contextmanager
+def record_and_log_graph_execution_order() -> Iterator[None]:
+    """Record graph execution order and log it once on exit."""
+    global RECORD_GRAPH_EXECUTION, GRAPH_EXECUTION_ORDER, GRAPH_COMPILE_IDS
+    GRAPH_EXECUTION_ORDER = []
+    GRAPH_COMPILE_IDS = {}
+    RECORD_GRAPH_EXECUTION = True
+    try:
+        yield
+    finally:
+        log_graph_execution()
+        RECORD_GRAPH_EXECUTION = False
+        GRAPH_EXECUTION_ORDER = None
+        GRAPH_COMPILE_IDS = None
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -1055,7 +1093,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     kernel_name: str,
     is_extern: bool = False,
 ) -> Optional[int]:
@@ -1076,7 +1114,7 @@ def set_kernel_post_grad_provenance_tracing(
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernelOut)
+            assert isinstance(node_schedule, ExternKernel)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1212,7 +1250,7 @@ def aot_inductor_minifier_wrapper(
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
-    gm = exported_program.module()
+    gm = exported_program.module(check_guards=False)
     assert isinstance(gm, torch.fx.GraphModule)
 
     args, kwargs = exported_program.example_inputs
@@ -1241,7 +1279,7 @@ def aot_inductor_minifier_wrapper(
             tuple_inputs = tuple(flat_example_inputs)
             flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
             func(
-                flattened_ep.module(),
+                flattened_ep.module(check_guards=False),
                 tuple_inputs,
                 inductor_configs=config_copy,
                 package_path=package_path,
