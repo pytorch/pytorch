@@ -263,7 +263,7 @@ class SubgraphInfo:
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
-    numels = None  # type: ignore[var-annotated]
+    numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("range_trees", "numels")
@@ -612,6 +612,8 @@ class TritonTemplateKernel(TritonKernel):
         if config.benchmark_kernel:
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
+
+        inductor_meta["config_args"] = self.meta
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -1453,7 +1455,9 @@ class TritonTemplate(KernelTemplate):
         """
 
         try:
-            choices.append(self.generate(generate_with_caching=True, **kwargs))
+            choice = self.generate(generate_with_caching=True, **kwargs)
+            if choice is not None:
+                choices.append(choice)
             return None
         except NotImplementedError as e:
             log.info(
@@ -1904,6 +1908,19 @@ class ExternKernelChoice:
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
+
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
+        # convenience function to match the Template interface, so that
+        # templates and ExternKernelChoice can be treated the same when
+        # generating choice callers
+        assert "input_nodes" in kwargs, "input_nodes argument required"
+        assert "layout" in kwargs, "layout argument required"
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
+        return None
 
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
@@ -2760,6 +2777,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    counters["inductor"][
+                        "select_algorithm_num_precompilation_exceptions"
+                    ] += 1
                     exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
@@ -3358,6 +3378,9 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
+    def clear_feedback_savers(self):
+        self.feedback_saver_fns = []
+
     def add_preprocessing_fn(self, fn: PreprocessingFunction):
         self.preprocessing_fns.append(fn)
 
@@ -3403,6 +3426,12 @@ def add_feedback_saver(
 ):
     cache = get_algorithm_selector_cache()
     cache.add_feedback_saver(fn)
+
+
+def clear_feedback_savers():
+    """Clear all feedback saver functions."""
+    cache = get_algorithm_selector_cache()
+    cache.clear_feedback_savers()
 
 
 def add_preprocessing_fn(
