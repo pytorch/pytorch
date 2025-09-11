@@ -3133,8 +3133,10 @@ class CppVecKernel(CppKernel):
                 "horizontal_reduction": horizontal_reduction,
                 "src_dtype": src_dtype,
             }
+            # use masked acc_vec for tail vec kernel
+            acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, **kwargs)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, **kwargs)};"
             )
         self._gen_parallel_reduction_buffers(
             acc_vec,
