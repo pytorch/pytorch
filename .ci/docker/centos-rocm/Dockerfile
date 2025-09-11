@@ -17,9 +17,8 @@ RUN bash ./install_base.sh && rm install_base.sh
 # Update CentOS git version
 RUN yum -y remove git
 RUN yum -y remove git-*
-RUN yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm || \
-    (yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm && \
-    sed -i "s/packages.endpoint/packages.endpointdev/" /etc/yum.repos.d/endpoint.repo)
+RUN yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm && \
+    sed -i 's/packages.endpoint/packages.endpointdev/' /etc/yum.repos.d/endpoint.repo
 RUN yum install -y git
 
 # Install devtoolset
@@ -40,7 +39,7 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
+ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
@@ -57,9 +56,13 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+RUN mkdir ci_commit_pins
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
 COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh
+RUN rm install_rocm.sh common_utils.sh
+RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
 RUN rm install_rocm_magma.sh
@@ -74,12 +77,6 @@ ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG en_US.utf8
 ENV LC_ALL en_US.utf8
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION

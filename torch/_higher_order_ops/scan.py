@@ -1,25 +1,27 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
+    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_bw_fn,
     first_slice_copy,
+    first_slice_copy_with_grad,
+    get_tensor_mask,
+    mask_list,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -38,9 +40,9 @@ aten = torch._ops.ops.aten
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
-    assert len(args) == (
-        num_init_leaves + num_inp_leaves
-    ), f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+    assert len(args) == (num_init_leaves + num_inp_leaves), (
+        f"Combin_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+    )
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
     return combine_fn(carry, xs)
@@ -59,50 +61,6 @@ def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
         .repeat(*([scan_length] + [1] * y.ndim))
         .clone(memory_format=torch.contiguous_format)
     )
-
-
-# NOTE: These functions can be reused in associative_scan and eventually moved to
-# torch._higher_order_ops.utils
-def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
-    # Returns a mask whether a list element is a tensor or not
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
-
-
-def mask_list(
-    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
-) -> list[Any]:
-    # Masks elements on an `inp` list.
-    # If other is None, then the elements of the `inp` list where the mask is False are removed
-    # If other is not None, then the elements of the `inp` list where the mask is False are
-    # replaced with the elements of the `other` list
-    assert len(mask) == len(
-        inp
-    ), "The length of the mask needs to be identical to the length of the input"
-    if other is not None:
-        assert len(inp) == len(
-            other
-        ), "If an input and an other list is provided, they need to have the same length"
-        return [i if m else o for m, i, o in zip(mask, inp, other)]
-    else:
-        return [i for m, i in zip(mask, inp) if m]
-
-
-def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
-    # First_slice_copy does not keep the original requires_grad flag,
-    # but we need it for materialize_as_graph
-    # in order to compute the correct gradients
-    # The reason why first_slice_copy doesn't keep requires_grad flag is
-    # because it's called in torch.autograd.Function.backward/forward.
-    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-    return slc
-
-
-def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    assert sum(chunk_sizes) == len(
-        iterable
-    ), "the sum of all chunks needs to match the length of the iterable."
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 def call_operator(operator, *args):
@@ -137,7 +95,7 @@ def scan(
             and the second output  of ``combine_fn`` represents a slice of the output.
             This function must be pure, i.e., no lifted arguments are supported at the moment
             and may not have any side effects.
-        init (torch.Tensor or pytree with tensor leaves): The inital scan carry, a tensor, or nested pytree of tensors.
+        init (torch.Tensor or pytree with tensor leaves): The initial scan carry, a tensor, or nested pytree of tensors.
             The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
         xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
@@ -152,11 +110,22 @@ def scan(
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
+    Restrictions:
+        - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
+            or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
+
+        - The combine_fn shouldn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
+            if you input mutation support for training is needed.
+
+        - The combine_fn's init carry should match the next_carry in pytree structure and in tensor metadata.
+
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
             next_carry = y = x + y
-            return next_carry, y
+            # clone the output to avoid output-output aliasing
+            return next_carry, y.clone()
+
 
         i0 = torch.zeros(1)
         xs = torch.arange(5)
@@ -254,9 +223,9 @@ class ScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(
-            additional_inputs, (tuple, list)
-        ), "additional_inputs must be a tuple."
+        assert isinstance(additional_inputs, (tuple, list)), (
+            "additional_inputs must be a tuple."
+        )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
@@ -264,6 +233,56 @@ class ScanOp(HigherOrderOperator):
         )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, additional_inputs)
+
+    def gen_schema(self, combine_fn, init, xs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        all_inputs = tuple(
+            list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
+        )
+
+        combine_gm: torch.fx.GraphModule = (
+            combine_fn
+            if isinstance(combine_fn, torch.fx.GraphModule)
+            else materialize_as_graph(combine_fn, all_inputs)
+        )
+
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in combine_gm.graph.find_nodes(op="placeholder")
+        ]
+
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("combine_fn", combine_gm)
+
+        for idx, arg in enumerate(init):
+            schema_gen.add_arg(f"init{idx}", arg)
+
+        for idx, arg in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", arg)
+
+        for idx, arg in enumerate(additional_inputs):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(combine_fn, init, xs, additional_inputs)
+        return schema_gen.gen_schema()
 
 
 scan_op = ScanOp()
@@ -576,9 +595,9 @@ class ScanAutogradOp(torch.autograd.Function):
             carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
             return [
                 *carry,
-                # We additionally checkpoint all the intemediate carry outputs for backward.
+                # We additionally checkpoint all the intermediate carry outputs for backward.
                 *[
-                    n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c
+                    n_c.detach().clone() if isinstance(n_c, torch.Tensor) else n_c
                     for n_c in carry
                 ],
                 *y,
@@ -784,7 +803,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # Prepare the bwd_init
         bwd_init = [*initial_g_additional_inputs, *g_c_T]
 
-        # 5.) Perform the backwrad scan:
+        # 5.) Perform the backward scan:
         # The ``combine_fn_bw_wrapped`` receives the
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
@@ -808,19 +827,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    if not any(
-        el.requires_grad
-        for el in (tuple(init) + tuple(xs) + additional_inputs)
-        if isinstance(el, torch.Tensor)
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-            )
-
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
@@ -861,12 +867,19 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        _maybe_run_with_interpreter,
+    )
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
+
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(combine_fn)
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        functional_combine_fn = ctx.functionalize(
+            _maybe_run_with_interpreter(combine_fn)
+        )
         sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(
@@ -875,18 +888,8 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        if _has_potential_branch_input_mutation(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be aliasing the input!"
-            )
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        _check_alias_and_mutation(combine_fn, sample_inputs, "scan", pre_dispatch)
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,

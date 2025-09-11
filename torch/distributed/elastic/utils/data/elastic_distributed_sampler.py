@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,12 +7,20 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+from collections.abc import Iterator, Sized
+from typing import cast, Optional, TypeVar
 
 import torch
+from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 
 
-class ElasticDistributedSampler(DistributedSampler):
+T = TypeVar("T")
+
+__all__ = ["ElasticDistributedSampler"]
+
+
+class ElasticDistributedSampler(DistributedSampler[T]):
     """
     Sampler that restricts data loading to a subset of
     the dataset for elastic training.
@@ -34,25 +41,39 @@ class ElasticDistributedSampler(DistributedSampler):
         start_index (optional):  Which index of the dataset to start sampling from
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, start_index=0):
+    def __init__(
+        self,
+        dataset: Dataset[T],
+        num_replicas: Optional[int] = None,
+        rank: Optional[int] = None,
+        start_index: int = 0,
+    ):
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
-        if start_index >= len(dataset):
+        if not isinstance(dataset, Sized):
+            raise TypeError("Dataset must be an instance of collections.abc.Sized")
+
+        # Cast to Sized for mypy
+        sized_dataset = cast(Sized, dataset)
+
+        if start_index >= len(sized_dataset):
             raise ValueError(
-                f"Start index {start_index} should be less than dataset size {len(dataset)}"
+                f"Start index {start_index} should be less than dataset size {len(sized_dataset)}"
             )
 
         self.start_index = start_index
+        sized_dataset = cast(Sized, self.dataset)
         self.num_samples = int(
-            math.ceil(float(len(self.dataset) - self.start_index) / self.num_replicas)  # type: ignore[arg-type]
+            math.ceil(float(len(sized_dataset) - self.start_index) / self.num_replicas)
         )
         self.total_size = self.num_samples * self.num_replicas
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T]:
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
+        sized_dataset = cast(Sized, self.dataset)
         indices = (
-            torch.randperm(len(self.dataset) - self.start_index, generator=g)  # type: ignore[arg-type]
+            torch.randperm(len(sized_dataset) - self.start_index, generator=g)
             .add(self.start_index)
             .tolist()
         )
@@ -67,5 +88,5 @@ class ElasticDistributedSampler(DistributedSampler):
 
         return iter(indices)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples

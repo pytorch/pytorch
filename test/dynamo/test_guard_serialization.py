@@ -5,6 +5,9 @@ import importlib
 import pickle
 import sys
 import types
+import unittest
+from collections.abc import Iterator
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -13,6 +16,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
@@ -21,6 +25,8 @@ from torch._dynamo.symbolic_convert import (
 )
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
+from torch.overrides import TorchFunctionMode
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -35,6 +41,17 @@ class _FrameState:
 class GlobalModule(torch.nn.Module):
     def forward(self, x):
         return x + 1
+
+
+def global_func(x):
+    return x + 1
+
+
+class GlobalTorchFunctionMode(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
 
 
 class SubclassWithMeta(torch.Tensor):
@@ -200,7 +217,35 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
         return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
+# defines a custom __eq__() / __hash__() to be registered as a pytree constant type
+class CustomConstantType:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def __eq__(self, other):
+        # custom eq ignores b
+        return self.a == other.a
+
+    def __hash__(self):
+        # custom hash ignores b
+        return hash(self.a)
+
+
+pytree.register_constant(CustomConstantType)
+
+
+@torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
+    def test_function_locals(self):
+        def foo(x):
+            return x + 1
+
+        def fn(x, g):
+            return g(x) + 1
+
+        self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
@@ -210,12 +255,18 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         self._frame_state = _FrameState(
             f_locals=dict(frame.f_locals),
-            f_globals=dict(frame.f_globals),
+            f_globals=frame.f_globals,
             f_code=frame.f_code,
             f_builtins=frame.f_builtins,
         )
 
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
+        # kwargs might contain a callable that generates kwargs
+        torch._dynamo.reset()
+        kwarg_gen_fn = kwargs.get("_gen_fn", None)
+        if kwarg_gen_fn is not None:
+            kwargs = kwarg_gen_fn()
+
         self._frame_state = None
         sys.settrace(self._tracefunc)
         if isinstance(fn, torch.nn.Module):
@@ -226,6 +277,14 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             sys.settrace(None)
 
         assert self._frame_state is not None
+
+        # Set f_locals from regenerated kwargs to handle exhausted input iterators
+        # NB: This is super janky and might cause unforeseen problems
+        if kwarg_gen_fn is not None:
+            kwargs = kwarg_gen_fn()
+            for key in self._frame_state.f_locals.keys():
+                if key in kwargs and isinstance(kwargs[key], Iterator):
+                    self._frame_state.f_locals[key] = kwargs[key]
 
         def guard_filter_fn(guards):
             ret = [
@@ -248,6 +307,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             nonlocal ref_gm
             nonlocal loaded_gm
 
+            torch._dynamo.convert_frame.initial_global_state = (
+                torch._C._dynamo.guards.GlobalStateGuard()
+            )
             tracer = InstructionTranslator(
                 instructions,
                 self._frame_state.f_code,
@@ -255,7 +317,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 self._frame_state.f_globals,
                 self._frame_state.f_builtins,
                 fn.__closure__ or (),
-                [],  # TODO tf_mode_stack,
+                torch.overrides._get_current_function_mode_stack(),
                 code_options,
                 torch._dynamo.lookup_backend("eager"),
                 one_graph=False,
@@ -265,33 +327,47 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 speculation_log=SpeculationLog(),
                 exn_vt_stack=ExceptionStack(),
                 distributed_state=None,
+                package=None,
             )
-            with compile_context(CompileContext(CompileId(0, 0))), tracing(
-                tracer.output.tracing_context
-            ), tracer.set_current_tx(), get_metrics_context(), dynamo_timed(""):
+            with (
+                compile_context(CompileContext(CompileId(0, 0))),
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                get_metrics_context(),
+                dynamo_timed(""),
+            ):
                 tracer.run()
+
+                ref_gm = CheckFunctionManager(
+                    self._frame_state.f_code,
+                    tracer.output,
+                    guard_filter_fn=guard_filter_fn,
+                ).guard_manager
 
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
-                    guards_serialization_mode="save",
+                    save_guards=True,
                 )
-                ref_gm = check_fn_manager.guard_manager
                 guards_state = check_fn_manager.guards_state
+                self._cached_guards_state = guards_state
+                self._cached_f_code = self._frame_state.f_code
                 self.assertIsNotNone(guards_state)
                 guards_state = pickle.loads(guards_state)
 
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
                     guards_state.output_graph,
-                    guards_serialization_mode="load",
+                    shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=self._frame_state.f_globals,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
         try:
             transform_code_object(self._frame_state.f_code, transform)
         finally:
+            torch._dynamo.convert_frame.initial_global_state = None
             self._frame_state = None
 
         self.assertIsNotNone(ref_gm)
@@ -433,7 +509,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # === example subclass defined locally (error) ===
         local_sub = LocalSubclass(torch.randn(3))
         with self.assertRaisesRegex(
-            RuntimeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
 
@@ -505,12 +581,249 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
 
+    def test_equals_match(self):
+        def fn(x, y):
+            # CustomConstantType is registered as a pytree constant so this should
+            # result in an EQUALS_MATCH guard.
+            if x in y:
+                return torch.zeros(3)
+            return torch.ones(3)
+
+        x = CustomConstantType(4, 5)
+        y = [CustomConstantType(2, 3), CustomConstantType(4, 5)]
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        # custom __eq__ says that CustomConstantType(4, 5) == CustomConstantType(4, 9)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": CustomConstantType(4, 5),
+                "y": [CustomConstantType(2, 3), CustomConstantType(4, 9)],
+            },
+            True,
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "y": []}, False)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": x,
+                "y": [CustomConstantType(2, 3), CustomConstantType(6, 7)],
+            },
+            False,
+        )
+
+    def test_constant_match(self):
+        # === bool constant ===
+        def fn(x, y):
+            if y:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = True
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": True}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": False}, False)
+
+        # === None constant ===
+        def fn(x, y):
+            if y is None:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = None
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": None}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": None}, True)
+        # guard should fail for non-None y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, False)
+
+        # === int constant ===
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(3)
+        y = 5
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": 5}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
+
+    def test_nn_module(self):
+        def fn(m, x):
+            return m(x)
+
+        m = GlobalModule()
+        x = torch.randn(3)
+
+        # config setting controls whether the NN_MODULE guard is installed
+        with patch("torch._dynamo.config.inline_inbuilt_nn_modules", False):
+            # we don't support NN_MODULE because it adds an ID_MATCH guard, and we don't
+            # support that in serialization
+            with self.assertRaisesRegex(
+                PackageError, "NN_MODULE guard cannot be serialized."
+            ):
+                self._test_serialization("NN_MODULE", fn, m, x)
+
+    def test_function_match(self):
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        x = torch.randn(3)
+
+        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
+        # support that in serialization
+        with self.assertRaisesRegex(
+            PackageError, "FUNCTION_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("FUNCTION_MATCH", fn, x)
+
+    def test_closure_match(self):
+        def fn(x):
+            # usage of this global function installs a CLOSURE_MATCH guard
+            return global_func(x)
+
+        x = torch.randn(3)
+
+        # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
+        # support that in serialization
+        with self.assertRaisesRegex(
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLOSURE_MATCH", fn, x)
+
+    def test_sequence_length(self):
+        # tuple input installs a SEQUENCE_LENGTH guard
+        def fn(t, x):
+            return t[1] + x
+
+        t = tuple(torch.randn(3) for _ in range(3))
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("SEQUENCE_LENGTH", fn, t, x)
+        self._test_check_fn(ref, loaded, {"x": x, "t": t}, True)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": torch.randn(3),
+                "t": tuple(torch.randn(3) for _ in range(3)),
+            },
+            True,
+        )
+        # different types in tuple of same length shouldn't fail SEQUENCE_LENGTH guard
+        # (it should fail the separate TYPE_MATCH guard but that isn't tested here)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "t": (0, 1, 2)}, True)
+        # different length tuple
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": torch.randn(3),
+                "t": tuple(torch.randn(3) for _ in range(4)),
+            },
+            False,
+        )
+
+    def test_tuple_iterator_len(self):
+        def fn(t, x):
+            if len(list(t)) > 2:
+                return x * 2
+            return x + 1
+
+        tup = (1, 2, 3)
+        x = torch.randn(3)
+
+        # func to generate kwargs; useful for avoiding iterator exhaustion issues
+        def _gen_kwargs(tup=tup, x=x):
+            return {"t": iter(tup), "x": x}
+
+        ref, loaded = self._test_serialization(
+            "TUPLE_ITERATOR_LEN", fn, _gen_fn=_gen_kwargs
+        )
+
+        # same tuple
+        self._test_check_fn(ref, loaded, {"t": iter(tup), "x": x}, True)
+        self._test_check_fn(ref, loaded, {"t": iter(tup), "x": torch.randn(4)}, True)
+        # same length tuple, different contents
+        self._test_check_fn(ref, loaded, {"t": iter((3, 2, 1)), "x": x}, True)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((3, 2, 1)), "x": torch.randn(4)}, True
+        )
+        # different tuple lengths
+        self._test_check_fn(ref, loaded, {"t": iter((1, 2)), "x": x}, False)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((1, 2)), "x": torch.randn(4)}, False
+        )
+        self._test_check_fn(ref, loaded, {"t": iter((1, 2, 3, 4)), "x": x}, False)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((1, 2, 3, 4)), "x": torch.randn(4)}, False
+        )
+
+    def test_range_iterator_match(self):
+        def fn(x, r):
+            y = x
+            for val in r:
+                y = x + val
+            return y
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "r": iter(range(2, 15, 3))}
+
+        ref, loaded = self._test_serialization(
+            "RANGE_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        # same range
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 3))}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 3))}, True
+        )
+        # equivalent even with different end
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 16, 3))}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 16, 3))}, True
+        )
+        # different start
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(1, 15, 3))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(1, 15, 3))}, False
+        )
+        # different end resulting in different values
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 18, 3))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 18, 3))}, False
+        )
+        # different step
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 4))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
+        )
+
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
         with self.assertRaisesRegex(
-            RuntimeError, "DICT_VERSION guard cannot be serialized."
+            PackageError, "DICT_VERSION guard cannot be serialized."
         ):
             self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
@@ -562,9 +875,26 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + id(x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "ID_MATCH guard cannot be serialized."
+            PackageError, "ID_MATCH guard cannot be serialized."
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_id_match_with_config(self):
+        def fn(x):
+            return x + id(x)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
 
     def test_dispatch_key_set_match(self):
         def fn(x, dks):
@@ -737,10 +1067,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + x_
 
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
-            RuntimeError, "DUPLICATE_INPUT guard cannot be serialized"
-        ):
-            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+        ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)
@@ -755,7 +1085,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return params[0].sum()
 
         with self.assertRaisesRegex(
-            RuntimeError, "WEAKREF_ALIVE guard cannot be serialized"
+            PackageError, "WEAKREF_ALIVE guard cannot be serialized"
         ):
             with torch.set_grad_enabled(False):
                 self._test_serialization("WEAKREF_ALIVE", fn)
@@ -798,6 +1128,223 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             False,
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
+
+    @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
+    def test_empty_nn_module_hooks_dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = Module()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(2, dtype=torch.float32)
+        ref, loaded = self._test_serialization("EMPTY_NN_MODULE_HOOKS_DICT", fn, x)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, True)
+
+        h = m.register_forward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_forward_pre_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_backward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+    def test_grad_mode(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_grad_mode_loading(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            # Ensure guards state loading is not affected by the current global grad mode.
+            guards_state = pickle.loads(self._cached_guards_state)
+            check_fn_manager = CheckFunctionManager(
+                self._cached_f_code,
+                guards_state.output_graph,
+                shape_code_parts=guards_state.shape_code_parts,
+            )
+            loaded = check_fn_manager.guard_manager
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_deterministic_algorithms(self):
+        def fn(x):
+            return x + 1
+
+        deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        try:
+            x = torch.randn(3, 2)
+            torch.use_deterministic_algorithms(True)
+            ref, loaded = self._test_serialization("DETERMINISTIC_ALGORITHMS", fn, x)
+            torch.use_deterministic_algorithms(False)
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.use_deterministic_algorithms(True)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.use_deterministic_algorithms(deterministic_restore)
+
+    def test_torch_function_state(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        class LocalTorchFunctionMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        with GlobalTorchFunctionMode():
+            ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with GlobalTorchFunctionMode():
+            with torch._C.DisableTorchFunction():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+        with self.assertRaisesRegex(
+            PackageError,
+            "defined in local scope. Please define the class at global scope",
+        ):
+            with LocalTorchFunctionMode():
+                ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_training_state(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+        from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+
+        param_group = FSDPParamGroup(
+            [],  # params: List[nn.Parameter],
+            (torch.nn.Linear(1, 1),),  # module: nn.Module,
+            None,  # mesh_info: FSDPMeshInfo,
+            None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
+            torch.device("cpu"),  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
+            None,  # mp_policy: MixedPrecisionPolicy,
+            None,  # offload_policy: OffloadPolicy,
+        )
+
+        def fn(x):
+            with param_group.use_training_state(TrainingState.FORWARD):
+                if param_group._training_state == TrainingState.FORWARD:
+                    return x + 1
+                else:
+                    return x - 1
+
+        x = torch.randn(3, 2)
+
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("FSDP_TRAINING_STATE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_default_device(self):
+        device = torch.get_default_device()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        try:
+            torch.set_default_device("cpu")
+            ref, loaded = self._test_serialization("DEFAULT_DEVICE", fn, x)
+            torch.set_default_device("meta")
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.set_default_device("cpu")
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.set_default_device(device)
+
+    def test_shape_env(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(2, 2)}, False)
+
+        x = torch.randn(3, 3, 2)
+        torch._dynamo.mark_dynamic(x, 1, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_builtin_match(self):
+        def fn(x):
+            # usage of getattr() here installs a BUILTIN_MATCH guard
+            s = getattr(x, "shape")  # noqa: B009
+            return x + s[0]
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("BUILTIN_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        getattr_original = getattr
+
+        def getattr_new(*args, **kwargs):
+            return getattr_original(*args, **kwargs)
+
+        builtins_dict = (
+            __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+        )
+        builtins_dict["getattr"] = getattr_new
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        finally:
+            builtins_dict["getattr"] = getattr_original
+
+    def test_skipped_objects(self):
+        def foo():
+            pass
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.code = foo.__code__
+                self.foo = foo
+                self.p = torch.nn.Parameter(torch.randn(3, 2))
+
+            def forward(self, x):
+                z = x + 1
+                for p in self.parameters():
+                    z += p
+                return z
+
+        m = Module()
+        ref, loaded = self._test_serialization("TENSOR_MATCH", m, torch.randn(3, 2))
+        self._test_check_fn(ref, loaded, {"self": m, "x": torch.randn(3, 2)}, True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import copy
 import types
 import unittest
 from typing import Dict, List, Tuple
@@ -8,8 +9,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
-from torch.export import export, export_for_training
-from torch.export._trace import _convert_ts_to_export_experimental
+from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
@@ -17,93 +17,6 @@ from torch.testing import FileCheck
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
-    def test_torchscript_module_export(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x.cos() + x.sin()
-
-        model_to_trace = M()
-        inps = (torch.randn(4, 4),)
-        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
-
-        exported_module = _convert_ts_to_export_experimental(
-            traced_module_by_torchscript, inps
-        )
-
-        self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
-
-    def test_torchscript_module_export_single_input(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x.cos() + x.sin()
-
-        model_to_trace = M()
-        inps = torch.randn(4, 4)
-        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
-
-        exported_module = _convert_ts_to_export_experimental(
-            traced_module_by_torchscript, inps
-        )
-
-        self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
-
-    def test_torchscript_module_export_various_inputs_with_annotated_input_names(self):
-        def _check_equality_and_annotations(m_func, inps):
-            # Original module.
-            model_to_trace = m_func()
-
-            # ExportedProgram from TorchScript module.
-            traced_module_by_torchscript = torch.jit.trace(
-                m_func(), example_inputs=inps
-            )
-            exported_module = _convert_ts_to_export_experimental(
-                traced_module_by_torchscript, inps
-            )
-
-            # ExportedProgram from original module.
-            original_exported_module = torch.export.export_for_training(
-                m_func(), inps, strict=True
-            )
-
-            # Check whether input annotations are the same as tracing the original module.
-            orig_ph_name_list = [
-                n.name
-                for n in original_exported_module.graph.nodes
-                if n.op == "placeholder"
-            ]
-            ph_name_list = [
-                n.name for n in exported_module.graph.nodes if n.op == "placeholder"
-            ]
-            self.assertEqual(orig_ph_name_list, ph_name_list)
-
-            # Check results equality.
-            self.assertTrue(
-                torch.allclose(exported_module(*inps), model_to_trace(*inps))
-            )
-
-        # Tuple
-        class MTuple(torch.nn.Module):
-            def forward(self, x: Tuple[torch.Tensor]):
-                return x[0] + x[1]
-
-        _check_equality_and_annotations(MTuple, ((torch.randn(4), torch.randn(4)),))
-
-        # List
-        class MList(torch.nn.Module):
-            def forward(self, x: List[torch.Tensor]):
-                return x[0] + x[1]
-
-        _check_equality_and_annotations(MList, ([torch.randn(4), torch.randn(4)],))
-
-        # Dict
-        class MDict(torch.nn.Module):
-            def forward(self, x: Dict[str, torch.Tensor]):
-                return x["0"] + x["1"]
-
-        _check_equality_and_annotations(
-            MDict, ({"0": torch.randn(4), "1": torch.randn(4)},)
-        )
-
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -119,7 +32,7 @@ class TestExperiment(TestCase):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export_for_training(m, example_inputs, strict=True)
+        ep = torch.export.export(m, example_inputs, strict=True)
         joint_ep = _export_forward_backward(ep)
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),
@@ -228,7 +141,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             m, example_inputs, dynamic_shapes={"x": {0: Dim("x0")}}, strict=True
         )
         _export_forward_backward(ep)
@@ -264,7 +177,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         labels = torch.ones(4, dtype=torch.int64)
         inputs = (x, labels)
 
-        ep = export_for_training(net, inputs, strict=True)
+        ep = export(net, inputs, strict=True)
         ep = _export_forward_backward(ep)
 
     def test_joint_loss_index(self):
@@ -284,7 +197,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         inputs = (torch.randn(4, 4),)
         for i in [0, 1]:
-            ep = export_for_training(Foo(i), inputs, strict=True)
+            ep = export(Foo(i), inputs, strict=True)
             ep_joint = _export_forward_backward(ep, joint_loss_index=i)
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:
@@ -406,6 +319,7 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     linear_weight = self.linear.weight
     linear_bias = self.linear.bias
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
     return pytree.tree_unflatten((linear,), self._out_spec)""",
         )
@@ -438,6 +352,62 @@ def forward(self, x):
         p.model.forward = orig_forward
         res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
         self.assertTrue(torch.allclose(res, res2))
+
+    def test_export_add_in_out_info(self):
+        class Foo(torch.nn.Module):
+            def forward(self, dct, lst, bleh):
+                x = dct["a"] * lst[1][0]
+                y = dct["b"] * lst[0]
+                out_dict = {}
+                # Mutate and get a new entry in there
+                lst_copy = lst.copy()
+                lst_copy.append(lst[0])
+                out_dict["a"] = x
+                out_dict["b"] = y
+                return (
+                    dct["a"],
+                    out_dict["b"],
+                    bleh,
+                    lst_copy[-1],
+                    out_dict["a"],
+                    [5, 6],
+                )
+
+        dct = {"a": torch.randn(2, 3), "b": torch.randn(2, 3)}
+        lst = [torch.randn(2, 3), [torch.randn(2, 3), torch.randn(2, 3)]]
+
+        export_inputs = ((dct, lst, 56), {})
+        eager_inputs = copy.deepcopy(export_inputs)
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
+            *export_inputs[0], **export_inputs[1]
+        )
+
+        res_export = graph_module(*export_inputs[0], **export_inputs[1])
+        res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
+
+        self.assertEqual(res_export, res_eager)
+
+    def test_export_leaf(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        export_inputs = ((torch.randn(4, 4),), {})
+        eager_inputs = copy.deepcopy(export_inputs)
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
+            *export_inputs[0], **export_inputs[1]
+        )
+
+        res_export = graph_module(*export_inputs[0], **export_inputs[1])
+        res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
+
+        self.assertEqual(res_export, res_eager)
 
 
 if __name__ == "__main__":

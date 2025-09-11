@@ -76,7 +76,7 @@ namespace at::cuda {
   AT_FORALL_NVRTC_BASE(_)
 #endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION)
 #define AT_FORALL_NVRTC(_) \
   AT_FORALL_NVRTC_EXTENDED(_)  \
   _(nvrtcGetCUBINSize)     \
@@ -117,6 +117,8 @@ namespace at::cuda {
   _(nvrtcGetPTXSize)                              \
   _(nvrtcGetPTX)                                  \
   _(cuModuleLoadData)                             \
+  _(cuModuleLoad)                                 \
+  _(cuGetErrorString)                             \
   _(cuModuleGetFunction)                          \
   _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
   _(nvrtcGetErrorString)                          \

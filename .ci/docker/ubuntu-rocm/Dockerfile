@@ -25,9 +25,9 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
+ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
@@ -52,9 +52,13 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+RUN mkdir ci_commit_pins
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
 COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh
+RUN rm install_rocm.sh common_utils.sh
+RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
 RUN rm install_rocm_magma.sh
@@ -96,16 +100,11 @@ ARG ANACONDA_PYTHON_VERSION
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
 COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION

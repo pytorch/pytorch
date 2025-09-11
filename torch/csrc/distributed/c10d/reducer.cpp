@@ -97,7 +97,8 @@ Reducer::Reducer(
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
     int64_t first_bucket_bytes_cap,
-    bool skip_all_reduce_unused_params)
+    bool skip_all_reduce_unused_params,
+    bool use_python_reducer)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -121,7 +122,8 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      use_python_reducer_(use_python_reducer) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -199,8 +201,9 @@ Reducer::Reducer(
                 this->autograd_hook(variable_index);
                 return outputs;
               },
-              [=](torch::autograd::CompiledNodeArgs& args) {
-                TORCH_INTERNAL_ASSERT(
+              [this](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_CHECK(
+                    this->use_python_reducer_,
                     "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
               })),
           grad_accumulator);
@@ -965,24 +968,6 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   // do any extra synchronization here.
   const auto& tensor = bucket.gradients;
 
-  // TODO(@egienvalue): remove special case after view ops are fully
-  // supported on MTIA.
-  // If the bucket.gradients is on MTIA, bucket.bucket_views_in might not
-  // point to the same storage as bucket.gradients due to the special
-  // memory layout. It has to explicitly copy the data back to 1-D gradients.
-  if (tensor.is_mtia()) {
-    for (const auto i : c10::irange(bucket.variables.size())) {
-      const auto offset = bucket.offsets[i];
-      const auto length = bucket.lengths[i];
-      if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
-        tensor
-            .narrow(
-                0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-            .copy_(bucket.bucket_views_in[i].flatten());
-      }
-    }
-  }
-
   GradBucket grad_bucket(
       next_bucket_,
       buckets_.size(),
@@ -1246,7 +1231,7 @@ void Reducer::initialize_buckets(
       // patterns when copy_ing grad data in and out of its bucket view.
       // However, numerics remain correct, because the bucket view is the same
       // on either end of the raw allreduce.  bucket_view_in.copy(grad)
-      // tranposes
+      // transposes
       // (+ densifies) to the bucket view's layout, the data is allreduced,
       // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
       //
@@ -1286,12 +1271,8 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    // TODO(@egienvalue): remove special case after view ops are fully
-    // supported on MTIA.
-    // In general, on MTIA, due to the special memory layout, it doesn't
-    // support as_strided which creates a view tensor and aten::view will
-    // create a new tensor on MTIA for now.
-    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
+
+    if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1345,12 +1326,8 @@ void Reducer::populate_bucket_views_out(
     const auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    // TODO(@egienvalue): remove special case after view ops are fully
-    // supported on MTIA.
-    // In general, on MTIA, due to the special memory layout, it doesn't
-    // support as_strided which creates a view tensor and aten::view will
-    // create a new tensor on MTIA for now.
-    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
+
+    if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.

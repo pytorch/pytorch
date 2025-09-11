@@ -163,20 +163,7 @@ macro(caffe2_interface_library SRC DST)
   # link command for the specific SRC library.
   if(${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
-    if(APPLE)
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
-    elseif(MSVC)
-      # In MSVC, we will add whole archive in default.
-      target_link_libraries(
-         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
-      target_link_options(
-         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
-    else()
-      # Assume everything else is like gcc
-      target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
-    endif()
+    target_link_libraries(${DST} INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,${SRC}>)
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
     # that are the dependent library of the source library. Note that we cannot
@@ -324,12 +311,20 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
+  # We need to support the explicitly and conveniently defined TORCH_CUDA_ARCH_LIST
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
         "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    if(NOT TORCH_CUDA_ARCH_LIST)
+      set(TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    else()
+      list(APPEND TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    endif()
   endif()
 
   # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
@@ -360,8 +355,12 @@ function(torch_compile_options libname)
       #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
       #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive-" PARENT_SCOPE)
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
@@ -387,7 +386,7 @@ function(torch_compile_options libname)
       list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wextra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -398,6 +397,7 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
+        -Werror=ignored-attributes
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=pedantic
@@ -482,6 +482,7 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckLinkerFlag)
 
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
@@ -509,5 +510,24 @@ function(target_compile_options_if_supported target flag)
   append_cxx_flag_if_supported("${flag}" _compile_options)
   if(NOT "${_compile_options}" STREQUAL "")
     target_compile_options(${target} PRIVATE ${flag})
+  endif()
+endfunction()
+
+# Check if a global link option is supported
+function(add_link_options_if_supported flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    add_link_options("LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
+  endif()
+endfunction()
+
+function(target_link_options_if_supported tgt flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
   endif()
 endfunction()

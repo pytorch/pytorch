@@ -1,5 +1,4 @@
 import ctypes
-import os
 import sys
 from typing import Any, Optional, Union
 
@@ -7,28 +6,6 @@ import torch
 
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
-
-
-def _get_nvrtc_version(cuda_version: int) -> str:
-    # TODO: Expose this from native code
-    # Follows same logic as LazyNVRTC.cpp getLibVersion()
-    major = cuda_version // 1000
-    minor = (cuda_version // 10) % 10
-
-    if sys.platform == "win32":
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}{minor}"
-        elif major == 11:
-            return "112"
-        else:
-            return f"{major}0"
-    else:
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}.{minor}"
-        elif major == 11:
-            return "11.2"
-        else:
-            return str(major)
 
 
 # Load CUDA driver and NVRTC
@@ -53,51 +30,33 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
-    # Get NVRTC version based on CUDA runtime version
-    # Use an alternative approach to get the CUDA version
-    # since cudart().getVersion() is failing
-    import torch
-
-    try:
-        import torch.cuda
-
-        cuda_runtime_version = torch.cuda.cudart().getVersion()
-    except (ImportError, AttributeError):
-        # Fallback: if we have CUDA available, get version from device properties
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
-            # Import locally to avoid circular imports
-            import torch.cuda
-
-            props = torch.cuda.get_device_properties(torch.cuda.current_device())
-            cuda_runtime_version = props.major * 1000 + props.minor * 10
-        else:
-            # Hardcode a default CUDA version if all else fails
-            cuda_runtime_version = 12000  # Assume CUDA 12.0 as default
-
-    version = _get_nvrtc_version(cuda_runtime_version)
-
+    # Since PyTorch already loads NVRTC, we can use the system library
+    # which should be compatible with PyTorch's version
     if sys.platform == "win32":
-        # Windows handling remains the same
-        lib_name = f"nvrtc64_{version}_0.dll"
-        return ctypes.CDLL(lib_name)
+        return ctypes.CDLL("nvrtc64_120_0.dll")
     else:
-        lib_paths = [
-            f"libnvrtc.so.{version}",
-            os.path.join(
-                os.environ.get("CUDA_HOME", ""), f"lib64/libnvrtc.so.{version}"
-            ),
-            "/usr/local/cuda/lib64/libnvrtc.so",
-        ]
+        return ctypes.CDLL("libnvrtc.so")
 
-        for path in lib_paths:
-            try:
-                return ctypes.CDLL(path)
-            except OSError:
-                continue
 
-        raise RuntimeError(
-            "Could not find libnvrtc.so. Please make sure CUDA is installed."
-        )
+def _get_nvrtc_compatible_flags() -> list[str]:
+    """
+    Get NVCC flags that are compatible with NVRTC compilation.
+
+    Returns:
+        List of NVCC flags that can be safely used with NVRTC.
+    """
+    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
+
+    nvrtc_unsupported_flags = {
+        "--expt-relaxed-constexpr",
+    }
+
+    # Filter out unsupported flags
+    compatible_flags = [
+        flag for flag in COMMON_NVCC_FLAGS if flag not in nvrtc_unsupported_flags
+    ]
+
+    return compatible_flags
 
 
 def _nvrtc_compile(
@@ -166,6 +125,13 @@ def _nvrtc_compile(
     options = []
     options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
 
+    # Auto-detect and add CUDA include paths
+    from torch.utils.cpp_extension import include_paths
+
+    cuda_include_paths = include_paths("cuda")
+    for cuda_path in cuda_include_paths:
+        options.append(f"-I{cuda_path}".encode())
+
     # Add custom include directories
     if cuda_include_dirs:
         for directory in cuda_include_dirs:
@@ -176,13 +142,7 @@ def _nvrtc_compile(
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
 
-    # TODO: Should we refactor flags into a common place?
-    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
-
-    # Filter out flags not supported by NVRTC
-    nvrtc_compatible_flags = [
-        flag for flag in COMMON_NVCC_FLAGS if flag != "--expt-relaxed-constexpr"
-    ]
+    nvrtc_compatible_flags = _get_nvrtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
 
     # Convert options to C array
@@ -261,6 +221,7 @@ class _CudaKernel:
     def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
+        self._max_shared_mem_bytes = 0
 
     def __call__(
         self,
@@ -294,8 +255,10 @@ class _CudaKernel:
 
         for arg in args:
             if isinstance(arg, torch.Tensor):
-                if not arg.is_cuda:
-                    raise ValueError("All tensor arguments must be CUDA tensors")
+                if not arg.is_cuda and not (arg.is_cpu and arg.is_pinned()):
+                    raise ValueError(
+                        "All tensor arguments must be CUDA tensors or pinned CPU tensors"
+                    )
                 # Get pointer to tensor data
                 ptr = ctypes.c_void_p(arg.data_ptr())
                 processed_args.append(ptr)
@@ -305,12 +268,11 @@ class _CudaKernel:
                 c_int = ctypes.c_int(arg)
                 # Store the C int for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_int))
-            # TODO: Python floats are actually doubles
             elif isinstance(arg, float):
-                # Convert floats to C float
-                c_float = ctypes.c_float(arg)
-                # Store the C float for reference keeping, not in processed_args
-                c_args.append(ctypes.byref(c_float))
+                # Python floats are doubles - use double by default
+                c_double = ctypes.c_double(arg)
+                # Store the C double for reference keeping, not in processed_args
+                c_args.append(ctypes.byref(c_double))
             else:
                 raise TypeError(f"Unsupported argument type: {type(arg)}")
 
@@ -326,23 +288,69 @@ class _CudaKernel:
 
             stream = torch.cuda.current_stream()
 
-        # Launch the kernel with the current stream
-        with stream:
-            _check_cuda(
-                libcuda.cuLaunchKernel(
-                    self.func,
-                    grid[0],
-                    grid[1],
-                    grid[2],
-                    block[0],
-                    block[1],
-                    block[2],
-                    shared_mem,
-                    None,
-                    c_args_array,
-                    None,
-                )
+        # Check if kernel requires large shared memory but hasn't been configured
+        if shared_mem >= 48 * 1024 and (
+            self._max_shared_mem_bytes == 0 or shared_mem > self._max_shared_mem_bytes
+        ):
+            configured_msg = (
+                "not configured"
+                if self._max_shared_mem_bytes == 0
+                else f"only {self._max_shared_mem_bytes} bytes configured"
             )
+            raise RuntimeError(
+                f"Kernel requires {shared_mem} bytes of shared memory (>= 48KB), "
+                f"but {configured_msg}. "
+                "Call kernel.set_shared_memory_config(shared_mem) after compilation "
+                "and before launching the kernel."
+            )
+
+        _check_cuda(
+            libcuda.cuLaunchKernel(
+                self.func,
+                grid[0],
+                grid[1],
+                grid[2],
+                block[0],
+                block[1],
+                block[2],
+                shared_mem,
+                stream._as_parameter_,
+                c_args_array,
+                None,
+            )
+        )
+
+    def set_shared_memory_config(self, shared_mem_bytes: int) -> None:
+        if shared_mem_bytes < 48 * 1024:
+            # No configuration needed for <= 48KB, just update the value
+            self._max_shared_mem_bytes = shared_mem_bytes
+            return
+
+        libcuda = _get_cuda_library()
+
+        # Get device properties to validate against limits
+        device_props = torch.cuda.get_device_properties()
+        max_shared_mem = getattr(device_props, "shared_memory_per_block_optin", 49152)
+
+        if shared_mem_bytes > max_shared_mem:
+            raise RuntimeError(
+                f"Requested shared memory ({shared_mem_bytes} bytes) exceeds "
+                f"device limit ({max_shared_mem} bytes). "
+                "Consider reducing block size or shared memory usage."
+            )
+
+        # Set the function attribute once
+        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
+        cudaFuncAttributeMaxDynamicSharedMemorySize = 8
+        _check_cuda(
+            libcuda.cuFuncSetAttribute(
+                self.func,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem_bytes,
+            )
+        )
+
+        self._max_shared_mem_bytes = shared_mem_bytes
 
 
 def _cuda_load_module(

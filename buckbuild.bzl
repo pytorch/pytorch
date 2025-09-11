@@ -11,7 +11,7 @@ load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
-load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
+load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -74,7 +74,7 @@ def _is_build_mode_dev():
     if is_production_build_android():
         # Android Prod builds
         return False
-    if is_production_build_ios():
+    if is_production_build_ios() or is_profile_build_ios():
         # iOS Prod builds
         return False
 
@@ -178,11 +178,12 @@ THIRD_PARTY_LIBS = {
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
     "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
-    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
+    "sleef_arm": ["//third-party/sleef:sleef", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
@@ -401,7 +402,7 @@ def get_aten_generated_files(enabled_backends):
 
     # This is tiresome.  A better strategy would be to unconditionally
     # generate these files, and then only actually COMPILE them depended
-    # on the generated set.  C'est la vie...
+    # on the generated set.  C'est la vie...  # codespell:ignore vie
     if "CPU" in enabled_backends:
         src_files.extend(aten_ufunc_generated_cpu_sources())
         src_files.extend(aten_ufunc_generated_cpu_kernel_sources())
@@ -524,7 +525,7 @@ def copy_template_registration_files(name, apple_sdks = None):
 
     # Ideally, we would run one copy command for a single source directory along
     # with all its child directories, but it's somewhat hard to know if a directory
-    # is a child of another just bu looking at the metadata (directory relative
+    # is a child of another just by looking at the metadata (directory relative
     # path) that we currently have since 1 directory could look like a parent of
     # another and yet come from a different filegroup() rule.
     #
@@ -737,7 +738,6 @@ def vulkan_spv_shader_library(name, spv_filegroup):
         },
         cmd = " ".join(genrule_cmd),
         default_outs = ["."],
-        labels = ["uses_dotslash"],
     )
 
     fb_xplat_cxx_library(
@@ -776,7 +776,7 @@ def copy_metal(name, apple_sdks = None):
 
     # Metal custom ops currently have to be brought into selective build because they directly reference metal ops instead of
     # going through the dispatcher. There is some weird issues with the genrule and these files locations on windows though, so
-    # for now we simply skip building them for windows where they very likely arent needed anyway.
+    # for now we simply skip building them for windows where they very likely aren't needed anyway.
     # Metal MaskRCNN custom op
     for full_path in METAL_MASKRCNN_SOURCE_LIST:
         path_prefix = paths.dirname(full_path)
@@ -792,7 +792,7 @@ def copy_metal(name, apple_sdks = None):
         name = name,
         cmd = " && ".join(cmd),
         cmd_exe = "@powershell -Command " + ("; ".join(cmd_exe)),
-        # due to an obscure bug certain custom ops werent being copied correctly on windows. ARVR also sometimes builds android targets on windows,
+        # due to an obscure bug certain custom ops weren't being copied correctly on windows. ARVR also sometimes builds android targets on windows,
         # so we just exclude those targets from being copied for those platforms (They end up uncompiled anyway).
         outs = select({
             "DEFAULT": get_metal_registration_files_outs(),
@@ -824,9 +824,13 @@ def get_pt_operator_registry_dict(
         apple_sdks = kwargs.get("apple_sdks"),
     )
 
+    # Extract existing linker_flags from kwargs and combine with default flags
+    existing_linker_flags = kwargs.pop("linker_flags", [])
+    combined_linker_flags = get_no_as_needed_linker_flag() + existing_linker_flags
+
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = get_no_as_needed_linker_flag(),
+        linker_flags = combined_linker_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
@@ -944,6 +948,8 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
+                ("", "torch/nativert/**/*.h"),
+                ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
@@ -1142,6 +1148,9 @@ def define_buck_targets(
             "--replace",
             "@AT_KLEIDIAI_ENABLED@",
             "0",
+            "--replace",
+            "@AT_USE_EIGEN_SPARSE@",
+            "0",
         ]),
         outs = {
             "Config.h": ["Config.h"],
@@ -1243,6 +1252,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/parse_operators.cpp",
             "torch/csrc/jit/mobile/upgrader_mobile.cpp",
             "torch/csrc/jit/serialization/import_read.cpp",
+            "torch/csrc/jit/serialization/pickler_helper.cpp",
             "torch/csrc/jit/serialization/unpickler.cpp",
         ],
         header_namespace = "",
@@ -1255,11 +1265,11 @@ def define_buck_targets(
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -1375,11 +1385,11 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/import.h",
             "torch/csrc/jit/mobile/flatbuffer_loader.h",
         ],
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -1406,9 +1416,9 @@ def define_buck_targets(
         exported_headers = [],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
-        # torch_mobile_core brings in sources neccessary to read and run a module
+        # torch_mobile_core brings in sources necessary to read and run a module
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -1522,10 +1532,10 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
-        # torch_mobile_train brings in sources neccessary to read and run a mobile
+        # torch_mobile_train brings in sources necessary to read and run a mobile
         # and save and load mobile params along with autograd
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and autograd related symbols are need in runtime
+        # operators, registrations and autograd related symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         visibility = ["PUBLIC"],
@@ -1547,9 +1557,9 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
-        # torch brings in all sources neccessary to read and run a mobile module/jit module
+        # torch brings in all sources necessary to read and run a mobile module/jit module
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         visibility = ["PUBLIC"],
@@ -1574,7 +1584,7 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
-        # torch_mobile_train_import_data brings in sources neccessary to read a mobile module
+        # torch_mobile_train_import_data brings in sources necessary to read a mobile module
         # link_whole is enabled so that all symbols linked
         # operators other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
@@ -1653,10 +1663,10 @@ def define_buck_targets(
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
-        # torch_mobile_model_tracer brings in sources neccessary to read and run a jit module
+        # torch_mobile_model_tracer brings in sources necessary to read and run a jit module
         # and trace the ops
         # link_whole is enabled so that all symbols linked
-        # operators, registerations and other few symbols are need in runtime
+        # operators, registrations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -1736,6 +1746,7 @@ def define_buck_targets(
         deps = [
             third_party("glog"),
             third_party("kineto"),
+            third_party("nlohmann-json"),
         ],
         exported_deps = [
             ":aten_cpu",
@@ -1840,11 +1851,11 @@ def define_buck_targets(
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
-        # torch_mobile_deserialize brings in sources neccessary to read a module
+        # torch_mobile_deserialize brings in sources necessary to read a module
         # which depends on mobile module definition
-        # link_whole is enable so that all symbols neccessary for mobile module are compiled
+        # link_whole is enable so that all symbols necessary for mobile module are compiled
         # instead of only symbols used while loading; this prevents symbol
-        # found definied in runtime
+        # found defined in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),

@@ -8,7 +8,8 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -18,6 +19,8 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
+
+from .descriptors import AOTOutput
 
 
 KNOWN_TYPES = [
@@ -140,9 +143,9 @@ def call_func_at_runtime_with_args(
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple: Optional[
-        bool
-    ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_simple: Optional[bool] = (
+        None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    )
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
@@ -335,12 +338,12 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
 
         num_erased_inputs = len(input_token_nodes)
 
-        assert (
-            num_erased_inputs == expected_num_erased
-        ), f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
-        assert (
-            num_erased_outs == expected_num_erased
-        ), f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
+        assert num_erased_inputs == expected_num_erased, (
+            f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
+        )
+        assert num_erased_outs == expected_num_erased, (
+            f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
+        )
 
         module.recompile()
 
@@ -500,3 +503,80 @@ def get_cuda_generator_meta_val(device_idx: int):
     it is fine to use in the meta.
     """
     return torch.cuda.default_generators[device_idx].clone_state()
+
+
+def top_saved_tensors_hooks():
+    return torch._C._autograd._top_saved_tensors_default_hooks(True)
+
+
+def saved_tensors_hooks_are_inlineable(hooks) -> bool:
+    if not hooks:
+        return False
+    pack, unpack = hooks
+    return isinstance(pack, torch.fx.GraphModule) and isinstance(
+        unpack, torch.fx.GraphModule
+    )
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_S = TypeVar("_S")
+
+
+def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
+    @wraps(f)
+    @simple_wraps(f)
+    def inner(*args, **kwargs):
+        return f(*args, **kwargs)[0]
+
+    return inner
+
+
+_P2 = ParamSpec("_P2")
+_R = TypeVar("_R")
+_R2 = TypeVar("_R2")
+
+
+def simple_wraps(
+    f: Callable[_P, _R],
+) -> Callable[[Callable[_P2, _R2]], Callable[_P2, _R2]]:
+    # NB: omit ('__module__', '__name__', '__qualname__') for ease of
+    # debugging
+    return wraps(f, assigned=("__doc__", "__annotations__", "__type_params__"))
+
+
+def call_and_expect_output_descs(fn, args):
+    outs_pair = fn(*args)
+    assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
+    outs, outs_descs = outs_pair
+    # The Tensor tests protects against the test when there are no outputs
+    out_vals, out_spec = pytree.tree_flatten(outs)
+    out_desc_vals, out_desc_spec = pytree.tree_flatten(outs_descs)
+    assert out_spec == out_desc_spec, (
+        fn_wrappers(fn),
+        outs,
+        outs_descs,
+        out_spec,
+        out_desc_spec,
+    )
+    assert not any(isinstance(x, AOTOutput) for x in out_vals), (
+        fn_wrappers(fn),
+        outs,
+        outs_descs,
+        out_vals,
+    )
+    assert all(
+        isinstance(d, AOTOutput)
+        for (x, d) in zip(out_vals, out_desc_vals)
+        if isinstance(x, (torch.Tensor, torch.SymInt)) or type(x) is int
+    ), (fn_wrappers(fn), outs, outs_descs, out_vals, out_desc_vals)
+    return outs_pair
+
+
+def fn_wrappers(fn):
+    fns = [fn]
+    f = fn
+    while hasattr(f, "__wrapped__"):
+        f = f.__wrapped__
+        fns.append(f)
+    return fns

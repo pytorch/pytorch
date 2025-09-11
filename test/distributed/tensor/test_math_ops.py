@@ -7,13 +7,14 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed.tensor.debug import CommDebugMode
@@ -23,7 +24,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -270,14 +271,22 @@ class DistMathOpsTest(DTensorTestBase):
         norm_shape_idx_list = list(range(x.ndim))
         shard_dims = [-1, 0, 1, 2]
         elementwise_affine_list = [False, True]
+
+        # Test RMSNorm as well if CUDA
+        norm_types = [torch.nn.LayerNorm]
+        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+            norm_types.append(torch.nn.RMSNorm)
+
         test_config_list = list(
-            itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
+            itertools.product(
+                norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list
+            )
         )
 
         # normalized shape is a torch.Size object
-        for shard_dim, norm_idx, elementwise_affine in test_config_list:
+        for norm_type, shard_dim, norm_idx, elementwise_affine in test_config_list:
             normalized_shape = x.shape[norm_idx:]
-            layer_norm = torch.nn.LayerNorm(
+            layer_norm = norm_type(
                 normalized_shape,
                 elementwise_affine=elementwise_affine,
                 device=self.device_type,
@@ -286,6 +295,7 @@ class DistMathOpsTest(DTensorTestBase):
 
             def _replicate_fn(name, module, device_mesh):
                 for name, param in module.named_parameters():
+                    # RMSNorm only has weight, LayerNorm has both weight and bias
                     if name in ["weight", "bias"]:
                         param_dist = torch.nn.Parameter(
                             distribute_tensor(param, device_mesh, [Replicate()])
@@ -306,11 +316,11 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertLessEqual(
                 comm_mode.get_total_counts(),
                 1,  # TODO: This should be 0!
-                f"comm count={comm_mode.get_total_counts()}, "
+                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
-            from torch.distributed._tensor.placement_types import TensorMeta
+            from torch.distributed.tensor._dtensor_spec import TensorMeta
 
             dtensor_meta = y_dist._spec.tensor_meta
             assert isinstance(dtensor_meta, TensorMeta)
@@ -328,12 +338,20 @@ class DistMathOpsTest(DTensorTestBase):
         norm_shape_idx_list = list(range(3))
         shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
+
+        # Test both LayerNorm and RMSNorm (if CUDA)
+        norm_types = [torch.nn.LayerNorm]
+        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+            norm_types.append(torch.nn.RMSNorm)
+
         test_config_list = list(
-            itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
+            itertools.product(
+                norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list
+            )
         )
 
         # normalized shape is a torch.Size object
-        for shard_dim, norm_idx, elementwise_affine in test_config_list:
+        for norm_type, shard_dim, norm_idx, elementwise_affine in test_config_list:
             x = torch.rand(
                 batch,
                 sentence_length,
@@ -342,7 +360,7 @@ class DistMathOpsTest(DTensorTestBase):
                 requires_grad=True,
             )
             normalized_shape = x.shape[norm_idx:]
-            layer_norm = torch.nn.LayerNorm(
+            layer_norm = norm_type(
                 normalized_shape,
                 elementwise_affine=elementwise_affine,
                 device=self.device_type,
@@ -363,9 +381,11 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertEqual(
                     layer_norm_local.weight, layer_norm_dist.weight.full_tensor()
                 )
-                self.assertEqual(
-                    layer_norm_local.bias, layer_norm_dist.bias.full_tensor()
-                )
+                # RMSNorm doesn't have bias
+                if hasattr(layer_norm_local, "bias"):
+                    self.assertEqual(
+                        layer_norm_local.bias, layer_norm_dist.bias.full_tensor()
+                    )
 
             x_local = x.detach().clone().requires_grad_(True)
             x_dist = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
@@ -383,7 +403,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, "
+                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -397,7 +417,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, "
+                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -411,18 +431,22 @@ class DistMathOpsTest(DTensorTestBase):
                     is_tensor_partial(layer_norm_dist.weight.grad._spec),
                     needs_reduction,
                 )
-                self.assertEqual(
-                    is_tensor_partial(layer_norm_dist.bias.grad._spec),
-                    needs_reduction,
-                )
+                # RMSNorm doesn't have bias
+                if hasattr(layer_norm_dist, "bias"):
+                    self.assertEqual(
+                        is_tensor_partial(layer_norm_dist.bias.grad._spec),
+                        needs_reduction,
+                    )
                 self.assertEqual(
                     layer_norm_local.weight.grad,
                     layer_norm_dist.weight.grad.full_tensor(),
                 )
-                self.assertEqual(
-                    layer_norm_local.bias.grad,
-                    layer_norm_dist.bias.grad.full_tensor(),
-                )
+                # RMSNorm doesn't have bias
+                if hasattr(layer_norm_local, "bias"):
+                    self.assertEqual(
+                        layer_norm_local.bias.grad,
+                        layer_norm_dist.bias.grad.full_tensor(),
+                    )
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
@@ -431,8 +455,14 @@ class DistMathOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
 
+        # Test both LayerNorm and RMSNorm (if CUDA)
+        norm_types = [torch.nn.LayerNorm]
+        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+            norm_types.append(torch.nn.RMSNorm)
+
         # build our subtest configurations and filter out invalid ones
         class SubTest(NamedTuple):
+            norm_type: type
             multidim_norm: bool
             elementwise_affine: bool
             emb_req_grad: bool
@@ -440,19 +470,26 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = lambda cfg: not (  # noqa: E731
-            cfg.ln_req_grad and not cfg.elementwise_affine
-        ) and any(cfg[2:])
+        valid_filter = (  # noqa: E731
+            lambda cfg: (
+                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
+            )
+        )
         subtest_cfgs = list(
             filter(
                 valid_filter,
-                [SubTest(*cfg) for cfg in itertools.product(*(((False, True),) * 5))],
+                [
+                    SubTest(norm_type, *cfg)
+                    for norm_type in norm_types
+                    for cfg in itertools.product(*(((False, True),) * 5))
+                ],
             )
         )
 
         for subtest_cfg in subtest_cfgs:
             try:
                 (
+                    norm_type,
                     multidim_norm,
                     elementwise_affine,
                     emb_req_grad,
@@ -470,7 +507,7 @@ class DistMathOpsTest(DTensorTestBase):
                         self.preln_embeddings = torch.nn.Embedding(
                             vocab_size, embedding_dim
                         )
-                        self.layer_norm = torch.nn.LayerNorm(
+                        self.layer_norm = norm_type(
                             normalized_shape, elementwise_affine=elementwise_affine
                         )
                         self.postln_linear = torch.nn.Linear(
@@ -565,9 +602,9 @@ class DistMathOpsTest(DTensorTestBase):
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
         # if any subtest fails, provide the failed subtests and report the overall failure
-        assert (
-            not subtest_fails
-        ), f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        assert not subtest_fails, (
+            f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        )
 
     @with_comms
     def test_topk(self):
@@ -658,7 +695,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
-    @skipIfRocm
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -687,7 +723,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out0.device_mesh, mesh_x)
         self.assertEqual(out1.device_mesh, mesh_y)
 
-        with self.assertRaisesRegex(ValueError, "computation across different mesh"):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             torch.ops.aten._foreach_add(
                 [replica_inp00, replica_inp01], [replica_inp10, replica_inp11]
             )
@@ -755,6 +791,94 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertEqual(comm_mode.get_total_counts(), 0)
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
+
+    @with_comms
+    def test_conj_complex_dtensor(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        freqs_cis = torch.randn(
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+        )
+        freqs_cis_dt = distribute_tensor(
+            freqs_cis, device_mesh=mesh, placements=[Replicate()]
+        )
+
+        local_result = freqs_cis.conj() + 1
+        with comm_mode:
+            dtensor_result = freqs_cis_dt.conj() + 1
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        self.assertEqual(local_result, dtensor_result.full_tensor())
+
+    @with_comms
+    def test_rotary_embedding_complex_ops(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        def apply_rotary_emb(xq, freqs_cis):
+            xq_ = torch.view_as_complex(xq)
+            xq_out = torch.view_as_real(xq_ * freqs_cis)
+            return xq_out
+
+        xq = torch.randn(1, 1, 2, requires_grad=True, device=self.device_type)
+        freqs_cis = torch.randn(
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+        )
+
+        xq_dt = distribute_tensor(xq, device_mesh=mesh, placements=[Replicate()])
+        freqs_cis_dt = distribute_tensor(
+            freqs_cis, device_mesh=mesh, placements=[Replicate()]
+        )
+
+        with comm_mode:
+            xq_out_dt = apply_rotary_emb(xq_dt, freqs_cis_dt)
+            xq_out_dt.sum().backward()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        dtensor_grad = xq_dt.grad.full_tensor()
+
+        xq.grad = None
+        xq_out = apply_rotary_emb(xq, freqs_cis)
+        xq_out.sum().backward()
+
+        self.assertEqual(dtensor_grad, xq.grad)
+
+    @with_comms
+    def test_histc(self):
+        # TODO - nicer to use parametrize here so its easy to run one sub-test by name,
+        # but its too slow (10sec per process-group init) -> switch to MultiProcessContinuousTest
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        for min_max_specified in (True, False):
+            for placement in [Shard(0), Shard(1), Shard(2), Replicate()]:
+                min_ = tensor.min().item()
+                max_ = tensor.max().item()
+                global_bins = (
+                    tensor.histc(min=min_, max=max_)
+                    if min_max_specified
+                    else tensor.histc()
+                )
+
+                dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+                with comm_mode:
+                    out_dt = (
+                        dtensor.histc(min=min_, max=max_)
+                        if min_max_specified
+                        else dtensor.histc()
+                    )
+
+                if placement.is_shard() and not min_max_specified:
+                    self.assertEqual(comm_mode.get_total_counts(), 1)
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+                    )
+                else:
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+
+                out_full = out_dt.full_tensor()
+                self.assertEqual(global_bins, out_full)
 
 
 if __name__ == "__main__":

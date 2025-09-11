@@ -746,7 +746,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             if cnts:
                 self.assertEqual(cnts.frame_count, 1)
             # These same exact assertions run on both eager and compiled
-            # X goes to x*2 becaue of mul_
+            # X goes to x*2 because of mul_
             self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
             # This test proves grad aliasing works -
             self.assertEqual(x.grad, b * 5)
@@ -899,21 +899,25 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         def hook(mod, args):
             nonlocal counter
             counter += 1
-            return (args[0] + 100,)
-
-        mod = Mod()
-        torch.nn.modules.module.register_module_forward_pre_hook(hook)
-
-        # Case 1: torch.compile(mod)
-        compiled_mod = torch.compile(mod, backend="eager")
+            return args
 
         x = torch.rand(18, 18)
+        mod = Mod()
+        compiled_mod = torch.compile(mod, backend="eager")
 
-        ref = mod(x)
-        self.assertEqual(counter, 1)
-        res = compiled_mod(x)
-        self.assertEqual(counter, 2)
-        self.assertEqual(ref, res)
+        try:
+            hook_handle = torch.nn.modules.module.register_module_forward_pre_hook(hook)
+            ref = mod(x)
+            self.assertEqual(counter, 1)
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"Using `torch.compile\(module\)` when there are global hooks.*",
+            ):
+                res = compiled_mod(x)
+            self.assertEqual(counter, 3)
+            self.assertEqual(ref, res)
+        finally:
+            hook_handle.remove()
 
 
 if __name__ == "__main__":

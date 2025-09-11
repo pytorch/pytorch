@@ -43,7 +43,9 @@ def autocast_decorator(autocast_instance, func):
         with autocast_instance:
             return func(*args, **kwargs)
 
-    decorate_autocast.__script_unsupported = "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
+    decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
+        "@autocast() decorator is not supported in script mode"
+    )
     return decorate_autocast
 
 
@@ -88,9 +90,9 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
+
             @torch.autocast(device_type="cuda")
-            def forward(self, input):
-                ...
+            def forward(self, input): ...
 
     Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
     After returning to an autocast-disabled region, using them with floating-point
@@ -152,8 +154,10 @@ class autocast:
             def __init__(self, input_size, num_classes):
                 super().__init__()
                 self.fc1 = nn.Linear(input_size, num_classes)
+
             def forward(self, x):
                 return self.fc1(x)
+
 
         input_size = 2
         num_classes = 2
@@ -320,7 +324,7 @@ class autocast:
         elif self.device == self.custom_backend_name:
             supported_dtype = self.custom_device_mod.get_amp_supported_dtype()
             if self.fast_dtype not in supported_dtype:
-                error_message = f"In {self.custom_backend_name} autocast, but the target dtype is not supported. "
+                error_message = f"In {self.custom_backend_name} autocast, but the target dtype {self.fast_dtype} is not supported. "
                 error_message += f"Disabling autocast.\n {self.custom_backend_name} Autocast only supports dtypes of "
                 error_message += (
                     ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
@@ -393,7 +397,10 @@ class autocast:
                         self._enabled,
                         self._cache_enabled,
                     )
-                    return mode.__torch_function__(torch.amp._enter_autocast, (), args)
+                    mode.__torch_function__(torch.amp._enter_autocast, (), args)
+                    return self
+
+        return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
@@ -416,7 +423,10 @@ class autocast:
                     mode,
                     torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
                 ):
-                    return mode.__torch_function__(torch.amp._exit_autocast, (), ())
+                    mode.__torch_function__(torch.amp._exit_autocast, (), ())
+                    # This is very important because the above line actually doesn't
+                    # run exit code so it end up swallowing exceptions.
+                    return False
         return False
 
     def __call__(self, func):

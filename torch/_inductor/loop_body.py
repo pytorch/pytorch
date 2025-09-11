@@ -36,7 +36,7 @@ T = TypeVar("T")
 
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _dummy_gm():
         return torch.fx.symbolic_trace(identity)
 
@@ -223,6 +223,53 @@ class LoopBody:
         )
         return new_body2
 
+    def expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int
+    ) -> LoopBody:
+        """
+        Expand node on `dimension` to `new_range` and rely on index modular to avoid
+        out-of-boundary access.
+        """
+
+        old_body = self
+        old_sizes = self.sizes
+
+        iter_size, reduce_size = old_sizes
+        original_range = iter_size[dimension]
+        new_iter_size = list(iter_size)
+        new_iter_size[dimension] = new_range
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
+        )
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = [*itertools.chain.from_iterable(indices)]
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+
+            new_iter_idx = list(iter_idx)
+            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+
+            return old_body(new_iter_idx, reduce_idx)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
+
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
         Reorder iteration loops and return a new LoopBody.
@@ -312,6 +359,14 @@ class LoopBody:
             for entry in self.memory_usage[MemoryUsageType.LOAD]
         ]
 
+    def get_all_read_expr(self, buffer_name):
+        # reversed to match old behavior
+        out = []
+        for entry in reversed(self.memory_usage[MemoryUsageType.LOAD]):
+            if entry.buffer_name == buffer_name:
+                out.append(self.indexing_exprs[entry.index_name])
+        return out
+
     def get_write_exprs(self):
         return [
             self.indexing_exprs[entry.index_name]
@@ -320,6 +375,16 @@ class LoopBody:
                 self.memory_usage[MemoryUsageType.STORE_REDUCTION],
             )
         ]
+
+    def get_all_write_expr(self, buffer_name):
+        out = []
+        for entry in itertools.chain(
+            self.memory_usage[MemoryUsageType.STORE],
+            self.memory_usage[MemoryUsageType.STORE_REDUCTION],
+        ):
+            if entry.buffer_name == buffer_name:
+                out.append(self.indexing_exprs[entry.index_name])
+        return out
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]

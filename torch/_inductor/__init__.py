@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
-import torch._inductor.config
 import torch.fx
 
 from .standalone_compile import CompiledArtifact  # noqa: TC001
@@ -15,6 +14,8 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
+    from torch.export.pt2_archive._package import AOTICompiledModel
+    from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 
 __all__ = [
@@ -197,13 +198,13 @@ def _aoti_compile_and_package_inner(
         path = [
             os.path.splitext(file)[0]
             for file in aoti_files
-            if os.path.splitext(file)[1] == ".so"
+            if isinstance(file, str) and os.path.splitext(file)[1] == ".so"
         ]
         if len(path) == 0:
             path = [
                 os.path.splitext(file)[0]
                 for file in aoti_files
-                if os.path.splitext(file)[1] == ".cpp"
+                if isinstance(file, str) and os.path.splitext(file)[1] == ".cpp"
             ]
         package_path = path[0] + ".pt2"
 
@@ -222,7 +223,7 @@ def _aoti_compile_and_package_inner(
             not_strict_accuracy = check_accuracy == "accuracy"
             if not same_two_models(
                 gm,
-                compiled_model,
+                compiled_model,  # type: ignore[arg-type]
                 args,
                 only_fwd=True,
                 require_fp64=not_strict_accuracy,
@@ -237,7 +238,7 @@ def _aoti_compile_and_package_inner(
 
 def aoti_load_package(
     path: FileLike, run_single_threaded: bool = False, device_index: int = -1
-) -> Any:  # type: ignore[type-arg]
+) -> AOTICompiledModel:
     """
     Loads the model from the PT2 package.
 
@@ -274,7 +275,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[str]]:
+) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -290,6 +291,15 @@ def aot_compile(
         TODO: make it return a list by default
     """
     from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
+
+    if hasattr(gm, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by AOTI. In particular, non-Tensor
+        # arguments are converted to None and will fail specialization checks.
+        node = next(iter(gm.graph.find_nodes(op="call_module", target="_guards_fn")))
+        gm.graph.erase_node(node)
+        delattr(gm, "_guards_fn")
+        gm.recompile()
 
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options

@@ -101,11 +101,10 @@
 #define THPBoolUtils_newReal(value) THPUtils_newReal_BOOL(value)
 #define THPBoolUtils_checkAccreal(object) THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackAccreal(object) \
-  (int64_t) THPUtils_unpackReal_BOOL(object)
+  (int64_t)THPUtils_unpackReal_BOOL(object)
 #define THPBoolUtils_newAccreal(value) THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackReal(object) \
-  (int64_t) THPUtils_unpackReal_INT(object)
+#define THPLongUtils_unpackReal(object) (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
@@ -202,3 +201,5 @@ bool maybeThrowBackCompatKeepdimWarn(char* func);
 void storage_fill(const at::Storage& self, uint8_t value);
 void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value);
 uint8_t storage_get(const at::Storage& self, ptrdiff_t idx);
+
+std::string uuid_to_string(const char* uuid_bytes);

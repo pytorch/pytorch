@@ -12,8 +12,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
-from torch._inductor.codegen.common import device_codegens, register_backend_for_device
-from torch._inductor.codegen.cpp import CppScheduling
+from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -34,7 +33,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_MPS,
+    patch_inductor_backend,
+)
 
 
 # Make the helper files in test/ importable
@@ -56,13 +61,37 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
+        ("cpu", "cuda", "xpu", "mps")
     ),
-    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
+    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
+    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
+    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
+    "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
+    "test_roll_dynamic_shapes": TestFailure(("mps",)),
+    "test_std_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
+    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
+        ("mps",), is_skip=True
+    ),
 }
+
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
-        ("cuda", "xpu")
+        ("cuda",)
     )
 
 if TEST_WITH_ROCM:
@@ -76,10 +105,17 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
-if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
-    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
-    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    # After https://github.com/pytorch/pytorch/pull/161586, starts failing UBSAN so we can't even xfail.
+    # Root cause seems to be SymInt issues in StorageImpl, see
+    # https://github.com/pytorch/pytorch/pull/161586#issuecomment-3246530671
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -104,7 +140,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -119,7 +155,7 @@ class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
-        # HAS_CUDA also checks compute capability to skip tests
+        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
         # on older devices
         if not HAS_GPU:
             self.skipTest("Triton not available")
@@ -367,18 +403,20 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
+        )
+        def nobreak_test(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
-        @foo.register_fake
+        @nobreak_test.register_fake
         def _(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
         @torch.compile(fullgraph=True)
         def f(x, r):
             y = x.item()
-            return torch.ops.test.foo(r, y)
+            return torch.ops.test_inductor_dynamic_shapes.nobreak_test(r, y)
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
@@ -591,11 +629,13 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
+        )
+        def unbacked_test(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
-        @foo.register_fake
+        @unbacked_test.register_fake
         def _(x: torch.Tensor) -> torch.Tensor:
             ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
@@ -603,7 +643,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            a, b = torch.ops.test.foo(x)
+            a, b = torch.ops.test_inductor_dynamic_shapes.unbacked_test(x)
             return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
@@ -643,8 +683,9 @@ class TestInductorDynamic(TestCase):
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
-                iw, k[1], s[1], d[1]
+            pad_h, pad_w = (
+                get_same_padding(ih, k[0], s[0], d[0]),
+                get_same_padding(iw, k[1], s[1], d[1]),
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -913,7 +954,9 @@ class TestInductorDynamic(TestCase):
                 # testing fn_2
                 assert (
                     PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be limited to exactly 5 on second call due to multiple constraints"
+                ), (
+                    "Should be limited to exactly 5 on second call due to multiple constraints"
+                )
             elif call_count == 2:
                 # testing fn_3
                 assert (
@@ -928,23 +971,13 @@ class TestInductorDynamic(TestCase):
                 _test_wrapper_codegen_statically_known_int_or_none_in_context()
                 return super().generate(is_inference, *args, **kwargs)
 
-        if "cpu" not in device_codegens:
-            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
-        orig_cpu_codegens = device_codegens["cpu"]
-        try:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
-            )
+        with patch_inductor_backend("cpu", python_wrapper_codegen=TestWrapperCodegen):
             # Compile each of the functions above, with an example input
             # that has 5 in the first dimension, but is marked as dynamic
 
             torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
-        finally:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
-            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_unbacked_stride_nobreak(self, device):
@@ -1053,6 +1086,36 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
 
+    @onlyOn(GPU_TYPE)
+    def test_dynamic_rblock_bounds(self):
+        class ForcePersistent(InductorChoices):
+            @staticmethod
+            def should_use_cooperative_reduction(*args, **kwargs) -> bool:
+                return False
+
+            @staticmethod
+            def should_use_persistent_reduction(*args, **kwargs) -> bool:
+                return True
+
+        def fn(x):
+            return x.sum()
+
+        x = torch.rand([31], device=GPU_TYPE)
+
+        with V.set_choices_handler(ForcePersistent()):
+            torch._dynamo.mark_dynamic(x, 0, min=1, max=62)
+            fn_c = torch.compile(fn)
+            actual, source_codes = run_and_get_code(fn_c, x)
+            self.assertEqual(fn(x), actual)
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            torch._dynamo.reset()
+
+            torch._dynamo.mark_dynamic(x, 2, min=1, max=64)
+            fn_c = torch.compile(fn)
+            actual, source_codes = run_and_get_code(fn_c, x)
+            self.assertEqual(fn(x), actual)
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):
             return x * y
@@ -1134,5 +1197,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

@@ -23,7 +23,8 @@ from typing import (
 )
 
 import torch
-from torch._inductor.custom_graph_pass import CustomGraphPass
+from functorch.compile import min_cut_rematerialization_partition
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomPartitionerFn
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -74,6 +75,20 @@ class DummyPass(CustomGraphPass):
         return None
 
 
+class DummyPartitionerFn(CustomPartitionerFn):
+    """
+    A Dummy partitioner function to be used by ConfigFuzzer
+    """
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, joint_inputs: Sequence[object], **kwargs: Any
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
+
+    def uuid(self) -> Optional[Any]:
+        return None
+
+
 T = TypeVar("T")
 
 
@@ -84,6 +99,7 @@ class TypeExemplars:
 
     TYPE_EXEMPLARS: dict[str, Any] = {
         CustomGraphPass.__name__: DummyPass(),
+        CustomPartitionerFn.__name__: DummyPartitionerFn(),
         torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
         BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }
@@ -220,9 +236,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(default[0])] if len(default) else [type(None)],
+                [type(default[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = default[0] if len(default) > 0 else None
+            new_default = default[0] if default and len(default) > 0 else None
             return [
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -234,9 +250,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -248,9 +264,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
                 [
                     SamplingMethod._generate_value_for_type(
@@ -363,6 +379,8 @@ class SamplingMethod(Enum):
                 )
 
             return dummy_function
+        elif type_hint == torch._ops.OpOverload:
+            return torch.ops.aten.add.default
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
@@ -497,6 +515,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "joint_custom_post_pass": DEFAULT,  # Typing
         "joint_custom_pre_pass": DEFAULT,  # Typing
         "pre_grad_custom_pass": DEFAULT,  # Typing
+        "custom_partitioner_fn": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -504,6 +523,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
         "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
         "suppress_errors": DEFAULT,
+        "caching_precompile": False,  # Required
     },
 }
 

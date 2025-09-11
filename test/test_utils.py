@@ -20,8 +20,7 @@ import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
+from torch._utils_internal import deprecated
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -59,6 +58,9 @@ HAS_CUDA = torch.cuda.is_available()
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -786,65 +788,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count("\n") >= 17)
 
 
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -852,7 +795,9 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")
@@ -1060,18 +1005,33 @@ class TestDeviceUtils(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
-        torch.set_default_device("cuda")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+        try:
+            torch.set_default_device("cuda")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda")
-        torch.cuda.set_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda")
+            torch.cuda.set_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
+
+            torch.set_default_device("cuda:1")
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            torch.set_default_device("cpu")
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+        finally:
+            # Reset the device at the end.
+            torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)
@@ -1180,6 +1140,21 @@ class TestTryImport(TestCase):
     def test_import_missing(self):
         missing_module = try_import("missing_module")
         self.assertIsNone(missing_module)
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import operator
 import warnings
 from collections import namedtuple
@@ -114,7 +115,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 
 
 def get_custom_module_class_keys(
-    custom_module_mapping: dict[QuantType, dict[type, type]]
+    custom_module_mapping: dict[QuantType, dict[type, type]],
 ) -> list[Any]:
     r"""Get all the unique custom module keys in the custom config dict
     e.g.
@@ -190,7 +191,7 @@ def get_new_attr_name_with_prefix(prefix: str) -> Callable:
 
 
 def collect_producer_nodes(node: Node) -> Optional[list[Node]]:
-    r"""Starting from a target node, trace back until we hit inpu or
+    r"""Starting from a target node, trace back until we hit input or
     getattr node. This is used to extract the chain of operators
     starting from getattr to the target node, for example
     def forward(self, x):
@@ -245,6 +246,7 @@ def graph_module_from_producer_nodes(
 
 
 # TODO: delete
+@functools.cache
 def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     """
     Returns the unique device for a module, or None if no device is found.
@@ -254,7 +256,11 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
 
 
 def create_getattr_from_value(
-    module: torch.nn.Module, graph: Graph, prefix: str, value: Any
+    module: torch.nn.Module,
+    graph: Graph,
+    prefix: str,
+    value: Any,
+    device: Optional[torch.device] = None,
 ) -> Node:
     """
     Given a value of any type, creates a getattr node corresponding to the value and
@@ -262,7 +268,8 @@ def create_getattr_from_value(
     """
     get_new_attr_name = get_new_attr_name_with_prefix(prefix)
     attr_name = get_new_attr_name(module)
-    device = assert_and_get_unique_device(module)
+    if device is None:
+        device = assert_and_get_unique_device(module)
     new_value = (
         value.detach().clone()
         if isinstance(value, torch.Tensor)
@@ -495,7 +502,9 @@ def _is_custom_module_lstm(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
+        assert isinstance(
+            qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
+        )  # type: ignore[attr-defined]
         return (
             isinstance(mod, torch.nn.LSTM)
             and activation_is_statically_quantized(qconfig)
@@ -517,7 +526,9 @@ def _is_custom_module_mha(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
+        assert isinstance(
+            qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
+        )  # type: ignore[attr-defined]
         return (
             isinstance(mod, torch.nn.MultiheadAttention)
             and activation_is_statically_quantized(qconfig)

@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -296,9 +297,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 
   const auto common_type = at::result_type(elements, test_elements);
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) || supportedFloatingType(common_type),
-              "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
-              common_type);
 
   @autoreleasepool {
     std::string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
@@ -337,6 +335,9 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 }
 
 static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  if (iter.numel() == 0) {
+    return;
+  }
   const auto& self = iter.input(0);
   auto& out = iter.output(0);
   @autoreleasepool {
@@ -392,6 +393,12 @@ TORCH_IMPL_FUNC(clamp_max_out_mps)
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
 (const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
   mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out, __func__);
+}
+TORCH_IMPL_FUNC(isin_Scalar_Tensor_out_mps)
+(const Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
+  at::native::resize_output(out, {});
+  mps::isin_Tensor_Tensor_out_mps(
+      mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out, __func__);
 }
 
 static void where_kernel_mps(TensorIterator& iter) {

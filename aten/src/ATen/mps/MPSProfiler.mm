@@ -780,8 +780,8 @@ void MPSProfiler::handleIntSignal(int signal) {
 }
 
 // used to capture sigint signal to log profiling stats
-struct sigaction MPSProfiler::currentSigint {};
-struct sigaction MPSProfiler::previousSigint {};
+struct sigaction MPSProfiler::currentSigint{};
+struct sigaction MPSProfiler::previousSigint{};
 
 bool MPSProfiler::isCapturing() const {
   return [captureManager isCapturing];

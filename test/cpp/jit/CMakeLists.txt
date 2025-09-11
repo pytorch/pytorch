@@ -17,7 +17,7 @@ set(BACKEND_WITH_COMPILER_SRCS
 )
 if(USE_KINETO)
   # Testing edge profiler for backend use
-  # profiler_edge should only be aded when USE_KINETO flag is on
+  # profiler_edge should only be added when USE_KINETO flag is on
   list(APPEND BACKEND_WITH_COMPILER_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp)
 endif()
@@ -88,6 +88,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
+  ${JIT_TEST_ROOT}/test_te.cpp
   ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
   ${JIT_TEST_ROOT}/test_script_profile.cpp
@@ -125,7 +126,7 @@ if(USE_MKLDNN)
   target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
+set(JIT_TEST_DEPENDENCIES torch gtest_main jitbackend_test backend_with_compiler gmock)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-# flake8: noqa C101
+# flake8: noqa: B950
 """This module implements the user facing API for flex_attention in PyTorch."""
+
 import functools
 import inspect
 import itertools
@@ -8,10 +9,22 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
+
+
+try:
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
+
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch._prims_common import DeviceLikeType
@@ -23,9 +36,42 @@ from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
+# Private debug flag to disable internal compilation wrapping for debugging purposes.
+# WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
+# When enabled, this bypasses the required internal compilation that ensures correctness
+# and performance. Only use this temporarily when you need to set breakpoints
+# in your score_mod/mask_mod functions during development.
+#
+# This flag only affects the internal compilation when flex_attention is called directly.
+# If you have already wrapped flex_attention in torch.compile(), this flag has no effect
+# and the user's compilation will still occur.
+#
+# Usage:
+#   import torch.nn.attention.flex_attention as fa
+#   fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+#   # Now you can set breakpoints in your score_mod/mask_mod
+#   output = fa.flex_attention(q, k, v, score_mod=my_score_mod)
+#
+_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+
+_WARNINGS_SHOWN: set[str] = set()
+
+
+def _warn_once(
+    warning_id: str, message: str, category: type[Warning] = UserWarning
+) -> None:
+    """Helper to ensure each warning is shown only once per process."""
+    if warning_id not in _WARNINGS_SHOWN:
+        warnings.warn(message, category, stacklevel=2)
+        _WARNINGS_SHOWN.add(warning_id)
+
+
 __all__ = [
     "BlockMask",
     "flex_attention",
+    "AuxOutput",
+    "AuxRequest",
+    "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
     "create_nested_block_mask",
@@ -36,6 +82,143 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+
+
+class FlexKernelOptions(TypedDict, total=False):
+    """Options for controlling the behavior of FlexAttention kernels.
+
+    These options are passed to the underlying Triton kernels to control performance
+    and numerical behavior. Most users will not need to specify these options as the
+    default autotuning provides good performance.
+
+    The options can be prefixed with ``fwd_`` or ``bwd_`` to apply only to forward or
+    backward pass respectively. For example: ``fwd_BLOCK_M`` and ``bwd_BLOCK_M1``.
+
+    Note:
+      We currently do not provide any backward compatibility guarantees for these options.
+      That being said most of these have remained pretty stable since their introduction. But
+      We do not consider this part of the public API just yet. We think that some documentation
+      Is better than secret hidden flags, but we may change these options in the future.
+
+    Example Usage:
+        .. code-block:: python
+
+            # Using dictionary (backward compatible)
+            kernel_opts = {"BLOCK_M": 64, "BLOCK_N": 64, "PRESCALE_QK": True}
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Using TypedDict (recommended for type safety)
+            from torch.nn.attention.flex_attention import FlexKernelOptions
+
+            kernel_opts: FlexKernelOptions = {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "PRESCALE_QK": True,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Forward/backward specific options
+            kernel_opts: FlexKernelOptions = {
+                "fwd_BLOCK_M": 64,
+                "bwd_BLOCK_M1": 32,
+                "PRESCALE_QK": False,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+    """
+
+    # Performance tuning options
+    num_warps: NotRequired[int]
+    """Number of warps to use in the CUDA kernel. Higher values may improve performance
+    but increase register pressure. Default is determined by autotuning."""
+
+    num_stages: NotRequired[int]
+    """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
+    but increase shared memory usage. Default is determined by autotuning."""
+
+    BLOCK_M: NotRequired[int]
+    """Thread block size for the sequence length dimension of Q in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    BLOCK_N: NotRequired[int]
+    """Thread block size for the sequence length dimension of K/V in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    # Backward-specific block sizes (when prefixed with 'bwd_')
+    BLOCK_M1: NotRequired[int]
+    """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
+    Default is determined by autotuning."""
+
+    BLOCK_N1: NotRequired[int]
+    """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
+    Default is determined by autotuning."""
+
+    BLOCK_M2: NotRequired[int]
+    """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
+    Default is determined by autotuning."""
+
+    BLOCK_N2: NotRequired[int]
+    """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
+    Default is determined by autotuning."""
+
+    PRESCALE_QK: NotRequired[bool]
+    """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
+    may have more numerical error. Default: False."""
+
+    ROWS_GUARANTEED_SAFE: NotRequired[bool]
+    """If True, guarantees that at least one value in each row is not masked out.
+    Allows skipping safety checks for better performance. Only set this if you are certain
+    your mask guarantees this property. For example, causal attention is guaranteed safe
+    because each query has at least 1 key-value to attend to. Default: False."""
+
+    BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
+    """If True, guarantees that all blocks in the mask are contiguous.
+    Allows optimizing block traversal. For example, causal masks would satisfy this,
+    but prefix_lm + sliding window would not. Default: False."""
+
+    WRITE_DQ: NotRequired[bool]
+    """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
+    Setting this to False will force this to happen in the DK loop which depending on your
+    specific score_mod and mask_mod might be faster. Default: True."""
+
+    FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
+    """If True, forces the use of the flex attention kernel instead of potentially using
+    the more optimized flex-decoding kernel for short sequences. This can be a helpful
+    option for debugging. Default: False."""
+
+    USE_TMA: NotRequired[bool]
+    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
+    This is experimental and may not work on all hardware, currently specific
+    to NVIDIA GPUs Hopper+. Default: False."""
+
+    # ROCm-specific options
+    kpack: NotRequired[int]
+    """ROCm-specific kernel packing parameter."""
+
+    matrix_instr_nonkdim: NotRequired[int]
+    """ROCm-specific matrix instruction non-K dimension."""
+
+    waves_per_eu: NotRequired[int]
+    """ROCm-specific waves per execution unit."""
+
+
+class AuxRequest(NamedTuple):
+    """Request which auxiliary outputs to compute from flex_attention.
+
+    Each field is a boolean indicating whether that auxiliary output should be computed.
+    """
+
+    lse: bool = False
+    max_scores: bool = False
+
+
+class AuxOutput(NamedTuple):
+    """Auxiliary outputs from flex_attention operation.
+
+    Fields will be None if not requested, or contain the tensor if requested.
+    """
+
+    lse: Optional[Tensor] = None
+    max_scores: Optional[Tensor] = None
 
 
 class _ModificationType(Enum):
@@ -291,14 +474,12 @@ class BlockMask:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
         assert kv_indices is not None, "kv_indices must be provided"
-        assert q_num_blocks is not None, "q_num_blocks must be provided"
-        assert q_indices is not None, "q_indices must be provided"
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
-        assert (full_q_num_blocks is None) == (
-            full_q_indices is None
-        ), "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
+        assert (full_q_num_blocks is None) == (full_q_indices is None), (
+            "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        )
 
         self.seq_lengths = seq_lengths
         self.kv_num_blocks = kv_num_blocks
@@ -322,6 +503,7 @@ class BlockMask:
         BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
         seq_lengths: Optional[tuple[int, int]] = None,
+        compute_q_blocks: bool = True,
     ):
         """
         Creates a BlockMask instance from key-value block information.
@@ -344,18 +526,22 @@ class BlockMask:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
 
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
 
         # Generate q_num_blocks and q_indices
-        q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
-        if full_kv_num_blocks is not None:
-            assert full_kv_indices is not None
-            full_q_num_blocks, full_q_indices = _transpose_ordered(
-                full_kv_num_blocks, full_kv_indices
-            )
+        if compute_q_blocks:
+            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+            if full_kv_num_blocks is not None:
+                assert full_kv_indices is not None
+                full_q_num_blocks, full_q_indices = _transpose_ordered(
+                    full_kv_num_blocks, full_kv_indices
+                )
+            else:
+                full_q_num_blocks, full_q_indices = None, None
         else:
+            q_num_blocks, q_indices = None, None
             full_q_num_blocks, full_q_indices = None, None
 
         if isinstance(BLOCK_SIZE, int):
@@ -364,7 +550,7 @@ class BlockMask:
         mask_mod = mask_mod if mask_mod is not None else noop_mask
         if seq_lengths is None:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
-            kv_length = q_indices.shape[-2] * BLOCK_SIZE[1]
+            kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
 
         return cls(
@@ -434,29 +620,34 @@ class BlockMask:
                 def causal_mask(b, h, q_idx, kv_idx):
                     return q_idx >= kv_idx
 
-                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
-                assert block_mask.kv_num_blocks.shape == (4,2,4)
-                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                block_mask = create_block_mask(
+                    causal_mask, 4, 2, 512, 512, device="cuda"
+                )
+                assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+                assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
                 # Index on batch dimension
                 new_block_mask = block_mask[0]
-                assert new_block_mask.kv_num_blocks.shape == (2,4)
-                assert new_block_mask.kv_indices.shape == (2,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 4)
+                assert new_block_mask.kv_indices.shape == (2, 4, 4)
 
                 # Index on batch and head dimension
                 new_block_mask = block_mask[0, 1]
                 assert new_block_mask.kv_num_blocks.shape == (4,)
-                assert new_block_mask.kv_indices.shape == (4,4)
+                assert new_block_mask.kv_indices.shape == (4, 4)
 
                 # slicing on batch and head dimension
                 new_block_mask = block_mask[0:2, 1:2]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
-                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+                assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
 
                 # slicing on batch, head, and query dimension
-                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
-                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+                new_block_mask = block_mask[
+                    0:2, 1:2, torch.tensor([1], dtype=torch.int32)
+                ]
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+                assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -475,6 +666,7 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
             seq_lengths=self.seq_lengths,
+            compute_q_blocks=self.q_indices is not None,
         )
 
     def __repr__(self):
@@ -485,7 +677,7 @@ class BlockMask:
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
+            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks)},\n"
             f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
             f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
             f"    q_indices={shape_or_none(self.q_indices)},\n"
@@ -636,7 +828,7 @@ class BlockMask:
 
         Note:
             This method does not modify the original BlockMask in-place.
-            Instead, it returns a new BlockMask instance where invidual tensor attributes
+            Instead, it returns a new BlockMask instance where individual tensor attributes
             may or may not be moved to the specified device, depending on their
             current device placement.
         """
@@ -857,6 +1049,7 @@ def create_block_mask(
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
             query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
@@ -864,9 +1057,9 @@ def create_block_mask(
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
-    assert (
-        mod_type == _ModificationType.MASK_MOD
-    ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    assert mod_type == _ModificationType.MASK_MOD, (
+        f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    )
     if B is None:
         B = 1
     if H is None:
@@ -962,7 +1155,10 @@ def _nested_mod_func_adapter(
         kv_seq_idx = q_seq_idx
     else:
         # cross attention case
-        kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
+        kv_seq_idx = _build_seq_idx(
+            kv_offsets,
+            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        )
 
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
@@ -1039,10 +1235,14 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
 
         .. code-block:: python
@@ -1052,11 +1252,15 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             # cross attention case: pass both query and key/value NJTs
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, key, _compile=True)
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, key, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     # use same structure for kv as for q by default
@@ -1081,7 +1285,12 @@ def create_nested_block_mask(
 
 
 def _apply_kernel_options(
-    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    return_lse: bool,
+    kernel_options,
+    return_aux: Optional[AuxRequest] = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
@@ -1091,23 +1300,41 @@ def _apply_kernel_options(
     # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
     kernel_options.setdefault("WRITE_DQ", True)
 
+    any_inputs_on_cpu_device = (
+        query.device.type == "cpu"
+        or key.device.type == "cpu"
+        or value.device.type == "cpu"
+    )
+
+    # Determine what auxiliary outputs are needed
+    output_lse = return_lse
+    output_max = False
+
+    if return_aux is not None:
+        # New API takes precedence over legacy parameters
+        output_lse = return_aux.lse
+        output_max = return_aux.max_scores
+
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
     kernel_options["OUTPUT_LOGSUMEXP"] = True
-    if not return_lse:
+    if not output_lse:
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
-        output_logsumexp = torch.is_grad_enabled()
-        kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
-        any_inputs_on_cpu_device = (
-            query.device.type == "cpu"
-            or key.device.type == "cpu"
-            or value.device.type == "cpu"
-        )
+        kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
         if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports infernece, and will not return lse
+            # CPU with torch.compile now supports inference, and will not return lse
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
+
+    # If forward kernel needs to return max is decided by this rule internally.
+    assert "OUTPUT_MAX" not in kernel_options
+    kernel_options["OUTPUT_MAX"] = output_max
+    if any_inputs_on_cpu_device and output_max:
+        # CPU doesn't support returning max yet
+        # TODO: support CPU for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU.")
+        kernel_options["OUTPUT_MAX"] = False
 
     return kernel_options
 
@@ -1124,11 +1351,8 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if (
-        query.device.type != "cuda"
-        and query.device.type != "cpu"
-        and query.device.type != "hpu"
-    ):
+    supported_devices = {"cuda", "cpu", "xpu", "hpu"}
+    if query.device.type not in supported_devices:
         raise ValueError(
             "FlexAttention is only supported on CUDA, CPU or HPU devices. "
             f"Found input tensors on {query.device.type} device."
@@ -1154,6 +1378,65 @@ def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
+def _enforce_mem_layouts(
+    query: Tensor, key: Tensor, value: Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Enforce memory layouts for query, key, and value tensors.
+
+    For non-FP8 dtypes, no action is taken.
+
+    For FP8 dtypes, we enforce the following memory layouts:
+    - Query tensor must be in row-major memory layout, as it will be the left-operand in the FP8 GEMM `q @ k.T`.
+    - Key tensor must be in row-major memory layout, as it will be transposed when used as the right-operand
+      in the FP8 GEMM `q @ k.T`, meaning it will correctly be in column-major memory layout for the GEMM.
+    - Value tensor must be in column-major memory layout, as it will be the right-operand in the FP8 GEMM `softmax_scores @ v`.
+
+    Returns the query, key, and value tensors with the enforced memory layouts.
+    """
+
+    def is_row_major(tensor: Tensor) -> bool:
+        return tensor.stride()[-1] == 1
+
+    def is_col_major(tensor: Tensor) -> bool:
+        return tensor.stride()[-2] == 1
+
+    # These memory layout constraint are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
+    # This is because GPU arch < SM89 does not not support FP8 GEMMs, and
+    # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMMs
+    # (i.e., left and right operands can be in row or column major layouts)
+    # so this check is only needed for older architectures.
+    # See: https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/blackwell_functionality.md
+    fp8_dtypes = (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    )
+    gemm_precision = query.dtype
+
+    should_enforce_mem_layout = (
+        gemm_precision in fp8_dtypes
+        and torch.version.cuda is not None
+        and torch.cuda.get_device_capability("cuda") >= (8, 9)
+        and torch.cuda.get_device_capability("cuda") < (10, 0)
+    )
+    if not should_enforce_mem_layout:
+        return query, key, value
+
+    # Query must be in row-major memory layout as the left-operand in the FP8 GEMM `q @ k.T`
+    if not is_row_major(query):
+        query = query.contiguous()
+
+    # Key must be in row-major memory layout as it will be transposed when used as the right-operand
+    # in the FP8 GEMM `q @ k.T`, meaning it will correctly be in column-major memory layout for the GEMM.
+    if not is_row_major(key):
+        key = key.contiguous()
+
+    # Value must be in column-major memory layout as the right-operand in the FP8 GEMM `softmax_scores @ v`
+    if not is_col_major(value):
+        value = value.transpose(-2, -1).contiguous().transpose(-2, -1)
+    return query, key, value
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -1163,8 +1446,10 @@ def flex_attention(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[dict[str, Any]] = None,
-) -> Union[Tensor, tuple[Tensor, Tensor]]:
+    kernel_options: Optional[FlexKernelOptions] = None,
+    *,
+    return_aux: Optional[AuxRequest] = None,
+) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1191,18 +1476,29 @@ def flex_attention(
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
     Args:
-        query (Tensor): Query tensor; shape :math:`(B, Hq, L, E)`.
-        key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`.
-        value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
+        query (Tensor): Query tensor; shape :math:`(B, Hq, L, E)`. For FP8 dtypes, should be in row-major memory layout for optimal performance.
+        key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`. For FP8 dtypes, should be in row-major memory layout for optimal performance.
+        value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`. For FP8 dtypes, should be in column-major memory layout for optimal performance.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
-        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
-        kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
+        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False. **Deprecated**: Use ``return_aux=AuxRequest(lse=True)`` instead.
+        kernel_options (Optional[FlexKernelOptions]):
+            Options to control the behavior of the underlying Triton kernels.
+            See :class:`FlexKernelOptions` for available options and usage examples.
+        return_aux (Optional[AuxRequest]): Specifies which auxiliary outputs to compute and return.
+            If None, only the attention output is returned. Use ``AuxRequest(lse=True, max_scores=True)``
+            to request both auxiliary outputs.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
+
+        When ``return_aux`` is not None:
+            aux (AuxOutput): Auxiliary outputs with requested fields populated.
+
+        When ``return_aux`` is None (deprecated paths):
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(B, Hq, L)`. Only returned if ``return_lse=True``.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -1222,6 +1518,7 @@ def flex_attention(
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
     _validate_nestedness(query, key, value)
+    query, key, value = _enforce_mem_layouts(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -1306,13 +1603,57 @@ def flex_attention(
             f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
         )
 
+    # Handle deprecation warnings for old parameters
+    if return_lse and return_aux is not None:
+        raise ValueError(
+            "Cannot specify both return_lse and return_aux. "
+            "return_lse is deprecated, please use return_aux=AuxRequest(lse=True) instead."
+        )
+    elif return_lse and return_aux is None:
+        _warn_once(
+            "deprecated_return_lse",
+            "return_lse is deprecated and will be removed in v2.7. "
+            "Please use return_aux=AuxRequest(lse=True) instead.",
+            category=FutureWarning,
+        )
+
     kernel_options = _apply_kernel_options(
         query,
         key,
         value,
         return_lse,
         kernel_options,
+        return_aux,
     )
+
+    def _finalize_outputs(
+        out,
+        lse,
+        max_scores,
+        *,
+        return_aux: Optional[AuxRequest],
+        return_lse: bool,
+    ):
+        """Normalize stats and build return value (aux-aware, legacy-compatible)."""
+        ln2 = math.log(2.0)
+        return_lse = return_lse or return_aux is not None and return_aux.lse
+        return_max = return_aux is not None and return_aux.max_scores
+
+        lse_scaled = lse * ln2 if (return_lse and lse.numel() > 0) else None
+        max_scaled = (
+            max_scores * ln2 if (return_max and max_scores.numel() > 0) else None
+        )
+
+        if return_aux is not None:
+            return out, AuxOutput(
+                lse=lse_scaled,
+                max_scores=max_scaled,
+            )
+
+        if return_lse:
+            return out, lse_scaled
+
+        return out
 
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
@@ -1320,13 +1661,30 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
+        out, lse, max_scores = flex_attention_hop(
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),
+            scale,
+            kernel_options,  # type: ignore[union-attr]
         )
-        if return_lse:
-            return out, lse * math.log(2)
-        else:
-            return out
+        return _finalize_outputs(
+            out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+        )
+
+    if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        _warn_once(
+            warning_id="flex_attention_performance",
+            message=(
+                "flex_attention called without torch.compile() - this will use an unfused implementation that materializes the full scores matrix instead of generating a fused kernel.\n\n"
+                "SOLUTION: Use torch.compile(flex_attention)(...)\n\n"
+                "If you want to debug your score_mod/mask_mod, you can set:\n"
+                "torch.nn.attention.flex_attention._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True\n\n"
+                "This will allow you to use print statements or breakpoints. Note: This doesn't work with the backwards pass and may produce incorrect results."
+            ),
+        )
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
@@ -1345,14 +1703,20 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                     if metadata_mode:
-                        backend = make_eager_backend_with_torch_function_mode(
-                            metadata_mode
+                        backend: Union[str, Callable[..., Any]] = (
+                            make_eager_backend_with_torch_function_mode(metadata_mode)
                         )
                     else:
                         backend = "eager"
-                    out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                    )(
+
+                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+                        flex_fn = _flex_attention_hop_wrapper
+                    else:
+                        flex_fn = torch.compile(
+                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                        )
+
+                    out, lse, max_scores = flex_fn(
                         query,
                         key,
                         value,
@@ -1361,7 +1725,6 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-                    if return_lse:
-                        return out, lse * math.log(2)
-                    else:
-                        return out
+    return _finalize_outputs(
+        out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+    )

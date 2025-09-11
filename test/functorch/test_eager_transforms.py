@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_CUDA_MEM_LEAK_CHECK,
@@ -687,7 +686,7 @@ class TestGradTransform(TestCase):
         expected = (torch.zeros_like(x), torch.ones_like(x))
         self.assertEqual(result, expected)
 
-    # TODO: https://github.com/zou3519/functorch/issues/12
+    # TODO: https://github.com/pytorch/functorch/issues/12
     @onlyCPU
     def test_unrelated_hessian(self, device):
         N = 5
@@ -4324,9 +4323,7 @@ class TestExamplesCorrectness(TestCase):
 
         def lennard_jones_force(r):
             """Get magnitude of LJ force"""
-            return -epsilon * (
-                (-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7)
-            )
+            return -epsilon * ((-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7))
 
         r = torch.linspace(0.5, 2 * sigma, steps=100, requires_grad=True, device=device)
         drs = torch.outer(r, torch.tensor([1.0, 0, 0], device=device))
@@ -4495,8 +4492,9 @@ class TestExamplesCorrectness(TestCase):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
-        points, labels = torch.randn(100, 2, 2, 2, 2, device=device), torch.randint(
-            0, 2, (100,), device=device
+        points, labels = (
+            torch.randn(100, 2, 2, 2, 2, device=device),
+            torch.randint(0, 2, (100,), device=device),
         )
 
         class MLPClassifier(nn.Module):
@@ -5164,7 +5162,6 @@ def traceable(f):
 
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
-    @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))

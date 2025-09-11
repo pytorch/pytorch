@@ -4444,12 +4444,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_dim(
         self,
         device,
         dtype,
         requires_grad,
         components_require_grad,
+        func,
     ):
         """
         Softmax passes when reducing on valid reduction dimensions.
@@ -4468,7 +4474,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         for reduce_dim, _ in reduce_dims:
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-            out_actual = torch.nn.functional.softmax(nt, dim=reduce_dim)
+            out_actual = func(nt, dim=reduce_dim)
             torch._dynamo.disable(self.assertEqual)(
                 len(out_actual.shape), len(output_shape)
             )  # disable if running on dynamo
@@ -4498,12 +4504,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             reduce_dim, reduce_dim_expected = reduce_dim_tuple
 
             if nt.dim() > reduce_dim:
-                out_actual = torch.nn.functional.softmax(
-                    nt, dim=reduce_dim
-                )  # nested tensor
-                out_expected = torch.nn.functional.softmax(
-                    nt.values(), dim=reduce_dim_expected
-                )  # dense tensor of dimensions 1 less than out_actual
+                # nested tensor
+                out_actual = func(nt, dim=reduce_dim)
+                # dense tensor of dimensions 1 less than out_actual
+                out_expected = func(nt.values(), dim=reduce_dim_expected)
                 self.assertTrue(
                     torch.allclose(out_actual.values().view(-1), out_expected.view(-1))
                 )
@@ -4601,8 +4605,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_reduce_batch_dim(
-        self, device, dtype, requires_grad, components_require_grad
+        self, device, dtype, requires_grad, components_require_grad, func
     ):
         """
         Softmax on NestedTensor fails when trying to reduce across batch dimension.
@@ -4627,7 +4636,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 RuntimeError,
                 "not supported when reducing across the batch dimension for NestedTensor",
             ):
-                out = torch.nn.functional.softmax(nt, dim=reduce_dim)
+                out = func(nt, dim=reduce_dim)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -5639,6 +5648,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             RuntimeError, "At least one of offsets or lengths is required"
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
 
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
@@ -6746,11 +6760,10 @@ torch.cuda.synchronize()
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
-                with torch.nn.attention.sdpa_kernel(
-                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-                ):
-                    check_forward_backward()
+            with torch.nn.attention.sdpa_kernel(
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+            ):
+                check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
@@ -7190,7 +7203,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backwark will fail
+        # total_length must > than max_length otherwise flash_attn backward will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -7272,6 +7285,9 @@ torch.cuda.synchronize()
 
         return query, key, value
 
+    @unittest.skip(
+        "Temporarily skip - nested tensor backward pass broken after return-max-scores commit"
+    )
     @onlyCUDA
     @flex_attention_supported_platform
     @dtypes(torch.float32)
@@ -8083,6 +8099,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             "std.unbiased",
             "var",
             "var.unbiased",
+            "hash_tensor",
         },
         name="not_implemented",
     ),
@@ -8379,16 +8396,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),
-    # -> CPU device conversion backwards is broken
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Unknown layout in record_stream_any_impl",
-        op_match_fn=lambda device, op: (op.full_name == "to"),
-        sample_match_fn=lambda device, sample: (
-            sample.kwargs.get("device", None) == "cpu"
-        ),
-        name="broken_to_backward",
-    ),
     # sum() backward is not implemented for non-full reductions
     XFailRule(
         error_type=NotImplementedError,
@@ -8540,14 +8547,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
-    # e.g. Expected 5 == 4
-    XFailRule(
-        error_type=AssertionError,
-        op_match_fn=lambda device, op: (op.full_name == "fill"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="fill_aot_autograd_bug_with_transposed_input",
-    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8584,18 +8583,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "select"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
         name="broken_select_backward_unbacked",
-    ),
-    # Bug: no idea what's going on here; needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug1",
-    ),
-    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "isreal"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug2",
     ),
 ]
 

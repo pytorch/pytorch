@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
@@ -13,6 +14,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -299,67 +301,50 @@ struct ConvParams {
   bool allow_tf32{};
 
   bool is_strided() const {
-    bool is_strided = false;
-    for (const auto& s : stride) {
-      is_strided |= (s != 1);
-    }
-    return is_strided;
+    return std::any_of(
+      stride.cbegin(), stride.cend(), [](const T& s) { return s != 1; });
   }
 
   bool is_dilated() const {
-    bool is_dilated = false;
-    for (const auto& d : dilation) {
-      is_dilated |= (d != 1);
-    }
-    return is_dilated;
+    return std::any_of(
+      dilation.cbegin(), dilation.cend(), [](const T& d) { return d != 1; });
   }
 
   bool is_padded() const {
-    bool is_padded = false;
-    for (auto p : padding) {
-      is_padded |= (p != 0);
-    }
-    return is_padded;
+    return std::any_of(
+      padding.cbegin(), padding.cend(), [](const T& p) { return p != 0; });
   }
 
   bool is_output_padding_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : output_padding) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      output_padding.cbegin(),
+      output_padding.cend(),
+      [](const T& p) { return p < 0; });
   }
 
   bool is_output_padding_big() const {
-    bool is_big = false;
+    // Revisit this with std::views::zip at C++20.
     for (auto i: c10::irange(output_padding.size())) {
-      is_big |= (output_padding[i] >= stride[i]);
+      if (output_padding[i] >= stride[i]) {
+        return true;
+      }
     }
-    return is_big;
+    return false;
   }
 
   bool is_padding_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : padding) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      padding.cbegin(), padding.cend(), [](const T& p) { return p < 0; });
   }
 
   bool is_dilation_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : dilation) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      dilation.cbegin(), dilation.cend(), [](const T& d) { return d < 0; });
   }
 
   bool is_stride_nonpos() const {
-    bool is_nonpos = false;
-    for (const auto& s : stride) {
-      is_nonpos |= (s <= 0);
-    }
-    return is_nonpos;
+    return std::any_of(
+      stride.cbegin(), stride.cend(), [](const T& s) { return s <= 0; });
   }
 
   void view1d_as_2d() {
@@ -446,11 +431,6 @@ struct ConvParams {
       }
     }
     if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
-      // bypass dilation checks for channels_last convolution
-      if (deterministic && is_dilated()) {
-        // cudnn doesn't support deterministic dilated convolution fully yet
-        return false;
-      }
       if (is_dilated()) {
         return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
       }
@@ -463,43 +443,38 @@ struct ConvParams {
 
   // Use cudnn for FP16 depthwise convolutions
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
+    if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+      return false;
+    }
     if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous && use_cudnn(input, weight)) {
       // always use cudnn_depthwise for channels_last format
       return true;
     }
-    if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
-      long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-      if (cudnn_version >= 8200) {
-        bool kernel_cond =  (use_cudnn(input, weight) &&
-                             input.scalar_type() == kHalf && // only for FP16
-                             weight.scalar_type() == kHalf &&
-                             is_depthwise(input, weight) &&
-                             input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                             !is_dilated() && // no dilation supported
-                             (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
-                             at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
-        if (kernel_cond) {
-          return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
-        }
+    // native kernel doesn't support 64-bit non-splittable case
+    if (cudnn_enabled && !(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
+      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
+        TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
+                        " if the V8 API is not enabled or before cuDNN version 9.3+."
+                        " Upgrade cuDNN or enable the V8 API to use cuDNN for 64-bit depthwise convolutions.");
+        return false;
+      } else {
+        return true;
       }
-      // keep (7600 <= cudnn < 8200) code unchanged
-      bool kernel_cond =  (cudnn_version >= 7600 &&
-                           use_cudnn(input, weight) &&
+    }
+    if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
+      bool kernel_cond =  (use_cudnn(input, weight) &&
                            input.scalar_type() == kHalf && // only for FP16
                            weight.scalar_type() == kHalf &&
                            is_depthwise(input, weight) &&
                            input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                           at::symint::size<T>(weight, 2) == at::symint::size<T>(weight, 3) && // only square kernels
-                           at::symint::size<T>(input, 2) >= 7 && // min width/height 7
                            !is_dilated() && // no dilation supported
-                           stride[0] == stride[1] && // equal strides
-                           ((at::symint::size<T>(weight, 3) == 3) || (at::symint::size<T>(weight, 3) == 1)) &&
+                           (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
-        return check_cudnn_depthwise_workload<T>(input, stride[0]);
-      } else {
-        return false;
+        return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
+      return false;
     } else {
       return false;
     }
@@ -1187,7 +1162,7 @@ at::Tensor convolution(
   bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN("conv"));
 }
 
 at::Tensor convolution_overrideable(
@@ -1332,7 +1307,7 @@ ConvBackend select_conv_backend(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   auto input = input_r;
   auto weight = weight_r;
@@ -1431,10 +1406,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Miopen:
     case ConvBackend::MiopenDepthwise:
     case ConvBackend::MiopenTranspose:
-      if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-        TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
-            "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+      if (detail::getCUDAHooks().compiledWithMIOpen()) {
+        backend_memory_format = miopen_conv_suggest_memory_format(input, weight);
       }
       break;
     case ConvBackend::Mkldnn:
@@ -1456,7 +1429,6 @@ static inline at::MemoryFormat determine_backend_memory_format(
       }
       break;
     case ConvBackend::Mps:
-    case ConvBackend::MpsTranspose:
       if (mps_conv_use_channels_last(input, weight)) {
 #ifdef USE_MPS
         if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
@@ -1719,7 +1691,7 @@ at::Tensor _convolution(
   c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
+  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN("conv"));
 }
 
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
@@ -2017,7 +1989,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN();
+  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);

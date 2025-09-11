@@ -1,42 +1,32 @@
 # Owner(s): ["oncall: distributed"]
 
 # To run:
-# TORCH_SYMMMEM=NVSHMEM python test/distributed/test_nvshmem.py
-# OR
-# TORCH_SYMMMEM=NVSHMEM torchrun --nproc-per-node 4 test/distributed/test_nvshmem.py
+# python test/distributed/test_nvshmem.py
 
-import os
-import sys
-import tempfile
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
-    TEST_SKIPS,
+    MultiProcContinuousTest,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda_p2p_access,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
 
 
-symm_mem_backend = os.getenv("TORCH_SYMMMEM")
-
-if symm_mem_backend != "NVSHMEM":
-    print(
-        "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`, skipping tests",
-        file=sys.stderr,
-    )
-    sys.exit(0)
-
-
 # Decorator
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
-        symm_mem_backend != "NVSHMEM",
-        "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`",
+        not symm_mem.is_nvshmem_available(),
+        "test_nvshmem requires NVSHMEM, skipping tests",
     )
 
 
@@ -46,22 +36,214 @@ device_module = torch.get_device_module(device_type)
 
 
 @requires_nvshmem()
-class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
-    def setUp(self) -> None:
-        super().setUp()
+@requires_cuda_p2p_access()
+class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @skipIfRocm
+    def test_alloc(self) -> None:
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+
+        foo()
+
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
+    def test_alloc_without_device_context(self) -> None:
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
+    def test_mempool_tensor_factory(self) -> None:
+        """
+        Test the effectiveness of MemPool on tensor factory ops.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        src_rank = 0
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            if self.rank == src_rank:
+                tensor = torch.arange(numel, dtype=dtype, device=self.device)
+            else:
+                tensor = torch.zeros(numel, dtype=dtype, device=self.device)
+
+        symm_mem.rendezvous(tensor, group=group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
+        self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
+
+    @skipIfRocm
+    def test_mempool_compute_ops(self) -> None:
+        """
+        Apply MemPool context to a compute op that creates input to collective.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x0 = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x = x0 + self.rank
+            y = torch.mm(x, w)
+
+        # y should be a symm tensor
+        torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
+        expected = torch.mm(x0, w)
+        self.assertEqual(y, expected)
+
+    @skipIfRocm
+    def test_handle_offset(self) -> None:
+        """
+        Test if handle offset is correctly set.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            x0 = torch.empty(numel, dtype=dtype, device=self.device)
+            x1 = torch.empty_like(x0)
+
+        hdl0 = symm_mem.rendezvous(x0, group=group_name)
+        hdl1 = symm_mem.rendezvous(x1, group=group_name)
+        self.assertEqual(hdl0.offset, 0)
+        self.assertEqual(hdl1.offset, x0.untyped_storage().nbytes())
+
+    def test_get_remote_tensor(self) -> None:
+        """
+        Get a remote tensor and use regular aten ops to write to it.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            # src data stores my rank
+            x = torch.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+            y = torch.empty_like(x)
+
+        hdl_y = symm_mem.rendezvous(y, group=group_name)
+        peer = (self.rank + 1) % self.world_size  # Shifting pattern
+        y_remote = hdl_y.get_remote_tensor(peer, y.size(), y.dtype)
+        y_remote.copy_(x)
+        dist.barrier()
+        # Expecting data from -1 rank
+        expected = torch.empty(numel, dtype=dtype, device=self.device).fill_(
+            (self.rank - 1) % self.world_size
+        )
+        self.assertEqual(y, expected)
+
+    @skipIfRocm
+    def test_nvshmem_put(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(tensor, group=group_name)
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nvshmem_put(tensor, 1)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+        elif self.rank == 1:
+            # handle.wait_signal(src_rank=0)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+            torch.testing.assert_close(
+                tensor, torch.zeros(numel, dtype=dtype, device=self.device)
+            )
+        else:
+            dist.barrier()
+
+    @skipIfRocm
+    def test_nvshmem_get(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(tensor, group=group_name)
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nvshmem_get(tensor, 1)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+            torch.testing.assert_close(
+                tensor, torch.ones(numel, dtype=dtype, device=self.device)
+            )
+        else:
+            # handle.wait_signal(src_rank=0)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMAll2AllTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
         # NOTE: required for nvshmem allocation
         torch.empty(1, device=self.device)
-
-    # Required by MultiProcContinousTest
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl"
-
-    @property
-    def world_size(self) -> int:
-        return device_module.device_count()
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
@@ -69,6 +251,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
     @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
+        self._init_device()
+
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
@@ -91,7 +275,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         torch.testing.assert_close(out, expected)
 
     @skipIfRocm
-    def test_nvshmem_all_to_all_vdev(self) -> None:
+    def test_all_to_all_vdev(self) -> None:
+        self._init_device()
+
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
@@ -104,21 +290,24 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         out_splits = torch.zeros_like(inp_splits)
         dist.all_to_all_single(out_splits, inp_splits)
         out_numel = out_splits.sum().item()
-        # Align up to make it bigger
-        align = 16
-        out_numel_max = (out_numel + align - 1) // align * align
 
-        inp = symm_mem.empty(inp_numel, dtype=dtype, device=self.device).fill_(
-            self.rank
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * self.world_size
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
-        out = symm_mem.empty(out_numel_max, dtype=dtype, device=self.device).fill_(-1)
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
         in_out_splits = symm_mem.empty(
             (3, self.world_size), dtype=torch.int64, device=self.device
         )
         # Row 0 is input splits
         in_out_splits[0].copy_(inp_splits)
 
-        torch.ops.symm_mem.nvshmem_all_to_all_vdev(inp, out, in_out_splits, group_name)
+        torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
 
         # Check input splits (row 0) -- should not change
         torch.testing.assert_close(in_out_splits[0], inp_splits)
@@ -128,35 +317,345 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
         # Check output offsets (row 2)
         out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
-        # output offsets from `nvshmem_all_to_all_vdev` is exclusive scan
+        # output offsets from `all_to_all_vdev` is exclusive scan
         self.assertEqual(in_out_splits[2][0], 0)
         torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
 
         # Check data
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
-        dist.all_to_all_single(expected, inp, out_splits.tolist(), inp_splits.tolist())
+        dist.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+        )
         torch.testing.assert_close(out[:out_numel], expected)
+
+    @skipIfRocm
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_all_to_all_vdev_2d(self, align: int) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+        # We do a .t() here because there is a rank-major to expert-major shuffle
+        out_splits_t = out_splits.reshape(self.world_size, ne).t()
+
+        # Actual number of input elements
+        inp_numel = inp_splits.sum().item()
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
+        )
+        received_out_splits = out_splits_offsets[0]
+        received_out_offsets = out_splits_offsets[1]
+
+        # Check input splits (row 0) -- should not change
+        torch.testing.assert_close(in_splits, inp_splits)
+
+        # Check output splits (row 1)
+        torch.testing.assert_close(received_out_splits, out_splits_t.reshape(-1))
+
+        # Check output offsets (row 2)
+        out_split_list = out_splits_t.tolist()
+        for i in range(ne):
+            expert_sum = 0
+            for j in range(self.world_size):
+                expert_sum += out_split_list[i][j]
+            # Align up expert_sum
+            expert_sum_aligned = (expert_sum + align - 1) // align * align
+            # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
+            expert_sum_aligned = max(expert_sum_aligned, align)
+            # last element absorbs the padding
+            out_split_list[i][-1] += expert_sum_aligned - expert_sum
+
+        out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
+        out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
+        # Make it exclusive scan because that's what `all_to_all_vdev_2d` returns
+        out_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), out_offsets[:-1]]
+        ).to(torch.int64)
+        torch.testing.assert_close(received_out_offsets, out_offsets)
+
+        # Check data
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        inp_splits_rank = inp_splits.reshape(self.world_size, ne).sum(1)
+        out_splits_rank = out_splits.reshape(self.world_size, ne).sum(1)
+        dist.all_to_all_single(
+            expected,
+            inp[:inp_numel],
+            out_splits_rank.tolist(),
+            inp_splits_rank.tolist(),
+        )
+        # We still need to shuffle `expected`
+        out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
+        result_list = []
+        for j in range(ne):
+            for i in range(self.world_size):
+                chunk_id = i * ne + j
+                offset = out_offsets[chunk_id]
+                chunk = expected[offset - out_splits[chunk_id] : offset]
+                result_list.append(chunk)
+
+        # Do a chunk-wise comparison
+        for c, chunk in enumerate(result_list):
+            start = received_out_offsets[c].item()
+            split = received_out_splits[c].item()
+            received_chunk = out[start : start + split]
+            torch.testing.assert_close(received_chunk, chunk)
+
+    @skipIfRocm
+    def test_all_to_all_vdev_2d_offset(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+        # Each split up align to k, as the offset, i.e. [0, k, 2k, 3k, ...]
+        inp_offsets = torch.arange(
+            0, k * nsplits, k, dtype=torch.int64, device=self.device
+        )
+
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        # First need to transpose the input splits
+        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
+        dist.all_to_all_single(out_splits, inp_splits_t)
+
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        # Remember that we up-align each input split to k?
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        # 2 rows: input splits, input offsets
+        in_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        )
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        # Row 0 is input splits
+        in_splits_offsets[0].copy_(inp_splits)
+        # Row 1 is input offsets
+        in_splits_offsets[1].copy_(inp_offsets)
+
+        torch.ops.symm_mem.all_to_all_vdev_2d_offset(
+            inp, out, in_splits_offsets, out_splits_offsets, group_name
+        )
+        received_out_splits = out_splits_offsets[0]
+        received_out_offsets = out_splits_offsets[1]
+
+        # Check input splits and offsets -- should not change
+        torch.testing.assert_close(in_splits_offsets[0], inp_splits)
+        torch.testing.assert_close(in_splits_offsets[1], inp_offsets)
+
+        # Check output splits (row 1)
+        torch.testing.assert_close(received_out_splits, out_splits)
+
+        # Check output offsets (row 2)
+        out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
+        # output offsets from `all_to_all_vdev_2d_offset` is exclusive scan
+        self.assertEqual(received_out_offsets[0], 0)
+        torch.testing.assert_close(received_out_offsets[1:], out_offsets[:-1])
+
+        # Check data
+        # Let's "squeeze" the padding out of the input data first
+        inp_chunks = []  # (ne, nranks)
+        for i in range(ne):
+            inp_chunks_e = []  # (nranks,)
+            for j in range(self.world_size):
+                chunk_id = i * self.world_size + j
+                offset = in_splits_offsets[1][chunk_id]
+                chunk = inp[offset : offset + inp_splits[chunk_id]]
+                inp_chunks_e.append(chunk)
+            inp_chunks.append(inp_chunks_e)
+
+        # Transpose the 2D input chunks
+        inp_chunks_t = list(zip(*inp_chunks))
+        # Now it is (nranks, ne), concatenate the e's
+        inp_chunks_t = [torch.cat(row) for row in inp_chunks_t]
+
+        # Create empty output tensors -- each tensor is data to be received from a peer
+        out_splits = out_splits.reshape(self.world_size, ne)
+        # Sum the split sizes of all experts, per peer
+        receive_size_per_peer = out_splits.sum(1)
+        out_chunks = []  # (nranks,)
+        for i in range(self.world_size):
+            out_chunks.append(
+                torch.empty(
+                    receive_size_per_peer[i].item(), dtype=dtype, device=self.device
+                )
+            )
+
+        # All-to-all
+        dist.all_to_all(out_chunks, inp_chunks_t)
+
+        # Concatenate the output chunks received from all peers
+        out_expected = torch.cat(out_chunks)
+        self.assertEqual(out_expected.shape[0], out_numel)
+
+        # Check data
+        torch.testing.assert_close(out_expected, out[:out_numel])
+
+    def helper_test_dispatch_combine(self, align: int, group_name) -> None:
+        """
+        Shuffle the tokens, then combine them, and check if the combined data is
+        exactly the same as the original input data
+        """
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+
+        # Actual number of input elements
+        inp_numel = inp_splits.sum().item()
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        # Buffers for shuffle
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
+            self.rank
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        # Shuffle the tokens
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
+        )
+
+        # Buffers for combine
+        combine_out = symm_mem.empty(
+            max_out_numel, dtype=dtype, device=self.device
+        ).fill_(-1)
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        combine_out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        # Combine the tokens
+        # `out_splits_offsets` from shuffle is exactly the `input_splits_offsets` for combine
+        # `out` data from shuffle is exactly the `input` data for combine
+        torch.ops.symm_mem.all_to_all_vdev_2d_offset(
+            out, combine_out, out_splits_offsets, combine_out_splits_offsets, group_name
+        )
+
+        # Assert the combined data is exactly the same as the original input data
+        torch.testing.assert_close(combine_out[:inp_numel], inp[:inp_numel])
+
+        # Assert the combined out splits are exactly the same as the original input splits
+        torch.testing.assert_close(combine_out_splits_offsets[0], inp_splits)
+
+        # Assert the combined out offsets are exactly the same as the original input offsets
+        inp_offsets = torch.cumsum(inp_splits, dim=0)  # inclusive scan
+        # Make it exclusive scan because that's what `all_to_all_vdev_2d_offset` returns
+        inp_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), inp_offsets[:-1]]
+        ).to(torch.int64)
+        torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
+
+    @skipIfRocm
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_dispatch_combine(self, align: int) -> None:
+        """
+        Test dispatch-and-combine over World group
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
+
+    @skipIfRocm
+    # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
+    # failure
+    @skip_if_lt_x_gpu(4)
+    def test_dispatch_combine_subgroup(self) -> None:
+        """
+        Test dispatch-and-combine over concurrent subgroups
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        # Test on two concurrent subgroups
+        ngroups = 2
+        subgroup_size = self.world_size // ngroups
+        dm = init_device_mesh(
+            device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
+        )
+        subgroup = dm.get_group("ep")
+        self.helper_test_dispatch_combine(align=8, group_name=subgroup.group_name)
 
 
 if __name__ == "__main__":
-    if not device_module.is_available():
-        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-
-    # If launched by torchrun, these values would have been set
-    rank = int(os.getenv("RANK", "-1"))
-    world_size = int(os.getenv("WORLD_SIZE", "-1"))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        NVSHMEMSymmetricMemoryTest.run_rank(rank, world_size)
-    else:
-        # No external launcher, spawn N processes
-        world_size = device_module.device_count()
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            NVSHMEMSymmetricMemoryTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()

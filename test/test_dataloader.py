@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_MACOS,
     IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -32,13 +33,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoDill,
-    skipIfRocm,
     skipIfXpu,
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
     xfailIfLinux,
@@ -96,7 +95,7 @@ TEST_CUDA_IPC = (
     and sys.platform != "darwin"
     and sys.platform != "win32"
     and not IS_JETSON
-    and not TEST_WITH_ROCM
+    #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
@@ -133,9 +132,26 @@ supported_multiprocessing_contexts = [None] + list(
 )
 
 
-# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+# The following collate functions are defined globally here for pickle purposes.
+
+
+# collate_fn that returns the batch cloned
 def _clone_collate(b):
     return [x.clone() for x in b]
+
+
+# collate_fn that returns the batch of sparse coo tensors cloned
+def _sparse_coo_collate(b):
+    lst = []
+    for x in b:
+        t = x.clone()
+        lst.append(t)
+        # Force sparse tensor invariants checks. check_pinning=True
+        # reproduces gh-153143.
+        torch._validate_sparse_coo_tensor_args(
+            t._indices(), t._values(), t.size(), t.is_coalesced(), check_pinning=False
+        )
+    return lst
 
 
 @unittest.skipIf(
@@ -717,12 +733,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
-        self.sleeped = False
+        self.slept = False
 
     def __getitem__(self, idx):
-        if not self.sleeped:
+        if not self.slept:
             time.sleep(self.sleep_sec)
-            self.sleeped = True
+            self.slept = True
         return idx
 
     def __len__(self):
@@ -1848,7 +1864,6 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -2473,7 +2488,6 @@ except RuntimeError as e:
                 self.assertFalse(pin_memory_thread.is_alive())
 
     # Takes 2.5min to finish, see https://github.com/pytorch/pytorch/issues/46065
-    @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
     @slowTest
     def test_proper_exit(self):
@@ -2893,8 +2907,9 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            # TODO: Skip this better in a better way when the test framework allows
-            return
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
 
         dataset = [
             torch.nested.nested_tensor([torch.randn(5)], device=device)
@@ -2931,6 +2946,37 @@ class TestDataLoaderDeviceType(TestCase):
             )
 
             next(iter(loader))
+
+    @parametrize(
+        "context",
+        [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_sparse_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if "cuda" in device and context == "fork":
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
+
+        dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
+
+        pin_memory_settings = [False]
+        if device == "cpu" and torch.cuda.is_available():
+            pin_memory_settings.append(True)
+
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_sparse_coo_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
@@ -3083,6 +3129,14 @@ class TestDictDataLoader(TestCase):
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
+    def test_pin_memory_no_cuda(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for sample in loader:
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_device(self):
@@ -3419,6 +3473,10 @@ class TestIndividualWorkerQueue(TestCase):
             if current_worker_idx == num_workers:
                 current_worker_idx = 0
 
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS,
+        "Flaky on Windows and MacOS https://github.com/pytorch/pytorch/issues/68643",
+    )
     def test_ind_worker_queue(self):
         max_num_workers = None
         if hasattr(os, "sched_getaffinity"):

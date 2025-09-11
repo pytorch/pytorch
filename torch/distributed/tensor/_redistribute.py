@@ -7,6 +7,7 @@ from typing import cast, NamedTuple, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -181,10 +182,7 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    has_symints = any(isinstance(s, torch.SymInt) for s in current_spec.shape) or any(
-        isinstance(s, torch.SymInt) for s in target_spec.shape
-    )
-    if has_symints:
+    if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
@@ -318,7 +316,6 @@ class Redistribute(torch.autograd.Function):
                 device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
-            local_tensor = input._local_tensor
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )

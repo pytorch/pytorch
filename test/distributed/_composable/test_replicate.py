@@ -8,8 +8,8 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._composable.replicate import replicate
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -69,7 +69,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
     def test_replicate_non_root_multiple_save_load(self):
         """
-        Tests tha replicate() on multiple submodules matches
+        Tests the replicate() on multiple submodules matches
         local module state_dict.
         """
         self._init_pg()

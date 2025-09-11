@@ -20,15 +20,27 @@ from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
-from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.export import Dim
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     requires_gpu,
     TRITON_HAS_CPU,
 )
+
+
+if HAS_GPU:
+    import triton
+    import triton.language as tl
+
+    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
 
 
 @requires_gpu()
@@ -39,6 +51,7 @@ from torch.testing._internal.inductor_utils import (
     scalar_asserts=False,
     nan_asserts=False,
 )
+@instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -146,20 +159,20 @@ class FxirTestCase(InductorTestCase):
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
-        num_extern = self._count_ops(gm, extern_kernels.addmm)
+        num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
         self.assertEqual(num_extern, 1)
 
     def test_fallback(self):
         """
-        Test a program that calls an aten fallback.
+        Test a program that calls aten fallbacks.
         """
 
-        length = 8
-
         def foo(x):
-            return x + torch.randn(1, device=self.device)
+            batch1 = torch.randn(2, 3, 5, device=self.device)
+            batch2 = torch.randn(2, 5, 4, device=self.device)
+            return torch.addbmm(x, batch1, batch2)
 
-        args = (torch.randn(length, device=self.device),)
+        args = (torch.randn(3, 4, device=self.device),)
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
@@ -168,8 +181,10 @@ class FxirTestCase(InductorTestCase):
         )
 
         # Check for the fallback kernel.
-        num_fallback = self._count_ops(gm, torch.ops.aten.randint.low_out)
-        self.assertEqual(num_fallback, 1)
+        num_fallback = self._count_ops(
+            gm, torch.ops.aten.randint.low_out
+        ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
+        self.assertEqual(num_fallback, 2)
 
     def test_cat_inputs(self):
         """
@@ -181,6 +196,33 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
+    def test_cat_views(self):
+        """
+        Test concatenation with multiple kernels writing to the same buffer.
+        """
+
+        def foo(x, y):
+            a = x - 2
+            b = y.sum(0, keepdim=True)
+            c = torch.cat((a, b)).clone()
+            return a, b, c
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
+
+        def get_offset(node: torch.fx.Node) -> int:
+            (input_, shape, stride, offset) = node.args
+            assert isinstance(offset, int)
+            return offset
+
+        # Check for 2 views, one of which is offset.
+        as_strided_nodes = list(
+            gm.graph.find_nodes(op="call_function", target=torch.as_strided)
+        )
+        self.assertEqual(len(as_strided_nodes), 2)
+        num_offset_views = sum(get_offset(node) > 0 for node in as_strided_nodes)
+        self.assertEqual(num_offset_views, 1)
 
     def test_cat_to_alloc(self):
         """
@@ -361,6 +403,130 @@ class FxirTestCase(InductorTestCase):
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
 
+    @parametrize(
+        "shape",
+        [
+            (20,),
+            (50, 30),
+            (50, 30, 40),
+        ],
+    )
+    @torch._inductor.config.patch(
+        {
+            "pad_dynamic_shapes": True,
+            "comprehensive_padding": True,
+            "padding_alignment_bytes": 32,
+            "pad_outputs": True,
+        }
+    )
+    def test_dynamic_shapes_with_padding(self, shape):
+        """
+        Test a graph with dynamic shapes with padding.
+        """
+
+        def get_input(shape):
+            pad_size = list(shape)
+            pad_size[-1] = ((shape[-1] + 7) // 8) * 8
+            pad = torch.randn(pad_size, dtype=torch.float32, device=self.device)
+            view = torch.as_strided(pad, shape, pad.stride())
+            return view
+
+        args = [get_input(shape) for _ in range(2)]
+        (gm,) = self._compile_and_check(
+            torch.add, args, compile_kwargs={"dynamic": True}
+        )
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        example_tensor = empty_strided.meta["val"]
+        symbolic_dims = example_tensor.shape
+        symbolic_strides = example_tensor.stride()
+
+        align_elems = 32 // args[0].dtype.itemsize
+        expected_strides = [1 for _ in range(len(shape))]
+        for i in range(len(shape) - 1, 0, -1):
+            expected_strides[i - 1] = align_elems * (
+                ((expected_strides[i] * symbolic_dims[i]) + align_elems - 1)
+                // align_elems
+            )
+        for i, j in zip(symbolic_strides, expected_strides):
+            self.assertEqual(i, j)
+
+    def test_dynamic_shapes_precomputed_size(self):
+        """
+        Test dynamic shapes where a kernel's size arg is precomputed.
+        """
+        func = torch.add
+        args = [
+            torch.randn(shape, device=self.device) for shape in [(7, 12, 9), (7, 1, 1)]
+        ]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("ks0", triton_node.kwargs["kwargs"])
+
+    def test_dynamic_launch_grid_calc_python(self):
+        """
+        Test the dyanmic launch grid calculation for Triton kernel wrapper using python mode
+        """
+        func = torch.add
+        args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("grid", triton_node.kwargs)
+        self.assertIn("xnumel", triton_node.kwargs["kwargs"])
+        self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
+        grid = triton_node.kwargs["grid"][0]
+        xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
+        xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
+        self.assertEqual(grid[0].meta["val"], -(-xnumel // xblock))
+        self.assertEqual(grid[1], 1)
+        self.assertEqual(grid[2], 1)
+
+    def test_dynamic_launch_grid_calc_python_slow(self):
+        """
+        Test the dyanmic launch grid calculation for Triton kernel wrapper using python_slow mode
+        """
+        from torch._inductor.runtime.triton_heuristics import GridExpr
+
+        # Mock GridExpr.from_meta to use "python_slow" mode explicitly
+        original_from_meta = GridExpr.from_meta
+
+        def mocked_from_meta(inductor_meta, cfg, mode="python"):
+            return original_from_meta(inductor_meta, cfg, mode="python_slow")
+
+        with unittest.mock.patch.object(GridExpr, "from_meta", mocked_from_meta):
+            func = torch.add
+            args = [
+                torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]
+            ]
+            (gm,) = self._compile_and_check(
+                func, args, compile_kwargs={"dynamic": True}
+            )
+
+            # Check for the precomputed size arg.
+            (triton_node,) = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+            self.assertIn("grid", triton_node.kwargs)
+            self.assertIn("xnumel", triton_node.kwargs["kwargs"])
+            self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
+            grid = triton_node.kwargs["grid"][0]
+            xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
+            xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
+            self.assertEqual(grid[0].meta["val"], ((xnumel + xblock - 1) // xblock))
+            self.assertEqual(grid[1], 1)
+            self.assertEqual(grid[2], 1)
+
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):
@@ -374,6 +540,32 @@ class FxirTestCase(InductorTestCase):
         with open(output_filename) as f:
             output_code = f.read()
         self.assertIn("triton_kernel_wrapper_mutation", output_code)
+
+    @parametrize(
+        "const",
+        (1, 1.5),
+    )
+    def test_export_const_placeholder(self, const):
+        """
+        Test that we can compile a graph coming from torch.export with a constant input.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        args = (torch.randn(8, device=self.device), const)
+        mod = TestModule()
+        export_gm = torch.export.export(mod, args).module()
+
+        def compile_module(*inps):
+            torch._inductor.compile(export_gm, inps)
+
+        (inductor_gm,) = self._run_and_capture_graphs(compile_module, args)
+        result = inductor_gm(*args)
+        ref = mod(*args)
+
+        self.assertTrue(same(ref, result))
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_subgraph_raises(self):
@@ -404,10 +596,230 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(5, device=device) for _ in range(2)]
 
         cpp_backend = common.DeviceCodegen(CppScheduling, WrapperFxCodegen, None)
-        with unittest.mock.patch.dict(
-            common.device_codegens, {device.type: cpp_backend}
-        ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
+        with (
+            unittest.mock.patch.dict(
+                common.device_codegens, {device.type: cpp_backend}
+            ),
+            self.assertRaisesRegex(BackendCompilerFailed, "Triton"),
+        ):
             self._compile_and_check(foo, args)
+
+    @parametrize("enable_tuning", (False, True))
+    @parametrize("use_dynamic_shapes", (False, True))
+    def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
+        orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
+        called = False
+
+        def run(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_run(*args, **kwargs)
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+
+        with (
+            config.patch("triton.autotune_at_compile_time", enable_tuning),
+            unittest.mock.patch.object(
+                torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+            ),
+        ):
+            # Compile and check that the tuner was called.
+            self.assertFalse(called)
+            (gm,) = self._compile_and_check(
+                torch.mul, args, compile_kwargs={"dynamic": use_dynamic_shapes}
+            )
+            self.assertEqual(called, enable_tuning)
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        (shape, stride) = empty_strided.args
+        if use_dynamic_shapes:
+            self.assertEqual(type(shape[0]), torch.fx.Node)
+
+    def test_custom_triton(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        args = [torch.randn(32, device=self.device) for _ in range(2)]
+        self._compile_and_check(add, args)
+
+    def test_output_slice_view(self):
+        """
+        Test when the output is a view of the input.
+        The sliced strides create a TensorBox in the output IR.
+        """
+
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        args = [torch.rand([4, 4, 4, 4], device=self.device)]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+
+class AOTFxirTestCase(InductorTestCase):
+    device = GPU_TYPE
+
+    def check(self, model, inp, dynamic_shapes=None, strict=False):
+        if self.device == "xpu":
+            raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
+        with torch.no_grad():
+            ep = torch.export.export(
+                model, inp, dynamic_shapes=dynamic_shapes, strict=strict
+            )
+            gm = torch._inductor.aot_compile(
+                ep.module(), inp, options={"fx_wrapper": True, "compile_threads": 1}
+            )
+            self.assertTrue(torch.allclose(model(*inp), gm(*inp)))
+
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target != triton_kernel_wrapper_mutation
+                ):
+                    self.assertTrue(node.meta.get("val", None) is not None)
+
+    def test_aoti_fx_add(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
+        self.check(M(), inp)
+
+    def test_aoti_fx_const(self):
+        class M(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+                self.a = torch.nn.Parameter(torch.ones(3, device=self.device))
+                self.b = torch.ones(3, device=self.device)
+
+            def forward(self, x, y):
+                return x + y + self.a + self.b + torch.tensor(3, device=self.device)
+
+        inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
+        self.check(M(self.device), inp)
+
+    def test_aoti_fx_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        inp = (torch.ones(3, 3, device=self.device),)
+        self.check(M().to(self.device), inp)
+
+    def test_aoti_fx_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
+        self.check(
+            M().to(device=self.device),
+            inp,
+            dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+        )
+
+    def test_custom_triton_autotune_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                output = torch.zeros_like(x)
+                x_elements = output.size()[0]
+                y_elements = output.size()[1]
+
+                def grid(meta):
+                    return (
+                        triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                        triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                    )
+
+                add_kernel_2d_autotuned[grid](x, y, output, x_elements, y_elements)
+
+                return output
+
+        num_dims = 2
+        dims = [10] * num_dims
+        x = torch.randn(*dims, device=self.device)
+        y = torch.randn(*dims, device=self.device)
+        dim0_x = Dim("dim0_x", min=1, max=10)
+        dim0_y = Dim("dim0_y", min=1, max=10)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
+        self.check(
+            Model().to(device=self.device),
+            (x, y),
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
+        )
+
+    def test_custom_backend(self):
+        """
+        Test registering a custom FX backend.
+        """
+        called = False
+
+        class CustomWrapperCodegen(WrapperFxCodegen):
+            def compile_graph(self, gm):
+                """
+                Simply records whether this override was called.
+                """
+                nonlocal called
+                called = True
+                return super().compile_graph(gm)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        # Register a custom FX backend.
+        custom_backend = common.DeviceCodegen(
+            TritonScheduling,
+            PythonWrapperCodegen,
+            fx_wrapper_codegen=CustomWrapperCodegen,
+        )
+        with unittest.mock.patch.dict(
+            common.device_codegens, {self.device: custom_backend}
+        ):
+            # The backend should not have been called yet.
+            self.assertFalse(called)
+
+            inp = (torch.randn(8, device=self.device),)
+            self.check(M().to(self.device), inp)
+
+        # Now the backend should have been called.
+        self.assertTrue(called)
 
 
 if __name__ == "__main__":

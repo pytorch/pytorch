@@ -95,7 +95,8 @@ TORCH_API void woq_matmul_int4(
     const at::Tensor& mat2_, // quantized weight, [K/8, N]
     const at::Tensor& scale, // [K/group_size, N]
     const at::Tensor& zp, // [k/group_size, N]
-    int64_t group_size);
+    int64_t group_size,
+    bool pri_cache = true);
 
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
@@ -163,13 +164,13 @@ void quantized_matmul(
     std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
-void gpu_float_sdpa(
+void sdpa(
     int batch_size,
     int seq_len_q,
-    int seq_len_k,
-    int num_head,
+    int seq_len_kv,
+    int num_head_q,
     int num_head_kv,
-    int head_dim,
+    int head_dim_qk,
     int head_dim_v,
     const Tensor& query,
     const Tensor& key,
@@ -177,5 +178,28 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    const Tensor& output);
+    const Tensor& attention,
+    bool compute_logsumexp,
+    const Tensor& logsumexp);
+
+void sdpa_backward(
+    int batch_size,
+    int num_head_q,
+    int num_head_kv,
+    int seq_len_q,
+    int seq_len_kv,
+    int head_dim_qk,
+    int head_dim_v,
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    std::optional<at::Tensor> attn_mask,
+    bool is_causal,
+    double scale,
+    Tensor& grad_query,
+    Tensor& grad_key,
+    Tensor& grad_value);
 } // namespace at::native::onednn

@@ -51,7 +51,7 @@ import torch._prims as prims  # noqa: F401
 from torch.utils import _pytree as pytree
 
 
-from packaging import version
+from torch._vendor.packaging import version
 
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     L,
@@ -97,6 +97,7 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     sample_inputs_foreach,
     ForeachFuncInfo,
     gradcheck_wrapper_hermitian_input,
+    gradcheck_wrapper_ctc_loss,
     gradcheck_wrapper_triangular_input,
     gradcheck_wrapper_triangular_input_real_positive_diagonal,
     gradcheck_wrapper_masked_operation,
@@ -776,9 +777,13 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 def error_inputs_arange(op, device, **kwargs):
-    yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzer')
-    yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
-    yield ErrorInput(SampleInput(0, args=(3, -2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzero')
+    yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(3, -2)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(1549556900, args=(1549556828, 1989724)), error_type=RuntimeError,
+                     error_regex='upper bound and lower bound inconsistent with step sign')
     yield ErrorInput(SampleInput(0, args=(float('inf'), 2)), error_type=RuntimeError, error_regex='unsupported range')
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
@@ -1156,8 +1161,8 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
-    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
+    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6 if dtype.is_floating_point else 2)
+    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2 if dtype.is_floating_point else 3)
     tests_list = [
         ((2, 3), (2, 2), (2, 3), False),
         ((3, 3), (3, 3), (3, 3), False),
@@ -1601,7 +1606,7 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         ((S,), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), {'dtype': torch.double}),
+        ((S,), {'dtype': torch.double if device != 'mps:0' else torch.float}),
         ((S,), {'device': 'cpu'}),
         ((S,), {'dtype': torch.double, 'device': 'cpu'}),
     ]
@@ -1786,7 +1791,6 @@ def error_inputs_margin_ranking_loss(op, device, **kwargs):
                      error_regex='margin_ranking_loss : All input tensors should')
 
 def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=False, **kwargs):
-    other_dtype = torch.half if torch.backends.mps.is_available() else torch.double
     # input_shape, output_shape, strides, kwargs
     # lengths of output_shape and strides must be equal
     inputs = [
@@ -1796,9 +1800,9 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=Fals
         ((S,), (2, 3), (7, 8), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), (10,), (S,), {'dtype': other_dtype}),
+        ((S,), (10,), (S,), {'dtype': torch.double if device != 'mps:0' else torch.float}),
         ((S,), (1, 1, 12), (S, L, M), {'device': 'cpu'}),
-        ((S,), (2, 2, 2), (L, M, S), {'dtype': other_dtype, 'device': 'cpu'}),
+        ((S,), (2, 2, 2), (L, M, S), {'dtype': torch.double, 'device': 'cpu'}),
     ]
     if torch.cuda.is_available():
         inputs.append(((S,), (7, 2), (3, 4), {'device': 'cuda'}))
@@ -1919,6 +1923,7 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
 
+    double_dtype = torch.double if device != "mps:0" else torch.float
     inputs = [
         ((), get_val(dtype), {}),
         ((S, S), get_val(dtype), {}),
@@ -1926,12 +1931,15 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
         ((S,), get_val(dtype), {'dtype': dtype, 'device': device}),
         # Hard-code some dtypes/devices. We want to test cases where the
         # (dtype, device) is different from the input's (dtype, device)
-        ((S,), get_val(torch.double), {'dtype': torch.double}),
+        ((S,), get_val(double_dtype), {'dtype': double_dtype}),
         ((S,), get_val(dtype), {'device': 'cpu'}),
-        ((S,), get_val(torch.double), {'dtype': torch.double, 'device': 'cpu'}),
+        ((S,), get_val(double_dtype), {'dtype': double_dtype, 'device': 'cpu'}),
     ]
     if torch.cuda.is_available():
         inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
+
+    if torch.mps.is_available() and dtype not in [torch.float64, torch.complex128, torch.uint32, torch.uint16]:
+        inputs.append(((S,), get_val(dtype), {'device': 'mps'}))
 
     if not dtype.is_signed:
         # For unsigned dtypes, negative values are converted.
@@ -2448,7 +2456,7 @@ def error_inputs_cat(op_info, device, **kwargs):
 
     # error inputs for empty tensors
     yield ErrorInput(SampleInput([], kwargs={'dim': 1}),
-                     error_regex='non-empty list of Tensors')
+                     error_regex='non-empty list of Tensors', error_type=ValueError)
 
     # error inputs for different sizes
     yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
@@ -2501,7 +2509,7 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex='zero-dimensional.*cannot be concatenated')
 
     # error inputs for different dtype of out tensors
-    d = make_tensor((2, 3), device=device, dtype=torch.double)
+    d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
                      error_regex='invalid combination of arguments')
@@ -3266,17 +3274,17 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     test_args = [
         ([1, 2],),
         (slice(0, 3),),
-        ([slice(0, 3), 1],),
-        ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],),
-        ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],),
-        ([slice(None), slice(None), [0, 3]],),
-        ([slice(None), [0, 3], slice(None)],),
-        ([[0, 3], slice(None), slice(None)],),
-        ([[0, 3], [1, 2], slice(None)],),
-        ([[0, 3], ],),
-        ([[0, 3], slice(None)],),
-        ([[0, 3], Ellipsis],),
-        ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],),
+        ((slice(0, 3), 1),),
+        (([0, 2, 3], [1, 3, 3], [0, 0, 2]),),
+        (([0, 0, 3], [1, 1, 3], [0, 0, 2]),),
+        ((slice(None), slice(None), [0, 3]),),
+        ((slice(None), [0, 3], slice(None)),),
+        (([0, 3], slice(None), slice(None)),),
+        (([0, 3], [1, 2], slice(None)),),
+        (([0, 3], ),),
+        (([0, 3], slice(None)),),
+        (([0, 3], Ellipsis),),
+        (([0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])),),
         (index_variable(2, S, device=device),),
         (mask_not_all_zeros((S,)),),
     ]
@@ -3284,7 +3292,7 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     for args in test_args:
         yield SampleInput(make_arg((S, S, S)), args=args)
 
-    yield SampleInput(make_arg((S, S, S, S)), args=([slice(None), [0, 1], slice(None), [0, 1]],))
+    yield SampleInput(make_arg((S, S, S, S)), args=((slice(None), [0, 1], slice(None), [0, 1]),))
 
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -4753,6 +4761,13 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
+    def uneven_shape(size, rank, with_batch_channel=True):
+        rc = list(shape(size, rank, with_batch_channel))
+        rc[-1] += 1
+        if rank > 2:
+            rc[-2] -= 1
+        return tuple(rc)
+
     if mode in ('bilinear', 'bicubic') and dtype == torch.uint8:
         make_arg = partial(
             make_tensor,
@@ -4791,6 +4806,21 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if rank > 1 and dtype.is_floating_point:
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(S, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
+                yield SampleInput(
+                    make_arg(uneven_shape(D, rank)),
+                    uneven_shape(L, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             for recompute_scale_factor in [False, True]:
                 for scale_factor in [1.7, 0.6]:
                     yield SampleInput(
@@ -5974,6 +6004,7 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_input((2, 3, 4)), repeats=2)
     yield SampleInput(make_input((2, 3, 4)), repeats=2, dim=1)
     yield SampleInput(make_input((2, 3, 4)), repeats=torch.arange(3, device=device), dim=1)
+    yield SampleInput(make_input((4, 1)), repeats=torch.arange(4, device=device), dim=0, output_size=6)
 
 
 def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
@@ -6169,6 +6200,11 @@ def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_corrcoef(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(t) for t in _generate_correlation_inputs(device, dtype, requires_grad))
+
+def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+    if dtype.is_floating_point:
+        yield SampleInput(make_tensor(5, dtype=dtype, device=device, requires_grad=requires_grad), -3.14)
 
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
@@ -6490,6 +6526,8 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+    other_dtype = torch.float16 if device.startswith("mps") else torch.float64
+    other_dtype_name = "Half" if device.startswith("mps") else "Double"
 
     if is_ref:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
@@ -6497,16 +6535,16 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
         error_out = "Expected out tensor to have dtype torch.complex128 but got torch.complex64 instead"
     else:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got Float and Int"
-        error_dtype = "Expected object of scalar type Float but got scalar type Double for second argument"
-        error_out = "Expected object of scalar type ComplexDouble but got scalar type ComplexFloat for argument 'out'"
+        error_dtype = f"Expected object of scalar type Float but got scalar type {other_dtype_name} for second argument"
+        error_out = f"Expected object of scalar type Complex{other_dtype_name} but got scalar type ComplexFloat for argument 'out'"
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
                      error_type=RuntimeError, error_regex=error_float)
 
-    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.float64)),
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=other_dtype)),
                      error_type=RuntimeError, error_regex=error_dtype)
 
-    yield ErrorInput(SampleInput(make_arg(M, S, dtype=torch.float64), make_arg(M, S, dtype=torch.float64),
+    yield ErrorInput(SampleInput(make_arg(M, S, dtype=other_dtype), make_arg(M, S, dtype=other_dtype),
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
@@ -7096,12 +7134,13 @@ def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
     cases = (
         ((2, 2, 2), (2, 2, 2), (2)),
         ((2, 2, 1), (2, 1, 2), ([0, 1], [2, 0])),
+        ((1, 1, 1), (2, 1, 2), ([0, 1], [2, 0])),
     )
     for first_shape, second_shape, dims in cases:
         yield SampleInput(make_tensor(first_shape, dtype=dtype, device=device,
-                                      requires_grad=requires_grad),
+                                      requires_grad=requires_grad, low=-1, high=+2),
                           make_tensor(second_shape, dtype=dtype, device=device,
-                                      requires_grad=requires_grad),
+                                      requires_grad=requires_grad, low=-1, high=+2),
                           dims=dims)
 
 def sample_inputs_kron(op_info, device, dtype, requires_grad, **kwargs):
@@ -7755,7 +7794,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     def make_bool_mask(shape):
-        # Make sure atleast one element is nonzero,
+        # Make sure at least one element is nonzero,
         # except for empty tensor
         mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
 
@@ -8320,6 +8359,36 @@ def sample_inputs_grid_sampler_2d(op_info, device, dtype, requires_grad, **kwarg
             align_corners,
         )
 
+def sample_inputs_grid_sampler_3d(op_info, device, dtype, requires_grad, **kwargs):
+    _make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                          low=-1, high=1)
+    # Test both out-of-range and in-range grid values
+    _make_grid = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                         low=-4, high=4)
+
+    modes = (0,)
+    padding_modes = (0, 1, 2)
+    align_cornerss = (False, True)
+    shape_pairs = [
+        # [input_shape, grid_shape]
+        [(1, 1, 2, 2, 2), (1, 1, 1, 1, 3)],
+        [(2, 3, S, L, L), (2, M + 2, M + 1, M, 3)],
+        [(L, L + 1, L + 2, L + 3, L + 4), (L, M + 2, M + 1, M, 3)],
+        [(M, M + 1, M + 2, M + 3, M + 4), (M, L + 3, L + 2, L + 1, 3)],
+        [(L, M + 1, M + 2, M + 3, M + 4), (L, L + 3, L + 2, L + 1, 3)],
+    ]
+
+    params_prod = itertools.product(modes, padding_modes, align_cornerss, shape_pairs)
+
+    for mode, padding_mode, align_corners, (input_shape, grid_shape) in params_prod:
+        yield SampleInput(
+            _make_input(input_shape),
+            _make_grid(grid_shape),
+            mode,
+            padding_mode,
+            align_corners,
+        )
+
 def sample_inputs_cosine_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8368,7 +8437,9 @@ def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
             input_lengths = input_lengths.tolist()
             target_lengths = target_lengths.tolist()
 
-        yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,), kwargs=dict(reduction=r, zero_infinity=z))
+        yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,),
+                          kwargs=dict(reduction=r, zero_infinity=z))
+
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
@@ -11557,6 +11628,26 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
+    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
+
+    dtype = tensor.dtype
+    if dtype.kind == 'f':
+        tensor = tensor.astype(np.float64).view(np.uint64)
+    else:
+        tensor = tensor.astype(np.uint64)
+
+
+    if dim == ():
+        result = np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
+    else:
+        if isinstance(dim, list):
+            dim = tuple(dim)
+        result = np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
+
+    return result
+
+
 def loss_reference_reduction_wrapper(fn):
     def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
         if size_average is not None or reduce is not None:
@@ -11789,8 +11880,11 @@ op_db: list[OpInfo] = [
                        safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-                    ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-                    else np.add(input, np.multiply(alpha, other)),
+                    ref=lambda input, other, *, alpha=1: (
+                        np.add(input, other)
+                        if alpha == 1
+                        else np.add(input, np.multiply(alpha, other))
+                    ),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                      torch.float16, torch.chalf),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -12268,6 +12362,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               # Higher differences starting with Zen3 or Alder Lake
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=4e-06)}),
+                   'TestDecomp', 'test_quick', device_type='cpu'),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
@@ -12926,6 +13024,7 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
+                    sample_inputs_func=sample_inputs_copysign,
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     promotes_int_to_float=True,
@@ -13681,7 +13780,7 @@ op_db: list[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    skips=(
                        # skips below tests as torch.frexp returns tuple-like (mantissa, exponent) as outputs,
-                       # while theses tests currently requires output to a single tensor.
+                       # while these tests currently requires output to a single tensor.
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_batch_vs_slicing'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_contig_vs_every_other'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),
@@ -14123,6 +14222,9 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            supports_out=False,
            skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -15567,6 +15669,9 @@ op_db: list[OpInfo] = [
                # NOTE: this failure may not reproduce consistently on different systems
                # false INTERNAL ASSERT FAILED at "...torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185
                DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -15600,9 +15705,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
-               # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out' is not currently implemented
-               # for the MPS device.
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -18633,7 +18735,12 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
-           error_inputs_func=error_inputs_scatter_and_scatter_add),
+           error_inputs_func=error_inputs_scatter_and_scatter_add,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     UnaryUfuncInfo(
         'bfloat16',
         op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
@@ -19355,7 +19462,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # The inplace variant (Tensor.normal_) is different from torch.normal
-               # inplace varaint Tensor.normal_ is decomposed using randn_like()
+               # inplace variant Tensor.normal_ is decomposed using randn_like()
                DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'))),
     OpInfo('normal',
            # This has its own variant b/c OpInfos assume the first arg is a Tensor but it is not here
@@ -19422,7 +19529,11 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           ),
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
@@ -19433,8 +19544,7 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/77046
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-           ),
-           ),
+           )),
     OpInfo('_chunk_cat',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_chunk_cat,
@@ -19577,15 +19687,7 @@ op_db: list[OpInfo] = [
            supports_gradgrad=True,
            supports_out=True,
            check_batched_grad=False,
-           skips=(
-               # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
-               # but it returned something else instead.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive_out'
-               ),
-           )),
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -20014,13 +20116,23 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
-           sample_inputs_func=sample_inputs_tril_triu),
+           sample_inputs_func=sample_inputs_tril_triu,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('triu',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
-           sample_inputs_func=sample_inputs_tril_triu),
+           sample_inputs_func=sample_inputs_tril_triu,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('triu_indices',
            dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
            sample_inputs_func=sample_inputs_trilu_indices,
@@ -20117,15 +20229,14 @@ op_db: list[OpInfo] = [
            ),
     OpInfo('logcumsumexp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
                # RuntimeError: "max_values_cpu" not implemented for 'ComplexDouble'
-               # Falling back to non-numerically stablized exp, causing nan in the results.
+               # Falling back to non-numerically stabilized exp, causing nan in the results.
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD', dtypes=[torch.complex128]),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad', dtypes=[torch.complex128]),
                DecorateInfo(
@@ -20427,8 +20538,11 @@ op_db: list[OpInfo] = [
         'jiterator_binary',
         op=torch.cuda.jiterator._create_jit_fn(
             "template <typename T> T binary(T x, T y, T alpha) { return x + alpha * y; }", alpha=1),
-        ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-            else np.add(input, np.multiply(alpha, other)),
+        ref=lambda input, other, *, alpha=1: (
+            np.add(input, other)
+            if alpha == 1
+            else np.add(input, np.multiply(alpha, other))
+        ),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-3.14),
         supports_out=False,
@@ -20955,6 +21069,22 @@ op_db: list[OpInfo] = [
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
         ),),
+    # TODO: Remove grid_sampler_3d tests once `nn.functional.grid_sample` has
+    # MPS support for all cases.
+    OpInfo(
+        "grid_sampler_3d",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sampler_3d,
+        supports_gradgrad=False,
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            # NOTE: Only run on MPS
+            DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='cuda'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='xpu'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='meta'),
+        ),),
     OpInfo(
         "argwhere",
         ref=np.argwhere,
@@ -21311,20 +21441,34 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
     ),
+    ReductionOpInfo(
+        'hash_tensor',
+        result_dtype=torch.uint64,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        ref=reference_hash_tensor,
+        skips=(
+            # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # aten::hash_tensor hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+            # Sharding strategy NYI
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+        )
+    ),
     OpInfo(
         "nn.functional.ctc_loss",
         dtypes=floating_types(),
         supports_out=False,
         sample_inputs_func=sample_inputs_ctc_loss,
+        # gradcheck_wrapper, see https://github.com/pytorch/pytorch/issues/52241
+        gradcheck_wrapper=gradcheck_wrapper_ctc_loss,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/67462
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestBwdGradients",
-                "test_fn_grad",
-                dtypes=(torch.float64,),
-            ),
             # RuntimeError: derivative for aten::_ctc_loss_backward is not implemented
             DecorateInfo(
                 unittest.expectedFailure,
@@ -21601,6 +21745,11 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
+        skips=(
+            # Compiler issue on ROCm. Regression started in ROCm 6.4.
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+        ),
     ),
     OpInfo(
         'scatter_reduce',

@@ -29,7 +29,7 @@ DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 # So first decompose CSEVars -> tuple before calling this
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_promoted_dtype(
     *args: Sequence[tuple[torch.dtype, bool]],
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
@@ -372,6 +372,10 @@ class DtypePropagationOpsHandler:
         raise AssertionError(
             f"{type(self).__name__}: ops.placeholder should not appear here"
         )
+
+    @staticmethod
+    def device_assert_async(cond, msg: str) -> torch.dtype:
+        return torch.bool
 
 
 if TYPE_CHECKING:

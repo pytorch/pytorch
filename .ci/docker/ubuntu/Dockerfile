@@ -28,7 +28,6 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
@@ -67,6 +66,7 @@ ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 # (optional) Install UCC
 ARG UCX_COMMIT
 ARG UCC_COMMIT
+ARG CUDA_VERSION
 ENV UCX_COMMIT $UCX_COMMIT
 ENV UCC_COMMIT $UCC_COMMIT
 ENV UCX_HOME /usr
@@ -81,12 +81,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION
@@ -103,10 +97,11 @@ RUN rm install_openssl.sh
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
 COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
 
 ARG TRITON
 ARG TRITON_CPU
@@ -154,6 +149,12 @@ RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
 
+ARG OPENBLAS
+COPY ./common/install_openblas.sh install_openblas.sh
+RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
+RUN rm install_openblas.sh
+ENV INSTALLED_OPENBLAS ${OPENBLAS}
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
@@ -181,7 +182,6 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
 
 # AWS specific CUDA build guidance
-ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 ENV CUDA_PATH /usr/local/cuda
 
