@@ -11,7 +11,7 @@ from typing import Any
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
-from cli.lib.common.path_helper import copy, remove_dir
+from cli.lib.common.path_helper import copy, get_path, remove_dir
 from cli.lib.common.pip_helper import (
     pip_install_first_match,
     pip_install_packages,
@@ -42,6 +42,10 @@ class VllmTestParameters:
     )
 
     torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
+
+    cleaning_script: Path = env_path_field(
+        "cleaning_script", ".github/ci_configs/vllm/use_existing_torch.py"
+    )
 
     def __post_init__(self):
         if not self.torch_whls_path.exists():
@@ -124,6 +128,11 @@ class VllmTestRunner(BaseRunner):
         finally:
             # double check the torches are not overridden by other packages
             check_versions()
+
+    def cp_torch_cleaning_script(self, params: VllmTestParameters):
+        script = get_path(params.cleaning_script, resolve=True)
+        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.py")
+        copy(script, vllm_script)
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
