@@ -2709,11 +2709,22 @@ class BenchmarkRunner:
                     )
 
             if os.getenv("CALL_TORCH_COMPILE_DIRECTLY", "0") == "1":
+                if "Timm" in str(type(self)):
 
-                @torch.compile
-                def f(x):
-                    out = model(**x)[0]
-                    out.sum().backward()
+                    @torch.compile
+                    def f(x):
+                        out = model(*x)  # timm
+                        if isinstance(out, tuple):
+                            out = out[0]
+                        out.sum().backward()
+                elif "Huggingface" in str(type(self)):
+
+                    @torch.compile
+                    def f(x):
+                        out = model(**x)[0]
+                        out.sum().backward()
+                else:
+                    raise RuntimeError(f"Unrecognized type: {type(self)}")
 
                 from triton.testing import do_bench
 
