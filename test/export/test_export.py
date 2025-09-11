@@ -43,13 +43,7 @@ from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import (
-    default_decompositions,
-    Dim,
-    export,
-    export_for_training,
-    unflatten,
-)
+from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -66,7 +60,10 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    xfailIfDistributedNotSupported,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -1063,7 +1060,7 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        gm: torch.fx.GraphModule = torch.export.export_for_training(
+        gm: torch.fx.GraphModule = torch.export.export(
             m, args=example_args, dynamic_shapes=dynamic_shapes
         ).module()
 
@@ -2451,7 +2448,7 @@ def forward(self, x, y):
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
 
-        ep_training = torch.export.export_for_training(m, (ref_x,))
+        ep_training = torch.export.export(m, (ref_x,))
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2514,7 +2511,7 @@ graph():
         ref_x = torch.randn(2, 2)
         ref_out = m(ref_x)
 
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2646,7 +2643,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertTrue(torch.allclose(ep_training.module()(ref_x), ref_out))
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
@@ -2701,7 +2698,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2741,7 +2738,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2779,7 +2776,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2818,7 +2815,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -2858,7 +2855,7 @@ graph():
         m = Foo()
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
-        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        ep_training = torch.export.export(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -3978,7 +3975,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 x_linear = self.linear(x_conv)
                 return x_linear.cos() + y_conv_1d.sum()
 
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
 
@@ -4246,9 +4243,7 @@ def forward(self, x):
                 return self.linear(x)
 
         eager_model = Foo()
-        ep_for_training = torch.export.export_for_training(
-            eager_model, (torch.ones(2, 2),)
-        )
+        ep_for_training = torch.export.export(eager_model, (torch.ones(2, 2),))
         self.assertExpectedInline(
             str(ep_for_training.graph_module.code).strip(),
             """\
@@ -4286,7 +4281,7 @@ def forward(self, x):
 
         eager_model_for_export = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export.export_for_training(
+        ep_for_training = torch.export.export(
             eager_model_for_export, (torch.ones(4, 4),)
         )
         self.assertExpectedInline(
@@ -4332,7 +4327,7 @@ def forward(self, x):
         eager_model_for_export_training = Foo()
         eager_model_for_export_inference = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export.export_for_training(
+        ep_for_training = torch.export.export(
             eager_model_for_export_training,
             (torch.ones(4, 4),),
             dynamic_shapes=({0: Dim("x")},),
@@ -4386,7 +4381,7 @@ def forward(self, x):
                 return x + y + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export.export_for_training(
+        ep_for_training = torch.export.export(
             eager_model,
             ([torch.ones(4, 4), torch.ones(4, 4)],),
         )
@@ -4592,7 +4587,7 @@ def forward(self, x):
                 return self.linear(x) + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export.export_for_training(
+        ep_for_training = torch.export.export(
             eager_model,
             (torch.ones(2, 2),),
         )
@@ -7525,7 +7520,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         inp = torch.randn(4, 4)
 
-        ep = export_for_training(
+        ep = torch.export.export(
             Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
         )
         unflat = unflatten(ep).bar
@@ -7831,7 +7826,7 @@ graph():
 
         decomp_table = {**default_decompositions(), **decomposition_table}
 
-        ep = export_for_training(M(), (torch.randn(2, 2),)).run_decompositions(
+        ep = torch.export.export(M(), (torch.randn(2, 2),)).run_decompositions(
             decomp_table
         )
 
@@ -7860,7 +7855,7 @@ def forward(self, c_lifted_tensor_0, x):
         mod.eval()
         inp = torch.randn(1, 1, 3, 3)
 
-        gm = torch.export.export_for_training(mod, (inp,)).module()
+        gm = torch.export.export(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -7880,7 +7875,7 @@ def forward(self, x):
         )
 
         mod.train()
-        gm_train = torch.export.export_for_training(mod, (inp,)).module()
+        gm_train = torch.export.export(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm_train.code).strip(),
             """\
@@ -8445,7 +8440,7 @@ def forward(self, x):
         ref_x = torch.randn(2, 2)
         ref_out = f(ref_x, mod)
 
-        ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
+        ep = torch.export.export(f, (torch.randn(2, 2), mod), strict=False)
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
     def test_unbacked_noncontig_lin(self):
@@ -9640,7 +9635,7 @@ graph():
                 return m(x) * x
 
         inps = (torch.randn(3, 3),)
-        ep = export_for_training(M2(), inps).run_decompositions({})
+        ep = torch.export.export(M2(), inps).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -9677,7 +9672,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         # Strict export segfaults (Issue #128109)
-        ep = export_for_training(M2(), inps, strict=False).run_decompositions({})
+        ep = torch.export.export(M2(), inps, strict=False).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -12008,7 +12003,7 @@ graph():
 
         if is_training_ir_test(self._testMethodName):
             test(
-                torch.export.export_for_training(
+                torch.export.export(
                     M(),
                     inp,
                     strict=not is_non_strict_test(self._testMethodName),
@@ -12129,7 +12124,7 @@ graph():
         test(export(M(), inp))
 
         strict = not is_non_strict_test(self._testMethodName)
-        ept = torch.export.export_for_training(
+        ept = torch.export.export(
             M(),
             inp,
             strict=strict,
@@ -12204,7 +12199,7 @@ graph():
 
         x = torch.zeros((4, 4, 10))
 
-        ep_training = torch.export.export_for_training(model, (x,), strict=False)
+        ep_training = torch.export.export(model, (x,), strict=False)
         state_dict_before = ep_training.state_dict
 
         ep = export(model, (x,), strict=False).run_decompositions()
@@ -12248,7 +12243,7 @@ def forward(self, c_params, x):
 
         x = torch.zeros((4, 4, 10))
 
-        ep_training = torch.export.export_for_training(model, (x,), strict=False)
+        ep_training = torch.export.export(model, (x,), strict=False)
         state_dict_before = ep_training.state_dict
 
         ep = export(model, (x,), strict=False).run_decompositions()
@@ -12767,7 +12762,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         model = Model()
         with torch.no_grad():
-            exported_program = torch.export.export_for_training(
+            exported_program = torch.export.export(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
@@ -12863,7 +12858,7 @@ def forward(self, x, b_t, y):
         # no grad
         model = Model()
         with torch.no_grad():
-            ep_nograd = torch.export.export_for_training(
+            ep_nograd = torch.export.export(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
@@ -12883,7 +12878,7 @@ def forward(self, x, b_t, y):
 
         # enable grad
         model = Model()
-        ep_grad = torch.export.export_for_training(
+        ep_grad = torch.export.export(
             model,
             (torch.tensor(10), torch.tensor(12)),
             {},
@@ -13006,7 +13001,7 @@ def forward(self, x, b_t, y):
                 "torch.ops.higher_order.wrap_with_set_grad_enabled",
                 ep.graph_module.code,
             )
-        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
         self.assertIn(
             "set_grad_enabled",
             gm.code,
@@ -13035,7 +13030,7 @@ def forward(self, x, b_t, y):
             )
         # _export_for_traininig is using pre_dispatch=False
         # Therefore the autocast calls are not replaced with a hop.
-        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
         self.assertIn(
             "autocast",
             gm.code,
@@ -13282,7 +13277,7 @@ def forward(self, x, b_t, y):
 
         inps = (torch.ones(5),)
 
-        ep = export_for_training(M(), inps).run_decompositions({})
+        ep = torch.export.export(M(), inps).run_decompositions({})
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -13603,7 +13598,7 @@ def forward(self, x):
                 return y + y_sum + unbacked_shape.sum()
 
         inps = (torch.tensor(4), torch.randn(5, 5))
-        ep_pre = torch.export.export_for_training(Foo(), inps, strict=False)
+        ep_pre = torch.export.export(Foo(), inps, strict=False)
         self.assertExpectedInline(
             str(ep_pre.graph_module.submod_1.code).strip(),
             """\
@@ -14296,7 +14291,7 @@ graph():
                 return val.b.a
 
         mod = Foo()
-        ep = export_for_training(mod, (torch.randn(4, 4),), strict=False)
+        ep = torch.export.export(mod, (torch.randn(4, 4),), strict=False)
         self.assertExpectedInline(
             str(ep.graph).strip(),
             """\
@@ -15317,7 +15312,7 @@ def forward(self, x):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        ep_for_training = torch.export.export_for_training(M(), (x, y), strict=strict)
+        ep_for_training = torch.export.export(M(), (x, y), strict=strict)
         self.assertExpectedInline(
             normalize_gm(
                 ep_for_training.graph_module.print_readable(print_output=False)
@@ -15665,6 +15660,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15682,6 +15678,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15697,6 +15694,7 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15710,6 +15708,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15727,6 +15726,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
