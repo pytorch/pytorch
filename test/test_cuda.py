@@ -7066,10 +7066,10 @@ class TestCompileKernel(TestCase):
         #include <cuda_fp16.h>
 
         extern "C"
-        __global__ void half_precision_kernel(__half* output, float input_value, int n) {
+        __global__ void half_precision_kernel(__half* output, double input_value, int n) {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx < n) {
-                output[idx] = __float2half(input_value);
+                output[idx] = __float2half((float)input_value);
             }
         }
         """
