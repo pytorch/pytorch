@@ -29,6 +29,8 @@ jobs:
         { include: [
           { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.h100, extra_flags: '--use-compile', op_benchmark_tests: 'matmul mm add bmm' },
           { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.h100, extra_flags: '', op_benchmark_tests: 'matmul mm add bmm' }
+          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.a100, extra_flags: '--use-compile', op_benchmark_tests: 'matmul mm add bmm' },
+          { config: operator_microbenchmark, shard: 1, num_shards: 1, runner: linux.aws.a100, extra_flags: '', op_benchmark_tests: 'matmul mm add bmm' }
         ]}
     secrets: inherit
 
