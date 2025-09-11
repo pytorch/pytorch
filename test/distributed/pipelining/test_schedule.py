@@ -202,7 +202,15 @@ class ScheduleTest(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    def test_zero_bubble_schedule_errors_with_compile(self):
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
         """
         Test that zero bubble schedules raise an error when used with torch.compile.
         """
@@ -221,10 +229,11 @@ class ScheduleTest(TestCase):
             n_stages,
             device,
         )
-        with self.assertRaises(RuntimeError):
-            ScheduleInterleavedZeroBubble([stage], 2)
-
-        torch.distributed.destroy_process_group()
+        try:
+            with self.assertRaises(RuntimeError):
+                ScheduleClass([stage], 2)
+        finally:
+            torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ScheduleTest)
