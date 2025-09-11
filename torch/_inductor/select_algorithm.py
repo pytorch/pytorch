@@ -2421,16 +2421,19 @@ class AlgorithmSelectorCache(PersistentCache):
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
-        if len(choices) == 0:
+        def create_no_valid_choices() -> NoValidChoicesError:
             backend_config = (
                 "max_autotune_gemm_backends"
                 if name != "convolution"
                 else "max_autotune_conv_backends"
             )
-            raise NoValidChoicesError(
+            return NoValidChoicesError(
                 f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
+
+        if len(choices) == 0:
+            raise create_no_valid_choices()
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
@@ -2487,6 +2490,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+            # Prune anything that failed to compile
+            choices = [c for c in choices if not c.failed]
+            if len(choices) == 0:
+                raise create_no_valid_choices()
 
             candidates = self.prescreen_choices(
                 choices, name, inputs_key, self.prescreening_cache
@@ -2823,6 +2830,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                     else:
                         log.exception(  # noqa: G202
                             "Exception %s for benchmark choice %s",
@@ -2830,6 +2838,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
