@@ -1,6 +1,3 @@
-# mypy: ignore-errors
-# flake8: noqa
-# ruff: noqa: PGH004, B011
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -36,9 +33,9 @@
 from abc import ABC
 
 
-class Integer(ABC):
+class Integer(ABC):  # noqa: B024  # Uses __subclasshook__ instead of abstract methods
     @classmethod
-    def __subclasshook__(cls, c):
+    def __subclasshook__(cls, c: type) -> bool:
         if c in [bool, float]:
             return False
 

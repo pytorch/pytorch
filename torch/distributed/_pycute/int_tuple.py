@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 #################################################################################################
 #
 # Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -37,24 +36,25 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import Any, Optional, Union
+from typing import Optional, Union
+from typing_extensions import TypeAlias, TypeIs
 
 from .typing import Integer
 
 
 # Type aliases for better readability
-IntTuple = Union[int, tuple[Any, ...]]
+IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
 
 
-def is_int(x: Any) -> bool:
+def is_int(x: object) -> TypeIs[int]:
     return isinstance(x, Integer)
 
 
-def is_tuple(x: Any) -> bool:
+def is_tuple(x: object) -> TypeIs[tuple]:
     return isinstance(x, tuple)
 
 
-def flatten(t: IntTuple) -> tuple[Any, ...]:
+def flatten(t: IntTuple) -> tuple[int, ...]:
     if is_tuple(t):
         if len(t) == 0:
             return ()
@@ -77,8 +77,8 @@ def product(a: IntTuple) -> int:
 
 def inner_product(a: IntTuple, b: IntTuple) -> int:
     if is_tuple(a):  # tuple tuple
-        assert len(a) == len(b)
-        return sum(inner_product(x, y) for x, y in zip(a, b))
+        assert len(a) == len(b)  # type: ignore[arg-type]
+        return sum(inner_product(x, y) for x, y in zip(a, b))  # type: ignore[arg-type,misc]
     else:  # "int" "int"
         assert not is_tuple(b)
         return a * b
@@ -126,18 +126,24 @@ def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
             return (a + b - 1) // b
 
 
-# Exclusive prefix product with output congruent to input a
+# Exclusive prefix product with output congruent to input a (lexicographic)
 def prefix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
     if is_tuple(a):
         if is_tuple(init):  # tuple tuple
             assert len(a) == len(init)
             return tuple(prefix_product(x, i) for x, i in zip(a, init))
         else:  # tuple "int"
-            # r = [prefix_product(a[0],init)] + [prefix_product(a[i],init := init * product(a[i-1])) for i in range(1,len(a))]
-            r = []
-            for v in a:
-                r.append(prefix_product(v, init))
-                init = init * product(v)
+            # Process from right to left for lexicographic ordering
+            r: list[IntTuple] = []
+            current_init = init
+
+            # Calculate products from right to left, appending to list
+            for i in range(len(a) - 1, -1, -1):
+                r.append(prefix_product(a[i], current_init))
+                current_init = current_init * product(a[i])
+
+            # Reverse to get correct lexicographic order
+            r.reverse()
             return tuple(r)
     else:
         if is_tuple(init):  # "int" tuple
@@ -154,16 +160,23 @@ def idx2crd(
 
     if is_tuple(idx):
         if is_tuple(shape):  # tuple tuple tuple
-            assert len(idx) == len(shape) and len(idx) == len(stride)
-            return tuple(idx2crd(i, s, d) for i, s, d in zip(idx, shape, stride))
+            assert len(idx) == len(shape) and len(stride) == len(shape)  # type: ignore[arg-type]
+            return tuple(idx2crd(i, s, d) for i, s, d in zip(idx, shape, stride))  # type: ignore[arg-type]
         else:  # tuple "int" "int"
             raise AssertionError("Invalid combination: tuple with int stride")
     else:
         if is_tuple(shape):  # "int" tuple tuple
-            assert len(shape) == len(stride)
-            return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))
+            assert len(shape) == len(stride)  # type: ignore[arg-type]
+            # Process from left to right for lexicographic ordering (opposite of crd2idx)
+            result = []
+            remaining_idx = idx
+            for s, d in zip(shape, stride):  # type: ignore[arg-type]
+                coord = idx2crd(remaining_idx // d, s, 1)  # type: ignore[operator]
+                result.append(coord)
+                remaining_idx = remaining_idx % d  # type: ignore[operator]
+            return tuple(result)
         else:  # "int" "int" "int"
-            return (idx // stride) % shape
+            return (idx // stride) % shape  # type: ignore[operator,return-value]  # all are ints after type checks
 
 
 def crd2idx(
@@ -174,8 +187,8 @@ def crd2idx(
 
     if is_tuple(crd):
         if is_tuple(shape):  # tuple tuple tuple
-            assert len(crd) == len(shape) and len(crd) == len(stride)
-            return sum(crd2idx(c, s, d) for c, s, d in zip(crd, shape, stride))
+            assert len(crd) == len(shape) and len(stride) == len(shape)  # type: ignore[arg-type]
+            return sum(crd2idx(c, s, d) for c, s, d in zip(crd, shape, stride))  # type: ignore[arg-type,misc]
         else:  # tuple "int" "int"
             raise AssertionError(f"Invalid combination: crd={crd}, shape={shape}")
     else:
@@ -183,14 +196,15 @@ def crd2idx(
             crd = 0
 
         if is_tuple(shape):  # "int" tuple tuple
-            assert len(shape) == len(stride)
+            assert len(shape) == len(stride)  # type: ignore[arg-type]
             result = 0
-            for i in range(len(shape) - 1):
-                result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
-                crd = crd // product(shape[i])
-            return result + crd2idx(crd, shape[-1], stride[-1])
+            # Process from right to left for lexicographic ordering
+            for i in range(len(shape) - 1, 0, -1):
+                result += crd2idx(crd % product(shape[i]), shape[i], stride[i])  # type: ignore[operator,index,arg-type]
+                crd = crd // product(shape[i])  # type: ignore[operator,index]
+            return result + crd2idx(crd, shape[0], stride[0])  # type: ignore[index,arg-type]
         else:  # "int" "int" "int"
-            return crd * stride
+            return crd * stride  # type: ignore[operator,return-value]  # all are ints after type checks
 
 
 # Transform crd into the dst_shape's iteration space
@@ -221,7 +235,7 @@ def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple,
             # match C++ behavior of `filter_tuple` using `tuple_cat(...)`
             return tuple(
                 chain(
-                    *filter(
+                    *filter(  # type: ignore[arg-type]  # filter returns Iterator which is compatible
                         lambda x: x != (),
                         [slice_(c, s) for c, s in zip(crd, trg)],
                     )

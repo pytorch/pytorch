@@ -99,39 +99,10 @@ class _Layout(Layout):
         - outer dimension: stride=4, mismatch (≠ 2)
         → cannot merge; result stays (3,2):(4,1)
         """
-        # Option 1: leverage pycute's coalesce
-        layout = coalesce(
-            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride)))
-        )
-        return _Layout(
-            tuple(
-                reversed(
-                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
-                )
-            ),
-            tuple(
-                reversed(
-                    (layout.stride,)
-                    if isinstance(layout.stride, int)
-                    else layout.stride
-                )
-            ),
-        )  # type: ignore[arg-type]
-        # Option 2: have our own implementation
-        sizes: list[int] = []
-        strides: list[int] = []
-        for size, stride in self.sizes_and_strides:
-            if size == 1:
-                pass
-            elif strides and strides[-1] == size * stride:
-                strides.pop()
-                prev_size = sizes.pop()
-                sizes.append(size * prev_size)
-                strides.append(stride)
-            else:
-                sizes.append(size)
-                strides.append(stride)
-        return _Layout(tuple(sizes), tuple(strides))
+        layout = coalesce(self)
+        shape = layout.shape if is_tuple(layout.shape) else (layout.shape,)  # type: ignore[union-attr]
+        stride = layout.stride if is_tuple(layout.stride) else (layout.stride,)  # type: ignore[union-attr]
+        return _Layout(shape, stride)  # type: ignore[arg-type]
 
     def composition(self, layout: "_Layout") -> "_Layout":
         """
@@ -153,83 +124,10 @@ class _Layout(Layout):
         Returns:
           A list of composed layouts.
         """
-        # Option 1: leverage pycute's composition
-        layout = composition(
-            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride))),
-            Layout(tuple(reversed(layout.shape)), tuple(reversed(layout.stride))),
-        )
-        return _Layout(
-            tuple(
-                reversed(
-                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
-                )
-            ),
-            tuple(
-                reversed(
-                    (layout.stride,)
-                    if isinstance(layout.stride, int)
-                    else layout.stride
-                )
-            ),
-        )  # type: ignore[arg-type]
-
-        # Option 2: have our own implementation
-        assert len(self.sizes) >= 1, "Layout for composition cannot be empty"
-        # A layout can be expressed as the concatenation of its sublayouts.
-        # When layout is injective (aka one-to-one), composition is left-distributive with concatenation.
-        # We return a flattened list of list of self compose with each sublayout.
-        if len(layout.sizes) > 1:
-            layouts = (self.composition(layout_i) for layout_i in layout)  # type: ignore[attr-defined]
-            zip_res_sizes, zip_res_strides = zip(
-                *((a.sizes, a.strides) for a in layouts)
-            )
-            return _Layout(tuple(zip_res_sizes), tuple(zip_res_strides))
-
-        res_sizes: list[int] = []
-        res_strides: list[int] = []
-        # Since we now only compose with single-size sublayout, we can assume numel_so_far is always from strides[0].
-        numel_so_far = layout.strides[0]
-        sub_size = layout.sizes[0]
-        assert isinstance(numel_so_far, int)
-        assert isinstance(sub_size, int)
-        sub_stride = numel_so_far
-        numel_so_far *= sub_size
-
-        # when self is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
-        # for integral s and d means that we want:
-        # (1) “remove” the first d elements from self. (This will increase the stride.)
-        # (2) “keep” the first s of those strided elements. (This does not affect the stride.)
-        # For example, if self = (6,2):(2,1), layout = (3:2)
-        # Step 1: remove the first 2 elements from self with stride increase, i.e., (6,2):(2,1) -> (3,2):(4,1)
-        # Step 2: keep the first 3 of those strided elements, i.e., (3,2):(4,1) -> (3,1):(4,1)
-        flattened_self = self.coalesce()
-        for curr_size, curr_stride in zip(
-            flatten(flattened_self.sizes)[:-1],
-            flatten(flattened_self.sizes)[:-1],
-        ):
-            assert curr_size % sub_stride == 0 or sub_stride % curr_size == 0, (
-                "Layouts do not meet stride divisibility condition"
-            )
-            new_size = min(max(1, curr_size // sub_stride), sub_size)
-            if new_size != 1:
-                res_sizes.append(new_size)
-                res_strides.append(sub_stride * curr_stride)
-            assert sub_size % new_size == 0, (
-                "Layouts do not meet size divisibility condition"
-            )
-            sub_size = sub_size // new_size
-            sub_stride = self.ceil_div(sub_stride, curr_size)
-
-        # When self is integral and has single-size sublayout, aka, self = a:b, layout = s:d,
-        # the result is rather trivial: self o layout = a:b o s:d = s:(b*d).
-        # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
-        if sub_size != 1 or len(res_sizes) == 0:
-            res_sizes.append(sub_size)
-            last_stride = flattened_self.strides[-1]
-            assert isinstance(last_stride, int)
-            res_strides.append(sub_stride * last_stride)
-
-        return _Layout(tuple(res_sizes), tuple(res_strides))
+        result = composition(self, layout)
+        shape = result.shape if is_tuple(result.shape) else (result.shape,)  # type: ignore[union-attr]
+        stride = result.stride if is_tuple(result.stride) else (result.stride,)  # type: ignore[union-attr]
+        return _Layout(shape, stride)  # type: ignore[arg-type]
 
     def complement(self, world_size: int) -> "_Layout":
         """
@@ -253,48 +151,10 @@ class _Layout(Layout):
 
         For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
-        # Option 1: leverage pycute's complement
-        layout = complement(
-            Layout(tuple(reversed(self.shape)), tuple(reversed(self.stride))),
-            world_size,
-        )
-        return _Layout(
-            tuple(
-                reversed(
-                    (layout.shape,) if isinstance(layout.shape, int) else layout.shape
-                )
-            ),
-            tuple(
-                reversed(
-                    (layout.stride,)
-                    if isinstance(layout.stride, int)
-                    else layout.stride
-                )
-            ),
-        )
-        # Option 2: have our own implementation
-        res_sizes: list[int] = []
-        res_strides: list[int] = []
-        current_idx = 1
-        for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
-            if stride == 0 or size == 1:
-                continue
-            assert current_idx <= size * stride, (
-                f"current_idx {current_idx} larger than numel so far {size * stride}."
-            )
-
-            res_sizes.append(stride // current_idx)
-            res_strides.append(current_idx)
-            current_idx = size * stride
-
-        res_sizes.append(self.ceil_div(world_size, current_idx))
-        res_strides.append(current_idx)
-        # This is different from original pycute implementation, because we want to follow the lexicographic order here
-        # where the right-most dimension is the innermost dimension (smallest stride).
-        res_sizes.reverse()
-        res_strides.reverse()
-
-        return _Layout(tuple(res_sizes), tuple(res_strides)).coalesce()
+        layout = complement(self, world_size)
+        shape = layout.shape if is_tuple(layout.shape) else (layout.shape,)  # type: ignore[union-attr]
+        stride = layout.stride if is_tuple(layout.stride) else (layout.stride,)  # type: ignore[union-attr]
+        return _Layout(shape, stride)  # type: ignore[arg-type]
 
     def local_ranks(self) -> list[int]:
         """
