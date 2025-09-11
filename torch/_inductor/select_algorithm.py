@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import inspect
 import itertools
 import json
@@ -1433,7 +1434,7 @@ class TritonTemplate(KernelTemplate):
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
@@ -1888,6 +1889,10 @@ class ExternKernelChoice:
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
+        # match the API for KernelTemplate as they can be treated the same
+        # There is no src hash for ExternKernelChoice in the traditional sense
+        # so we indicate this by returning None
+        self.src_hash = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
