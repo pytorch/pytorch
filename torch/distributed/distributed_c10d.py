@@ -1569,6 +1569,17 @@ def init(
     in current job, and `get_rank()` is guaranteed to return the rank of current
     process in the job.
 
+    This API differs from `init_process_group` by not instantiating a default
+    "world" `ProcessGroup`. This is useful in combination with `DeviceMesh`
+    initialization, in particular when you do not need to use the "world" group,
+    only groups along individual mesh dimensions.
+
+    Example:
+        >>> # xdoctest: +SKIP("no rank")
+        >>> dist.init()
+        >>> mesh = dist.init_device_mesh(...)
+        >>> group = mesh.get_dim(...)
+
     There are two main ways to initialize the distributed environment:
         1. Specify ``store``, ``rank``, and ``world_size`` explicitly.
         2. Infer from environment variables set by the launcher of the job (e.g.
@@ -1581,6 +1592,13 @@ def init(
         - `MASTER_PORT`: a port of the above IP address over which the rendezvous happens.
     `RANK` must be unique per process, while `WORLD_SIZE`, `MASTER_ADDRESS` and
     `MASTER_PORT` must be the same across all processes.
+
+    Communication cost:
+    If a store is provided, this API does not involve any communication.
+    Otherwise, it will create an internal store based on the environment
+    variables provided, the time of which depends on each store's
+    implementation. For details, please refer to `Distributed Key-Value Store
+    <https://docs.pytorch.org/docs/stable/distributed.html#distributed-key-value-store>`.
 
     Args:
         world_size (int, optional):
@@ -1615,9 +1633,11 @@ def init(
     if "torch._dynamo" in sys.modules:
         torch._dynamo.trace_rules.clear_lru_cache()
 
+    # Create a store if not provided
     if store is None:
-        # Create one from environment variables
-        init_method = kwargs.get("init_method", "env://")
+        init_method = kwargs.get("init_method")
+        # If not set, default to env://
+        init_method = init_method or "env://"
         rendezvous_iterator = rendezvous(
             init_method,
             rank,
@@ -1738,6 +1758,9 @@ def init_process_group(
         init(world_size, rank, store, init_method=init_method)
 
     world = _World.get()
+    # Refresh values after init() if not provided at API call
+    rank = world.rank if rank < 0 else rank
+    world_size = world.world_size if world_size <= 0 else world_size
 
     # Get the compile-time accelerator type.
     # None indicates no accelerator support.
