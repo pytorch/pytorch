@@ -29,16 +29,17 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_multicast_support,
     skip_if_lt_x_gpu,
+    skip_if_rocm_multiprocess,
+    skip_if_rocm_arch_multiprocess,
+    skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MI300_ARCH,
+    MI200_ARCH,
     parametrize,
     requires_cuda,
     requires_cuda_p2p_access,
     run_tests,
-    runOnRocmArch,
-    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -50,7 +51,7 @@ test_contexts = [nullcontext, _test_mode]
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
-
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcContinuousTest):
@@ -67,7 +68,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
-    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_get_backend(self) -> None:
         backend = symm_mem.get_backend(torch.device("cuda"))
@@ -75,7 +75,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         backend = symm_mem.get_backend("cuda")
         self.assertIsNotNone(backend)
 
-    @skipIfRocm
+    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_cuda_nvlink_connectivity_detection(self) -> None:
         from torch._C._distributed_c10d import _detect_dma_connectivity
@@ -87,12 +87,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         for row in connectivity.matrix:
             self.assertEqual(len(row), torch.cuda.device_count())
 
-    @runOnRocmArch(MI300_ARCH)
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_get_signal_pad(self) -> None:
         self._init_process()
@@ -133,7 +131,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         t.fill_(0)
         self.assertTrue(signal_pad.eq(42).all())
 
-    @runOnRocmArch(MI300_ARCH)
     @requires_cuda
     def test_allow_overlapping_devices(self) -> None:
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "1"
@@ -152,7 +149,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "0"
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
@@ -177,7 +173,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         for r in range(self.world_size):
             self.assertTrue(chunks[r].eq(r).all())
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("reduce_op", ["sum", "avg"])
     @parametrize("symm_mem_input", [True, False])
@@ -213,7 +208,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
         self.assertTrue(res.eq(expect).all())
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -256,6 +250,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -270,7 +265,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.set_deterministic_debug_mode("warn")
         torch.utils.deterministic.fill_uninitialized_memory = True
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
@@ -300,7 +294,7 @@ class AsyncTPTest(MultiProcContinuousTest):
             assert torch.allclose(mm_output_0, mm_output_1)
             assert mm_output_0.stride(), mm_output_1.stride()
 
-    @skipIfRocm  # this requires async_input_mm support
+    @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -397,7 +391,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     @parametrize(
@@ -483,7 +476,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             self.assertEqual(mm_output_0.stride(), mm_output_1.stride())
             self.assertEqual(mm_output_0.dtype, mm_output_1.dtype)
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
@@ -510,7 +502,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         assert torch.allclose(output_0, output_1)
         assert output_0.stride() == output_1.stride()
 
-    @skipIfRocm  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
+    @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
@@ -560,7 +552,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         assert outputs[0].stride() == outputs[1].stride()
         self.assertEqual(outputs[0], outputs[1])
 
-    @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
     def test_optimal_layout(self, dim: int) -> None:
         t = torch.rand(8, 64, 32, 16)
@@ -583,6 +574,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 # `MultiProcessTestCase` which spawns new processes for each test function.
 # Please limit the number of tests you want to add under this test
 # suite as respawning processes and `init_process_group` is expensive.
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
@@ -644,7 +636,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 
         symm_mem_hdl.barrier()
 
-    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:
@@ -663,7 +654,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         del t
         self._verify_symmetric_memory(symm_mem_hdl)
 
-    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
+    @skip_if_rocm_ver_lessthan_multiprocess((7,0))
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
@@ -702,6 +693,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 # This Test class is used to test the error handling of SymmetricMemory APIs.
 # Since a process restart is often needed after each test, we use the
 # MultiProcessTestCase instead of MultiProcContinuousTest.
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @requires_cuda_p2p_access()
 class SymmMemNegativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -732,7 +724,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
     # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
-    @skipIfRocm
+    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
@@ -758,7 +750,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
     # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
-    @skipIfRocm
+    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
         self._init_process()
@@ -787,7 +779,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
     # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
-    @skipIfRocm
+    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
         self._init_process()
@@ -809,6 +801,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         os._exit(0)
 
 
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcContinuousTest):
@@ -876,7 +869,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
         )
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_one_shot_all_reduce(self) -> None:
         self._init_process()
@@ -907,7 +899,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
                 )
             self._verify_all_reduce_result(local_inp if copy else inp[offset:], res)
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_two_shot_all_reduce(self) -> None:
         self._init_process()
@@ -957,7 +948,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()
@@ -994,7 +984,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             self.assertTrue(t[shift + numel :].eq(0).all().item())
             self._verify_reduce_scatter_result(inp, out)
 
-    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter_corner_cases(self) -> None:
         self._init_process()
@@ -1056,6 +1045,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         self.assertTrue(out.eq(ref).all())
 
 
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
@@ -1070,7 +1060,7 @@ class LoweringTest(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
-    @skipIfRocm  # requires registered-buffer support
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
     def test_lowering_one_shot_all_reduce(self):
@@ -1124,13 +1114,13 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertNotIn("return (buf0", code_3)
 
 
+@skip_if_rocm_arch_multiprocess(MI200_ARCH)
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
     )
-    @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):
         tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
         expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
@@ -1146,7 +1136,6 @@ class SymmMemSingleProcTest(TestCase):
             _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
 
     @requires_cuda
-    @runOnRocmArch(MI300_ARCH)
     def test_memset32(self):
         t = _SymmetricMemory.empty_strided_p2p(
             (64,),
