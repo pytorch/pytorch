@@ -806,6 +806,12 @@ class _SymmetricMemory:
         channel: int = 0,
         timeout_ms: int = 0,
     ) -> None: ...
+    def get_remote_tensor(
+        self,
+        peer: int,
+        sizes: torch.types._size,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
