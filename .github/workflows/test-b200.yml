@@ -1,0 +1,76 @@
+# B200 Smoke Tests CI Workflow
+#
+# This workflow runs smoke tests on B200 hardware
+#
+# Flow:
+# 1. Builds PyTorch with CUDA 12.8+ and sm100 architecture for B200
+# 2. Runs smoke tests on linux.dgx.b200 runner
+# 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke() function
+#
+# Triggered by:
+# - Pull requests modifying this workflow file
+# - Manual dispatch
+# - Schedule (every 6 hours)
+# - Adding ciflow/b200 label to a PR (creates ciflow/b200/* tag)
+
+name: B200 Smoke Tests
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-b200.yml
+  workflow_dispatch:
+  schedule:
+    - cron: 0 4,10,16,22 * * *  # every 6 hours
+  push:
+    tags:
+      - ciflow/b200/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm100-build:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "smoke", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+      # config: "smoke" maps to test_python_smoke() in .ci/pytorch/test.sh
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm100-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+    secrets: inherit
