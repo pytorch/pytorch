@@ -222,9 +222,7 @@ class InductorChoices:
         # Since the following backends are not using get_template_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
         # defensively.
-        # TODO(coconutruben): remove this once TRITON,CPP,CK,CUTLASS are supported
-        if _use_autotune_backend("TRITON"):
-            return True
+        # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
         if _use_autotune_backend("CUTLASS"):
             return True
         if _use_autotune_backend("CK") or _use_autotune_backend("CKTILE"):
