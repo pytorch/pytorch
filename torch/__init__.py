@@ -1135,7 +1135,7 @@ def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]
         >>> torch.is_storage(x)
         False
         >>> torch.is_storage(x.untyped_storage())
-        False
+        True
 
     """
     return type(obj) in _storage_classes
