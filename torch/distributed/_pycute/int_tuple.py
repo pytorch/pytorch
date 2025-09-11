@@ -126,18 +126,22 @@ def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
             return (a + b - 1) // b  # type: ignore[operator,return-value]  # result is int, operators valid on ints
 
 
-# Exclusive prefix product with output congruent to input a
+# Exclusive prefix product with output congruent to input a (lexicographic)
 def prefix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
     if is_tuple(a):
         if is_tuple(init):  # tuple tuple
             assert len(a) == len(init)
             return tuple(prefix_product(x, i) for x, i in zip(a, init))
         else:  # tuple "int"
-            # r = [prefix_product(a[0],init)] + [prefix_product(a[i],init := init * product(a[i-1])) for i in range(1,len(a))]
-            r = []
-            for v in a:
-                r.append(prefix_product(v, init))
-                init = init * product(v)
+            # Process from right to left for lexicographic ordering
+            r: list[IntTuple] = []
+            current_init = init
+
+            # Calculate products from right to left
+            for i in range(len(a) - 1, -1, -1):
+                r.insert(0, prefix_product(a[i], current_init))
+                current_init = current_init * product(a[i])
+
             return tuple(r)
     else:
         if is_tuple(init):  # "int" tuple
@@ -161,7 +165,14 @@ def idx2crd(
     else:
         if is_tuple(shape):  # "int" tuple tuple
             assert len(shape) == len(stride)  # type: ignore[arg-type]
-            return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))  # type: ignore[arg-type]
+            # Process from left to right for lexicographic ordering (opposite of crd2idx)
+            result = []
+            remaining_idx = idx
+            for s, d in zip(shape, stride):  # type: ignore[arg-type]
+                coord = idx2crd(remaining_idx // d, s, 1)  # type: ignore[operator]
+                result.append(coord)
+                remaining_idx = remaining_idx % d  # type: ignore[operator]
+            return tuple(result)
         else:  # "int" "int" "int"
             return (idx // stride) % shape  # type: ignore[operator,return-value]  # all are ints after type checks
 
@@ -185,10 +196,11 @@ def crd2idx(
         if is_tuple(shape):  # "int" tuple tuple
             assert len(shape) == len(stride)  # type: ignore[arg-type]
             result = 0
-            for i in range(len(shape) - 1):
+            # Process from right to left for lexicographic ordering
+            for i in range(len(shape) - 1, 0, -1):
                 result += crd2idx(crd % product(shape[i]), shape[i], stride[i])  # type: ignore[operator,index,arg-type]
                 crd = crd // product(shape[i])  # type: ignore[operator,index]
-            return result + crd2idx(crd, shape[-1], stride[-1])  # type: ignore[index,arg-type]
+            return result + crd2idx(crd, shape[0], stride[0])  # type: ignore[index,arg-type]
         else:  # "int" "int" "int"
             return crd * stride  # type: ignore[operator,return-value]  # all are ints after type checks
 

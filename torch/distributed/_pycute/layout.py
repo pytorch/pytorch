@@ -31,7 +31,8 @@
 #################################################################################################
 
 """
-Definition of CuTe Layouts and functions to manipulate them
+Definition of CuTe Layouts and functions to manipulate them which works with the order
+of lexicographic instead of co-lexicographic as implemented in the original layout.py
 """
 
 from itertools import chain
@@ -166,25 +167,31 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
             )
         )
 
-    result_shape = [1]
-    result_stride = [0]
-    for shape, stride in zip(flatten(layout.shape), flatten(layout.stride)):
-        # skip their shape-1s
+    flattened_shape = flatten(layout.shape)
+    flattened_stride = flatten(layout.stride)
+    # Skip leading shape-1 modes and find the first non-unit mode
+    result_shape: list[int] = []
+    result_stride: list[int] = []
+
+    for shape, stride in zip(flattened_shape, flattened_stride):
+        # skip shape-1s
         if shape == 1:
             continue
-        # replace our shape-1 with anything
-        elif result_shape[-1] == 1:
-            result_shape[-1] = shape
-            result_stride[-1] = stride
         # merge modes if the shape*stride match
-        elif result_shape[-1] * result_stride[-1] == stride:
-            result_shape[-1] = result_shape[-1] * shape
+        elif result_stride and result_stride[-1] == shape * stride:
+            result_stride.pop()
+            prev_shape = result_shape.pop()
+            result_shape.append(shape * prev_shape)
+            result_stride.append(stride)
         # append a new mode
         else:
             result_shape.append(shape)
             result_stride.append(stride)
 
-    if len(result_shape) == 1:
+    # Handle empty result (all modes were shape-1)
+    if len(result_shape) == 0:
+        return Layout(1, 0)
+    elif len(result_shape) == 1:
         return Layout(result_shape[0], result_stride[0])
     else:
         return Layout(tuple(result_shape), tuple(result_stride))
@@ -230,7 +237,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
-    elif is_tuple(layoutB.shape):  # type: ignore[union-attr]
+    elif is_tuple(layoutB.shape) and len(layoutB.shape) > 1:  # type: ignore[union-attr]
         return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)  # type: ignore[arg-type,union-attr]
 
     if layoutB.stride == 0:  # type: ignore[union-attr]
@@ -238,17 +245,25 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     else:
         result_shape = []
         result_stride = []
-        rest_shape = layoutB.shape  # type: ignore[union-attr]
-        rest_stride = layoutB.stride  # type: ignore[union-attr]
+        rest_shape = layoutB.shape if is_int(layoutB.shape) else layoutB.shape[0]  # type: ignore[union-attr]
+        rest_stride = layoutB.stride if is_int(layoutB.stride) else layoutB.stride[0]  # type: ignore[union-attr]
         flat_A = coalesce(layoutA)
-        for curr_shape, curr_stride in zip(
-            flatten(flat_A.shape)[:-1], flatten(flat_A.stride)[:-1]
-        ):
+
+        # Process from right to left for lexicographic ordering
+        flat_A_shapes = flatten(flat_A.shape)
+        flat_A_strides = flatten(flat_A.stride)
+
+        # Build lists in reverse order (append to end), then reverse at the end for efficiency
+        # Iterate from last element down to second element (index len-1 down to 1)
+        for i in range(len(flat_A_shapes) - 1, 0, -1):
+            curr_shape = flat_A_shapes[i]
+            curr_stride = flat_A_strides[i]
+
             assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0  # type: ignore[operator]
             new_shape = min(max(1, curr_shape // rest_stride), rest_shape)  # type: ignore[operator]
 
             if new_shape != 1:
-                result_shape.append(new_shape)
+                result_shape.append(new_shape)  # Append to end, will reverse later
                 result_stride.append(rest_stride * curr_stride)
 
             rest_shape = rest_shape // new_shape  # type: ignore[operator]
@@ -256,9 +271,15 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
                 -rest_stride // curr_shape  # type: ignore[operator]
             )  # Python exclusive impl: "//" is always floor div so == ceil_div(abs(rest_stride), curr_shape) * signum(rest_stride)
 
+        # Handle the first element (index 0) separately
         if rest_shape != 1 or len(result_shape) == 0:
-            result_shape.append(rest_shape)
-            result_stride.append(rest_stride * flatten(flat_A.stride)[-1])
+            result_shape.append(rest_shape)  # Append to end, will reverse later
+            result_stride.append(rest_stride * flat_A_strides[0])
+
+        # Reverse the lists to get lexicographic order
+        result_shape.reverse()
+        result_stride.reverse()
+        print(result_shape, result_stride)
 
         if len(result_shape) == 1:
             return Layout(result_shape[0], result_stride[0])  # type: ignore[arg-type]
@@ -290,6 +311,10 @@ def complement(layout: LayoutOrIntTuple, max_idx: int = 1) -> Layout:
 
     result_shape.append((max_idx + current_idx - 1) // current_idx)  # ceil_div
     result_stride.append(current_idx)
+    # This is different from original pycute implementation, because we want to follow the lexicographic order here
+    # where the right-most dimension is the innermost dimension (smallest stride).
+    result_shape.reverse()
+    result_stride.reverse()
 
     return coalesce(Layout(tuple(result_shape), tuple(result_stride)))
 
@@ -318,6 +343,8 @@ def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
         result_stride.append(rstride)
         current_idx = shape * stride
 
+    result_shape.reverse()
+    result_stride.reverse()
     return coalesce(Layout(tuple(result_shape), tuple(result_stride)))
 
 
@@ -327,7 +354,7 @@ def left_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
         return None
     elif is_int(layout):
         return Layout(layout)
-    return right_inverse(make_layout(layout, complement(layout)))  # type: ignore[arg-type]
+    return right_inverse(make_layout(complement(layout), layout))  # type: ignore[arg-type]
 
 
 # Split a layout by the composition of B and the "rest"

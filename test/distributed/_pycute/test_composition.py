@@ -51,11 +51,13 @@ class TestComposition(TestCase):
         layoutR = composition(layoutA, layoutB)
 
         _LOGGER.debug(f"{layoutA} o {layoutB}  =>  {layoutR}")
+        print(layoutR.shape, layoutR.stride, size(layoutR))
 
         # True post-condition: Every coordinate c of layoutB with L1D(c) < size(layoutR) is a coordinate of layoutR.
 
         # Test that R(c) = A(B(c)) for all coordinates c in layoutR
         for i in range(size(layoutR)):
+            print(i, layoutR(i), layoutB(i), layoutA(layoutB(i)))
             self.assertEqual(layoutR(i), layoutA(layoutB(i)))
 
     def test_composition(self):
@@ -208,9 +210,24 @@ class TestComposition(TestCase):
         layoutB = Layout((6), (1))
         self.helper_test_composition(layoutA, layoutB)
 
+        # Pre-coalesced RHS
+        layoutA = Layout((8, 6, 4), (7, 4, 1))
+        layoutB = Layout((6), (1))
+        self.helper_test_composition(layoutA, layoutB)
+
+        # Case when not meet stride divisibility condition
+        with self.assertRaises(AssertionError):
+            layoutA = Layout((4, 6, 8, 10), (2, 3, 5, 7))
+            layoutB = Layout(6, 12)
+            self.helper_test_composition(layoutA, layoutB)
+
         # Mid-layout truncation
-        layoutA = Layout((4, 6, 8, 10), (2, 3, 5, 7))
+        layoutA = Layout((10, 8, 6, 4), (7, 5, 3, 2))
         layoutB = Layout(6, 12)
+        self.helper_test_composition(layoutA, layoutB)
+
+        layoutA = Layout((4,), (3,))
+        layoutB = Layout((6,), (2,))
         self.helper_test_composition(layoutA, layoutB)
 
 
