@@ -337,10 +337,10 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
-        from torch.distributed.tensor.debug import DTensorDebugMode
+        from torch.utils.debug_mode import DebugMode
 
         debug_mode = _get_current_dispatch_mode()
-        in_debug_mode = isinstance(debug_mode, DTensorDebugMode)
+        in_debug_mode = isinstance(debug_mode, DebugMode)
         redistribute_context = contextlib.nullcontext()
 
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
