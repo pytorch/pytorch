@@ -221,8 +221,6 @@ class Shard(Placement):
         output = funcol.reduce_scatter_tensor(
             tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
-        if isinstance(output, funcol.AsyncCollectiveTensor):
-            output = output.wait()
 
         if is_padded:
             output = unpad_tensor(output, self.dim, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
@@ -257,9 +255,6 @@ class Shard(Placement):
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-        if isinstance(result, funcol.AsyncCollectiveTensor):
-            result = result.wait()
-
         if is_padded:
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             result = unpad_tensor(result, self.dim, unpad_size)
@@ -686,12 +681,9 @@ class Partial(Placement):
     ) -> torch.Tensor:
         # Partial placement contract #1:
         # _reduce_value: reduce the value of the tensor on the mesh dimension
-        output = funcol.all_reduce(
+        return funcol.all_reduce(
             tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
-        if isinstance(output, funcol.AsyncCollectiveTensor):
-            output = output.wait()
-        return output
 
     def _reduce_shard_value(
         self,
