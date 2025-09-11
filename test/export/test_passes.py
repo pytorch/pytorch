@@ -14,12 +14,12 @@ from re import escape
 import torch
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import config
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
 )
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch._export import config
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
