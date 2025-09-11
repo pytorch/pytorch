@@ -5674,6 +5674,11 @@ class GlobalsGuardAccessor : public GuardAccessor {
     return "GlobalsGuardAccessor";
   }
 
+  bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
+    // Ensure that we don't construct the framelocals to dict here.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
  public: // cloning functions
   GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
