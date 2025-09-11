@@ -939,6 +939,7 @@ static PyObject* THPVariable_dtensor_new(
 
   py::handle spec = py::handle(r.pyobject(2));
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
+  TORCH_CHECK(!tensor_meta.is_none());
   const auto sizes = tensor_meta.attr(dtensor_interned_strings.shape);
   TORCH_CHECK(
       THPSize_Check(sizes.ptr()),

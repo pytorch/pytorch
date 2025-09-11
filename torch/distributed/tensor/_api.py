@@ -245,6 +245,16 @@ class DTensor(torch.Tensor):
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental
     def __init__(self, *args, **kwargs):
+        """
+        Construct a DTensor from a local tensor, device mesh, and placement and
+        other tensor properties (i.e. shape, requires_grad, strides, etc).
+        .. note:: This is not a public API and it's only supposed to be used by the
+            operator implementations and internals. If you want to construct a
+            DTensor from a local tensor, consider using ``DTensor.from_local``, if
+            you want to construct a DTensor from a "global" tensor (where you
+            already have tensor initialized and want to shard this tensor),
+            consider using ``distribute_tensor``.
+        """
         super().__init__()
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -306,6 +316,12 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
+        # These are all ops that can show up in AccumulateGrad,
+        # which is susceptible to DTensor overheads
+        if func is torch.ops.aten.detach.default:
+            return DTensor(
+                args[0]._local_tensor.detach(), args[0]._spec, requires_grad=False
+            )
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
