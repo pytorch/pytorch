@@ -12,6 +12,8 @@ from collections import defaultdict
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Union
 
+from tqdm import tqdm
+
 import torch
 from torch._inductor.analysis.device_info import (
     compute_device_ridgepoint,
@@ -19,8 +21,6 @@ from torch._inductor.analysis.device_info import (
 )
 from torch._inductor.utils import tabulate_2d, zip_dicts
 from torch.utils._ordered_set import OrderedSet
-
-from tqdm import tqdm
 
 from .dag_nodes import TraceDAG
 from .types import _IdxEvt, Device, DeviceMap, KernelStats, Table
@@ -182,17 +182,18 @@ class JsonProfile:
                     raise RuntimeError(
                         "dtype is not found on tensor and default dtype is not set"
                     )
-                
+
                 # Use DeviceInfo API to get FLOPS and bandwidth correctly
                 from torch._inductor.analysis.device_info import DeviceInfo
+
                 peak_flops = DeviceInfo.lookup_tops(dev.name, dtype)
                 peak_bandwidth_gbs = DeviceInfo.lookup_dram_bw_gbs(dev.name)
-                
+
                 if peak_flops is not None and peak_flops > 0:
                     achieved_flops = 100 * op_flops / peak_flops
                 else:
                     achieved_flops = 0
-                    
+
                 if peak_bandwidth_gbs is not None and peak_bandwidth_gbs > 0:
                     achieved_bandwidth = 100 * op_gbps / peak_bandwidth_gbs
                 else:
@@ -248,7 +249,7 @@ class JsonProfile:
 
         # Convert GB/s to B/s (base 10: 1 GB = 10^9 bytes)
         op_bps = op_gbps * 1e9
-        
+
         # Kernel intensity = FLOPS / B/s = operations per byte
         kernel_intensity = op_flops / op_bps
 
@@ -704,11 +705,12 @@ class JsonProfile:
         - Add edges only (set handles de-dupe)
 
         # Algorithm Description
-        The slow bits are from O(K·N) overlap scans and de-duping whole chains.
+        Naive algorithm is O(K * N).
         Pre-index every cpu_op / user_annotation / cudaLaunchKernel by thread, with parent pointers built from the per-thread stack (no overlap scans).
-        For each kernel, resolve its launching site fast
+        For each kernel, resolve its launching site first
         Else, find the cudaLaunchKernel whose interval contains the kernel start using bisect over a per-thread sorted list (O(log N)).
         Build the op chain by walking parent pointers from the launch (or external op) up to the root; don't de-dup chains—just add edges (the set takes care of uniqueness).
+        Total is ~O(K * log N). This starts to become ~ too long around 100k kernels (~500k total events). Open to any suggestions on how to speed up past it.
         """
         dag = TraceDAG()
 
@@ -801,7 +803,7 @@ class JsonProfile:
                                 stats_list, key=lambda s: abs(s.latency - kdur)
                             )
                             latency_diff = abs(best_stats.latency - kdur)
-                            if  latency_diff < 100.0:
+                            if latency_diff < 100.0:
                                 kernel_node.achieved_flops_list.append(
                                     best_stats.achieved_flops
                                 )
@@ -862,14 +864,11 @@ class JsonProfile:
                     }
                 )
 
-        # Sort by start time to build the chain
         overlapping_ops.sort(key=lambda x: x["ts"])
 
-        # Build the operation chain
         for op in overlapping_ops:
             chain.append(op)
 
-        # Add the kernel at the end
         chain.append(
             {
                 "name": kernel_info["name"],
@@ -1098,7 +1097,7 @@ class JsonProfile:
         Returns a dictionary mapping kernel names to color strings.
         """
         from .utils import calculate_kernel_colors
-          
+
         kernel_nodes = {
             name: node for name, node in dag.nodes.items() if node.node_type == "kernel"
         }
@@ -1139,15 +1138,15 @@ class JsonProfile:
                 filtered_dag.add_node(kernel_name, "kernel")
                 for dur, tid in kernel_node.kernel_instances:
                     filtered_dag.add_kernel_instance(kernel_name, dur, tid)
-                filtered_dag.nodes[kernel_name].achieved_flops_list = (
-                    kernel_node.achieved_flops_list[:]
-                )
-                filtered_dag.nodes[kernel_name].achieved_bandwidth_list = (
-                    kernel_node.achieved_bandwidth_list[:]
-                )
-                filtered_dag.nodes[kernel_name].bound_type_list = (
-                    kernel_node.bound_type_list[:]
-                )
+                filtered_dag.nodes[
+                    kernel_name
+                ].achieved_flops_list = kernel_node.achieved_flops_list[:]
+                filtered_dag.nodes[
+                    kernel_name
+                ].achieved_bandwidth_list = kernel_node.achieved_bandwidth_list[:]
+                filtered_dag.nodes[
+                    kernel_name
+                ].bound_type_list = kernel_node.bound_type_list[:]
             return filtered_dag
 
         # Perform reverse BFS from kernels to find nodes within height limit
@@ -1184,20 +1183,20 @@ class JsonProfile:
             if original_node.node_type == "kernel":
                 for dur, tid in original_node.kernel_instances:
                     filtered_dag.add_kernel_instance(node_name, dur, tid)
-                filtered_dag.nodes[node_name].achieved_flops_list = (
-                    original_node.achieved_flops_list[:]
-                )
-                filtered_dag.nodes[node_name].achieved_bandwidth_list = (
-                    original_node.achieved_bandwidth_list[:]
-                )
-                filtered_dag.nodes[node_name].bound_type_list = (
-                    original_node.bound_type_list[:]
-                )
+                filtered_dag.nodes[
+                    node_name
+                ].achieved_flops_list = original_node.achieved_flops_list[:]
+                filtered_dag.nodes[
+                    node_name
+                ].achieved_bandwidth_list = original_node.achieved_bandwidth_list[:]
+                filtered_dag.nodes[
+                    node_name
+                ].bound_type_list = original_node.bound_type_list[:]
             else:
                 if hasattr(original_node, "instance_count"):
-                    filtered_dag.nodes[node_name].instance_count = (
-                        original_node.instance_count
-                    )
+                    filtered_dag.nodes[
+                        node_name
+                    ].instance_count = original_node.instance_count
 
         for parent, child in dag.edges:
             if parent in nodes_to_include and child in nodes_to_include:
@@ -1315,7 +1314,6 @@ shape and type information needed for calculations. To include performance metri
         for key, value in self.data.items():
             if key not in combined_data:
                 combined_data[key] = value
-
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
