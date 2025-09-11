@@ -155,6 +155,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["disable_cudagraph"]
 
     @property
+    def large_cudagraph_dynamic_shape_error_limit_models(self):
+        return self._config["large_cudagraph_dynamic_shape_error_limit_models"]
+
+    @property
     def skip_models_for_freezing_cpu(self):
         return self._skip["freezing"]["cpu"]
 

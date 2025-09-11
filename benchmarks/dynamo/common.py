@@ -1917,6 +1917,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def large_cudagraph_dynamic_shape_error_limit_models(self):
+        return {}
+
+    @property
     def guard_on_nn_module_models(self):
         return set()
 
@@ -4017,6 +4021,11 @@ def run(runner, args, original_dir=None):
 
     if args.only in runner.disable_cudagraph_models:
         args.disable_cudagraphs = True
+
+    if args.only in runner.large_cudagraph_dynamic_shape_error_limit_models:
+        torch._inductor.config.triton.cudagraph_dynamic_shape_error_limit = (
+            runner.large_cudagraph_dynamic_shape_error_limit_models[args.only]
+        )
 
     if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs

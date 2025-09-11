@@ -15,6 +15,8 @@ batch_size:
   inference:
     timm_efficientdet: 32
 
+large_cudagraph_dynamic_shape_error_limit_models:
+  hf_T5_generate: 256
 
 dont_change_batch_size:
   - demucs
