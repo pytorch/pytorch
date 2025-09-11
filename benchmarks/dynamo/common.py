@@ -1424,7 +1424,7 @@ class AOTInductorModelCache:
                     torch.hpu.max_memory_allocated() - pre_clone_memory_used
                 ) / 1e9
 
-            inductor_configs = {"aot_inductor.package_constants_in_so": False}
+            inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
             ep = torch.export.export(
@@ -1439,14 +1439,8 @@ class AOTInductorModelCache:
                     ep, inductor_configs=inductor_configs
                 )  # type: ignore[arg-type]
 
-            compiled = torch._inductor.aoti_load_package(package_path)
-            compiled.load_constants(
-                {**ep.state_dict, **ep.constants},
-                check_full_update=False,
-                user_managed=True,
-            )
             cls.cache[key] = (
-                compiled,
+                torch._inductor.aoti_load_package(package_path),
                 clone_memory_used,
             )
 
