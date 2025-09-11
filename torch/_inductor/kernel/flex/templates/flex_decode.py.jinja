@@ -120,7 +120,8 @@
     # Offset the kv_indices tensor by the correct batch and head
     kv_indices = KV_IDX + sparse_idx_hz_offset
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
-    indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+    MAX_KV_IDX = {{size("KV_IDX", -1)}}
+    indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
     # first kv block we're loading
@@ -130,9 +131,27 @@
 
     offs_n = tl.arange(0, BLOCK_N) + off_n
 
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
+
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K, V, None, None, Q_LEN, KV_LEN,
+        q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
         #offsets
@@ -156,7 +175,7 @@
         # Assign full block in a reverse order for off_t. Prioritize the last CTA.
         block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
         block_n_end = block_n_start + TILE_KV_MULTIPLE
-        indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+        indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
@@ -167,7 +186,7 @@
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K, V, None, None, Q_LEN, KV_LEN,
+            q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
             #offsets
