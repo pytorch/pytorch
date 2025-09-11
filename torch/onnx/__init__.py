@@ -81,7 +81,7 @@ def export(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
+    fallback: bool = True,
     # BC options
     export_params: bool = True,
     keep_initializers_as_inputs: bool = False,
