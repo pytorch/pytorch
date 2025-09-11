@@ -645,6 +645,7 @@ def create_multi_trace_visualization(
     height: Optional[int] = None,
     color_mode: str = "time",
     baseline_profile: Optional["JsonProfile"] = None,
+    compact: bool = True,
 ) -> "MultiTraceDAG":
     """Create a multi-trace DAG visualization from multiple JSON trace files."""
     from .dag_nodes import MultiTraceDAG
@@ -722,7 +723,7 @@ def create_multi_trace_visualization(
 
     # Visualize the multi-trace DAG
     visualize_multi_trace_dag(
-        multi_dag, output_file, format, color_mode, baseline_profile
+        multi_dag, output_file, format, color_mode, baseline_profile, compact
     )
 
     return multi_dag
@@ -828,6 +829,7 @@ def visualize_multi_trace_dag(
     format: str = "png",
     color_mode: str = "time",
     baseline_profile: Optional["JsonProfile"] = None,
+    compact: bool = True,
 ) -> None:
     """Create a PNG visualization of the multi-trace DAG with composite nodes and colored edges."""
     if not VISUALIZATION_AVAILABLE:
@@ -886,7 +888,7 @@ def visualize_multi_trace_dag(
 
             # Create composite node label with kernel runtime information
             label = _create_composite_node_label(
-                multi_node, multi_dag, op_kernel_runtimes
+                multi_node, multi_dag, op_kernel_runtimes, compact
             )
 
             # Style based on node type
@@ -949,6 +951,7 @@ def _create_composite_node_label(
     multi_node: "MultiTraceDAGNode",
     multi_dag: "MultiTraceDAG",
     op_kernel_runtimes: dict = None,
+    compact: bool = True,
 ) -> str:
     """Create a composite node label that shows data from each trace."""
     if op_kernel_runtimes is None:
@@ -959,7 +962,7 @@ def _create_composite_node_label(
 
     # Create header row with node name spanning all columns
     # Apply escaping and wrapping in a safe way for HTML tables
-    safe_name = _safe_html_wrap(multi_node.name, 40)
+    safe_name = _safe_html_wrap(multi_node.name, 40, compact)
 
     num_traces = len(sorted_trace_ids)
     header_row = f'<TR><TD COLSPAN="{num_traces}"><B>{safe_name}</B></TD></TR>'
@@ -1065,7 +1068,7 @@ def _create_composite_node_label(
     return f'<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">{header_row}{data_row}</TABLE>>'
 
 
-def _safe_html_wrap(text: str, max_width: int) -> str:
+def _safe_html_wrap(text: str, max_width: int, compact: bool = False) -> str:
     """Safely wrap text for HTML table context by escaping first, then wrapping with HTML breaks."""
     # Step 1: Escape all problematic characters for HTML/XML
     escaped_text = text.replace("&", "&amp;")
@@ -1079,11 +1082,15 @@ def _safe_html_wrap(text: str, max_width: int) -> str:
     escaped_text = escaped_text.replace("{", "(")
     escaped_text = escaped_text.replace("}", ")")
 
-    # Step 2: Check if wrapping is needed
+    # Step 2: If compact mode is enabled, return the escaped text without wrapping
+    if compact:
+        return escaped_text
+
+    # Step 3: Check if wrapping is needed
     if len(escaped_text) <= max_width:
         return escaped_text
 
-    # Step 3: Do HTML-entity-aware wrapping
+    # Step 4: Do HTML-entity-aware wrapping
     lines = []
     current_line = ""
     i = 0

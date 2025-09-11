@@ -499,7 +499,15 @@ Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arg
         type=int,
         help="Limit the height of the visualization to only show this many levels of non-kernel nodes above kernels. For example, height=1 shows only direct parents of kernels. Default: no height limit.",
     )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        default=True,
+        help="Make kernel names compact without line wrapping.",
+    )
     args = parser.parse_args()
+
+    compact_mode = args.compact
 
     # Validate color/diff-baseline arguments
     if args.color == "diff" and not args.diff_baseline:
@@ -615,6 +623,7 @@ Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arg
                 color_mode=args.color,
                 baseline_profile=baseline_profile,
                 height=args.height,
+                compact=compact_mode,
             )
             print(f"DAG visualization completed and saved to {output_file}")
             print(
@@ -642,6 +651,7 @@ Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arg
                 height=args.height,
                 color_mode=args.color,
                 baseline_profile=baseline_profile,
+                compact=compact_mode,
             )
             print(f"Multi-trace DAG visualization completed and saved to {output_file}")
             print(
