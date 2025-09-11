@@ -12073,8 +12073,6 @@ graph():
 
         test(export(M(), inp))
 
-    # Preserving signature hook is messing with dynamo tracing
-    @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
