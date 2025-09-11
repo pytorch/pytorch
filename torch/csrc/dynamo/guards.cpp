@@ -2254,6 +2254,39 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
+// Check if the float is nan
+class FLOAT_IS_NAN : public LeafGuard {
+ public:
+  FLOAT_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyFloat_CheckExact(value)) {
+      return false;
+    }
+    return std::isnan(PyFloat_AsDouble(value));
+  }
+};
+
+// Check if the float is nan
+class COMPLEX_IS_NAN : public LeafGuard {
+ public:
+  COMPLEX_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyComplex_CheckExact(value)) {
+      return false;
+    }
+    Py_complex c_value = PyComplex_AsCComplex(value);
+    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+  }
+};
+
 // Check if the dual level is the same as the one in fx graph
 class DUAL_LEVEL_MATCH : public LeafGuard {
  public:
@@ -6875,6 +6908,14 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DUAL_LEVEL_MATCH")
       .def(py::init<RootGuardManager*, int64_t, py::list>())
       .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
+      py_m, "FLOAT_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &FLOAT_IS_NAN::check);
+  py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
+      py_m, "COMPLEX_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<RootGuardManager*, py::set, py::list>())
@@ -7315,6 +7356,18 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
                 self.get_root(), level, std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_float_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<FLOAT_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_complex_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",
