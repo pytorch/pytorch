@@ -27,7 +27,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
@@ -1972,6 +1972,42 @@ class TestMaxAutotune(TestCase):
                     self.assertNotIn(TritonTemplateCaller, choice_types_seen)
         finally:
             clear_preprocessing_fns()
+
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+    )
+    @parametrize("max_autotune_enabled", (True, False))
+    def test_autotune_layout_optimization(self, max_autotune_enabled):
+        """Test that layouts are flexible when every choice is ExternKernelChoice"""
+
+        # we use a proxy here of bias_addmm and max-autotune because this enables us to see
+        # multiple choices in both scenarios (bias_addmm, addmm, triton (max-autotune only))
+        # and both bias_addmm and addmm are extern kernel choices
+        def layout_checker(choices):
+            if choices:
+                expected_layout = (
+                    FixedLayout if max_autotune_enabled else FlexibleLayout
+                )
+                for choice in choices:
+                    self.assertIsInstance(
+                        choice.layout,
+                        expected_layout,
+                        f"Expected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                    )
+            return choices
+
+        add_preprocessing_fn(layout_checker)
+
+        try:
+            bias = torch.randn(64, device=GPU_TYPE)
+            x = torch.randn(32, 128, device=GPU_TYPE)
+            w = torch.randn(128, 64, device=GPU_TYPE)
+
+            with config.patch({"max_autotune": max_autotune_enabled}):
+                compiled_fn = torch.compile(lambda b, x, w: torch.addmm(b, x, w))
+                _ = compiled_fn(bias, x, w)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
 
 
 class TestMaxAutotunePrecompile(TestCase):
