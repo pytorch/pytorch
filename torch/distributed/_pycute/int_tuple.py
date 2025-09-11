@@ -76,11 +76,11 @@ def product(a: IntTuple) -> int:
 
 
 def inner_product(a: IntTuple, b: IntTuple) -> int:
-    if is_tuple(a):  # tuple tuple
-        assert len(a) == len(b)  # type: ignore[arg-type]
-        return sum(inner_product(x, y) for x, y in zip(a, b))  # type: ignore[arg-type,misc]
+    if is_tuple(a) and is_tuple(b):  # tuple tuple
+        assert len(a) == len(b)
+        return sum(inner_product(x, y) for x, y in zip(a, b))
     else:  # "int" "int"
-        assert not is_tuple(b)
+        assert not is_tuple(a) and not is_tuple(b)
         return a * b
 
 
@@ -153,17 +153,18 @@ def idx2crd(
         stride = prefix_product(shape)
 
     if is_tuple(idx):
-        if is_tuple(shape):  # tuple tuple tuple
-            assert len(idx) == len(shape) and len(stride) == len(shape)  # type: ignore[arg-type]
-            return tuple(idx2crd(i, s, d) for i, s, d in zip(idx, shape, stride))  # type: ignore[arg-type]
+        if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
+            assert len(idx) == len(shape) and len(stride) == len(shape)
+            return tuple(idx2crd(i, s, d) for i, s, d in zip(idx, shape, stride))
         else:  # tuple "int" "int"
             raise AssertionError("Invalid combination: tuple with int stride")
     else:
-        if is_tuple(shape):  # "int" tuple tuple
-            assert len(shape) == len(stride)  # type: ignore[arg-type]
-            return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))  # type: ignore[arg-type]
+        if is_tuple(shape) and is_tuple(stride):  # "int" tuple tuple
+            assert len(shape) == len(stride)
+            return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))
         else:  # "int" "int" "int"
-            return (idx // stride) % shape  # type: ignore[operator,return-value]  # all are ints after type checks
+            assert not is_tuple(shape) and not is_tuple(stride)
+            return (idx // stride) % shape  # all are ints after type checks
 
 
 def crd2idx(
@@ -173,24 +174,25 @@ def crd2idx(
         stride = prefix_product(shape)
 
     if is_tuple(crd):
-        if is_tuple(shape):  # tuple tuple tuple
-            assert len(crd) == len(shape) and len(stride) == len(shape)  # type: ignore[arg-type]
-            return sum(crd2idx(c, s, d) for c, s, d in zip(crd, shape, stride))  # type: ignore[arg-type,misc]
+        if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
+            assert len(crd) == len(shape) and len(stride) == len(shape)
+            return sum(crd2idx(c, s, d) for c, s, d in zip(crd, shape, stride))
         else:  # tuple "int" "int"
             raise AssertionError(f"Invalid combination: crd={crd}, shape={shape}")
     else:
         if crd is None:
             crd = 0
 
-        if is_tuple(shape):  # "int" tuple tuple
-            assert len(shape) == len(stride)  # type: ignore[arg-type]
+        if is_tuple(shape) and is_tuple(stride):  # "int" tuple tuple
+            assert len(shape) == len(stride)
             result = 0
             for i in range(len(shape) - 1):
-                result += crd2idx(crd % product(shape[i]), shape[i], stride[i])  # type: ignore[operator,index,arg-type]
-                crd = crd // product(shape[i])  # type: ignore[operator,index]
-            return result + crd2idx(crd, shape[-1], stride[-1])  # type: ignore[index,arg-type]
+                result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
+                crd = crd // product(shape[i])
+            return result + crd2idx(crd, shape[-1], stride[-1])
         else:  # "int" "int" "int"
-            return crd * stride  # type: ignore[operator,return-value]  # all are ints after type checks
+            assert not is_tuple(shape) and not is_tuple(stride)
+            return crd * stride  # all are ints after type checks
 
 
 # Transform crd into the dst_shape's iteration space
