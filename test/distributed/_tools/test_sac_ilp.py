@@ -163,7 +163,9 @@ class TestSACILP(TestCase):
         sorted_discard_ratio = sorted(ac_decisions.values())
         self.assertEqual(
             modules_to_ac,
-            {"Transformer.layers." + str(i) + ".feed_forward" for i in range(4)},  # n_layers=4
+            {
+                "Transformer.layers." + str(i) + ".feed_forward" for i in range(4)
+            },  # n_layers=4
         )
         self.assertAlmostEqual(sorted_discard_ratio[0], 0.55, delta=0.05)
         self.assertAlmostEqual(sorted_discard_ratio[1], 0.55, delta=0.05)
