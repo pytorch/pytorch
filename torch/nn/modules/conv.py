@@ -768,7 +768,7 @@ class _ConvTransposeNd(_ConvNd):
         dilation: Optional[list[int]] = None,
     ) -> list[int]:
         if output_size is None:
-            ret = _single(self.output_padding)  # converting to list if was not already
+            ret = list(self.output_padding)  # converting to list if was not already
         else:
             has_batch_dim = input.dim() == num_spatial_dims + 2
             num_non_spatial_dims = 2 if has_batch_dim else 1
