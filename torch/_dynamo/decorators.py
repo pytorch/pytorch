@@ -625,7 +625,10 @@ def mark_dynamic(
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
-    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
+    from the first example input as the official size hint.
+
+    6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
     per dimension specialization, or in other words we do not generate a cross product of specializations.
     At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
@@ -639,6 +642,7 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
+
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
