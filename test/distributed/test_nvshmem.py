@@ -50,26 +50,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     @skipIfRocm
-    def test_alloc(self) -> None:
-        self._init_device()
-
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        dtype = torch.float
-        numel = 1024
-
-        def foo():
-            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
-            symm_mem.rendezvous(inp, group=group_name)
-
-        foo()
-
-        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
-        symm_mem.rendezvous(out, group=group_name)
-
-    @skipIfRocm
-    def test_dealloc(self) -> None:
+    def test_alloc_free(self) -> None:
+        """Tests that we can allocate and free memory."""
         self._init_device()
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
@@ -80,6 +62,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         def foo():
             inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
             symm_mem.rendezvous(inp, group=group_name)
+            self.assertGreater(_SymmetricMemory.num_active_allocations(self.device), 0)
 
         foo()
         self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
@@ -88,6 +71,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(t0, group=group_name)
         t1 = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(t1, group=group_name)
+        self.assertGreater(_SymmetricMemory.num_active_allocations(self.device), 0)
+
         del t0, t1
         self.assertEqual(_SymmetricMemory.num_active_allocations(self.device), 0)
 
