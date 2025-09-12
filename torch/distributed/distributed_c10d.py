@@ -1755,6 +1755,12 @@ def init_process_group(
     # Initialize distributed environment if user didn't call it
     # (backward compatible purpose)
     if _World.maybe_get() is None:
+        # "fake" backend uses specific store
+        if backend == "fake":
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            store = store or FakeStore()
+
         init(world_size, rank, store, init_method=init_method)
 
     world = _World.get()
@@ -1843,18 +1849,10 @@ def init_process_group(
         )
         _update_default_pg(default_pg)
     else:
-        # backward compatible API
-        if backend == "fake":
-            from torch.testing._internal.distributed.fake_pg import FakeStore
-
-            store_from = FakeStore()
-        else:
-            # `dist.init()` must have created a store
-            store_from = world.store
-
+        # `dist.init()` must have created a store.
         # Use a PrefixStore to avoid accidental overrides of keys used by
         # different systems (e.g. RPC) in case the store is multi-tenant.
-        store = PrefixStore("default_pg", store_from)
+        store = PrefixStore("default_pg", world.store)
         store.set_timeout(timeout)
 
         default_pg, _ = _new_process_group_helper(
